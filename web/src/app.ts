@@ -18,7 +18,6 @@ const APP_VERSION = '0.1.0';
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
 const STORAGE_NOTIF = 'herdr_notifications';
-const STORAGE_FIT = 'herdr_fit_width';
 
 // ── WS reconnect config ───────────────────────────────────────────────────────
 const WS_PING_INTERVAL_MS = 30_000;
@@ -603,18 +602,12 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     document.getElementById('topbar-title')!.innerHTML = paneHeaderHtml(found, paneId);
     document.getElementById('topbar-left')!.innerHTML =
       `<button class="topbar-back" aria-label="Back">&#8592; Agents</button>`;
-    document.getElementById('topbar-right')!.innerHTML =
-      `<button class="topbar-action ${fitMode ? 'active' : ''}" id="btn-fit">Fit</button>`;
+    document.getElementById('topbar-right')!.innerHTML = '';
     document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate('#/agents'));
-
-    // Fit-to-width toggle
-    document.getElementById('btn-fit')!.addEventListener('click', () => {
-      fitMode = !fitMode;
-      localStorage.setItem(STORAGE_FIT, String(fitMode));
-      document.getElementById('btn-fit')!.classList.toggle('active', fitMode);
-      void refreshPaneOutput();
-    });
   }
+
+  // each pane opens fitted to width; pinch zoom adjusts from there
+  paneFontPx = null;
 
   // Build screen HTML
   elScreen!.innerHTML = `
@@ -630,6 +623,8 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       </div>
     </div>
   `;
+
+  bindPinchZoom(document.getElementById('terminal-output')!);
 
   // Send buttons. Enter in the field inserts a newline — sending happens only
   // via the buttons, so the phone keyboard can't fire off half-typed commands.
@@ -714,9 +709,10 @@ function buildQuickKeys(paneId: string): void {
   }
 }
 
-// ── Fit-to-width rendering ────────────────────────────────────────────────────
+// ── Fit-to-width rendering with pinch zoom ────────────────────────────────────
 
-let fitMode = localStorage.getItem(STORAGE_FIT) === 'true';
+// null = auto-fit the pane width; a number = font px set by the pinch gesture
+let paneFontPx: number | null = null;
 let monoRatio: number | null = null; // monospace glyph width / font-size
 
 function measureMonoRatio(el: HTMLElement): number {
@@ -741,8 +737,8 @@ function displayCols(line: string): number {
 }
 
 function applyFitFontSize(outputEl: HTMLElement, ansiStr: string): void {
-  if (!fitMode) {
-    outputEl.style.fontSize = '';
+  if (paneFontPx !== null) {
+    outputEl.style.fontSize = `${paneFontPx.toFixed(2)}px`;
     return;
   }
   const plain = ansiStr.replace(/\x1b\[[0-9;:?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g, '');
@@ -756,6 +752,43 @@ function applyFitFontSize(outputEl: HTMLElement, ansiStr: string): void {
   const px = avail / (cols * measureMonoRatio(outputEl));
   // clamp: below ~6px nothing is readable — fall back to horizontal scrolling
   outputEl.style.fontSize = `${Math.max(6, Math.min(14, px)).toFixed(2)}px`;
+}
+
+// Pinch-to-zoom on the terminal: two fingers scale the font, double-tap
+// returns to fit-to-width. Page-level zoom stays untouched elsewhere.
+function bindPinchZoom(outputEl: HTMLElement): void {
+  let pinchStartDist = 0;
+  let pinchStartPx = 0;
+  let lastTapAt = 0;
+
+  const touchDist = (t: TouchList): number =>
+    Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+
+  outputEl.addEventListener('touchstart', (e: TouchEvent) => {
+    if (e.touches.length === 2) {
+      pinchStartDist = touchDist(e.touches);
+      pinchStartPx = parseFloat(getComputedStyle(outputEl).fontSize) || 13;
+    } else if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - lastTapAt < 300) {
+        paneFontPx = null;
+        void refreshPaneOutput();
+      }
+      lastTapAt = now;
+    }
+  }, { passive: true });
+
+  outputEl.addEventListener('touchmove', (e: TouchEvent) => {
+    if (e.touches.length !== 2 || pinchStartDist === 0) return;
+    e.preventDefault(); // keep the browser from zooming the whole page
+    const px = Math.max(4, Math.min(24, pinchStartPx * (touchDist(e.touches) / pinchStartDist)));
+    paneFontPx = px;
+    outputEl.style.fontSize = `${px.toFixed(2)}px`;
+  }, { passive: false });
+
+  outputEl.addEventListener('touchend', () => {
+    pinchStartDist = 0;
+  });
 }
 
 // Render terminal output, following the bottom only when the user was already
