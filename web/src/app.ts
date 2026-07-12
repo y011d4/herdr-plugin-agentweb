@@ -546,12 +546,18 @@ function findPane(paneId: string) {
   return null;
 }
 
+function paneHeaderHtml(found: ReturnType<typeof findPane>, paneId: string): string {
+  const label = found?.pane?.agent?.displayName || found?.pane?.agent?.name || found?.pane?.title || paneId;
+  const context = found ? `${found.ws.label} / ${found.tab.label}` : '';
+  return `${escHtml(label)}${context ? `<span class="topbar-subtitle">&#183; ${escHtml(context)}</span>` : ''}`;
+}
+
 function updatePaneDetailHeader(): void {
   if (!activePaneId) return;
   const found = findPane(activePaneId);
   const titleEl = document.getElementById('topbar-title');
   if (titleEl && found) {
-    titleEl.textContent = found.pane.agent?.displayName || found.pane.agent?.name || found.pane.title || activePaneId;
+    titleEl.innerHTML = paneHeaderHtml(found, activePaneId);
   }
 }
 
@@ -560,8 +566,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   if (topbar) {
     topbar.style.display = '';
     const found = findPane(paneId);
-    const label = found?.pane?.agent?.displayName || found?.pane?.agent?.name || found?.pane?.title || paneId;
-    document.getElementById('topbar-title')!.textContent = label;
+    document.getElementById('topbar-title')!.innerHTML = paneHeaderHtml(found, paneId);
     document.getElementById('topbar-left')!.innerHTML =
       `<button class="topbar-back" aria-label="Back">&#8592; Agents</button>`;
     document.getElementById('topbar-right')!.innerHTML = '';
@@ -579,7 +584,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       <div class="terminal-output" id="terminal-output"><span class="loading-spinner"></span></div>
       <div class="input-bar">
         <div class="input-row">
-          <input type="text" id="pane-input" placeholder="Send text…" autocorrect="off" autocapitalize="off" spellcheck="false" />
+          <textarea id="pane-input" rows="1" placeholder="Send text…" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
           <button class="input-send-btn" id="btn-send-enter">Send+&#x23CE;</button>
           <button class="input-send-literal" id="btn-send-literal">Send</button>
         </div>
@@ -610,12 +615,26 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     }
   });
 
-  // Send buttons
-  const paneInput = document.getElementById('pane-input') as HTMLInputElement;
-  document.getElementById('btn-send-enter')!.addEventListener('click', async () => {
+  // Send buttons. Enter in the field inserts a newline — sending happens only
+  // via the buttons, so the phone keyboard can't fire off half-typed commands.
+  const paneInput = document.getElementById('pane-input') as HTMLTextAreaElement;
+
+  const autoGrow = (): void => {
+    paneInput.style.height = 'auto';
+    paneInput.style.height = `${Math.min(paneInput.scrollHeight, 120)}px`;
+  };
+  paneInput.addEventListener('input', autoGrow);
+
+  const takeText = (): string => {
     const text = paneInput.value;
-    if (!text) return;
     paneInput.value = '';
+    autoGrow();
+    return text;
+  };
+
+  document.getElementById('btn-send-enter')!.addEventListener('click', async () => {
+    const text = takeText();
+    if (!text) return;
     try {
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true });
       queuePaneEcho();
@@ -624,29 +643,13 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     }
   });
   document.getElementById('btn-send-literal')!.addEventListener('click', async () => {
-    const text = paneInput.value;
+    const text = takeText();
     if (!text) return;
-    paneInput.value = '';
     try {
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text });
       queuePaneEcho();
     } catch (err) {
       showToast('Send failed', (err as Error).message);
-    }
-  });
-  // Also send on Enter key in input field
-  paneInput.addEventListener('keydown', async (e: KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      const text = paneInput.value;
-      if (!text) return;
-      paneInput.value = '';
-      try {
-        await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true });
-        queuePaneEcho();
-      } catch (err) {
-        showToast('Send failed', (err as Error).message);
-      }
     }
   });
 
@@ -666,8 +669,8 @@ function buildQuickKeys(paneId: string): void {
     { label: '⌫',      payload: { keys: ['backspace'] } },
     { label: 'Esc',    payload: { keys: ['esc'] } },
     { label: 'Ctrl+C', payload: { keys: ['ctrl+c'] } },
-    { label: '^P',     payload: { keys: ['ctrl+p'] } },
-    { label: '^N',     payload: { keys: ['ctrl+n'] } },
+    { label: '↑',      payload: { keys: ['up'] } },
+    { label: '↓',      payload: { keys: ['down'] } },
     { label: 'Tab',    payload: { keys: ['tab'] } },
     { label: 'y',      payload: { text: 'y', enter: true } },
     { label: 'n',      payload: { text: 'n', enter: true } },
