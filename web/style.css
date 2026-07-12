@@ -376,6 +376,14 @@ a {
   overflow: hidden;
 }
 
+.history-start {
+  padding: 6px 0 10px;
+  text-align: center;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
 .terminal-output {
   flex: 1;
   overflow: auto;

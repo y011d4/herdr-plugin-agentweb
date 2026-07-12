@@ -871,7 +871,11 @@ async function loadHistoryPrefix(): Promise<void> {
     const prefix = recentLines.slice(0, Math.max(0, recentLines.length - liveLineCount)).join('\n');
     // anchor by distance from the bottom: content only changes above the fold
     const fromBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight;
-    historyEl.innerHTML = prefix ? ansiToHtml(prefix) : '';
+    // No scrollback (full-screen apps repaint in place, or the pane is fresh):
+    // a swipe up reveals this marker and bounces, instead of a dead gesture.
+    historyEl.innerHTML = prefix
+      ? ansiToHtml(prefix)
+      : '<div class="history-start">&#183; start of output &#183;</div>';
     historyFetchedAt = Date.now();
     outputEl.scrollTop = outputEl.scrollHeight - fromBottom - outputEl.clientHeight;
   } catch {
