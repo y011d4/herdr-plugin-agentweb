@@ -610,6 +610,9 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   paneFontPx = null;
   historyMode = false;
   historyLoading = false;
+  historyPending = false;
+  terminalTouchActive = false;
+  pendingAnsi = null;
 
   // Build screen HTML
   elScreen!.innerHTML = `
@@ -765,34 +768,38 @@ function applyFitFontSize(outputEl: HTMLElement, ansiStr: string): void {
 
 // Pinch-to-zoom on the terminal: two fingers scale the font, double-tap
 // returns to fit-to-width. Page-level zoom stays untouched elsewhere.
+// Also tracks whether any finger is on the terminal: replacing the DOM
+// mid-gesture cancels the browser's touch scroll, so renders are deferred
+// while a gesture is active (see renderPaneOutput).
 function bindPinchZoom(outputEl: HTMLElement): void {
   let pinchStartDist = 0;
   let pinchStartPx = 0;
-  let lastTapAt = 0;
+  let lastTapEndAt = 0;
+  let tapStartX = 0;
+  let tapStartY = 0;
+  let tapCandidate = false;
 
   const touchDist = (t: TouchList): number =>
     Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
 
   outputEl.addEventListener('touchstart', (e: TouchEvent) => {
+    terminalTouchActive = true;
     if (e.touches.length === 2) {
+      tapCandidate = false;
       pinchStartDist = touchDist(e.touches);
       pinchStartPx = parseFloat(getComputedStyle(outputEl).fontSize) || 13;
     } else if (e.touches.length === 1) {
-      const now = Date.now();
-      if (now - lastTapAt < 300) {
-        // double-tap: back to fitted live view
-        paneFontPx = null;
-        if (historyMode) {
-          exitHistoryMode();
-        } else {
-          void refreshPaneOutput();
-        }
-      }
-      lastTapAt = now;
+      tapCandidate = true;
+      tapStartX = e.touches[0].clientX;
+      tapStartY = e.touches[0].clientY;
     }
   }, { passive: true });
 
   outputEl.addEventListener('touchmove', (e: TouchEvent) => {
+    if (e.touches.length === 1 && tapCandidate &&
+        Math.hypot(e.touches[0].clientX - tapStartX, e.touches[0].clientY - tapStartY) > 10) {
+      tapCandidate = false; // a scroll flick is not a tap
+    }
     if (e.touches.length !== 2 || pinchStartDist === 0) return;
     e.preventDefault(); // keep the browser from zooming the whole page
     const px = Math.max(4, Math.min(24, pinchStartPx * (touchDist(e.touches) / pinchStartDist)));
@@ -800,9 +807,44 @@ function bindPinchZoom(outputEl: HTMLElement): void {
     outputEl.style.fontSize = `${px.toFixed(2)}px`;
   }, { passive: false });
 
-  outputEl.addEventListener('touchend', () => {
+  outputEl.addEventListener('touchend', (e: TouchEvent) => {
+    if (e.touches.length > 0) return; // fingers still down
+    terminalTouchActive = false;
     pinchStartDist = 0;
-  });
+
+    if (tapCandidate) {
+      const now = Date.now();
+      tapCandidate = false;
+      if (now - lastTapEndAt < 300) {
+        // double-tap (two stationary taps): back to fitted live view
+        lastTapEndAt = 0;
+        paneFontPx = null;
+        pendingAnsi = null;
+        if (historyMode) {
+          exitHistoryMode();
+        } else {
+          void refreshPaneOutput();
+        }
+        return;
+      }
+      lastTapEndAt = now;
+    } else {
+      lastTapEndAt = 0;
+    }
+
+    if (historyPending) {
+      historyPending = false;
+      void enterHistoryMode();
+      return;
+    }
+    flushPendingOutput();
+  }, { passive: true });
+
+  outputEl.addEventListener('touchcancel', () => {
+    terminalTouchActive = false;
+    pinchStartDist = 0;
+    tapCandidate = false;
+  }, { passive: true });
 }
 
 // ── History mode ──────────────────────────────────────────────────────────────
@@ -812,6 +854,10 @@ function bindPinchZoom(outputEl: HTMLElement): void {
 
 let historyMode = false;
 let historyLoading = false;
+let historyPending = false; // entry requested mid-gesture; runs on touchend
+let historyEnteredAt = 0;
+let terminalTouchActive = false; // a finger is on the terminal
+let pendingAnsi: string | null = null; // output received while unsafe to render
 
 async function enterHistoryMode(): Promise<void> {
   if (historyMode || historyLoading || !activePaneId) return;
@@ -827,6 +873,8 @@ async function enterHistoryMode(): Promise<void> {
       paneFontPx = parseFloat(getComputedStyle(outputEl).fontSize) || 13;
     }
     historyMode = true;
+    historyEnteredAt = Date.now();
+    pendingAnsi = null;
     const oldScrollHeight = outputEl.scrollHeight;
     const oldScrollTop = outputEl.scrollTop;
     outputEl.innerHTML = ansiToHtml((data.ansi ?? data.text ?? ''));
@@ -843,6 +891,7 @@ async function enterHistoryMode(): Promise<void> {
 function exitHistoryMode(): void {
   if (!historyMode) return;
   historyMode = false;
+  pendingAnsi = null;
   document.getElementById('btn-live')?.classList.remove('visible');
   void refreshPaneOutput();
 }
@@ -852,12 +901,21 @@ function bindHistoryScroll(outputEl: HTMLElement): void {
   outputEl.addEventListener('scroll', () => {
     const goingUp = outputEl.scrollTop < lastScrollTop;
     lastScrollTop = outputEl.scrollTop;
+    const fromBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight;
+
     if (!historyMode && goingUp && outputEl.scrollTop < 60 &&
         outputEl.scrollHeight > outputEl.clientHeight + 40) {
-      void enterHistoryMode();
-    } else if (historyMode &&
-        outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight < 10) {
+      // swapping content cancels an active touch scroll — defer to touchend
+      if (terminalTouchActive) {
+        historyPending = true;
+      } else {
+        void enterHistoryMode();
+      }
+    } else if (historyMode && fromBottom < 10 &&
+        Date.now() - historyEnteredAt > 600) {
       exitHistoryMode();
+    } else if (!historyMode && fromBottom < 40) {
+      flushPendingOutput();
     }
   }, { passive: true });
 }
@@ -870,11 +928,23 @@ function renderPaneOutput(ansiStr: string): void {
   if (!outputEl) return;
   const atBottom =
     outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight < 40;
+  // Replacing the DOM cancels an in-progress touch scroll, and re-rendering
+  // while the user reads above the fold would disturb them — defer until safe.
+  if (terminalTouchActive || !atBottom) {
+    pendingAnsi = ansiStr;
+    return;
+  }
+  pendingAnsi = null;
   applyFitFontSize(outputEl, ansiStr);
   outputEl.innerHTML = ansiToHtml(ansiStr);
-  if (atBottom) {
-    outputEl.scrollTop = outputEl.scrollHeight;
-  }
+  outputEl.scrollTop = outputEl.scrollHeight;
+}
+
+function flushPendingOutput(): void {
+  if (pendingAnsi === null || historyMode) return;
+  const ansi = pendingAnsi;
+  pendingAnsi = null;
+  renderPaneOutput(ansi); // re-queues itself if still unsafe
 }
 
 async function refreshPaneOutput(): Promise<void> {
