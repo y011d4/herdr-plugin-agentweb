@@ -355,9 +355,45 @@ function showToast(title: string, body: string, opts: ToastOptions = {}): void {
     dismiss();
   });
 
+  // Swipe right to dismiss
+  let touchStartX = 0;
+  let touchDeltaX = 0;
+  let didSwipe = false;
+  el.addEventListener('touchstart', (e: TouchEvent) => {
+    touchStartX = e.touches[0].clientX;
+    touchDeltaX = 0;
+    el.style.transition = 'none';
+  }, { passive: true });
+  el.addEventListener('touchmove', (e: TouchEvent) => {
+    touchDeltaX = e.touches[0].clientX - touchStartX;
+    if (touchDeltaX > 0) {
+      el.style.transform = `translateX(${touchDeltaX}px)`;
+      el.style.opacity = String(Math.max(0.2, 1 - touchDeltaX / 240));
+    }
+  }, { passive: true });
+  el.addEventListener('touchend', () => {
+    el.style.transition = 'transform 0.15s ease-out, opacity 0.15s ease-out';
+    if (touchDeltaX > 72) {
+      didSwipe = true;
+      el.style.transform = 'translateX(120%)';
+      el.style.opacity = '0';
+      setTimeout(() => el.remove(), 150);
+    } else {
+      if (Math.abs(touchDeltaX) > 10) didSwipe = true;
+      el.style.transform = '';
+      el.style.opacity = '';
+    }
+    touchDeltaX = 0;
+  });
+
   if (opts.onclick) {
     el.style.cursor = 'pointer';
-    el.addEventListener('click', () => { opts.onclick!(); el.remove(); });
+    el.addEventListener('click', () => {
+      // a swipe gesture must not double as a tap
+      if (didSwipe) { didSwipe = false; return; }
+      opts.onclick!();
+      el.remove();
+    });
   }
   elToastContainer.appendChild(el);
 
