@@ -5,10 +5,17 @@ import { createHttpServer } from './http.ts';
 import { sendNtfyNotification } from './notify.ts';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import type { NormalizedState, StatusChange } from './types.ts';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const WEB_ROOT = resolve(join(__dirname, '..', 'web'));
+// When running from source (server/main.ts), __dirname/../web is the project-root
+// web/ directory. When running compiled (dist/server/main.js), __dirname is
+// dist/server/ and we need to go up two levels instead of one.
+const _webOne = resolve(join(__dirname, '..', 'web'));
+const WEB_ROOT = existsSync(join(_webOne, 'index.html'))
+  ? _webOne
+  : resolve(join(__dirname, '..', '..', 'web'));
 
 const config = loadConfig();
 const token = initAuth(config.stateDir);
