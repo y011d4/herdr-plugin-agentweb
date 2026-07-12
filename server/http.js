@@ -18,7 +18,7 @@ const MIME = {
   '.ico': 'image/x-icon',
 };
 
-// ── pane id pattern: one or more word chars, colon, one or more word chars ──
+// ── pane routes: id segment is any non-slash text (pane ids contain ':') ──
 const PANE_RE = /^\/api\/panes\/([^/]+)\/(\w+)$/;
 const AGENT_RE = /^\/api\/agents\/([^/]+)\/(\w+)$/;
 
