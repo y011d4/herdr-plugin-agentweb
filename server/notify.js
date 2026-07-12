@@ -29,7 +29,8 @@ export function buildAgentStatusMessage(change, state) {
   return {
     type: 'agent_status',
     paneId,
-    agent,
+    // contract: agent is the display string, not the internal agent object
+    agent: agent?.displayName ?? agent?.name ?? null,
     from,
     to,
     workspaceLabel,

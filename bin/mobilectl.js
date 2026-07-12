@@ -30,14 +30,15 @@ function readConfig() {
   }
 }
 
-function pidFile() {
-  return path.join(stateDir(), 'bridge.pid');
-}
+// The detached daemon (start/stop) and the foreground pane (run) own separate
+// pidfiles so one lifecycle can't clobber the other's bookkeeping.
+const daemonPidFile = () => path.join(stateDir(), 'bridge.pid');
+const runPidFile = () => path.join(stateDir(), 'bridge-run.pid');
 
-function runningPid() {
+function alivePid(file) {
   let pid;
   try {
-    pid = Number(fs.readFileSync(pidFile(), 'utf8').trim());
+    pid = Number(fs.readFileSync(file, 'utf8').trim());
   } catch {
     return null;
   }
@@ -50,18 +51,20 @@ function runningPid() {
   }
 }
 
-function connectUrl() {
+function baseUrl() {
   const cfg = readConfig();
   const host = process.env.HERDR_MOBILE_HOST || cfg.host || '127.0.0.1';
   const port = Number(process.env.HERDR_MOBILE_PORT || cfg.port || 8390);
-  let token = '';
-  try {
-    token = fs.readFileSync(path.join(stateDir(), 'token'), 'utf8').trim();
-  } catch {
-    // token is created on first bridge startup
-  }
-  const base = `http://${host}:${port}/`;
-  return token ? `${base}?token=${token}` : base;
+  return `http://${host}:${port}/`;
+}
+
+// herdr captures action stdout into its plugin logs, so never print the token
+// here. The tokenized connect link is printed by the server itself: visible in
+// the "Mobile bridge" pane (run entrypoint) and in <state dir>/bridge.log.
+function printConnectInfo() {
+  console.log(`url: ${baseUrl()}`);
+  console.log(`token file: ${path.join(stateDir(), 'token')}`);
+  console.log(`full connect link: see the Mobile bridge pane or ${path.join(stateDir(), 'bridge.log')}`);
 }
 
 function notify(title, body) {
@@ -70,22 +73,13 @@ function notify(title, body) {
   spawnSync(herdr, ['notification', 'show', title, '--body', body], { stdio: 'ignore' });
 }
 
-async function waitForToken(timeoutMs) {
-  const file = path.join(stateDir(), 'token');
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (fs.existsSync(file)) return true;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  return fs.existsSync(file);
-}
-
 function start() {
-  const existing = runningPid();
-  if (existing) {
-    console.log(`bridge already running (pid ${existing})`);
-    console.log(`url: ${connectUrl()}`);
-    return Promise.resolve(0);
+  const daemon = alivePid(daemonPidFile());
+  const fg = alivePid(runPidFile());
+  if (daemon || fg) {
+    console.log(`bridge already running (pid ${daemon || fg}${fg ? ', foreground pane' : ''})`);
+    printConnectInfo();
+    return 0;
   }
   const logPath = path.join(stateDir(), 'bridge.log');
   const log = fs.openSync(logPath, 'a', 0o600);
@@ -97,38 +91,37 @@ function start() {
   });
   child.unref();
   fs.closeSync(log);
-  fs.writeFileSync(pidFile(), String(child.pid), { mode: 0o600 });
-  return waitForToken(5000).then(() => {
-    const url = connectUrl();
-    console.log(`bridge started (pid ${child.pid})`);
-    console.log(`url: ${url}`);
-    console.log(`log: ${logPath}`);
-    notify('herdr mobile started', url);
-    return 0;
-  });
+  fs.writeFileSync(daemonPidFile(), String(child.pid), { mode: 0o600 });
+  console.log(`bridge started (pid ${child.pid})`);
+  printConnectInfo();
+  console.log(`log: ${logPath}`);
+  notify('herdr mobile started', baseUrl());
+  return 0;
 }
 
 function stop() {
-  const pid = runningPid();
+  const daemon = alivePid(daemonPidFile());
+  const fg = alivePid(runPidFile());
+  const pid = daemon || fg;
   if (!pid) {
     console.log('bridge is not running');
-    fs.rmSync(pidFile(), { force: true });
+    fs.rmSync(daemonPidFile(), { force: true });
     return 0;
   }
   process.kill(pid, 'SIGTERM');
-  fs.rmSync(pidFile(), { force: true });
+  fs.rmSync(daemon ? daemonPidFile() : runPidFile(), { force: true });
   console.log(`bridge stopped (pid ${pid})`);
   notify('herdr mobile stopped', `pid ${pid}`);
   return 0;
 }
 
 function status() {
-  const pid = runningPid();
-  if (pid) {
-    const url = connectUrl();
-    console.log(`bridge running (pid ${pid})`);
-    console.log(`url: ${url}`);
-    notify('herdr mobile running', url);
+  const daemon = alivePid(daemonPidFile());
+  const fg = alivePid(runPidFile());
+  if (daemon || fg) {
+    console.log(`bridge running (pid ${daemon || fg}${fg ? ', foreground pane' : ''})`);
+    printConnectInfo();
+    notify('herdr mobile running', baseUrl());
   } else {
     console.log('bridge is not running');
     notify('herdr mobile stopped', 'invoke y011d4.mobile.start to launch');
@@ -137,9 +130,10 @@ function status() {
 }
 
 function run() {
-  const existing = runningPid();
-  if (existing) {
-    console.error(`bridge already running detached (pid ${existing}); stop it first`);
+  const daemon = alivePid(daemonPidFile());
+  const fg = alivePid(runPidFile());
+  if (daemon || fg) {
+    console.error(`bridge already running (pid ${daemon || fg}); stop it first`);
     return 1;
   }
   const child = spawn(process.execPath, [mainJs], {
@@ -147,13 +141,13 @@ function run() {
     stdio: 'inherit',
     env: process.env,
   });
-  fs.writeFileSync(pidFile(), String(child.pid), { mode: 0o600 });
+  fs.writeFileSync(runPidFile(), String(child.pid), { mode: 0o600 });
   const forward = (sig) => child.kill(sig);
   process.on('SIGINT', () => forward('SIGINT'));
   process.on('SIGTERM', () => forward('SIGTERM'));
   return new Promise((resolve) => {
     child.on('exit', (code) => {
-      fs.rmSync(pidFile(), { force: true });
+      fs.rmSync(runPidFile(), { force: true });
       resolve(code ?? 1);
     });
   });

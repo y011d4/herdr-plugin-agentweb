@@ -42,25 +42,31 @@ function jsonOk(res, body) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let bytes = 0;
+    let settled = false;
     const chunks = [];
+    const fail = (err) => {
+      if (!settled) { settled = true; reject(err); }
+    };
     req.on('data', chunk => {
       bytes += chunk.length;
       if (bytes > BODY_LIMIT) {
-        reject(Object.assign(new Error('request body too large'), { status: 413 }));
+        fail(Object.assign(new Error('request body too large'), { status: 413 }));
         req.destroy();
       } else {
         chunks.push(chunk);
       }
     });
     req.on('end', () => {
+      if (settled) return;
       try {
         const text = Buffer.concat(chunks).toString('utf8');
+        settled = true;
         resolve(text ? JSON.parse(text) : {});
       } catch {
-        reject(Object.assign(new Error('invalid JSON body'), { status: 400 }));
+        fail(Object.assign(new Error('invalid JSON body'), { status: 400 }));
       }
     });
-    req.on('error', reject);
+    req.on('error', fail);
   });
 }
 
@@ -215,7 +221,8 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }) {
 
   // ── WebSocket server ───────────────────────────────────────────────────────
 
-  const wss = new WebSocketServer({ noServer: true });
+  // the only expected inbound WS message is a small ping — cap payloads
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://localhost');

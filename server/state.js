@@ -2,6 +2,9 @@
  * Pure state module. No I/O. Takes raw herdr snapshot/events and maintains
  * the normalized State JSON defined in the shared contract.
  *
+ * createState and applyEvent never mutate their inputs; applyEvent returns a
+ * new state built with copy-on-write internal indexes.
+ *
  * State shape:
  * {
  *   connected: bool,
@@ -14,25 +17,45 @@
  * }
  */
 
-// Events that indicate pane set has changed and we need to re-snapshot + re-subscribe
+// Events that change the workspace/tab/pane structure. The client reacts by
+// re-fetching session.snapshot and re-subscribing (per-pane status
+// subscriptions must track the pane set). Every subscribed lifecycle event
+// must be either in this set or handled by applyEvent — see the routing test.
 export const PANE_SET_CHANGING_EVENTS = new Set([
   'pane_created',
   'pane_closed',
   'pane_moved',
   'pane_exited',
+  'workspace_created',
+  'workspace_updated',
+  'workspace_moved',
   'workspace_closed',
+  'tab_created',
+  'tab_closed',
+  'tab_moved',
   'worktree_created',
   'worktree_opened',
   'worktree_removed',
+]);
+
+// Events applyEvent updates in place (no re-snapshot needed).
+export const APPLIED_EVENTS = new Set([
+  'pane_agent_status_changed',
+  'workspace_focused',
+  'tab_focused',
+  'pane_focused',
+  'workspace_renamed',
+  'tab_renamed',
 ]);
 
 function normalizeAgent(pane, nowMs) {
   if (!pane.agent) return null;
   return {
     name: pane.agent || null,
-    displayName: pane.agent || null,
+    displayName: pane.display_agent || pane.agent || null,
     status: pane.agent_status || 'unknown',
     customStatus: pane.custom_status || null,
+    // snapshots don't carry a message field; populated only via events when present
     message: pane.agent_message || null,
     sinceUnixMs: nowMs,
   };
@@ -137,10 +160,10 @@ export function createState(snapshot, nowMs = Date.now(), prevState = null) {
 
 /**
  * Apply a herdr event to the current state and return updated state + any
- * agent status changes.
+ * agent status changes. The input state is not mutated.
  *
  * @param {object} state   current normalized state (from createState or prior applyEvent)
- * @param {string} eventName  underscore_form event name
+ * @param {string} eventName  event name (dot or underscore form)
  * @param {object} data    event data payload
  * @param {number} [nowMs]
  * @returns {{ state: object, changes: Array<{paneId, from, to, agent}> }}
@@ -148,11 +171,32 @@ export function createState(snapshot, nowMs = Date.now(), prevState = null) {
 export function applyEvent(state, eventName, data, nowMs = Date.now()) {
   const changes = [];
 
+  // Copy-on-write: clone the internal indexes (and tab objects, whose panes
+  // arrays are written below) so callers holding older generations never see
+  // them change underneath.
+  const paneById = new Map(state._paneById);
+  const tabById = new Map();
+  for (const [id, tab] of state._tabById) {
+    tabById.set(id, { ...tab, panes: [...tab.panes] });
+  }
+  let focused = state.focused;
+  let workspaces = state.workspaces;
+
+  const replacePaneInTab = (updated) => {
+    for (const tab of tabById.values()) {
+      const idx = tab.panes.findIndex(p => p.paneId === updated.paneId);
+      if (idx !== -1) {
+        tab.panes[idx] = updated;
+        break;
+      }
+    }
+  };
+
   // Accept both herdr event name forms (dot and underscore).
   switch (eventName.replaceAll('.', '_')) {
     case 'pane_agent_status_changed': {
       const paneId = data.pane_id;
-      const pane = state._paneById.get(paneId);
+      const pane = paneById.get(paneId);
       if (!pane) break;
 
       const from = pane.agent?.status || 'unknown';
@@ -177,68 +221,51 @@ export function applyEvent(state, eventName, data, nowMs = Date.now()) {
           ...(data.title != null && { title: data.title }),
           agent: updatedAgent,
         };
-        state._paneById.set(paneId, updated);
+        paneById.set(paneId, updated);
+        replacePaneInTab(updated);
 
-        // update the pane in its tab
-        for (const tab of state._tabById.values()) {
-          const idx = tab.panes.findIndex(p => p.paneId === paneId);
-          if (idx !== -1) {
-            tab.panes = [
-              ...tab.panes.slice(0, idx),
-              updated,
-              ...tab.panes.slice(idx + 1),
-            ];
-            break;
-          }
-        }
-
-        changes.push({ paneId, from, to, agent: updated.agent });
+        changes.push({ paneId, from, to, agent: updatedAgent });
       }
       break;
     }
 
     case 'workspace_focused': {
-      state = { ...state, focused: { ...state.focused, workspaceId: data.workspace_id || state.focused.workspaceId } };
+      focused = { ...focused, workspaceId: data.workspace_id || focused.workspaceId };
       break;
     }
 
     case 'tab_focused': {
-      state = { ...state, focused: { ...state.focused, tabId: data.tab_id || state.focused.tabId } };
+      focused = { ...focused, tabId: data.tab_id || focused.tabId };
       break;
     }
 
     case 'pane_focused': {
       const newFocusedId = data.pane_id;
-      // update focused flag on panes
-      for (const [id, pane] of state._paneById) {
+      for (const [id, pane] of paneById) {
         const shouldBeFocused = id === newFocusedId;
         if (pane.focused !== shouldBeFocused) {
-          state._paneById.set(id, { ...pane, focused: shouldBeFocused });
+          const updated = { ...pane, focused: shouldBeFocused };
+          paneById.set(id, updated);
+          replacePaneInTab(updated);
         }
       }
-      for (const tab of state._tabById.values()) {
-        tab.panes = tab.panes.map(p => ({ ...p, focused: p.paneId === newFocusedId }));
-      }
-      state = { ...state, focused: { ...state.focused, paneId: newFocusedId } };
+      focused = { ...focused, paneId: newFocusedId };
       break;
     }
 
     case 'workspace_renamed': {
-      state = {
-        ...state,
-        workspaces: state.workspaces.map(ws =>
-          ws.workspaceId === data.workspace_id
-            ? { ...ws, label: data.label || ws.label }
-            : ws
-        ),
-      };
+      workspaces = workspaces.map(ws =>
+        ws.workspaceId === data.workspace_id
+          ? { ...ws, label: data.label || ws.label }
+          : ws
+      );
       break;
     }
 
     case 'tab_renamed': {
-      const tab = state._tabById.get(data.tab_id);
+      const tab = tabById.get(data.tab_id);
       if (tab) {
-        state._tabById.set(data.tab_id, { ...tab, label: data.label || tab.label });
+        tabById.set(data.tab_id, { ...tab, label: data.label || tab.label });
       }
       break;
     }
@@ -248,13 +275,19 @@ export function applyEvent(state, eventName, data, nowMs = Date.now()) {
       break;
   }
 
-  // rebuild workspaces array from current tab/pane index state
-  const rebuildWorkspaces = state.workspaces.map(ws => ({
+  // rebuild workspaces array against the (possibly updated) tab index
+  const rebuiltWorkspaces = workspaces.map(ws => ({
     ...ws,
-    tabs: ws.tabs.map(t => state._tabById.get(t.tabId) || t),
+    tabs: ws.tabs.map(t => tabById.get(t.tabId) || t),
   }));
 
-  const nextState = { ...state, workspaces: rebuildWorkspaces };
+  const nextState = {
+    ...state,
+    focused,
+    workspaces: rebuiltWorkspaces,
+    _paneById: paneById,
+    _tabById: tabById,
+  };
   return { state: nextState, changes };
 }
 

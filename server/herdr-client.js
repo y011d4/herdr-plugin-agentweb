@@ -127,6 +127,12 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
     let ackReceived = false;
     const id = `mobile:sub:${Date.now()}`;
 
+    // A socket that connects but never acks would otherwise hang forever:
+    // reconnection is only triggered by 'close'.
+    const ackTimer = setTimeout(() => {
+      if (!ackReceived) conn.destroy();
+    }, REQUEST_TIMEOUT_MS);
+
     conn.on('connect', () => {
       const subscriptions = buildSubscriptions(paneIds);
       conn.write(serialize({ type: 'request', id, method: 'events.subscribe', params: { subscriptions } }));
@@ -142,6 +148,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
         if (!ackReceived) {
           if (msg.result?.type === 'subscription_started') {
             ackReceived = true;
+            clearTimeout(ackTimer);
             setConnected(true);
             backoffMs = BACKOFF_INITIAL_MS;
           }
@@ -164,6 +171,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
     });
 
     conn.on('close', () => {
+      clearTimeout(ackTimer);
       if (destroyed) return;
       if (conn === subscribeConn) {
         subscribeConn = null;

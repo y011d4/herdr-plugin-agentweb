@@ -5,7 +5,7 @@ import { join } from 'node:path';
 let tokenBuf = null;
 
 export function initAuth(stateDir) {
-  mkdirSync(stateDir, { recursive: true });
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   const tokenPath = join(stateDir, 'token');
 
   let hex;

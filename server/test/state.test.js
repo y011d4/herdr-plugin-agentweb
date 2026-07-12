@@ -1,6 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createState, applyEvent, toClientState, getPaneIds } from '../state.js';
+import {
+  createState, applyEvent, toClientState, getPaneIds,
+  PANE_SET_CHANGING_EVENTS, APPLIED_EVENTS,
+} from '../state.js';
 
 // Minimal snapshot fixture matching the real herdr API shape observed in live testing.
 function makeSnapshot(overrides = {}) {
@@ -295,5 +298,61 @@ describe('applyEvent - dot-form event names', () => {
     assert.equal(changes.length, 1);
     assert.equal(changes[0].from, 'working');
     assert.equal(changes[0].to, 'blocked');
+  });
+});
+
+describe('event routing table', () => {
+  // Every lifecycle event the client subscribes to (herdr-client.js
+  // buildSubscriptions) must be either rebuild-triggering or applied by
+  // applyEvent — anything else is silently dropped and the phone view drifts.
+  const SUBSCRIBED_LIFECYCLE_EVENTS = [
+    'workspace_created', 'workspace_updated', 'workspace_renamed',
+    'workspace_moved', 'workspace_closed', 'workspace_focused',
+    'tab_created', 'tab_closed', 'tab_focused', 'tab_renamed', 'tab_moved',
+    'pane_created', 'pane_closed', 'pane_focused', 'pane_moved', 'pane_exited',
+    'worktree_created', 'worktree_opened', 'worktree_removed',
+  ];
+
+  it('every subscribed lifecycle event is rebuild-triggering or applied', () => {
+    for (const ev of SUBSCRIBED_LIFECYCLE_EVENTS) {
+      assert.ok(
+        PANE_SET_CHANGING_EVENTS.has(ev) || APPLIED_EVENTS.has(ev),
+        `subscribed event '${ev}' would be silently dropped`
+      );
+    }
+  });
+
+  it('agent status events are applied, not rebuild-triggering', () => {
+    assert.ok(APPLIED_EVENTS.has('pane_agent_status_changed'));
+    assert.ok(!PANE_SET_CHANGING_EVENTS.has('pane_agent_status_changed'));
+  });
+});
+
+describe('applyEvent immutability', () => {
+  it('does not mutate the input state', () => {
+    const s0 = createState(makeSnapshot(), 1000);
+    const before = JSON.stringify(toClientState(s0));
+    const paneBefore = s0._paneById.get('w0:p1');
+
+    applyEvent(s0, 'pane_agent_status_changed', { pane_id: 'w0:p1', workspace_id: 'w0', agent_status: 'blocked' }, 2000);
+    applyEvent(s0, 'pane_focused', { pane_id: 'w0:p2' }, 2000);
+    applyEvent(s0, 'tab_renamed', { tab_id: 'w0:t1', label: 'renamed' }, 2000);
+
+    assert.equal(JSON.stringify(toClientState(s0)), before);
+    assert.equal(s0._paneById.get('w0:p1'), paneBefore);
+    assert.equal(s0._paneById.get('w0:p1').agent.status, 'working');
+    assert.equal(s0._tabById.get('w0:t1').label, '1');
+  });
+
+  it('returns a state with independent indexes', () => {
+    const s0 = createState(makeSnapshot(), 1000);
+    const { state: s1 } = applyEvent(
+      s0, 'pane_agent_status_changed',
+      { pane_id: 'w0:p1', workspace_id: 'w0', agent_status: 'blocked' }, 2000
+    );
+    assert.notEqual(s1._paneById, s0._paneById);
+    assert.notEqual(s1._tabById, s0._tabById);
+    assert.equal(s1._paneById.get('w0:p1').agent.status, 'blocked');
+    assert.equal(s0._paneById.get('w0:p1').agent.status, 'working');
   });
 });
