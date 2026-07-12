@@ -866,14 +866,14 @@ let lastLiveAnsi = ''; // last rendered screen (for line counts and refits)
 let historyFetchedAt = 0;
 let historyRefreshing = false;
 // Full-screen apps (claude etc.) keep no terminal scrollback but scroll their
-// own view. herdr desktop routes the wheel to them as up/down arrow keys
-// (xterm alternate-scroll mode) — forward swipes the same way.
+// own view on SGR mouse wheel events — forward swipes through the bridge's
+// /scroll endpoint, which injects real wheel events into the pty.
 let appScrollPane = false;
 let wheelRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 function sendPaneWheel(up: boolean): void {
   if (!activePaneId) return;
-  apiPost(`/api/panes/${encodeURIComponent(activePaneId)}/input`, { keys: [up ? 'up' : 'down'] })
+  apiPost(`/api/panes/${encodeURIComponent(activePaneId)}/scroll`, { direction: up ? 'up' : 'down' })
     .catch(() => { /* transient send failures just skip a scroll step */ });
   if (wheelRefreshTimer) clearTimeout(wheelRefreshTimer);
   wheelRefreshTimer = setTimeout(() => { void refreshPaneOutput(); }, 250);

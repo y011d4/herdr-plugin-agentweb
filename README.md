@@ -134,6 +134,7 @@ Environment overrides: `HERDR_MOBILE_HOST`, `HERDR_MOBILE_PORT`.
 - `GET /api/panes/:paneId/read?source=visible|recent&lines=N&format=text|ansi`
 - `POST /api/panes/:paneId/input` `{"text": "ls", "enter": true}` or `{"keys": ["ctrl+c"]}`
 - `POST /api/panes/:paneId/focus`
+- `POST /api/panes/:paneId/scroll` `{"direction": "up", "steps": 3}` — SGR wheel events for full-screen apps
 - `POST /api/agents/:target/send` `{"text": "continue"}`
 - `WS /ws?token=…` — `{"type":"state"}` snapshots and `{"type":"agent_status"}` transitions
 

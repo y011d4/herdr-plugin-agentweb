@@ -226,6 +226,34 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
         return;
       }
 
+      // Scroll a full-screen app's own view (claude etc.) by sending real SGR
+      // mouse wheel events. These must go through pane.send_text as raw bytes:
+      // pane.send_input wraps text in bracketed paste when the app enables it,
+      // and the app then discards the control sequences.
+      if (action === 'scroll' && method === 'POST') {
+        let body: Record<string, unknown>;
+        try { body = await readBody(req); } catch (err) {
+          const herdrErr = err as HerdrError;
+          jsonError(res, herdrErr.status || 400, 'bad_request', herdrErr.message);
+          return;
+        }
+        const direction = body.direction;
+        if (direction !== 'up' && direction !== 'down') {
+          jsonError(res, 400, 'invalid_params', `invalid direction: ${String(direction)}`);
+          return;
+        }
+        const steps = Math.max(1, Math.min(10, Math.floor(typeof body.steps === 'number' ? body.steps : 1)));
+        const seq = (direction === 'up' ? '\u001b[<64;10;5M' : '\u001b[<65;10;5M').repeat(steps);
+        try {
+          await herdrClient.rpc('pane.send_text', { pane_id: paneId, text: seq });
+          jsonOk(res, { ok: true });
+        } catch (err) {
+          const herdrErr = err as HerdrError;
+          jsonError(res, mapHerdrError(herdrErr), herdrErr.herdrCode || 'error', herdrErr.message);
+        }
+        return;
+      }
+
       jsonError(res, 404, 'not_found', 'unknown pane endpoint');
       return;
     }
