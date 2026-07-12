@@ -242,7 +242,7 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
           jsonError(res, 400, 'invalid_params', `invalid direction: ${String(direction)}`);
           return;
         }
-        const steps = Math.max(1, Math.min(10, Math.floor(typeof body.steps === 'number' ? body.steps : 1)));
+        const steps = Math.max(1, Math.min(30, Math.floor(typeof body.steps === 'number' ? body.steps : 1)));
         const seq = (direction === 'up' ? '\u001b[<64;10;5M' : '\u001b[<65;10;5M').repeat(steps);
         try {
           await herdrClient.rpc('pane.send_text', { pane_id: paneId, text: seq });

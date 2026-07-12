@@ -607,6 +607,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   }
 
   // each pane opens fitted to width, scrolled to the bottom
+  paneViewGen++;
   paneFontPx = null;
   terminalTouchActive = false;
   pendingAnsi = null;
@@ -878,6 +879,9 @@ function bindPinchZoom(outputEl: HTMLElement): void {
 // user reads it) and #term-live holds the current screen (updated by WS
 // pushes). The view is scrollable from the very first swipe — no modes.
 
+// Bumped on every pane-view render; async work captures it and bails if the
+// user navigated away, so stale fetches can't poison the next pane's view.
+let paneViewGen = 0;
 let terminalTouchActive = false; // a finger is on the terminal
 let pendingAnsi: string | null = null; // output received while unsafe to render
 let lastLiveAnsi = ''; // last rendered screen (for line counts and refits)
@@ -905,14 +909,16 @@ function queuePaneWheel(up: boolean): void {
 
 async function flushWheelQueue(): Promise<void> {
   wheelFlushTimer = null;
-  const queued = wheelQueue;
-  wheelQueue = 0;
-  if (!activePaneId || queued === 0) return;
+  if (!activePaneId || wheelQueue === 0) return;
+  const direction = wheelQueue > 0 ? 'up' : 'down';
+  const steps = Math.min(30, Math.abs(wheelQueue));
+  wheelQueue -= (direction === 'up' ? steps : -steps);
+  if (wheelQueue !== 0) {
+    // more queued than one request carries — keep flushing
+    wheelFlushTimer = setTimeout(() => { void flushWheelQueue(); }, 70);
+  }
   try {
-    await apiPost(`/api/panes/${encodeURIComponent(activePaneId)}/scroll`, {
-      direction: queued > 0 ? 'up' : 'down',
-      steps: Math.min(10, Math.abs(queued)),
-    });
+    await apiPost(`/api/panes/${encodeURIComponent(activePaneId)}/scroll`, { direction, steps });
   } catch { /* transient send failures just skip a scroll step */ }
   const now = Date.now();
   if (now - lastWheelRefreshAt > 200) {
@@ -953,11 +959,14 @@ const HISTORY_REFRESH_MS = 10_000;
 // the live section's line count is dropped from its tail to avoid the overlap.
 async function loadHistoryPrefix(): Promise<void> {
   if (!activePaneId || historyRefreshing || terminalTouchActive) return;
+  const gen = paneViewGen;
+  const paneId = activePaneId;
   historyRefreshing = true;
   try {
     const data = await apiGet(
-      `/api/panes/${encodeURIComponent(activePaneId)}/read?source=recent&lines=${HISTORY_LINES}&format=ansi`
+      `/api/panes/${encodeURIComponent(paneId)}/read?source=recent&lines=${HISTORY_LINES}&format=ansi`
     ) as Record<string, string | null>;
+    if (gen !== paneViewGen || paneId !== activePaneId) return; // navigated away
     const outputEl = document.getElementById('terminal-output');
     const historyEl = document.getElementById('term-history');
     if (!outputEl || !historyEl) return;
@@ -1039,10 +1048,13 @@ async function refreshPaneOutput(): Promise<void> {
   const liveEl = document.getElementById('term-live');
   if (!liveEl) return;
 
+  const gen = paneViewGen;
+  const paneId = activePaneId;
   try {
     const data = await apiGet(
-      `/api/panes/${encodeURIComponent(activePaneId)}/read?source=visible&lines=200&format=ansi`
+      `/api/panes/${encodeURIComponent(paneId)}/read?source=visible&lines=200&format=ansi`
     ) as Record<string, string | null>;
+    if (gen !== paneViewGen || paneId !== activePaneId) return; // navigated away
     renderPaneOutput(data.ansi ?? data.text ?? '');
   } catch (err) {
     const message = (err as Error).message;
