@@ -44,7 +44,6 @@ let appState: AppState | null = null;
 let activePaneId: string | null = null;
 
 /** source toggle: 'visible' | 'recent' */
-let paneSource: 'visible' | 'recent' = 'visible';
 
 // ── DOM refs (populated after DOMContentLoaded) ───────────────────────────────
 let elApp: HTMLElement | null;
@@ -209,9 +208,7 @@ function handleWsMessage(msg: WsMessage): void {
   } else if (msg.type === 'agent_status') {
     onAgentStatus(msg);
   } else if (msg.type === 'pane_output') {
-    // server-side watch pushes are always source=visible; ignore them while
-    // the user is looking at a different source
-    if (msg.paneId === activePaneId && paneSource === 'visible') {
+    if (msg.paneId === activePaneId) {
       renderPaneOutput(msg.ansi);
     }
   }
@@ -606,19 +603,22 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     document.getElementById('topbar-title')!.innerHTML = paneHeaderHtml(found, paneId);
     document.getElementById('topbar-left')!.innerHTML =
       `<button class="topbar-back" aria-label="Back">&#8592; Agents</button>`;
-    document.getElementById('topbar-right')!.innerHTML = '';
+    document.getElementById('topbar-right')!.innerHTML =
+      `<button class="topbar-action ${fitMode ? 'active' : ''}" id="btn-fit">Fit</button>`;
     document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate('#/agents'));
+
+    // Fit-to-width toggle
+    document.getElementById('btn-fit')!.addEventListener('click', () => {
+      fitMode = !fitMode;
+      localStorage.setItem(STORAGE_FIT, String(fitMode));
+      document.getElementById('btn-fit')!.classList.toggle('active', fitMode);
+      void refreshPaneOutput();
+    });
   }
 
   // Build screen HTML
   elScreen!.innerHTML = `
     <div id="screen-pane" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
-      <div class="pane-source-bar">
-        <button class="source-btn ${paneSource === 'visible' ? 'active' : ''}" data-source="visible">Visible</button>
-        <button class="source-btn ${paneSource === 'recent' ? 'active' : ''}" data-source="recent">Recent</button>
-        <button class="source-btn ${fitMode ? 'active' : ''}" id="btn-fit">Fit</button>
-        <button class="focus-btn" id="btn-pane-focus">Focus</button>
-      </div>
       <div class="terminal-output" id="terminal-output"><span class="loading-spinner"></span></div>
       <div class="input-bar">
         <div class="input-row">
@@ -630,40 +630,6 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       </div>
     </div>
   `;
-
-  // Source toggle
-  // bind only real source buttons — the Fit button shares .source-btn for
-  // styling but has no data-source and must not change paneSource
-  elScreen!.querySelectorAll('.source-btn[data-source]').forEach((btn) => {
-    const el = btn as HTMLElement;
-    el.addEventListener('click', () => {
-      const src = el.dataset.source;
-      if (src !== 'visible' && src !== 'recent') return;
-      paneSource = src;
-      elScreen!.querySelectorAll('.source-btn[data-source]').forEach((b) => {
-        const be = b as HTMLElement;
-        be.classList.toggle('active', be.dataset.source === paneSource);
-      });
-      refreshPaneOutput();
-    });
-  });
-
-  // Fit-to-width toggle
-  document.getElementById('btn-fit')!.addEventListener('click', () => {
-    fitMode = !fitMode;
-    localStorage.setItem(STORAGE_FIT, String(fitMode));
-    document.getElementById('btn-fit')!.classList.toggle('active', fitMode);
-    void refreshPaneOutput();
-  });
-
-  // Focus button
-  document.getElementById('btn-pane-focus')!.addEventListener('click', async () => {
-    try {
-      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/focus`, {});
-    } catch (err) {
-      showToast('Focus failed', (err as Error).message);
-    }
-  });
 
   // Send buttons. Enter in the field inserts a newline — sending happens only
   // via the buttons, so the phone keyboard can't fire off half-typed commands.
@@ -813,7 +779,7 @@ async function refreshPaneOutput(): Promise<void> {
 
   try {
     const data = await apiGet(
-      `/api/panes/${encodeURIComponent(activePaneId)}/read?source=${paneSource}&lines=200&format=ansi`
+      `/api/panes/${encodeURIComponent(activePaneId)}/read?source=visible&lines=200&format=ansi`
     ) as Record<string, string | null>;
     renderPaneOutput(data.ansi ?? data.text ?? '');
   } catch (err) {
@@ -845,9 +811,9 @@ function queuePaneEcho(): void {
 function startPaneRefresh(): void {
   stopPaneRefresh();
   paneRefreshTimer = setInterval(() => {
-    // While the WS pane watch is pushing (source=visible), client polling is
-    // redundant — poll only as a fallback or for non-visible sources.
-    if (activePaneId && !document.hidden && (!wsConnected || paneSource !== 'visible')) {
+    // While the WS pane watch is pushing, client polling is redundant —
+    // poll only as a fallback when the socket is down.
+    if (activePaneId && !document.hidden && !wsConnected) {
       refreshPaneOutput();
     }
   }, PANE_REFRESH_INTERVAL_MS);

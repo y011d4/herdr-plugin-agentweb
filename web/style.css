@@ -144,6 +144,15 @@ a {
   color: var(--color-text);
 }
 
+.topbar-action.active {
+  color: var(--color-accent);
+}
+
+#btn-fit {
+  font-size: 13px;
+  font-weight: 600;
+}
+
 /* Connection status dot */
 .conn-dot {
   width: 10px;
@@ -371,48 +380,6 @@ a {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.pane-source-bar {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 6px 16px;
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.source-btn {
-  padding: 5px 14px;
-  min-height: 34px;
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--color-text-dim);
-  background: transparent;
-  transition: background 0.12s, color 0.12s;
-}
-.source-btn.active {
-  background: var(--color-surface-2);
-  color: var(--color-text);
-}
-.source-btn:hover:not(.active) {
-  color: var(--color-text);
-}
-
-.focus-btn {
-  margin-left: auto;
-  padding: 5px 14px;
-  min-height: 34px;
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--color-text-dim);
-}
-.focus-btn:hover {
-  color: var(--color-text);
-  border-color: var(--color-accent);
 }
 
 .terminal-output {
