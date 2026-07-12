@@ -73,11 +73,21 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
       });
 
       conn.on('error', (err: Error) => {
-        if (!settled) { settled = true; clearTimeout(timer); reject(err); }
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          console.error(`[herdr-client] rpc ${method} error: ${err.message} params=${JSON.stringify(params).slice(0, 200)}`);
+          reject(err);
+        }
       });
 
       conn.on('close', () => {
-        if (!settled) { settled = true; clearTimeout(timer); reject(new Error('connection closed')); }
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          console.error(`[herdr-client] rpc ${method} closed without response params=${JSON.stringify(params).slice(0, 200)}`);
+          reject(new Error('connection closed'));
+        }
       });
     });
   }

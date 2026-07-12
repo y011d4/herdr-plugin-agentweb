@@ -159,6 +159,21 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
         const lines = linesParam ? parseInt(linesParam, 10) : undefined;
         const format = url.searchParams.get('format') || 'text';
         const stripAnsi = url.searchParams.get('strip_ansi') === 'true';
+        // validate enums here: herdr drops the connection without a response
+        // on an invalid request variant, which surfaces as an opaque
+        // "connection closed" — return a clear 400 instead
+        if (!['visible', 'recent', 'recent_unwrapped', 'detection'].includes(source)) {
+          jsonError(res, 400, 'invalid_params', `invalid source: ${source}`);
+          return;
+        }
+        if (!['text', 'ansi'].includes(format)) {
+          jsonError(res, 400, 'invalid_params', `invalid format: ${format}`);
+          return;
+        }
+        if (lines !== undefined && (!Number.isInteger(lines) || lines < 0)) {
+          jsonError(res, 400, 'invalid_params', `invalid lines: ${linesParam}`);
+          return;
+        }
         try {
           const params: Record<string, unknown> = { pane_id: paneId, source, format };
           if (lines != null) params.lines = lines;

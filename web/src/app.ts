@@ -632,11 +632,15 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   `;
 
   // Source toggle
-  elScreen!.querySelectorAll('.source-btn').forEach((btn) => {
+  // bind only real source buttons — the Fit button shares .source-btn for
+  // styling but has no data-source and must not change paneSource
+  elScreen!.querySelectorAll('.source-btn[data-source]').forEach((btn) => {
     const el = btn as HTMLElement;
     el.addEventListener('click', () => {
-      paneSource = el.dataset.source as 'visible' | 'recent';
-      elScreen!.querySelectorAll('.source-btn').forEach((b) => {
+      const src = el.dataset.source;
+      if (src !== 'visible' && src !== 'recent') return;
+      paneSource = src;
+      elScreen!.querySelectorAll('.source-btn[data-source]').forEach((b) => {
         const be = b as HTMLElement;
         be.classList.toggle('active', be.dataset.source === paneSource);
       });
