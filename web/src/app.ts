@@ -613,6 +613,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   lastLiveAnsi = '';
   historyFetchedAt = 0;
   historyRefreshing = false;
+  appScrollPane = false;
 
   // Build screen HTML. The terminal holds two sections that are updated
   // independently so live pushes never touch the scrollback DOM above:
@@ -770,6 +771,8 @@ function applyFitFontSize(outputEl: HTMLElement, ansiStr: string): void {
 // Also tracks whether any finger is on the terminal: replacing the DOM
 // mid-gesture cancels the browser's touch scroll, so renders are deferred
 // while a gesture is active (see renderPaneOutput).
+const WHEEL_STEP_PX = 40; // finger travel per forwarded wheel event
+
 function bindPinchZoom(outputEl: HTMLElement): void {
   let pinchStartDist = 0;
   let pinchStartPx = 0;
@@ -777,6 +780,8 @@ function bindPinchZoom(outputEl: HTMLElement): void {
   let tapStartX = 0;
   let tapStartY = 0;
   let tapCandidate = false;
+  let lastTouchY = 0;
+  let wheelAccum = 0;
 
   const touchDist = (t: TouchList): number =>
     Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
@@ -791,13 +796,24 @@ function bindPinchZoom(outputEl: HTMLElement): void {
       tapCandidate = true;
       tapStartX = e.touches[0].clientX;
       tapStartY = e.touches[0].clientY;
+      lastTouchY = e.touches[0].clientY;
+      wheelAccum = 0;
     }
   }, { passive: true });
 
   outputEl.addEventListener('touchmove', (e: TouchEvent) => {
-    if (e.touches.length === 1 && tapCandidate &&
-        Math.hypot(e.touches[0].clientX - tapStartX, e.touches[0].clientY - tapStartY) > 10) {
-      tapCandidate = false; // a scroll flick is not a tap
+    if (e.touches.length === 1) {
+      if (tapCandidate &&
+          Math.hypot(e.touches[0].clientX - tapStartX, e.touches[0].clientY - tapStartY) > 10) {
+        tapCandidate = false; // a scroll flick is not a tap
+      }
+      // app-scroll panes: translate vertical swipes into wheel events
+      if (appScrollPane) {
+        wheelAccum += e.touches[0].clientY - lastTouchY;
+        lastTouchY = e.touches[0].clientY;
+        while (wheelAccum >= WHEEL_STEP_PX) { wheelAccum -= WHEEL_STEP_PX; sendPaneWheel(true); }
+        while (wheelAccum <= -WHEEL_STEP_PX) { wheelAccum += WHEEL_STEP_PX; sendPaneWheel(false); }
+      }
     }
     if (e.touches.length !== 2 || pinchStartDist === 0) return;
     e.preventDefault(); // keep the browser from zooming the whole page
@@ -849,6 +865,19 @@ let pendingAnsi: string | null = null; // output received while unsafe to render
 let lastLiveAnsi = ''; // last rendered screen (for line counts and refits)
 let historyFetchedAt = 0;
 let historyRefreshing = false;
+// Full-screen apps (claude etc.) keep no terminal scrollback but scroll their
+// own view. herdr desktop routes the wheel to them as up/down arrow keys
+// (xterm alternate-scroll mode) — forward swipes the same way.
+let appScrollPane = false;
+let wheelRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+function sendPaneWheel(up: boolean): void {
+  if (!activePaneId) return;
+  apiPost(`/api/panes/${encodeURIComponent(activePaneId)}/input`, { keys: [up ? 'up' : 'down'] })
+    .catch(() => { /* transient send failures just skip a scroll step */ });
+  if (wheelRefreshTimer) clearTimeout(wheelRefreshTimer);
+  wheelRefreshTimer = setTimeout(() => { void refreshPaneOutput(); }, 250);
+}
 
 const HISTORY_LINES = 1000;
 const HISTORY_REFRESH_MS = 10_000;
@@ -869,13 +898,16 @@ async function loadHistoryPrefix(): Promise<void> {
     const recentLines = (data.ansi ?? data.text ?? '').split('\n');
     const liveLineCount = lastLiveAnsi ? lastLiveAnsi.split('\n').length : 0;
     const prefix = recentLines.slice(0, Math.max(0, recentLines.length - liveLineCount)).join('\n');
+    // No terminal scrollback + an agent runs here: a full-screen app that
+    // handles wheel scrolling itself (verified for claude) — forward swipes
+    // as wheel events. Without an agent (fresh shell), injecting mouse
+    // sequences would type garbage, so show the start-of-output marker.
+    appScrollPane = !prefix && !!(activePaneId && findPane(activePaneId)?.pane.agent);
     // anchor by distance from the bottom: content only changes above the fold
     const fromBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight;
-    // No scrollback (full-screen apps repaint in place, or the pane is fresh):
-    // a swipe up reveals this marker and bounces, instead of a dead gesture.
     historyEl.innerHTML = prefix
       ? ansiToHtml(prefix)
-      : '<div class="history-start">&#183; start of output &#183;</div>';
+      : (appScrollPane ? '' : '<div class="history-start">&#183; start of output &#183;</div>');
     historyFetchedAt = Date.now();
     outputEl.scrollTop = outputEl.scrollHeight - fromBottom - outputEl.clientHeight;
   } catch {
@@ -886,6 +918,15 @@ async function loadHistoryPrefix(): Promise<void> {
 }
 
 function bindTerminalScroll(outputEl: HTMLElement): void {
+  // desktop equivalent of the swipe-to-wheel forwarding
+  let wheelDeltaAccum = 0;
+  outputEl.addEventListener('wheel', (e: WheelEvent) => {
+    if (!appScrollPane) return;
+    wheelDeltaAccum += e.deltaY;
+    while (wheelDeltaAccum <= -30) { wheelDeltaAccum += 30; sendPaneWheel(true); }
+    while (wheelDeltaAccum >= 30) { wheelDeltaAccum -= 30; sendPaneWheel(false); }
+  }, { passive: true });
+
   outputEl.addEventListener('scroll', () => {
     const fromBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight;
     if (fromBottom < 40) {

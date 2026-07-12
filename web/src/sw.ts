@@ -14,7 +14,7 @@ const sw = self as unknown as ServiceWorkerGlobalScope;
 
 // Bump on every release that changes any static asset: cached assets are only
 // refreshed when the service worker itself changes.
-const CACHE_VERSION = 'herdr-mobile-v15';
+const CACHE_VERSION = 'herdr-mobile-v17';
 
 const STATIC_ASSETS = [
   '/',
