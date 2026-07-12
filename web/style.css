@@ -397,6 +397,32 @@ a {
   padding-bottom: var(--safe-bottom);
 }
 
+/* floating "back to live" chip shown while reading scrollback history */
+.live-chip-anchor {
+  position: relative;
+  height: 0;
+  flex-shrink: 0;
+}
+
+.live-chip {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  display: none;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  z-index: 5;
+}
+
+.live-chip.visible {
+  display: block;
+}
+
 .input-row {
   display: flex;
   align-items: center;

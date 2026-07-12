@@ -606,13 +606,16 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate('#/agents'));
   }
 
-  // each pane opens fitted to width; pinch zoom adjusts from there
+  // each pane opens fitted to width, in live view
   paneFontPx = null;
+  historyMode = false;
+  historyLoading = false;
 
   // Build screen HTML
   elScreen!.innerHTML = `
     <div id="screen-pane" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
       <div class="terminal-output" id="terminal-output"><span class="loading-spinner"></span></div>
+      <div class="live-chip-anchor"><button id="btn-live" class="live-chip">&#8595; Live</button></div>
       <div class="input-bar">
         <div class="input-row">
           <textarea id="pane-input" rows="1" placeholder="Send text…" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
@@ -624,7 +627,13 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     </div>
   `;
 
-  bindPinchZoom(document.getElementById('terminal-output')!);
+  const terminalEl = document.getElementById('terminal-output')!;
+  bindPinchZoom(terminalEl);
+  bindHistoryScroll(terminalEl);
+  document.getElementById('btn-live')!.addEventListener('click', () => {
+    exitHistoryMode();
+    terminalEl.scrollTop = terminalEl.scrollHeight;
+  });
 
   // Send buttons. Enter in the field inserts a newline — sending happens only
   // via the buttons, so the phone keyboard can't fire off half-typed commands.
@@ -771,8 +780,13 @@ function bindPinchZoom(outputEl: HTMLElement): void {
     } else if (e.touches.length === 1) {
       const now = Date.now();
       if (now - lastTapAt < 300) {
+        // double-tap: back to fitted live view
         paneFontPx = null;
-        void refreshPaneOutput();
+        if (historyMode) {
+          exitHistoryMode();
+        } else {
+          void refreshPaneOutput();
+        }
       }
       lastTapAt = now;
     }
@@ -791,9 +805,67 @@ function bindPinchZoom(outputEl: HTMLElement): void {
   });
 }
 
+// ── History mode ──────────────────────────────────────────────────────────────
+// The live view shows the current screen (small payload, WS pushes). Scrolling
+// to the very top loads the pane's scrollback once (source=recent) and freezes
+// live updates until the user returns to the bottom.
+
+let historyMode = false;
+let historyLoading = false;
+
+async function enterHistoryMode(): Promise<void> {
+  if (historyMode || historyLoading || !activePaneId) return;
+  const outputEl = document.getElementById('terminal-output');
+  if (!outputEl) return;
+  historyLoading = true;
+  try {
+    const data = await apiGet(
+      `/api/panes/${encodeURIComponent(activePaneId)}/read?source=recent&lines=1000&format=ansi`
+    ) as Record<string, string | null>;
+    // freeze the current font size so the longer history doesn't re-fit
+    if (paneFontPx === null) {
+      paneFontPx = parseFloat(getComputedStyle(outputEl).fontSize) || 13;
+    }
+    historyMode = true;
+    const oldScrollHeight = outputEl.scrollHeight;
+    const oldScrollTop = outputEl.scrollTop;
+    outputEl.innerHTML = ansiToHtml((data.ansi ?? data.text ?? ''));
+    // keep the line the user was looking at in place
+    outputEl.scrollTop = outputEl.scrollHeight - oldScrollHeight + oldScrollTop;
+    document.getElementById('btn-live')?.classList.add('visible');
+  } catch (err) {
+    showToast('History load failed', (err as Error).message);
+  } finally {
+    historyLoading = false;
+  }
+}
+
+function exitHistoryMode(): void {
+  if (!historyMode) return;
+  historyMode = false;
+  document.getElementById('btn-live')?.classList.remove('visible');
+  void refreshPaneOutput();
+}
+
+function bindHistoryScroll(outputEl: HTMLElement): void {
+  let lastScrollTop = outputEl.scrollTop;
+  outputEl.addEventListener('scroll', () => {
+    const goingUp = outputEl.scrollTop < lastScrollTop;
+    lastScrollTop = outputEl.scrollTop;
+    if (!historyMode && goingUp && outputEl.scrollTop < 60 &&
+        outputEl.scrollHeight > outputEl.clientHeight + 40) {
+      void enterHistoryMode();
+    } else if (historyMode &&
+        outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight < 10) {
+      exitHistoryMode();
+    }
+  }, { passive: true });
+}
+
 // Render terminal output, following the bottom only when the user was already
 // there — never yank them out of scrollback they are reading.
 function renderPaneOutput(ansiStr: string): void {
+  if (historyMode) return; // frozen while reading scrollback
   const outputEl = document.getElementById('terminal-output');
   if (!outputEl) return;
   const atBottom =
@@ -806,7 +878,7 @@ function renderPaneOutput(ansiStr: string): void {
 }
 
 async function refreshPaneOutput(): Promise<void> {
-  if (!activePaneId) return;
+  if (!activePaneId || historyMode) return;
   const outputEl = document.getElementById('terminal-output');
   if (!outputEl) return;
 
