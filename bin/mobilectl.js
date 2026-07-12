@@ -129,6 +129,62 @@ function status() {
   return 0;
 }
 
+function tailscaleInfo(port) {
+  try {
+    const status = spawnSync('tailscale', ['status', '--json'], { encoding: 'utf8' });
+    if (status.status !== 0) return { dns: null, ip: null, serveActive: false };
+    const st = JSON.parse(status.stdout);
+    const dns = (st?.Self?.DNSName || '').replace(/\.$/, '') || null;
+    const ip = st?.Self?.TailscaleIPs?.[0] || null;
+    const serve = spawnSync('tailscale', ['serve', 'status'], { encoding: 'utf8' });
+    const serveActive = serve.status === 0 && serve.stdout.includes(`:${port}`);
+    return { dns, ip, serveActive };
+  } catch {
+    return { dns: null, ip: null, serveActive: false };
+  }
+}
+
+// Show the connect link as a QR code (pane entrypoint "connect", or manual CLI).
+// Unlike start/status this is an explicit, interactive surface, so the
+// tokenized URL is intentionally shown here.
+async function qr() {
+  let token;
+  try {
+    token = fs.readFileSync(path.join(stateDir(), 'token'), 'utf8').trim();
+  } catch {
+    console.error('no token yet — start the bridge first (action y011d4.mobile.start)');
+    return 1;
+  }
+  const cfg = readConfig();
+  const port = Number(process.env.HERDR_MOBILE_PORT || cfg.port || 8390);
+  const ts = tailscaleInfo(port);
+
+  let url;
+  if (ts.serveActive && ts.dns) {
+    url = `https://${ts.dns}/?token=${token}`;
+  } else if (ts.ip) {
+    url = `http://${ts.ip}:${port}/?token=${token}`;
+  } else {
+    url = `${baseUrl()}?token=${token}`;
+  }
+
+  const enc = spawnSync('qrencode', ['-t', 'UTF8', url], { encoding: 'utf8' });
+  if (enc.status === 0) {
+    console.log(enc.stdout);
+  } else {
+    console.log('(qrencode not found — install it for a scannable QR code)\n');
+  }
+  console.log(url);
+  if (!ts.serveActive) {
+    console.log(`\nhint: run \`tailscale serve --bg ${port}\` for tailnet-only HTTPS and full PWA support`);
+  }
+  if (process.env.HERDR_PLUGIN_ENTRYPOINT_ID) {
+    console.log('\npress Enter to close');
+    await new Promise((resolve) => process.stdin.once('data', resolve));
+  }
+  return 0;
+}
+
 function run() {
   const daemon = alivePid(daemonPidFile());
   const fg = alivePid(runPidFile());
@@ -154,10 +210,10 @@ function run() {
 }
 
 const command = process.argv[2];
-const handlers = { run, start, stop, status };
+const handlers = { run, start, stop, status, qr };
 const handler = handlers[command];
 if (!handler) {
-  console.error('usage: mobilectl.js <run|start|stop|status>');
+  console.error('usage: mobilectl.js <run|start|stop|status|qr>');
   process.exit(2);
 }
 process.exit(await handler());

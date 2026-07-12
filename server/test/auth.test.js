@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -37,15 +37,14 @@ describe('auth', () => {
   });
 
   it('verifyToken rejects a wrong token of same length', () => {
-    // 64 hex chars (same length as the real token) but all zeros
-    const wrong = '0'.repeat(64);
+    const wrong = '0'.repeat(token.length);
     assert.equal(auth.verifyToken(wrong), false);
   });
 
   it('verifyToken rejects a token of different length', () => {
     assert.equal(auth.verifyToken('abc'), false);
-    assert.equal(auth.verifyToken('a'.repeat(63)), false);
-    assert.equal(auth.verifyToken('a'.repeat(65)), false);
+    assert.equal(auth.verifyToken('a'.repeat(token.length - 1)), false);
+    assert.equal(auth.verifyToken('a'.repeat(token.length + 1)), false);
   });
 
   it('verifyToken rejects null/undefined', () => {
@@ -54,7 +53,20 @@ describe('auth', () => {
   });
 
   it('generates token written to state dir with correct format', () => {
-    assert.match(token, /^[0-9a-f]{64}$/, 'token should be 64 hex chars');
+    assert.match(token, /^[0-9a-f]{32}$/, 'new tokens should be 32 hex chars');
+  });
+
+  it('keeps a legacy 64-hex token from an older version', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'herdr-mobile-auth-legacy-'));
+    try {
+      const legacy = 'ab'.repeat(32); // 64 hex chars
+      writeFileSync(join(dir, 'token'), legacy, { mode: 0o600 });
+      const auth2 = await freshAuth(dir);
+      assert.equal(readFileSync(join(dir, 'token'), 'utf8').trim(), legacy);
+      assert.ok(auth2.verifyToken(legacy));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('re-uses the same token on a second init call', async () => {

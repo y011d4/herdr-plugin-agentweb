@@ -44,8 +44,17 @@ herdr plugin action invoke y011d4.mobile.start   # detached daemon
 herdr plugin pane open --plugin y011d4.mobile --entrypoint server  # visible in a pane
 ```
 
-`start`/`status` print the connect URL including the access token, e.g.
-`http://127.0.0.1:8390/?token=<hex>`.
+Then connect the phone by scanning a QR code (requires the `qrencode` system
+package; falls back to printing the URL):
+
+```bash
+herdr plugin pane open --plugin y011d4.mobile --entrypoint connect
+```
+
+The overlay pane shows a QR of the best reachable URL — the `tailscale serve`
+HTTPS address when active, otherwise the Tailscale IP — with the access token
+included. `start`/`status` print the URL without the token; the token lives in
+the state dir (`token` file, printed path in the action output).
 
 ### Expose to your phone (Tailscale, recommended)
 
@@ -111,6 +120,8 @@ Environment overrides: `HERDR_MOBILE_HOST`, `HERDR_MOBILE_PORT`.
 - No telemetry, no external requests (unless you opt into `notify_url`).
 - Anyone with the token can read agent output and type into your panes — treat the
   URL like an SSH key. Rotate by deleting `token` in the state dir and restarting.
+  Tokens are 32 hex chars (128-bit); tokens created by older versions were 64 and
+  stay valid until rotated.
 
 ## API surface (for scripting)
 

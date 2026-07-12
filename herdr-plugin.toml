@@ -28,3 +28,9 @@ id = "server"
 title = "Mobile bridge"
 placement = "tab"
 command = ["node", "bin/mobilectl.js", "run"]
+
+[[panes]]
+id = "connect"
+title = "Connect phone"
+placement = "overlay"
+command = ["node", "bin/mobilectl.js", "qr"]

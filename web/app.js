@@ -595,6 +595,7 @@ async function renderPaneDetail(paneId) {
 function buildQuickKeys(paneId) {
   const KEYS = [
     { label: 'Enter',  payload: { keys: ['enter'] } },
+    { label: '⌫',      payload: { keys: ['backspace'] } },
     { label: 'Esc',    payload: { keys: ['esc'] } },
     { label: 'Ctrl+C', payload: { keys: ['ctrl+c'] } },
     { label: '↑',      payload: { keys: ['up'] } },
