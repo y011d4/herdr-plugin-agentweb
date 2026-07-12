@@ -1,0 +1,13 @@
+{
+  "name": "herdr-plugin-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test server/test/*.test.js",
+    "start": "node server/main.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

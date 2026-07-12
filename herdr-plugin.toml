@@ -1,0 +1,30 @@
+id = "y011d4.mobile"
+name = "Herdr Mobile"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Monitor and control herdr agents from your phone (PWA bridge, Tailscale-friendly)"
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "start"
+title = "Start mobile bridge"
+contexts = ["workspace"]
+command = ["node", "bin/mobilectl.js", "start"]
+
+[[actions]]
+id = "stop"
+title = "Stop mobile bridge"
+contexts = ["workspace"]
+command = ["node", "bin/mobilectl.js", "stop"]
+
+[[actions]]
+id = "status"
+title = "Mobile bridge status"
+contexts = ["workspace"]
+command = ["node", "bin/mobilectl.js", "status"]
+
+[[panes]]
+id = "server"
+title = "Mobile bridge"
+placement = "tab"
+command = ["node", "bin/mobilectl.js", "run"]

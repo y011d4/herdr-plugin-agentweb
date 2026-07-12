@@ -1,0 +1,90 @@
+/**
+ * sw.js — Service Worker for Herdr Mobile PWA
+ *
+ * Strategy:
+ *   - Static assets (index.html, app.js, ansi.js, style.css, manifest, icons):
+ *     cache-first, served from versioned cache.
+ *   - /api/* and /ws*: network passthrough, never cached.
+ *   - On activate: delete caches from previous versions.
+ */
+
+const CACHE_VERSION = 'herdr-mobile-v1';
+
+const STATIC_ASSETS = [
+  '/',
+  '/index.html',
+  '/app.js',
+  '/ansi.js',
+  '/style.css',
+  '/manifest.webmanifest',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_VERSION).then((cache) => cache.addAll(STATIC_ASSETS))
+  );
+  // Activate immediately without waiting for old clients to unload
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys
+          .filter((key) => key !== CACHE_VERSION)
+          .map((key) => caches.delete(key))
+      )
+    )
+  );
+  // Take control of all open clients immediately
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+
+  // Pass through API and WebSocket upgrade requests — never cache
+  if (url.pathname.startsWith('/api') || url.pathname.startsWith('/ws') || url.pathname === '/healthz') {
+    return; // let browser handle normally
+  }
+
+  // Cache-first for static assets
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      if (cached) return cached;
+      return fetch(event.request).then((response) => {
+        // Cache successful GET responses for static content
+        if (response.ok && event.request.method === 'GET') {
+          const responseClone = response.clone();
+          caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, responseClone));
+        }
+        return response;
+      });
+    })
+  );
+});
+
+// Handle notification click: focus the app and navigate to the pane
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const paneId = event.notification.tag;
+  const targetUrl = paneId ? `/#/pane/${encodeURIComponent(paneId)}` : '/';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          client.focus();
+          client.postMessage({ type: 'navigate', url: targetUrl });
+          return;
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+    })
+  );
+});

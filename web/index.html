@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#111318" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Herdr" />
+  <title>Herdr Mobile</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+</head>
+<body>
+  <div id="app">
+    <!-- Top bar (hidden on login screen) -->
+    <header id="topbar" class="topbar">
+      <div id="topbar-left"></div>
+      <div class="topbar-title" id="topbar-title">Herdr</div>
+      <div id="conn-dot" class="conn-dot" title="Disconnected"></div>
+      <div id="topbar-right"></div>
+    </header>
+
+    <!-- Reconnecting banner -->
+    <div id="reconnect-banner" role="status" aria-live="polite">
+      <span class="loading-spinner" style="width:14px;height:14px;border-width:2px;"></span>
+      Reconnecting&hellip;
+    </div>
+
+    <!-- Main screen — content injected by app.js -->
+    <main id="screen"></main>
+
+    <!-- Toast container — fixed overlay -->
+    <div id="toast-container" aria-live="assertive" aria-atomic="false"></div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
