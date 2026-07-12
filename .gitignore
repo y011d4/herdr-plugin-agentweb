@@ -4,3 +4,4 @@ dist/
 web/app.js
 web/ansi.js
 web/sw.js
+web/types.js

@@ -68,4 +68,14 @@ export interface WsPongMessage {
   type: 'pong';
 }
 
-export type WsMessage = WsStateMessage | WsAgentStatusMessage | WsPongMessage;
+export interface WsPaneOutputMessage {
+  type: 'pane_output';
+  paneId: string;
+  ansi: string;
+}
+
+export type WsMessage =
+  | WsStateMessage
+  | WsAgentStatusMessage
+  | WsPongMessage
+  | WsPaneOutputMessage;

@@ -92,6 +92,7 @@ Optional `config.json` in the plugin config dir
 {
   "host": "127.0.0.1",
   "port": 8390,
+  "public_url": null,
   "notify_url": null
 }
 ```
@@ -100,6 +101,10 @@ Optional `config.json` in the plugin config dir
   to your Tailscale IP serves plain HTTP directly on the tailnet (works, but the
   PWA runs without a secure context: no service worker, no system notifications).
 - `port` — bridge port (default 8390).
+- `public_url` — the base URL your phone reaches the bridge at, e.g.
+  `"https://gram.your-tailnet.ts.net"` or any reverse-proxy address. Used by the
+  connect QR pane. When unset, the pane falls back to auto-detecting Tailscale
+  (serve HTTPS address, else tailnet IP); set this if you don't use Tailscale.
 - `notify_url` — optional [ntfy](https://ntfy.sh) topic URL for background push
   notifications, e.g. `https://ntfy.example.internal/herdr` for a **self-hosted**
   ntfy instance. When unset (default) the bridge performs no outbound requests at

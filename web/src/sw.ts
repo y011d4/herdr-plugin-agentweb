@@ -12,7 +12,9 @@
 // service-worker type so service-worker-specific APIs type-check correctly.
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
-const CACHE_VERSION = 'herdr-mobile-v1';
+// Bump on every release that changes any static asset: cached assets are only
+// refreshed when the service worker itself changes.
+const CACHE_VERSION = 'herdr-mobile-v2';
 
 const STATIC_ASSETS = [
   '/',

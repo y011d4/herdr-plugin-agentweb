@@ -181,15 +181,30 @@ async function qr(): Promise<number> {
   }
   const cfg = readConfig();
   const port = Number(process.env.HERDR_MOBILE_PORT || cfg.port || 8390);
-  const ts = tailscaleInfo(port);
+
+  // config public_url wins; tailscale auto-detection is only a zero-config
+  // convenience fallback, not a dependency.
+  const publicUrl =
+    typeof cfg.public_url === 'string' && cfg.public_url.trim() !== ''
+      ? cfg.public_url.trim().replace(/\/+$/, '')
+      : null;
 
   let url: string;
-  if (ts.serveActive && ts.dns) {
-    url = `https://${ts.dns}/?token=${token}`;
-  } else if (ts.ip) {
-    url = `http://${ts.ip}:${port}/?token=${token}`;
+  let hint: string | null = null;
+  if (publicUrl) {
+    url = `${publicUrl}/?token=${token}`;
   } else {
-    url = `${baseUrl()}?token=${token}`;
+    const ts = tailscaleInfo(port);
+    if (ts.serveActive && ts.dns) {
+      url = `https://${ts.dns}/?token=${token}`;
+    } else if (ts.ip) {
+      url = `http://${ts.ip}:${port}/?token=${token}`;
+    } else {
+      url = `${baseUrl()}?token=${token}`;
+    }
+    if (!ts.serveActive) {
+      hint = `hint: set "public_url" in config.json (herdr plugin config-dir y011d4.mobile), or run \`tailscale serve --bg ${port}\` for tailnet-only HTTPS`;
+    }
   }
 
   const enc = spawnSync('qrencode', ['-t', 'UTF8', url], { encoding: 'utf8' });
@@ -199,8 +214,8 @@ async function qr(): Promise<number> {
     console.log('(qrencode not found — install it for a scannable QR code)\n');
   }
   console.log(url);
-  if (!ts.serveActive) {
-    console.log(`\nhint: run \`tailscale serve --bg ${port}\` for tailnet-only HTTPS and full PWA support`);
+  if (hint) {
+    console.log(`\n${hint}`);
   }
   if (process.env.HERDR_PLUGIN_ENTRYPOINT_ID) {
     console.log('\npress Enter to close');

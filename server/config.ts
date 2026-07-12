@@ -43,10 +43,16 @@ export function loadConfig(): Config {
 
   const notifyUrl = typeof file.notify_url === 'string' ? file.notify_url : null;
 
+  const publicUrl =
+    typeof file.public_url === 'string' && file.public_url.trim() !== ''
+      ? file.public_url.trim().replace(/\/+$/, '')
+      : null;
+
   return {
     host,
     port,
     notifyUrl,
+    publicUrl,
     stateDir: resolveStateDir(),
     socketPath: resolveSocketPath(),
   };

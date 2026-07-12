@@ -8,6 +8,7 @@ import { buildAgentStatusMessage } from './notify.ts';
 import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
+const PANE_WATCH_INTERVAL_MS = 800; // server-side poll rate for watched panes
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -270,16 +271,63 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
         ws.send(JSON.stringify({ type: 'state', state: toClientState(state) }));
       }
 
+      // Pane watch: while a client views a pane, poll it server-side over the
+      // cheap unix socket and push output only when it actually changed. This
+      // gives near-real-time keypress echo without client-side fast polling.
+      let watchedPaneId: string | null = null;
+      let watchTimer: ReturnType<typeof setInterval> | null = null;
+      let lastOutput: string | null = null;
+      let readInFlight = false;
+
+      const stopWatch = (): void => {
+        if (watchTimer) clearInterval(watchTimer);
+        watchTimer = null;
+        watchedPaneId = null;
+        lastOutput = null;
+      };
+
+      const pollWatchedPane = async (): Promise<void> => {
+        if (!watchedPaneId || readInFlight || ws.readyState !== WebSocket.OPEN) return;
+        readInFlight = true;
+        const paneId = watchedPaneId;
+        try {
+          const result = (await herdrClient.rpc('pane.read', {
+            pane_id: paneId,
+            source: 'visible',
+            lines: 200,
+            format: 'ansi',
+          })) as { read?: { text?: string } };
+          const ansi = result.read?.text ?? '';
+          if (paneId === watchedPaneId && ansi !== lastOutput && ws.readyState === WebSocket.OPEN) {
+            lastOutput = ansi;
+            ws.send(JSON.stringify({ type: 'pane_output', paneId, ansi }));
+          }
+        } catch {
+          // pane gone or herdr unreachable — stop pushing; the client's
+          // fallback polling keeps the view alive.
+          if (paneId === watchedPaneId) stopWatch();
+        } finally {
+          readInFlight = false;
+        }
+      };
+
       ws.on('message', (data: Buffer) => {
         let msg: Record<string, unknown>;
         try { msg = JSON.parse(data.toString()) as Record<string, unknown>; } catch { return; }
         if (msg?.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong' }));
+        } else if (msg?.type === 'watch_pane' && typeof msg.paneId === 'string') {
+          stopWatch();
+          watchedPaneId = msg.paneId;
+          watchTimer = setInterval(() => { void pollWatchedPane(); }, PANE_WATCH_INTERVAL_MS);
+          void pollWatchedPane();
+        } else if (msg?.type === 'unwatch_pane') {
+          stopWatch();
         }
       });
 
-      ws.on('close', () => wsClients.delete(ws));
-      ws.on('error', () => wsClients.delete(ws));
+      ws.on('close', () => { stopWatch(); wsClients.delete(ws); });
+      ws.on('error', () => { stopWatch(); wsClients.delete(ws); });
     });
   });
 

@@ -87,6 +87,8 @@ export interface Config {
   host: string;
   port: number;
   notifyUrl: string | null;
+  /** externally reachable base URL (config public_url), used for connect links */
+  publicUrl: string | null;
   stateDir: string;
   socketPath: string;
 }

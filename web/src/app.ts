@@ -163,6 +163,7 @@ function wsConnect(): void {
     wsReconnectDelay = WS_RECONNECT_BASE_MS;
     setConnected(true);
     stopStatePoll();
+    wsSendWatch(); // re-establish pane watch after reconnect
 
     // Ping keepalive
     if (wsPingTimer) clearInterval(wsPingTimer);
@@ -206,8 +207,24 @@ function handleWsMessage(msg: WsMessage): void {
     onStateUpdate();
   } else if (msg.type === 'agent_status') {
     onAgentStatus(msg);
+  } else if (msg.type === 'pane_output') {
+    // server-side watch pushes are always source=visible; ignore them while
+    // the user is looking at a different source
+    if (msg.paneId === activePaneId && paneSource === 'visible') {
+      renderPaneOutput(msg.ansi);
+    }
   }
   // pong — no-op
+}
+
+// Tell the server which pane (if any) to watch for output pushes.
+function wsSendWatch(): void {
+  if (!wsSocket || wsSocket.readyState !== WebSocket.OPEN) return;
+  if (activePaneId) {
+    wsSocket.send(JSON.stringify({ type: 'watch_pane', paneId: activePaneId }));
+  } else {
+    wsSocket.send(JSON.stringify({ type: 'unwatch_pane' }));
+  }
 }
 
 function setConnected(connected: boolean): void {
@@ -344,6 +361,8 @@ function handleRoute(): void {
   } else {
     navigate('#/agents');
   }
+
+  wsSendWatch(); // sync the server-side pane watch with the current route
 }
 
 // ── Token screen ──────────────────────────────────────────────────────────────
@@ -565,6 +584,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     paneInput.value = '';
     try {
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true });
+      queuePaneEcho();
     } catch (err) {
       showToast('Send failed', (err as Error).message);
     }
@@ -575,6 +595,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     paneInput.value = '';
     try {
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text });
+      queuePaneEcho();
     } catch (err) {
       showToast('Send failed', (err as Error).message);
     }
@@ -588,6 +609,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       paneInput.value = '';
       try {
         await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true });
+        queuePaneEcho();
       } catch (err) {
         showToast('Send failed', (err as Error).message);
       }
@@ -630,11 +652,25 @@ function buildQuickKeys(paneId: string): void {
     btn.addEventListener('click', async () => {
       try {
         await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, key.payload);
+        queuePaneEcho();
       } catch (err) {
         showToast('Key send failed', (err as Error).message);
       }
     });
     row.appendChild(btn);
+  }
+}
+
+// Render terminal output, following the bottom only when the user was already
+// there — never yank them out of scrollback they are reading.
+function renderPaneOutput(ansiStr: string): void {
+  const outputEl = document.getElementById('terminal-output');
+  if (!outputEl) return;
+  const atBottom =
+    outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight < 40;
+  outputEl.innerHTML = ansiToHtml(ansiStr);
+  if (atBottom) {
+    outputEl.scrollTop = outputEl.scrollHeight;
   }
 }
 
@@ -647,11 +683,7 @@ async function refreshPaneOutput(): Promise<void> {
     const data = await apiGet(
       `/api/panes/${encodeURIComponent(activePaneId)}/read?source=${paneSource}&lines=200&format=ansi`
     ) as Record<string, string | null>;
-    const ansiStr = data.ansi ?? data.text ?? '';
-    const rendered = ansiToHtml(ansiStr);
-    outputEl.innerHTML = rendered;
-    // Scroll to bottom
-    outputEl.scrollTop = outputEl.scrollHeight;
+    renderPaneOutput(data.ansi ?? data.text ?? '');
   } catch (err) {
     if ((err as Error).message !== '401') {
       outputEl.textContent = `Error loading output: ${(err as Error).message}`;
@@ -659,10 +691,19 @@ async function refreshPaneOutput(): Promise<void> {
   }
 }
 
+// Right after sending input, fetch fresh output a couple of times so keypress
+// echo feels instant instead of waiting for the next push/poll cycle.
+function queuePaneEcho(): void {
+  setTimeout(() => { void refreshPaneOutput(); }, 120);
+  setTimeout(() => { void refreshPaneOutput(); }, 500);
+}
+
 function startPaneRefresh(): void {
   stopPaneRefresh();
   paneRefreshTimer = setInterval(() => {
-    if (activePaneId && !document.hidden) {
+    // While the WS pane watch is pushing (source=visible), client polling is
+    // redundant — poll only as a fallback or for non-visible sources.
+    if (activePaneId && !document.hidden && (!wsConnected || paneSource !== 'visible')) {
       refreshPaneOutput();
     }
   }, PANE_REFRESH_INTERVAL_MS);
