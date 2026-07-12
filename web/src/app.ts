@@ -275,11 +275,17 @@ function onStateUpdate(): void {
 function onAgentStatus(msg: WsAgentStatusMessage): void {
   const { paneId, agent, from, to, workspaceLabel, tabLabel } = msg;
 
+  const jumpToPane = (): void => navigate(`#/pane/${encodeURIComponent(paneId)}`);
+
   const notifyStatuses = new Set(['blocked', 'done']);
   if (!notifyStatuses.has(to)) {
     // Still show toast for other transitions if not currently on that pane
     if (activePaneId !== paneId) {
-      showToast(`${agent ?? 'Agent'}: ${from} → ${to}`, `${workspaceLabel ?? ''} / ${tabLabel ?? ''}`);
+      showToast(
+        `${agent ?? 'Agent'}: ${from} → ${to}`,
+        `${workspaceLabel ?? ''} / ${tabLabel ?? ''}`,
+        { sticky: true, onclick: jumpToPane }
+      );
     }
     return;
   }
@@ -289,7 +295,7 @@ function onAgentStatus(msg: WsAgentStatusMessage): void {
 
   // In-app toast (skip for the pane currently being viewed)
   if (activePaneId !== paneId) {
-    showToast(title, body, () => navigate(`#/pane/${encodeURIComponent(paneId)}`));
+    showToast(title, body, { sticky: true, onclick: jumpToPane });
   }
 
   // System notification when page is hidden
@@ -314,22 +320,50 @@ function onAgentStatus(msg: WsAgentStatusMessage): void {
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
-function showToast(title: string, body: string, onclick?: () => void): void {
+interface ToastOptions {
+  onclick?: () => void;
+  /** sticky toasts stay until the user dismisses them */
+  sticky?: boolean;
+}
+
+const TOAST_MAX = 4;
+
+function showToast(title: string, body: string, opts: ToastOptions = {}): void {
   if (!elToastContainer) return;
+
+  // keep the stack bounded — drop the oldest toast
+  while (elToastContainer.children.length >= TOAST_MAX) {
+    elToastContainer.firstElementChild?.remove();
+  }
+
   const el = document.createElement('div');
   el.className = 'toast';
-  el.innerHTML = `<div class="toast-header">${escHtml(title)}</div><div class="toast-body">${escHtml(body)}</div>`;
-  if (onclick) {
+  el.innerHTML =
+    `<div class="toast-main">` +
+    `<div class="toast-header">${escHtml(title)}</div>` +
+    `<div class="toast-body">${escHtml(body)}</div>` +
+    `</div>` +
+    `<button class="toast-close" aria-label="Dismiss">&#10005;</button>`;
+
+  const dismiss = (): void => {
+    el.classList.add('fading');
+    setTimeout(() => el.remove(), 300);
+  };
+
+  el.querySelector('.toast-close')!.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dismiss();
+  });
+
+  if (opts.onclick) {
     el.style.cursor = 'pointer';
-    el.addEventListener('click', () => { onclick(); el.remove(); });
+    el.addEventListener('click', () => { opts.onclick!(); el.remove(); });
   }
   elToastContainer.appendChild(el);
 
-  // Auto-dismiss after 4s
-  setTimeout(() => {
-    el.classList.add('fading');
-    setTimeout(() => el.remove(), 300);
-  }, 4_000);
+  if (!opts.sticky) {
+    setTimeout(dismiss, 4_000);
+  }
 }
 
 // ── Routing ───────────────────────────────────────────────────────────────────
@@ -632,8 +666,8 @@ function buildQuickKeys(paneId: string): void {
     { label: '⌫',      payload: { keys: ['backspace'] } },
     { label: 'Esc',    payload: { keys: ['esc'] } },
     { label: 'Ctrl+C', payload: { keys: ['ctrl+c'] } },
-    { label: '↑',      payload: { keys: ['up'] } },
-    { label: '↓',      payload: { keys: ['down'] } },
+    { label: '^P',     payload: { keys: ['ctrl+p'] } },
+    { label: '^N',     payload: { keys: ['ctrl+n'] } },
     { label: 'Tab',    payload: { keys: ['tab'] } },
     { label: 'y',      payload: { text: 'y', enter: true } },
     { label: 'n',      payload: { text: 'n', enter: true } },
