@@ -614,6 +614,8 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   historyFetchedAt = 0;
   historyRefreshing = false;
   appScrollPane = false;
+  wheelQueue = 0;
+  stopFling();
 
   // Build screen HTML. The terminal holds two sections that are updated
   // independently so live pushes never touch the scrollback DOM above:
@@ -771,7 +773,7 @@ function applyFitFontSize(outputEl: HTMLElement, ansiStr: string): void {
 // Also tracks whether any finger is on the terminal: replacing the DOM
 // mid-gesture cancels the browser's touch scroll, so renders are deferred
 // while a gesture is active (see renderPaneOutput).
-const WHEEL_STEP_PX = 40; // finger travel per forwarded wheel event
+const WHEEL_STEP_PX = 12; // finger travel per forwarded wheel event
 
 function bindPinchZoom(outputEl: HTMLElement): void {
   let pinchStartDist = 0;
@@ -782,6 +784,8 @@ function bindPinchZoom(outputEl: HTMLElement): void {
   let tapCandidate = false;
   let lastTouchY = 0;
   let wheelAccum = 0;
+  let touchVelocity = 0; // px/ms, positive = finger moving down (scroll up)
+  let lastMoveAt = 0;
 
   const touchDist = (t: TouchList): number =>
     Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
@@ -798,6 +802,9 @@ function bindPinchZoom(outputEl: HTMLElement): void {
       tapStartY = e.touches[0].clientY;
       lastTouchY = e.touches[0].clientY;
       wheelAccum = 0;
+      touchVelocity = 0;
+      lastMoveAt = performance.now();
+      stopFling();
     }
   }, { passive: true });
 
@@ -809,10 +816,18 @@ function bindPinchZoom(outputEl: HTMLElement): void {
       }
       // app-scroll panes: translate vertical swipes into wheel events
       if (appScrollPane) {
-        wheelAccum += e.touches[0].clientY - lastTouchY;
-        lastTouchY = e.touches[0].clientY;
-        while (wheelAccum >= WHEEL_STEP_PX) { wheelAccum -= WHEEL_STEP_PX; sendPaneWheel(true); }
-        while (wheelAccum <= -WHEEL_STEP_PX) { wheelAccum += WHEEL_STEP_PX; sendPaneWheel(false); }
+        const y = e.touches[0].clientY;
+        const dy = y - lastTouchY;
+        const now = performance.now();
+        const dt = now - lastMoveAt;
+        if (dt > 0 && dt < 200) {
+          touchVelocity = 0.7 * touchVelocity + 0.3 * (dy / dt);
+        }
+        lastMoveAt = now;
+        wheelAccum += dy;
+        lastTouchY = y;
+        while (wheelAccum >= WHEEL_STEP_PX) { wheelAccum -= WHEEL_STEP_PX; queuePaneWheel(true); }
+        while (wheelAccum <= -WHEEL_STEP_PX) { wheelAccum += WHEEL_STEP_PX; queuePaneWheel(false); }
       }
     }
     if (e.touches.length !== 2 || pinchStartDist === 0) return;
@@ -844,6 +859,9 @@ function bindPinchZoom(outputEl: HTMLElement): void {
       lastTapEndAt = 0;
     }
 
+    if (appScrollPane) {
+      startFling(touchVelocity);
+    }
     flushPendingOutput();
   }, { passive: true });
 
@@ -871,12 +889,60 @@ let historyRefreshing = false;
 let appScrollPane = false;
 let wheelRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
-function sendPaneWheel(up: boolean): void {
-  if (!activePaneId) return;
-  apiPost(`/api/panes/${encodeURIComponent(activePaneId)}/scroll`, { direction: up ? 'up' : 'down' })
-    .catch(() => { /* transient send failures just skip a scroll step */ });
+// Wheel events are batched (~70ms windows, sent as steps) so fast swipes
+// don't turn into dozens of http requests, and the view refreshes on a
+// rolling ~200ms cadence while scroll activity continues.
+let wheelQueue = 0; // >0 = up steps, <0 = down steps
+let wheelFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let lastWheelRefreshAt = 0;
+
+function queuePaneWheel(up: boolean): void {
+  wheelQueue += up ? 1 : -1;
+  if (!wheelFlushTimer) {
+    wheelFlushTimer = setTimeout(() => { void flushWheelQueue(); }, 70);
+  }
+}
+
+async function flushWheelQueue(): Promise<void> {
+  wheelFlushTimer = null;
+  const queued = wheelQueue;
+  wheelQueue = 0;
+  if (!activePaneId || queued === 0) return;
+  try {
+    await apiPost(`/api/panes/${encodeURIComponent(activePaneId)}/scroll`, {
+      direction: queued > 0 ? 'up' : 'down',
+      steps: Math.min(10, Math.abs(queued)),
+    });
+  } catch { /* transient send failures just skip a scroll step */ }
+  const now = Date.now();
+  if (now - lastWheelRefreshAt > 200) {
+    lastWheelRefreshAt = now;
+    void refreshPaneOutput();
+  }
   if (wheelRefreshTimer) clearTimeout(wheelRefreshTimer);
-  wheelRefreshTimer = setTimeout(() => { void refreshPaneOutput(); }, 250);
+  wheelRefreshTimer = setTimeout(() => { void refreshPaneOutput(); }, 150);
+}
+
+// Momentum: keep sending decaying wheel batches after the finger lifts, like
+// native fling. Renders are not deferred once the touch ends, so the view
+// visibly follows the fling.
+let flingTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopFling(): void {
+  if (flingTimer) { clearInterval(flingTimer); flingTimer = null; }
+}
+
+function startFling(velocityPxMs: number): void {
+  stopFling();
+  let v = Math.max(-3, Math.min(3, velocityPxMs));
+  if (Math.abs(v) < 0.4) return;
+  flingTimer = setInterval(() => {
+    v *= 0.82;
+    const dist = v * 80;
+    const steps = Math.floor(Math.abs(dist) / WHEEL_STEP_PX);
+    if (steps === 0) { stopFling(); return; }
+    for (let i = 0; i < steps; i++) queuePaneWheel(dist > 0);
+  }, 80);
 }
 
 const HISTORY_LINES = 1000;
@@ -923,8 +989,8 @@ function bindTerminalScroll(outputEl: HTMLElement): void {
   outputEl.addEventListener('wheel', (e: WheelEvent) => {
     if (!appScrollPane) return;
     wheelDeltaAccum += e.deltaY;
-    while (wheelDeltaAccum <= -30) { wheelDeltaAccum += 30; sendPaneWheel(true); }
-    while (wheelDeltaAccum >= 30) { wheelDeltaAccum -= 30; sendPaneWheel(false); }
+    while (wheelDeltaAccum <= -30) { wheelDeltaAccum += 30; queuePaneWheel(true); }
+    while (wheelDeltaAccum >= 30) { wheelDeltaAccum -= 30; queuePaneWheel(false); }
   }, { passive: true });
 
   outputEl.addEventListener('scroll', () => {
