@@ -606,19 +606,20 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate('#/agents'));
   }
 
-  // each pane opens fitted to width, in live view
+  // each pane opens fitted to width, scrolled to the bottom
   paneFontPx = null;
-  historyMode = false;
-  historyLoading = false;
-  historyPending = false;
   terminalTouchActive = false;
   pendingAnsi = null;
+  lastLiveAnsi = '';
+  historyFetchedAt = 0;
+  historyRefreshing = false;
 
-  // Build screen HTML
+  // Build screen HTML. The terminal holds two sections that are updated
+  // independently so live pushes never touch the scrollback DOM above:
+  // #term-history (scrollback prefix) + #term-live (current screen).
   elScreen!.innerHTML = `
     <div id="screen-pane" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
-      <div class="terminal-output" id="terminal-output"><span class="loading-spinner"></span></div>
-      <div class="live-chip-anchor"><button id="btn-live" class="live-chip">&#8595; Live</button></div>
+      <div class="terminal-output" id="terminal-output"><div id="term-history"></div><div id="term-live"><span class="loading-spinner"></span></div></div>
       <div class="input-bar">
         <div class="input-row">
           <textarea id="pane-input" rows="1" placeholder="Send text…" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
@@ -632,11 +633,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
 
   const terminalEl = document.getElementById('terminal-output')!;
   bindPinchZoom(terminalEl);
-  bindHistoryScroll(terminalEl);
-  document.getElementById('btn-live')!.addEventListener('click', () => {
-    exitHistoryMode();
-    terminalEl.scrollTop = terminalEl.scrollHeight;
-  });
+  bindTerminalScroll(terminalEl);
 
   // Send buttons. Enter in the field inserts a newline — sending happens only
   // via the buttons, so the phone keyboard can't fire off half-typed commands.
@@ -679,8 +676,10 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   // Quick-key row
   buildQuickKeys(paneId);
 
-  // Load terminal output
+  // Current screen first (small, fast), then the scrollback above it so the
+  // view is continuously scrollable from the very first swipe.
   await refreshPaneOutput();
+  void loadHistoryPrefix();
 
   // Start polling while this pane is visible
   startPaneRefresh();
@@ -796,18 +795,9 @@ function bindPinchZoom(outputEl: HTMLElement): void {
   }, { passive: true });
 
   outputEl.addEventListener('touchmove', (e: TouchEvent) => {
-    if (e.touches.length === 1) {
-      const dx = e.touches[0].clientX - tapStartX;
-      const dy = e.touches[0].clientY - tapStartY;
-      if (tapCandidate && Math.hypot(dx, dy) > 10) {
-        tapCandidate = false; // a scroll flick is not a tap
-      }
-      // Swiping down while already at the top requests history. The fitted
-      // live view usually has nothing to scroll, so scroll events never fire —
-      // the gesture itself is the trigger.
-      if (!historyMode && !historyLoading && dy > 60 && outputEl.scrollTop <= 0) {
-        historyPending = true;
-      }
+    if (e.touches.length === 1 && tapCandidate &&
+        Math.hypot(e.touches[0].clientX - tapStartX, e.touches[0].clientY - tapStartY) > 10) {
+      tapCandidate = false; // a scroll flick is not a tap
     }
     if (e.touches.length !== 2 || pinchStartDist === 0) return;
     e.preventDefault(); // keep the browser from zooming the whole page
@@ -825,15 +815,12 @@ function bindPinchZoom(outputEl: HTMLElement): void {
       const now = Date.now();
       tapCandidate = false;
       if (now - lastTapEndAt < 300) {
-        // double-tap (two stationary taps): back to fitted live view
+        // double-tap (two stationary taps): back to the fitted bottom
         lastTapEndAt = 0;
         paneFontPx = null;
         pendingAnsi = null;
-        if (historyMode) {
-          exitHistoryMode();
-        } else {
-          void refreshPaneOutput();
-        }
+        outputEl.scrollTop = outputEl.scrollHeight;
+        void refreshPaneOutput();
         return;
       }
       lastTapEndAt = now;
@@ -841,11 +828,6 @@ function bindPinchZoom(outputEl: HTMLElement): void {
       lastTapEndAt = 0;
     }
 
-    if (historyPending) {
-      historyPending = false;
-      void enterHistoryMode();
-      return;
-    }
     flushPendingOutput();
   }, { passive: true });
 
@@ -856,117 +838,95 @@ function bindPinchZoom(outputEl: HTMLElement): void {
   }, { passive: true });
 }
 
-// ── History mode ──────────────────────────────────────────────────────────────
-// The live view shows the current screen (small payload, WS pushes). Scrolling
-// to the very top loads the pane's scrollback once (source=recent) and freezes
-// live updates until the user returns to the bottom.
+// ── Continuous terminal buffer ────────────────────────────────────────────────
+// The terminal is one continuous buffer: #term-history holds the scrollback
+// prefix (fetched from source=recent, refreshed at most every 10s while the
+// user reads it) and #term-live holds the current screen (updated by WS
+// pushes). The view is scrollable from the very first swipe — no modes.
 
-let historyMode = false;
-let historyLoading = false;
-let historyPending = false; // entry requested mid-gesture; runs on touchend
-let historyEnteredAt = 0;
 let terminalTouchActive = false; // a finger is on the terminal
 let pendingAnsi: string | null = null; // output received while unsafe to render
+let lastLiveAnsi = ''; // last rendered screen (for line counts and refits)
+let historyFetchedAt = 0;
+let historyRefreshing = false;
 
-async function enterHistoryMode(): Promise<void> {
-  if (historyMode || historyLoading || !activePaneId) return;
-  const outputEl = document.getElementById('terminal-output');
-  if (!outputEl) return;
-  historyLoading = true;
+const HISTORY_LINES = 1000;
+const HISTORY_REFRESH_MS = 10_000;
+
+// Fetch the scrollback and place everything ABOVE the current screen into
+// #term-history. source=recent ends with the lines currently on screen, so
+// the live section's line count is dropped from its tail to avoid the overlap.
+async function loadHistoryPrefix(): Promise<void> {
+  if (!activePaneId || historyRefreshing || terminalTouchActive) return;
+  historyRefreshing = true;
   try {
     const data = await apiGet(
-      `/api/panes/${encodeURIComponent(activePaneId)}/read?source=recent&lines=1000&format=ansi`
+      `/api/panes/${encodeURIComponent(activePaneId)}/read?source=recent&lines=${HISTORY_LINES}&format=ansi`
     ) as Record<string, string | null>;
-    // freeze the current font size so the longer history doesn't re-fit
-    if (paneFontPx === null) {
-      paneFontPx = parseFloat(getComputedStyle(outputEl).fontSize) || 13;
-    }
-    historyMode = true;
-    historyEnteredAt = Date.now();
-    pendingAnsi = null;
-    const oldScrollHeight = outputEl.scrollHeight;
-    const oldScrollTop = outputEl.scrollTop;
-    outputEl.innerHTML = ansiToHtml((data.ansi ?? data.text ?? ''));
-    // keep the line the user was looking at in place
-    outputEl.scrollTop = outputEl.scrollHeight - oldScrollHeight + oldScrollTop;
-    document.getElementById('btn-live')?.classList.add('visible');
-  } catch (err) {
-    showToast('History load failed', (err as Error).message);
+    const outputEl = document.getElementById('terminal-output');
+    const historyEl = document.getElementById('term-history');
+    if (!outputEl || !historyEl) return;
+    const recentLines = (data.ansi ?? data.text ?? '').split('\n');
+    const liveLineCount = lastLiveAnsi ? lastLiveAnsi.split('\n').length : 0;
+    const prefix = recentLines.slice(0, Math.max(0, recentLines.length - liveLineCount)).join('\n');
+    // anchor by distance from the bottom: content only changes above the fold
+    const fromBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight;
+    historyEl.innerHTML = prefix ? ansiToHtml(prefix) : '';
+    historyFetchedAt = Date.now();
+    outputEl.scrollTop = outputEl.scrollHeight - fromBottom - outputEl.clientHeight;
+  } catch {
+    // scrollback is best-effort; the live screen keeps working without it
   } finally {
-    historyLoading = false;
+    historyRefreshing = false;
   }
 }
 
-function exitHistoryMode(): void {
-  if (!historyMode) return;
-  historyMode = false;
-  pendingAnsi = null;
-  document.getElementById('btn-live')?.classList.remove('visible');
-  void refreshPaneOutput();
-}
-
-function bindHistoryScroll(outputEl: HTMLElement): void {
-  // desktop: wheel-up at the top loads history (no touch gesture available)
-  outputEl.addEventListener('wheel', (e: WheelEvent) => {
-    if (!historyMode && e.deltaY < 0 && outputEl.scrollTop <= 0) {
-      void enterHistoryMode();
-    }
-  }, { passive: true });
-
-  let lastScrollTop = outputEl.scrollTop;
+function bindTerminalScroll(outputEl: HTMLElement): void {
   outputEl.addEventListener('scroll', () => {
-    const goingUp = outputEl.scrollTop < lastScrollTop;
-    lastScrollTop = outputEl.scrollTop;
     const fromBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight;
-
-    if (!historyMode && goingUp && outputEl.scrollTop < 60 &&
-        outputEl.scrollHeight > outputEl.clientHeight + 40) {
-      // swapping content cancels an active touch scroll — defer to touchend
-      if (terminalTouchActive) {
-        historyPending = true;
-      } else {
-        void enterHistoryMode();
-      }
-    } else if (historyMode && fromBottom < 10 &&
-        Date.now() - historyEnteredAt > 600) {
-      exitHistoryMode();
-    } else if (!historyMode && fromBottom < 40) {
+    if (fromBottom < 40) {
       flushPendingOutput();
+    } else if (Date.now() - historyFetchedAt > HISTORY_REFRESH_MS) {
+      // reading scrollback — freshen the prefix occasionally so lines that
+      // scrolled off the live screen since the last fetch appear
+      void loadHistoryPrefix();
     }
   }, { passive: true });
 }
 
-// Render terminal output, following the bottom only when the user was already
-// there — never yank them out of scrollback they are reading.
+// Render the current screen into #term-live, following the bottom only when
+// the user was already there — never yank them out of scrollback.
 function renderPaneOutput(ansiStr: string): void {
-  if (historyMode) return; // frozen while reading scrollback
   const outputEl = document.getElementById('terminal-output');
-  if (!outputEl) return;
+  const liveEl = document.getElementById('term-live');
+  if (!outputEl || !liveEl) return;
   const atBottom =
     outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight < 40;
-  // Replacing the DOM cancels an in-progress touch scroll, and re-rendering
-  // while the user reads above the fold would disturb them — defer until safe.
+  // Replacing the DOM under an active touch cancels the scroll gesture, and
+  // resizing the live section while the user reads above would shift the
+  // content they're reading — defer until safe.
   if (terminalTouchActive || !atBottom) {
     pendingAnsi = ansiStr;
     return;
   }
   pendingAnsi = null;
+  lastLiveAnsi = ansiStr;
   applyFitFontSize(outputEl, ansiStr);
-  outputEl.innerHTML = ansiToHtml(ansiStr);
+  liveEl.innerHTML = ansiToHtml(ansiStr);
   outputEl.scrollTop = outputEl.scrollHeight;
 }
 
 function flushPendingOutput(): void {
-  if (pendingAnsi === null || historyMode) return;
+  if (pendingAnsi === null) return;
   const ansi = pendingAnsi;
   pendingAnsi = null;
   renderPaneOutput(ansi); // re-queues itself if still unsafe
 }
 
 async function refreshPaneOutput(): Promise<void> {
-  if (!activePaneId || historyMode) return;
-  const outputEl = document.getElementById('terminal-output');
-  if (!outputEl) return;
+  if (!activePaneId) return;
+  const liveEl = document.getElementById('term-live');
+  if (!liveEl) return;
 
   try {
     const data = await apiGet(
@@ -978,14 +938,14 @@ async function refreshPaneOutput(): Promise<void> {
     if (message === '401') return;
     // transient failures (bridge restart, herdr reconnect) must not wipe the
     // terminal the user is reading — keep the last render and toast instead
-    if (outputEl.childElementCount > 0 || outputEl.textContent?.trim()) {
+    if (lastLiveAnsi) {
       const now = Date.now();
       if (now - lastReadErrorToastAt > 10_000) {
         lastReadErrorToastAt = now;
         showToast('Output refresh failed', message);
       }
     } else {
-      outputEl.textContent = `Error loading output: ${message}`;
+      liveEl.textContent = `Error loading output: ${message}`;
     }
   }
 }
