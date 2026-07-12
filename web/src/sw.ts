@@ -1,5 +1,5 @@
 /**
- * sw.js — Service Worker for Herdr Mobile PWA
+ * sw.ts — Service Worker for Herdr Mobile PWA
  *
  * Strategy:
  *   - Static assets (index.html, app.js, ansi.js, style.css, manifest, icons):
@@ -7,6 +7,10 @@
  *   - /api/* and /ws*: network passthrough, never cached.
  *   - On activate: delete caches from previous versions.
  */
+
+// The webworker lib declares `self` as WorkerGlobalScope; cast to the narrower
+// service-worker type so service-worker-specific APIs type-check correctly.
+const sw = self as unknown as ServiceWorkerGlobalScope;
 
 const CACHE_VERSION = 'herdr-mobile-v1';
 
@@ -21,15 +25,15 @@ const STATIC_ASSETS = [
   '/icons/icon-512.png',
 ];
 
-self.addEventListener('install', (event) => {
+sw.addEventListener('install', (event: ExtendableEvent) => {
   event.waitUntil(
     caches.open(CACHE_VERSION).then((cache) => cache.addAll(STATIC_ASSETS))
   );
   // Activate immediately without waiting for old clients to unload
-  self.skipWaiting();
+  sw.skipWaiting();
 });
 
-self.addEventListener('activate', (event) => {
+sw.addEventListener('activate', (event: ExtendableEvent) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(
@@ -40,10 +44,10 @@ self.addEventListener('activate', (event) => {
     )
   );
   // Take control of all open clients immediately
-  self.clients.claim();
+  sw.clients.claim();
 });
 
-self.addEventListener('fetch', (event) => {
+sw.addEventListener('fetch', (event: FetchEvent) => {
   const url = new URL(event.request.url);
 
   // Pass through API and WebSocket upgrade requests — never cache
@@ -68,13 +72,13 @@ self.addEventListener('fetch', (event) => {
 });
 
 // Handle notification click: focus the app and navigate to the pane
-self.addEventListener('notificationclick', (event) => {
+sw.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
   const paneId = event.notification.tag;
   const targetUrl = paneId ? `/#/pane/${encodeURIComponent(paneId)}` : '/';
 
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+    sw.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if ('focus' in client) {
           client.focus();
@@ -82,8 +86,8 @@ self.addEventListener('notificationclick', (event) => {
           return;
         }
       }
-      if (self.clients.openWindow) {
-        return self.clients.openWindow(targetUrl);
+      if (sw.clients.openWindow) {
+        return sw.clients.openWindow(targetUrl);
       }
     })
   );

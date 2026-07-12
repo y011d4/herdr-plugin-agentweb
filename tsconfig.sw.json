@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "target": "es2022",
+    "lib": ["es2022", "webworker"],
+    "skipLibCheck": true,
+    "rootDir": "web/src",
+    "outDir": "web",
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": [
+    "web/src/sw.ts"
+  ],
+  "exclude": []
+}

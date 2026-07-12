@@ -134,10 +134,21 @@ Environment overrides: `HERDR_MOBILE_HOST`, `HERDR_MOBILE_PORT`.
 
 ## Development
 
+Source is TypeScript under `server/`, `bin/`, and `web/src/`. The built JS
+distribution lives in `dist/` (server and bin) and `web/` (PWA assets).
+
 ```bash
-npm test                  # unit tests (node --test)
-node server/main.js       # run against your live herdr in the foreground
+npm install && npm run build   # install deps and compile TS → JS
+npm test                       # unit tests (node --test, runs .ts natively, needs Node >= 23.6)
+node server/main.ts            # run against your live herdr in the foreground (dev, Node >= 23.6)
 ```
+
+`herdr plugin link` does **not** run build commands; run `npm install && npm run build`
+manually after cloning or linking. `herdr plugin install` does run the manifest
+build commands automatically.
+
+Runtime of the built `dist/` requires Node >= 20. Running TS sources directly
+(dev mode) requires Node >= 23.6 for native type stripping.
 
 Logs for the detached daemon go to `<state dir>/bridge.log`
 (`herdr plugin config-dir y011d4.mobile` prints the config dir; state dir is its

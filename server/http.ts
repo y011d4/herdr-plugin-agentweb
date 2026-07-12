@@ -1,14 +1,15 @@
-import { createServer } from 'node:http';
+import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { createReadStream, statSync } from 'node:fs';
 import { join, resolve, extname } from 'node:path';
-import { WebSocketServer } from 'ws';
-import { verifyToken, extractToken } from './auth.js';
-import { toClientState } from './state.js';
-import { buildAgentStatusMessage } from './notify.js';
+import { WebSocketServer, WebSocket } from 'ws';
+import { verifyToken, extractToken } from './auth.ts';
+import { toClientState } from './state.ts';
+import { buildAgentStatusMessage } from './notify.ts';
+import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
 
-const MIME = {
+const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -22,32 +23,37 @@ const MIME = {
 const PANE_RE = /^\/api\/panes\/([^/]+)\/(\w+)$/;
 const AGENT_RE = /^\/api\/agents\/([^/]+)\/(\w+)$/;
 
-function mapHerdrError(err) {
+interface HerdrError extends Error {
+  herdrCode?: string;
+  status?: number;
+}
+
+function mapHerdrError(err: HerdrError): number {
   const code = err.herdrCode;
   if (code === 'not_found') return 404;
   if (code === 'invalid_params' || code === 'invalid_request') return 400;
   return 502;
 }
 
-function jsonError(res, status, code, message) {
+function jsonError(res: ServerResponse, status: number, code: string, message: string): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: { code, message } }));
 }
 
-function jsonOk(res, body) {
+function jsonOk(res: ServerResponse, body: unknown): void {
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
 }
 
-function readBody(req) {
+function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     let bytes = 0;
     let settled = false;
-    const chunks = [];
-    const fail = (err) => {
+    const chunks: Buffer[] = [];
+    const fail = (err: HerdrError) => {
       if (!settled) { settled = true; reject(err); }
     };
-    req.on('data', chunk => {
+    req.on('data', (chunk: Buffer) => {
       bytes += chunk.length;
       if (bytes > BODY_LIMIT) {
         fail(Object.assign(new Error('request body too large'), { status: 413 }));
@@ -61,7 +67,7 @@ function readBody(req) {
       try {
         const text = Buffer.concat(chunks).toString('utf8');
         settled = true;
-        resolve(text ? JSON.parse(text) : {});
+        resolve(text ? JSON.parse(text) as Record<string, unknown> : {});
       } catch {
         fail(Object.assign(new Error('invalid JSON body'), { status: 400 }));
       }
@@ -70,7 +76,7 @@ function readBody(req) {
   });
 }
 
-function serveStatic(webRoot, urlPath, res) {
+function serveStatic(webRoot: string, urlPath: string, res: ServerResponse): void {
   const rel = urlPath === '/' ? '/index.html' : urlPath;
   const abs = resolve(join(webRoot, rel));
   // path traversal guard
@@ -89,11 +95,22 @@ function serveStatic(webRoot, urlPath, res) {
   createReadStream(abs).pipe(res);
 }
 
-export function createHttpServer({ webRoot, herdrClient, getState, config }) {
-  const wsClients = new Set();
+export interface HttpServerResult {
+  server: ReturnType<typeof createServer>;
+  broadcastState: (state: NormalizedState) => void;
+  broadcastAgentStatus: (change: StatusChange, state: NormalizedState) => void;
+}
 
-  const server = createServer(async (req, res) => {
-    const url = new URL(req.url, 'http://localhost');
+export function createHttpServer({ webRoot, herdrClient, getState, config: _config }: {
+  webRoot: string;
+  herdrClient: HerdrClient;
+  getState: () => NormalizedState | null;
+  config: Config;
+}): HttpServerResult {
+  const wsClients = new Set<WebSocket>();
+
+  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
     const pathname = url.pathname;
     const method = req.method;
 
@@ -137,43 +154,47 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }) {
 
       if (action === 'read' && method === 'GET') {
         const source = url.searchParams.get('source') || 'visible';
-        const lines = url.searchParams.get('lines') ? parseInt(url.searchParams.get('lines'), 10) : undefined;
+        const linesParam = url.searchParams.get('lines');
+        const lines = linesParam ? parseInt(linesParam, 10) : undefined;
         const format = url.searchParams.get('format') || 'text';
         const stripAnsi = url.searchParams.get('strip_ansi') === 'true';
         try {
-          const params = { pane_id: paneId, source, format };
+          const params: Record<string, unknown> = { pane_id: paneId, source, format };
           if (lines != null) params.lines = lines;
           if (stripAnsi) params.strip_ansi = true;
-          const result = await herdrClient.rpc('pane.read', params);
+          const result = await herdrClient.rpc('pane.read', params) as Record<string, unknown>;
           // Unwrap herdr's {type, read: {text, ...}} envelope to contract shape {text?} or {ansi?}.
           // herdr always puts the content in read.text; format=ansi means that text contains ANSI escapes.
-          const inner = result.read ?? result;
+          const inner = (result.read ?? result) as Record<string, unknown>;
           const out = format === 'ansi'
             ? { ansi: inner.text ?? null }
             : { text: inner.text ?? null };
           jsonOk(res, out);
         } catch (err) {
-          jsonError(res, mapHerdrError(err), err.herdrCode || 'error', err.message);
+          const herdrErr = err as HerdrError;
+          jsonError(res, mapHerdrError(herdrErr), herdrErr.herdrCode || 'error', herdrErr.message);
         }
         return;
       }
 
       if (action === 'input' && method === 'POST') {
-        let body;
+        let body: Record<string, unknown>;
         try { body = await readBody(req); } catch (err) {
-          jsonError(res, err.status || 400, 'bad_request', err.message);
+          const herdrErr = err as HerdrError;
+          jsonError(res, herdrErr.status || 400, 'bad_request', herdrErr.message);
           return;
         }
-        const keys = [...(body.keys || [])];
+        const keys = [...((body.keys as string[]) || [])];
         if (body.enter) keys.push('enter');
-        const params = { pane_id: paneId };
+        const params: Record<string, unknown> = { pane_id: paneId };
         if (body.text != null) params.text = body.text;
         if (keys.length > 0) params.keys = keys;
         try {
           await herdrClient.rpc('pane.send_input', params);
           jsonOk(res, { ok: true });
         } catch (err) {
-          jsonError(res, mapHerdrError(err), err.herdrCode || 'error', err.message);
+          const herdrErr = err as HerdrError;
+          jsonError(res, mapHerdrError(herdrErr), herdrErr.herdrCode || 'error', herdrErr.message);
         }
         return;
       }
@@ -183,7 +204,8 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }) {
           await herdrClient.rpc('pane.focus', { pane_id: paneId });
           jsonOk(res, { ok: true });
         } catch (err) {
-          jsonError(res, mapHerdrError(err), err.herdrCode || 'error', err.message);
+          const herdrErr = err as HerdrError;
+          jsonError(res, mapHerdrError(herdrErr), herdrErr.herdrCode || 'error', herdrErr.message);
         }
         return;
       }
@@ -198,16 +220,18 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }) {
       const action = agentMatch[2];
 
       if (action === 'send' && method === 'POST') {
-        let body;
+        let body: Record<string, unknown>;
         try { body = await readBody(req); } catch (err) {
-          jsonError(res, err.status || 400, 'bad_request', err.message);
+          const herdrErr = err as HerdrError;
+          jsonError(res, herdrErr.status || 400, 'bad_request', herdrErr.message);
           return;
         }
         try {
           await herdrClient.rpc('agent.send', { target, text: body.text || '' });
           jsonOk(res, { ok: true });
         } catch (err) {
-          jsonError(res, mapHerdrError(err), err.herdrCode || 'error', err.message);
+          const herdrErr = err as HerdrError;
+          jsonError(res, mapHerdrError(herdrErr), herdrErr.herdrCode || 'error', herdrErr.message);
         }
         return;
       }
@@ -224,8 +248,8 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }) {
   // the only expected inbound WS message is a small ping — cap payloads
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 
-  server.on('upgrade', (req, socket, head) => {
-    const url = new URL(req.url, 'http://localhost');
+  server.on('upgrade', (req: IncomingMessage, socket, head: Buffer) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
     if (url.pathname !== '/ws') {
       socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
       socket.destroy();
@@ -239,16 +263,16 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }) {
       return;
     }
 
-    wss.handleUpgrade(req, socket, head, ws => {
+    wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
       wsClients.add(ws);
       const state = getState();
       if (state) {
         ws.send(JSON.stringify({ type: 'state', state: toClientState(state) }));
       }
 
-      ws.on('message', data => {
-        let msg;
-        try { msg = JSON.parse(data.toString()); } catch { return; }
+      ws.on('message', (data: Buffer) => {
+        let msg: Record<string, unknown>;
+        try { msg = JSON.parse(data.toString()) as Record<string, unknown>; } catch { return; }
         if (msg?.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong' }));
         }
@@ -259,26 +283,26 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }) {
     });
   });
 
-  // ── broadcast helpers (called by main.js) ─────────────────────────────────
+  // ── broadcast helpers (called by main.ts) ─────────────────────────────────
 
-  let lastStateMsg = null;
+  let lastStateMsg: string | null = null;
 
-  function broadcastState(state) {
+  function broadcastState(state: NormalizedState): void {
     if (wsClients.size === 0) return;
     const msg = JSON.stringify({ type: 'state', state: toClientState(state) });
     // focus churn in the TUI produces frequent no-op state updates; skip resends
     if (msg === lastStateMsg) return;
     lastStateMsg = msg;
     for (const ws of wsClients) {
-      if (ws.readyState === ws.OPEN) ws.send(msg);
+      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }
   }
 
-  function broadcastAgentStatus(change, state) {
+  function broadcastAgentStatus(change: StatusChange, state: NormalizedState): void {
     if (wsClients.size === 0) return;
     const msg = JSON.stringify(buildAgentStatusMessage(change, state));
     for (const ws of wsClients) {
-      if (ws.readyState === ws.OPEN) ws.send(msg);
+      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }
   }
 

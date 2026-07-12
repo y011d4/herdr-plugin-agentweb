@@ -1,14 +1,15 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import type { IncomingMessage } from 'node:http';
 
-let tokenBuf = null;
+let tokenBuf: Buffer | null = null;
 
-export function initAuth(stateDir) {
+export function initAuth(stateDir: string): string {
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   const tokenPath = join(stateDir, 'token');
 
-  let hex;
+  let hex: string;
   try {
     hex = readFileSync(tokenPath, 'utf8').trim();
     // accept 32-64 hex chars: new tokens are 32 (128-bit, easier to share),
@@ -23,7 +24,7 @@ export function initAuth(stateDir) {
   return hex;
 }
 
-export function verifyToken(candidate) {
+export function verifyToken(candidate: unknown): boolean {
   if (!tokenBuf) return false;
   if (typeof candidate !== 'string' || candidate.length === 0) return false;
   const candidateBuf = Buffer.from(candidate, 'utf8');
@@ -32,11 +33,11 @@ export function verifyToken(candidate) {
   return timingSafeEqual(candidateBuf, tokenBuf);
 }
 
-export function extractToken(req) {
+export function extractToken(req: Pick<IncomingMessage, 'headers' | 'url'>): string | null {
   const auth = req.headers['authorization'];
   if (auth && auth.startsWith('Bearer ')) {
     return auth.slice(7).trim();
   }
-  const url = new URL(req.url, 'http://localhost');
+  const url = new URL(req.url ?? '/', 'http://localhost');
   return url.searchParams.get('token') || null;
 }

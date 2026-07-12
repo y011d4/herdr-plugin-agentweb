@@ -7,16 +7,16 @@ import { join } from 'node:path';
 // We need a fresh module instance per test group because initAuth stores
 // module-level state. Use a dynamic import with a cache-buster query string
 // so Node's module cache doesn't interfere.
-async function freshAuth(stateDir) {
-  const mod = await import(`../auth.js?bust=${Date.now()}`);
+async function freshAuth(stateDir: string) {
+  const mod = await import(`../auth.ts?bust=${Date.now()}`);
   mod.initAuth(stateDir);
-  return mod;
+  return mod as typeof import('../auth.ts');
 }
 
 describe('auth', () => {
-  let tmpDir;
-  let auth;
-  let token;
+  let tmpDir: string;
+  let auth: Awaited<ReturnType<typeof freshAuth>>;
+  let token: string;
 
   before(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'herdr-auth-test-'));
@@ -78,8 +78,8 @@ describe('auth', () => {
 });
 
 describe('extractToken', () => {
-  let auth;
-  let tmpDir;
+  let auth: Awaited<ReturnType<typeof freshAuth>>;
+  let tmpDir: string;
 
   before(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'herdr-auth-extract-'));
@@ -90,7 +90,7 @@ describe('extractToken', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function fakeReq(headers = {}, url = '/') {
+  function fakeReq(headers: Record<string, string> = {}, url = '/') {
     return { headers, url };
   }
 

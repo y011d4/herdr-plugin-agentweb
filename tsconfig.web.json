@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "target": "es2022",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "skipLibCheck": true,
+    "rootDir": "web/src",
+    "outDir": "web",
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": [
+    "web/src/app.ts",
+    "web/src/ansi.ts",
+    "web/src/types.ts"
+  ],
+  "exclude": []
+}

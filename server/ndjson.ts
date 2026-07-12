@@ -7,17 +7,17 @@
  * Creates a stateful splitter that accumulates chunks and emits complete JSON lines.
  * @returns {{ push(chunk: string): string[], reset(): void }}
  */
-export function createSplitter() {
+export function createSplitter(): { push(chunk: string): string[]; reset(): void } {
   let buf = '';
 
   return {
-    push(chunk) {
+    push(chunk: string): string[] {
       buf += chunk;
       const lines = buf.split('\n');
-      buf = lines.pop(); // last element is incomplete (or empty after trailing newline)
+      buf = lines.pop() ?? ''; // last element is incomplete (or empty after trailing newline)
       return lines.filter(l => l.length > 0);
     },
-    reset() {
+    reset(): void {
       buf = '';
     },
   };
@@ -28,6 +28,6 @@ export function createSplitter() {
  * @param {unknown} obj
  * @returns {string}
  */
-export function serialize(obj) {
+export function serialize(obj: unknown): string {
   return JSON.stringify(obj) + '\n';
 }

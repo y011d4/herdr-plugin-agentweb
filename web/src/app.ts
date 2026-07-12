@@ -1,15 +1,16 @@
 /**
- * app.js — Herdr Mobile PWA
+ * app.ts — Herdr Mobile PWA
  *
  * Single-page application with hash routing:
  *   #/agents    — dashboard (default)
  *   #/pane/:id  — pane terminal detail
  *   #/settings  — settings
  *
- * Depends on ansi.js for ANSI→HTML rendering.
+ * Depends on ansi.ts for ANSI→HTML rendering.
  */
 
-import { ansiToHtml } from './ansi.js';
+import { ansiToHtml } from './ansi.ts';
+import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage } from './types.ts';
 
 // ── App version ──────────────────────────────────────────────────────────────
 const APP_VERSION = '0.1.0';
@@ -26,30 +27,34 @@ const STATE_POLL_INTERVAL_MS = 10_000;   // fallback when WS is down
 const PANE_REFRESH_INTERVAL_MS = 3_000;  // polling while pane detail is visible
 
 // ── Module-level state ────────────────────────────────────────────────────────
-let token = null;
-let wsSocket = null;
+let token: string | null = null;
+let wsSocket: WebSocket | null = null;
 let wsConnected = false;
 let wsReconnectDelay = WS_RECONNECT_BASE_MS;
-let wsReconnectTimer = null;
-let wsPingTimer = null;
-let statePollTimer = null;
-let paneRefreshTimer = null;
+let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let wsPingTimer: ReturnType<typeof setInterval> | null = null;
+let statePollTimer: ReturnType<typeof setInterval> | null = null;
+let paneRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
-/** @type {Object|null} Last received State JSON */
-let appState = null;
+/** Last received State JSON */
+let appState: AppState | null = null;
 
 /** paneId currently shown in detail view (null if not on pane screen) */
-let activePaneId = null;
+let activePaneId: string | null = null;
 
 /** source toggle: 'visible' | 'recent' */
-let paneSource = 'visible';
+let paneSource: 'visible' | 'recent' = 'visible';
 
 // ── DOM refs (populated after DOMContentLoaded) ───────────────────────────────
-let elApp, elScreen, elConnDot, elReconnectBanner, elToastContainer;
+let elApp: HTMLElement | null;
+let elScreen: HTMLElement | null;
+let elConnDot: HTMLElement | null;
+let elReconnectBanner: HTMLElement | null;
+let elToastContainer: HTMLElement | null;
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 
-function escHtml(s) {
+function escHtml(s: unknown): string {
   return String(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -57,7 +62,7 @@ function escHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
-function relativeTime(ms) {
+function relativeTime(ms: number): string {
   if (!ms) return '';
   const diff = Date.now() - ms;
   if (diff < 5_000) return 'just now';
@@ -66,22 +71,22 @@ function relativeTime(ms) {
   return `${Math.floor(diff / 3_600_000)}h ago`;
 }
 
-function statusOrder(status) {
-  return { blocked: 0, working: 1, done: 2, idle: 3, unknown: 4 }[status] ?? 5;
+function statusOrder(status: string): number {
+  return ({ blocked: 0, working: 1, done: 2, idle: 3, unknown: 4 } as Record<string, number>)[status] ?? 5;
 }
 
 // Most urgent agent status in a workspace; workspaces without agents sort last.
-function workspaceUrgency(ws) {
+function workspaceUrgency(ws: WorkspaceNode): number {
   const ranks = (ws.tabs ?? [])
     .flatMap((t) => t.panes ?? [])
     .filter((p) => p.agent)
-    .map((p) => statusOrder(p.agent.status));
+    .map((p) => statusOrder(p.agent!.status));
   return ranks.length ? Math.min(...ranks) : 6;
 }
 
 // ── Token handling ────────────────────────────────────────────────────────────
 
-function loadToken() {
+function loadToken(): string | null {
   // Check URL for ?token= param first
   const params = new URLSearchParams(window.location.search);
   const urlToken = params.get('token');
@@ -97,18 +102,18 @@ function loadToken() {
   return localStorage.getItem(STORAGE_TOKEN);
 }
 
-function clearToken() {
+function clearToken(): void {
   localStorage.removeItem(STORAGE_TOKEN);
   token = null;
 }
 
 // ── Fetch wrapper ─────────────────────────────────────────────────────────────
 
-async function apiFetch(path, options = {}) {
-  const headers = {
+async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
+  const headers: Record<string, string> = {
     'Authorization': `Bearer ${token}`,
     'Content-Type': 'application/json',
-    ...(options.headers ?? {}),
+    ...((options.headers ?? {}) as Record<string, string>),
   };
   const resp = await fetch(path, { ...options, headers });
   if (resp.status === 401) {
@@ -119,30 +124,32 @@ async function apiFetch(path, options = {}) {
   return resp;
 }
 
-async function apiGet(path) {
+async function apiGet(path: string): Promise<unknown> {
   const resp = await apiFetch(path);
   if (!resp.ok) {
-    const body = await resp.json().catch(() => ({}));
-    throw new Error(body?.error?.message ?? `HTTP ${resp.status}`);
+    const body = await resp.json().catch(() => ({})) as Record<string, unknown>;
+    const err = body?.error as Record<string, unknown> | undefined;
+    throw new Error((err?.message as string | undefined) ?? `HTTP ${resp.status}`);
   }
   return resp.json();
 }
 
-async function apiPost(path, body = {}) {
+async function apiPost(path: string, body: Record<string, unknown> = {}): Promise<unknown> {
   const resp = await apiFetch(path, {
     method: 'POST',
     body: JSON.stringify(body),
   });
   if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}));
-    throw new Error(data?.error?.message ?? `HTTP ${resp.status}`);
+    const data = await resp.json().catch(() => ({})) as Record<string, unknown>;
+    const err = data?.error as Record<string, unknown> | undefined;
+    throw new Error((err?.message as string | undefined) ?? `HTTP ${resp.status}`);
   }
   return resp.json();
 }
 
 // ── WebSocket lifecycle ───────────────────────────────────────────────────────
 
-function wsConnect() {
+function wsConnect(): void {
   if (!token) return;
   if (wsSocket && wsSocket.readyState <= 1 /* OPEN or CONNECTING */) return;
 
@@ -158,7 +165,7 @@ function wsConnect() {
     stopStatePoll();
 
     // Ping keepalive
-    clearInterval(wsPingTimer);
+    if (wsPingTimer) clearInterval(wsPingTimer);
     wsPingTimer = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'ping' }));
@@ -166,16 +173,16 @@ function wsConnect() {
     }, WS_PING_INTERVAL_MS);
   });
 
-  ws.addEventListener('message', (evt) => {
-    let msg;
-    try { msg = JSON.parse(evt.data); } catch { return; }
+  ws.addEventListener('message', (evt: MessageEvent<string>) => {
+    let msg: WsMessage;
+    try { msg = JSON.parse(evt.data) as WsMessage; } catch { return; }
     handleWsMessage(msg);
   });
 
   ws.addEventListener('close', () => {
     wsConnected = false;
     setConnected(false);
-    clearInterval(wsPingTimer);
+    if (wsPingTimer) clearInterval(wsPingTimer);
     startStatePoll();
     scheduleWsReconnect();
   });
@@ -185,15 +192,15 @@ function wsConnect() {
   });
 }
 
-function scheduleWsReconnect() {
-  clearTimeout(wsReconnectTimer);
+function scheduleWsReconnect(): void {
+  if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
   wsReconnectTimer = setTimeout(() => {
     wsConnect();
     wsReconnectDelay = Math.min(wsReconnectDelay * 2, WS_RECONNECT_MAX_MS);
   }, wsReconnectDelay);
 }
 
-function handleWsMessage(msg) {
+function handleWsMessage(msg: WsMessage): void {
   if (msg.type === 'state') {
     appState = msg.state;
     onStateUpdate();
@@ -203,7 +210,7 @@ function handleWsMessage(msg) {
   // pong — no-op
 }
 
-function setConnected(connected) {
+function setConnected(connected: boolean): void {
   if (elConnDot) {
     elConnDot.classList.toggle('connected', connected);
     elConnDot.title = connected ? 'Connected' : 'Reconnecting…';
@@ -215,12 +222,12 @@ function setConnected(connected) {
 
 // ── Fallback state polling (when WS is down) ──────────────────────────────────
 
-function startStatePoll() {
+function startStatePoll(): void {
   if (statePollTimer) return;
   statePollTimer = setInterval(async () => {
     if (!token) return;
     try {
-      const state = await apiGet('/api/state');
+      const state = await apiGet('/api/state') as AppState;
       appState = state;
       onStateUpdate();
     } catch {
@@ -229,14 +236,14 @@ function startStatePoll() {
   }, STATE_POLL_INTERVAL_MS);
 }
 
-function stopStatePoll() {
-  clearInterval(statePollTimer);
+function stopStatePoll(): void {
+  if (statePollTimer) clearInterval(statePollTimer);
   statePollTimer = null;
 }
 
 // ── State update handler ──────────────────────────────────────────────────────
 
-function onStateUpdate() {
+function onStateUpdate(): void {
   const hash = location.hash || '#/agents';
   if (hash === '#/agents') {
     renderAgentsDashboard();
@@ -248,7 +255,7 @@ function onStateUpdate() {
 
 // ── Agent status notification handler ────────────────────────────────────────
 
-function onAgentStatus(msg) {
+function onAgentStatus(msg: WsAgentStatusMessage): void {
   const { paneId, agent, from, to, workspaceLabel, tabLabel } = msg;
 
   const notifyStatuses = new Set(['blocked', 'done']);
@@ -290,7 +297,7 @@ function onAgentStatus(msg) {
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
-function showToast(title, body, onclick) {
+function showToast(title: string, body: string, onclick?: () => void): void {
   if (!elToastContainer) return;
   const el = document.createElement('div');
   el.className = 'toast';
@@ -310,11 +317,11 @@ function showToast(title, body, onclick) {
 
 // ── Routing ───────────────────────────────────────────────────────────────────
 
-function navigate(hash) {
+function navigate(hash: string): void {
   location.hash = hash;
 }
 
-function handleRoute() {
+function handleRoute(): void {
   if (!token) {
     renderTokenScreen();
     return;
@@ -341,11 +348,11 @@ function handleRoute() {
 
 // ── Token screen ──────────────────────────────────────────────────────────────
 
-function renderTokenScreen(message) {
+function renderTokenScreen(message?: string): void {
   stopPaneRefresh();
   activePaneId = null;
 
-  elScreen.innerHTML = `
+  elScreen!.innerHTML = `
     <div id="screen-login" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:32px 24px;height:100%;overflow-y:auto;">
       <div class="login-logo">&#128241;</div>
       <div class="login-title">Herdr Mobile</div>
@@ -362,9 +369,9 @@ function renderTokenScreen(message) {
   if (topbar) topbar.style.display = 'none';
   if (elReconnectBanner) elReconnectBanner.classList.remove('visible');
 
-  document.getElementById('token-form').addEventListener('submit', (e) => {
+  document.getElementById('token-form')!.addEventListener('submit', (e) => {
     e.preventDefault();
-    const val = document.getElementById('token-input').value.trim();
+    const val = (document.getElementById('token-input') as HTMLInputElement).value.trim();
     if (!val) return;
     token = val;
     localStorage.setItem(STORAGE_TOKEN, token);
@@ -372,9 +379,9 @@ function renderTokenScreen(message) {
     wsConnect();
     // Immediately fetch state
     apiGet('/api/state').then((state) => {
-      appState = state;
+      appState = state as AppState;
       navigate('#/agents');
-    }).catch((err) => {
+    }).catch((err: Error) => {
       if (err.message !== '401') {
         renderTokenScreen('Could not connect. Check the token and try again.');
       }
@@ -384,19 +391,19 @@ function renderTokenScreen(message) {
 
 // ── Agents dashboard ──────────────────────────────────────────────────────────
 
-function renderAgentsDashboard() {
+function renderAgentsDashboard(): void {
   const topbar = document.getElementById('topbar');
   if (topbar) {
     topbar.style.display = '';
-    document.getElementById('topbar-title').textContent = 'Agents';
-    document.getElementById('topbar-left').innerHTML = '';
-    document.getElementById('topbar-right').innerHTML =
+    document.getElementById('topbar-title')!.textContent = 'Agents';
+    document.getElementById('topbar-left')!.innerHTML = '';
+    document.getElementById('topbar-right')!.innerHTML =
       `<button class="topbar-action" id="btn-settings" aria-label="Settings">&#9881;</button>`;
-    document.getElementById('btn-settings').addEventListener('click', () => navigate('#/settings'));
+    document.getElementById('btn-settings')!.addEventListener('click', () => navigate('#/settings'));
   }
 
   if (!appState) {
-    elScreen.innerHTML = `<div id="screen-agents" style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="loading-spinner"></span></div>`;
+    elScreen!.innerHTML = `<div id="screen-agents" style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="loading-spinner"></span></div>`;
     return;
   }
 
@@ -418,7 +425,7 @@ function renderAgentsDashboard() {
     const allPanes = tabs.flatMap((t) => t.panes ?? []);
     const agentPanes = allPanes
       .filter((p) => p.agent)
-      .sort((a, b) => statusOrder(a.agent.status) - statusOrder(b.agent.status));
+      .sort((a, b) => statusOrder(a.agent!.status) - statusOrder(b.agent!.status));
     const inactivePanes = allPanes.filter((p) => !p.agent);
 
     if (allPanes.length === 0) continue;
@@ -432,7 +439,7 @@ function renderAgentsDashboard() {
 
     for (const pane of agentPanes) {
       const { paneId, agent, title } = pane;
-      const { displayName, name, status, customStatus, message, sinceUnixMs } = agent;
+      const { displayName, name, status, customStatus, message, sinceUnixMs } = agent!;
       const displayLabel = displayName || name || 'Agent';
       const statusClass = status || 'unknown';
       const meta = customStatus || message || '';
@@ -460,20 +467,21 @@ function renderAgentsDashboard() {
   }
 
   html += '</div>'; // screen-agents
-  elScreen.innerHTML = html;
+  elScreen!.innerHTML = html;
 
   // Attach tap handlers
-  elScreen.querySelectorAll('.agent-card').forEach((card) => {
-    const paneId = card.dataset.paneId;
+  elScreen!.querySelectorAll('.agent-card').forEach((card) => {
+    const el = card as HTMLElement;
+    const paneId = el.dataset.paneId!;
     const activate = () => navigate(`#/pane/${encodeURIComponent(paneId)}`);
-    card.addEventListener('click', activate);
-    card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') activate(); });
+    el.addEventListener('click', activate);
+    el.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') activate(); });
   });
 }
 
 // ── Pane detail ───────────────────────────────────────────────────────────────
 
-function findPane(paneId) {
+function findPane(paneId: string) {
   if (!appState) return null;
   for (const ws of appState.workspaces ?? []) {
     for (const tab of ws.tabs ?? []) {
@@ -485,7 +493,7 @@ function findPane(paneId) {
   return null;
 }
 
-function updatePaneDetailHeader() {
+function updatePaneDetailHeader(): void {
   if (!activePaneId) return;
   const found = findPane(activePaneId);
   const titleEl = document.getElementById('topbar-title');
@@ -494,21 +502,21 @@ function updatePaneDetailHeader() {
   }
 }
 
-async function renderPaneDetail(paneId) {
+async function renderPaneDetail(paneId: string): Promise<void> {
   const topbar = document.getElementById('topbar');
   if (topbar) {
     topbar.style.display = '';
     const found = findPane(paneId);
     const label = found?.pane?.agent?.displayName || found?.pane?.agent?.name || found?.pane?.title || paneId;
-    document.getElementById('topbar-title').textContent = label;
-    document.getElementById('topbar-left').innerHTML =
+    document.getElementById('topbar-title')!.textContent = label;
+    document.getElementById('topbar-left')!.innerHTML =
       `<button class="topbar-back" aria-label="Back">&#8592; Agents</button>`;
-    document.getElementById('topbar-right').innerHTML = '';
-    document.getElementById('topbar-left').querySelector('button').addEventListener('click', () => navigate('#/agents'));
+    document.getElementById('topbar-right')!.innerHTML = '';
+    document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate('#/agents'));
   }
 
   // Build screen HTML
-  elScreen.innerHTML = `
+  elScreen!.innerHTML = `
     <div id="screen-pane" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
       <div class="pane-source-bar">
         <button class="source-btn ${paneSource === 'visible' ? 'active' : ''}" data-source="visible">Visible</button>
@@ -528,47 +536,51 @@ async function renderPaneDetail(paneId) {
   `;
 
   // Source toggle
-  elScreen.querySelectorAll('.source-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      paneSource = btn.dataset.source;
-      elScreen.querySelectorAll('.source-btn').forEach((b) => b.classList.toggle('active', b.dataset.source === paneSource));
+  elScreen!.querySelectorAll('.source-btn').forEach((btn) => {
+    const el = btn as HTMLElement;
+    el.addEventListener('click', () => {
+      paneSource = el.dataset.source as 'visible' | 'recent';
+      elScreen!.querySelectorAll('.source-btn').forEach((b) => {
+        const be = b as HTMLElement;
+        be.classList.toggle('active', be.dataset.source === paneSource);
+      });
       refreshPaneOutput();
     });
   });
 
   // Focus button
-  document.getElementById('btn-pane-focus').addEventListener('click', async () => {
+  document.getElementById('btn-pane-focus')!.addEventListener('click', async () => {
     try {
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/focus`, {});
     } catch (err) {
-      showToast('Focus failed', err.message);
+      showToast('Focus failed', (err as Error).message);
     }
   });
 
   // Send buttons
-  const paneInput = document.getElementById('pane-input');
-  document.getElementById('btn-send-enter').addEventListener('click', async () => {
+  const paneInput = document.getElementById('pane-input') as HTMLInputElement;
+  document.getElementById('btn-send-enter')!.addEventListener('click', async () => {
     const text = paneInput.value;
     if (!text) return;
     paneInput.value = '';
     try {
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true });
     } catch (err) {
-      showToast('Send failed', err.message);
+      showToast('Send failed', (err as Error).message);
     }
   });
-  document.getElementById('btn-send-literal').addEventListener('click', async () => {
+  document.getElementById('btn-send-literal')!.addEventListener('click', async () => {
     const text = paneInput.value;
     if (!text) return;
     paneInput.value = '';
     try {
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text });
     } catch (err) {
-      showToast('Send failed', err.message);
+      showToast('Send failed', (err as Error).message);
     }
   });
   // Also send on Enter key in input field
-  paneInput.addEventListener('keydown', async (e) => {
+  paneInput.addEventListener('keydown', async (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       const text = paneInput.value;
@@ -577,7 +589,7 @@ async function renderPaneDetail(paneId) {
       try {
         await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true });
       } catch (err) {
-        showToast('Send failed', err.message);
+        showToast('Send failed', (err as Error).message);
       }
     }
   });
@@ -592,8 +604,8 @@ async function renderPaneDetail(paneId) {
   startPaneRefresh();
 }
 
-function buildQuickKeys(paneId) {
-  const KEYS = [
+function buildQuickKeys(paneId: string): void {
+  const KEYS: Array<{ label: string; payload: Record<string, unknown> }> = [
     { label: 'Enter',  payload: { keys: ['enter'] } },
     { label: '⌫',      payload: { keys: ['backspace'] } },
     { label: 'Esc',    payload: { keys: ['esc'] } },
@@ -619,14 +631,14 @@ function buildQuickKeys(paneId) {
       try {
         await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, key.payload);
       } catch (err) {
-        showToast('Key send failed', err.message);
+        showToast('Key send failed', (err as Error).message);
       }
     });
     row.appendChild(btn);
   }
 }
 
-async function refreshPaneOutput() {
+async function refreshPaneOutput(): Promise<void> {
   if (!activePaneId) return;
   const outputEl = document.getElementById('terminal-output');
   if (!outputEl) return;
@@ -634,20 +646,20 @@ async function refreshPaneOutput() {
   try {
     const data = await apiGet(
       `/api/panes/${encodeURIComponent(activePaneId)}/read?source=${paneSource}&lines=200&format=ansi`
-    );
+    ) as Record<string, string | null>;
     const ansiStr = data.ansi ?? data.text ?? '';
     const rendered = ansiToHtml(ansiStr);
     outputEl.innerHTML = rendered;
     // Scroll to bottom
     outputEl.scrollTop = outputEl.scrollHeight;
   } catch (err) {
-    if (err.message !== '401') {
-      outputEl.textContent = `Error loading output: ${err.message}`;
+    if ((err as Error).message !== '401') {
+      outputEl.textContent = `Error loading output: ${(err as Error).message}`;
     }
   }
 }
 
-function startPaneRefresh() {
+function startPaneRefresh(): void {
   stopPaneRefresh();
   paneRefreshTimer = setInterval(() => {
     if (activePaneId && !document.hidden) {
@@ -656,22 +668,22 @@ function startPaneRefresh() {
   }, PANE_REFRESH_INTERVAL_MS);
 }
 
-function stopPaneRefresh() {
-  clearInterval(paneRefreshTimer);
+function stopPaneRefresh(): void {
+  if (paneRefreshTimer) clearInterval(paneRefreshTimer);
   paneRefreshTimer = null;
 }
 
 // ── Settings screen ───────────────────────────────────────────────────────────
 
-function renderSettingsScreen() {
+function renderSettingsScreen(): void {
   const topbar = document.getElementById('topbar');
   if (topbar) {
     topbar.style.display = '';
-    document.getElementById('topbar-title').textContent = 'Settings';
-    document.getElementById('topbar-left').innerHTML =
+    document.getElementById('topbar-title')!.textContent = 'Settings';
+    document.getElementById('topbar-left')!.innerHTML =
       `<button class="topbar-back" aria-label="Back">&#8592;</button>`;
-    document.getElementById('topbar-right').innerHTML = '';
-    document.getElementById('topbar-left').querySelector('button').addEventListener('click', () => navigate('#/agents'));
+    document.getElementById('topbar-right')!.innerHTML = '';
+    document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate('#/agents'));
   }
 
   const notifEnabled = localStorage.getItem(STORAGE_NOTIF) === 'true';
@@ -680,7 +692,7 @@ function renderSettingsScreen() {
   const bridgeUrl = `${location.protocol}//${location.host}`;
   const notifPermission = typeof Notification !== 'undefined' ? Notification.permission : 'unavailable';
 
-  elScreen.innerHTML = `
+  elScreen!.innerHTML = `
     <div id="screen-settings">
       <div class="settings-section">
         <div class="settings-section-title">Notifications</div>
@@ -738,29 +750,29 @@ function renderSettingsScreen() {
   `;
 
   // Notification toggle
-  document.getElementById('toggle-notif').addEventListener('change', (e) => {
-    localStorage.setItem(STORAGE_NOTIF, e.target.checked ? 'true' : 'false');
+  (document.getElementById('toggle-notif') as HTMLInputElement).addEventListener('change', (e) => {
+    localStorage.setItem(STORAGE_NOTIF, (e.target as HTMLInputElement).checked ? 'true' : 'false');
   });
 
   // Request permission
-  document.getElementById('btn-request-notif').addEventListener('click', async () => {
+  document.getElementById('btn-request-notif')!.addEventListener('click', async () => {
     if (typeof Notification === 'undefined') {
       showToast('Not supported', 'Notifications are not available in this browser.');
       return;
     }
     const result = await Notification.requestPermission();
-    document.getElementById('notif-permission').textContent = result;
+    document.getElementById('notif-permission')!.textContent = result;
     if (result === 'granted') {
       localStorage.setItem(STORAGE_NOTIF, 'true');
-      document.getElementById('toggle-notif').checked = true;
+      (document.getElementById('toggle-notif') as HTMLInputElement).checked = true;
     }
   });
 
   // Clear token
-  document.getElementById('btn-clear-token').addEventListener('click', () => {
+  document.getElementById('btn-clear-token')!.addEventListener('click', () => {
     if (wsSocket) { wsSocket.close(); wsSocket = null; }
-    clearTimeout(wsReconnectTimer);
-    clearInterval(wsPingTimer);
+    if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+    if (wsPingTimer) clearInterval(wsPingTimer);
     stopStatePoll();
     stopPaneRefresh();
     appState = null;
@@ -772,7 +784,7 @@ function renderSettingsScreen() {
 
 // ── Service Worker registration ───────────────────────────────────────────────
 
-function registerServiceWorker() {
+function registerServiceWorker(): void {
   if (!window.isSecureContext) return;
   if (!('serviceWorker' in navigator)) return;
   navigator.serviceWorker.register('/sw.js').catch(() => {
@@ -780,7 +792,7 @@ function registerServiceWorker() {
   });
 
   // Handle navigate messages from SW notification clicks
-  navigator.serviceWorker.addEventListener('message', (evt) => {
+  navigator.serviceWorker.addEventListener('message', (evt: MessageEvent<{ type: string; url: string }>) => {
     if (evt.data?.type === 'navigate') {
       navigate(evt.data.url);
     }
@@ -812,9 +824,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Connect WS and load initial state
     wsConnect();
     apiGet('/api/state').then((state) => {
-      appState = state;
+      appState = state as AppState;
       handleRoute();
-    }).catch((err) => {
+    }).catch((err: Error) => {
       if (err.message !== '401') {
         // Try to render with null state, WS will populate later
         handleRoute();

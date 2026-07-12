@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSplitter, serialize } from '../ndjson.js';
+import { createSplitter, serialize } from '../ndjson.ts';
 
 describe('createSplitter', () => {
   it('emits a complete line when chunk contains newline', () => {
@@ -29,7 +29,7 @@ describe('createSplitter', () => {
 
   it('handles two lines split across multiple small chunks', () => {
     const s = createSplitter();
-    const collected = [];
+    const collected: string[] = [];
     collected.push(...s.push('{"i'));
     collected.push(...s.push('d":1}'));
     collected.push(...s.push('\n{"id"'));
@@ -54,7 +54,7 @@ describe('createSplitter', () => {
   it('handles lines delivered one byte at a time', () => {
     const s = createSplitter();
     const input = '{"v":42}\n';
-    let collected = [];
+    let collected: string[] = [];
     for (const ch of input) {
       collected = collected.concat(s.push(ch));
     }

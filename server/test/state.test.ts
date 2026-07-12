@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import {
   createState, applyEvent, toClientState, getPaneIds,
   PANE_SET_CHANGING_EVENTS, APPLIED_EVENTS,
-} from '../state.js';
+} from '../state.ts';
+import type { RawSnapshot } from '../types.ts';
 
 // Minimal snapshot fixture matching the real herdr API shape observed in live testing.
-function makeSnapshot(overrides = {}) {
+function makeSnapshot(overrides: Partial<RawSnapshot> = {}): RawSnapshot {
   return {
     version: '0.7.3',
     protocol: 16,
@@ -75,9 +76,9 @@ describe('createState', () => {
     const pane = state.workspaces[0].tabs[0].panes[0];
     assert.equal(pane.paneId, 'w0:p1');
     assert.equal(pane.focused, true);
-    assert.equal(pane.agent.name, 'claude');
-    assert.equal(pane.agent.status, 'working');
-    assert.equal(pane.agent.sinceUnixMs, 1000);
+    assert.equal(pane.agent!.name, 'claude');
+    assert.equal(pane.agent!.status, 'working');
+    assert.equal(pane.agent!.sinceUnixMs, 1000);
   });
 
   it('sets agent=null for panes without an agent field', () => {
@@ -88,7 +89,7 @@ describe('createState', () => {
   });
 
   it('tolerates missing optional fields in snapshot', () => {
-    const minimal = {
+    const minimal: RawSnapshot = {
       panes: [],
       tabs: [],
       workspaces: [],
@@ -121,7 +122,7 @@ describe('applyEvent - pane_agent_status_changed', () => {
     assert.equal(changes[0].agent.sinceUnixMs, 2000);
 
     const pane = next.workspaces[0].tabs[0].panes[0];
-    assert.equal(pane.agent.status, 'idle');
+    assert.equal(pane.agent!.status, 'idle');
   });
 
   it('returns no changes when status is unchanged', () => {
@@ -156,7 +157,7 @@ describe('applyEvent - pane_agent_status_changed', () => {
     assert.equal(changes[0].from, 'unknown');
     assert.equal(changes[0].to, 'working');
     const pane = next.workspaces[0].tabs[0].panes[1];
-    assert.equal(pane.agent.status, 'working');
+    assert.equal(pane.agent!.status, 'working');
   });
 
   it('merges agent/display_agent/custom_status/title from event payload', () => {
@@ -224,8 +225,8 @@ describe('applyEvent - pane_focused', () => {
     const { state: next } = applyEvent(state, 'pane_focused', { pane_id: 'w0:p2' });
     assert.equal(next.focused.paneId, 'w0:p2');
     const panes = next.workspaces[0].tabs[0].panes;
-    assert.equal(panes.find(p => p.paneId === 'w0:p1').focused, false);
-    assert.equal(panes.find(p => p.paneId === 'w0:p2').focused, true);
+    assert.equal(panes.find(p => p.paneId === 'w0:p1')!.focused, false);
+    assert.equal(panes.find(p => p.paneId === 'w0:p2')!.focused, true);
   });
 });
 
@@ -260,29 +261,29 @@ describe('createState with prevState', () => {
     const prev = createState(makeSnapshot(), 1000);
     const next = createState(makeSnapshot(), 5000, prev);
     const pane = next.workspaces[0].tabs[0].panes.find(p => p.paneId === 'w0:p1');
-    assert.equal(pane.agent.sinceUnixMs, 1000);
+    assert.equal(pane!.agent!.sinceUnixMs, 1000);
   });
 
   it('resets sinceUnixMs when agent status changed between snapshots', () => {
     const prev = createState(makeSnapshot(), 1000);
     const snap = makeSnapshot();
-    snap.panes[0].agent_status = 'idle';
+    snap.panes![0].agent_status = 'idle';
     const next = createState(snap, 5000, prev);
     const pane = next.workspaces[0].tabs[0].panes.find(p => p.paneId === 'w0:p1');
-    assert.equal(pane.agent.status, 'idle');
-    assert.equal(pane.agent.sinceUnixMs, 5000);
+    assert.equal(pane!.agent!.status, 'idle');
+    assert.equal(pane!.agent!.sinceUnixMs, 5000);
   });
 
   it('uses nowMs for panes not present in prevState', () => {
     const prev = createState(makeSnapshot(), 1000);
     const snap = makeSnapshot();
-    snap.panes.push({
+    snap.panes!.push({
       pane_id: 'w0:p3', workspace_id: 'w0', tab_id: 'w0:t1',
       focused: false, agent: 'codex', agent_status: 'working', cwd: '/x',
     });
     const next = createState(snap, 5000, prev);
     const pane = next.workspaces[0].tabs[0].panes.find(p => p.paneId === 'w0:p3');
-    assert.equal(pane.agent.sinceUnixMs, 5000);
+    assert.equal(pane!.agent!.sinceUnixMs, 5000);
   });
 });
 
@@ -302,7 +303,7 @@ describe('applyEvent - dot-form event names', () => {
 });
 
 describe('event routing table', () => {
-  // Every lifecycle event the client subscribes to (herdr-client.js
+  // Every lifecycle event the client subscribes to (herdr-client.ts
   // buildSubscriptions) must be either rebuild-triggering or applied by
   // applyEvent — anything else is silently dropped and the phone view drifts.
   const SUBSCRIBED_LIFECYCLE_EVENTS = [
@@ -340,8 +341,8 @@ describe('applyEvent immutability', () => {
 
     assert.equal(JSON.stringify(toClientState(s0)), before);
     assert.equal(s0._paneById.get('w0:p1'), paneBefore);
-    assert.equal(s0._paneById.get('w0:p1').agent.status, 'working');
-    assert.equal(s0._tabById.get('w0:t1').label, '1');
+    assert.equal(s0._paneById.get('w0:p1')!.agent!.status, 'working');
+    assert.equal(s0._tabById.get('w0:t1')!.label, '1');
   });
 
   it('returns a state with independent indexes', () => {
@@ -352,7 +353,7 @@ describe('applyEvent immutability', () => {
     );
     assert.notEqual(s1._paneById, s0._paneById);
     assert.notEqual(s1._tabById, s0._tabById);
-    assert.equal(s1._paneById.get('w0:p1').agent.status, 'blocked');
-    assert.equal(s0._paneById.get('w0:p1').agent.status, 'working');
+    assert.equal(s1._paneById.get('w0:p1')!.agent!.status, 'blocked');
+    assert.equal(s0._paneById.get('w0:p1')!.agent!.status, 'working');
   });
 });

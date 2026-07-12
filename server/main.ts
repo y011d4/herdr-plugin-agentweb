@@ -1,10 +1,11 @@
-import { loadConfig } from './config.js';
-import { initAuth } from './auth.js';
-import { createHerdrClient } from './herdr-client.js';
-import { createHttpServer } from './http.js';
-import { sendNtfyNotification } from './notify.js';
+import { loadConfig } from './config.ts';
+import { initAuth } from './auth.ts';
+import { createHerdrClient } from './herdr-client.ts';
+import { createHttpServer } from './http.ts';
+import { sendNtfyNotification } from './notify.ts';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { NormalizedState, StatusChange } from './types.ts';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const WEB_ROOT = resolve(join(__dirname, '..', 'web'));
@@ -12,26 +13,26 @@ const WEB_ROOT = resolve(join(__dirname, '..', 'web'));
 const config = loadConfig();
 const token = initAuth(config.stateDir);
 
-let currentState = null;
-let httpServer = null;
-let broadcastState = null;
-let broadcastAgentStatus = null;
+let currentState: NormalizedState | null = null;
+let httpServer: ReturnType<typeof import('node:http').createServer> | null = null;
+let broadcastState: ((state: NormalizedState) => void) | null = null;
+let broadcastAgentStatus: ((change: StatusChange, state: NormalizedState) => void) | null = null;
 
 const herdrClient = createHerdrClient({
   socketPath: config.socketPath,
 
-  onState(state) {
+  onState(state: NormalizedState) {
     currentState = state;
     broadcastState?.(state);
   },
 
-  onAgentStatus(change, state) {
+  onAgentStatus(change: StatusChange, state: NormalizedState) {
     currentState = state;
     broadcastAgentStatus?.(change, state);
     sendNtfyNotification(change, state, config.notifyUrl).catch(() => {});
   },
 
-  onConnectionChange(isConnected) {
+  onConnectionChange(isConnected: boolean) {
     console.log(`[herdr] ${isConnected ? 'connected' : 'disconnected'}`);
   },
 });
@@ -55,10 +56,10 @@ httpServer.listen(config.port, config.host, () => {
 
 herdrClient.start();
 
-function shutdown() {
+function shutdown(): void {
   console.log('[herdr-mobile] shutting down');
   herdrClient.destroy();
-  httpServer.close(() => process.exit(0));
+  httpServer!.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000);
 }
 

@@ -1,5 +1,5 @@
 /**
- * ansi.js — ANSI SGR escape sequence renderer
+ * ansi.ts — ANSI SGR escape sequence renderer
  *
  * Pure ES module, no browser globals at import time (safe for node --check and
  * future node unit tests).
@@ -42,7 +42,7 @@ const ANSI_PALETTE_16 = [
  * 16-231: 6x6x6 color cube
  * 232-255: grayscale ramp
  */
-function xterm256Color(n) {
+function xterm256Color(n: number): string {
   if (n < 16) return ANSI_PALETTE_16[n];
   if (n >= 232) {
     const v = 8 + (n - 232) * 10;
@@ -53,26 +53,36 @@ function xterm256Color(n) {
   const b = idx % 6;
   const g = Math.floor(idx / 6) % 6;
   const r = Math.floor(idx / 36);
-  const toHex = (c) => (c === 0 ? '00' : (55 + c * 40).toString(16).padStart(2, '0'));
+  const toHex = (c: number) => (c === 0 ? '00' : (55 + c * 40).toString(16).padStart(2, '0'));
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
 // Named fg colors for the 16-color set (class names used in CSS)
 // We use inline styles throughout for simplicity and correctness with 256/truecolor.
-function fgColor(idx) {
+function fgColor(idx: number): string | null {
   return ANSI_PALETTE_16[idx] ?? null;
 }
-function bgColor(idx) {
+function bgColor(idx: number): string | null {
   return ANSI_PALETTE_16[idx] ?? null;
 }
 
-const DEFAULT_FG = null;
-const DEFAULT_BG = null;
+const DEFAULT_FG: string | null = null;
+const DEFAULT_BG: string | null = null;
+
+interface SgrState {
+  fg: string | null;
+  bg: string | null;
+  bold: boolean;
+  dim: boolean;
+  italic: boolean;
+  underline: boolean;
+  inverse: boolean;
+}
 
 /**
  * HTML-escape text content (must be called on raw text, not on spans).
  */
-function escapeHtml(text) {
+function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -83,8 +93,8 @@ function escapeHtml(text) {
 /**
  * Build inline style + class string for a span from current SGR state.
  */
-function buildSpanStyle(state) {
-  const parts = [];
+function buildSpanStyle(state: SgrState): string {
+  const parts: string[] = [];
   let fg = state.fg;
   let bg = state.bg;
   if (state.inverse) {
@@ -102,11 +112,11 @@ function buildSpanStyle(state) {
   return parts.join(';');
 }
 
-function makeState() {
+function makeState(): SgrState {
   return { fg: DEFAULT_FG, bg: DEFAULT_BG, bold: false, dim: false, italic: false, underline: false, inverse: false };
 }
 
-function resetState(s) {
+function resetState(s: SgrState): void {
   s.fg = DEFAULT_FG;
   s.bg = DEFAULT_BG;
   s.bold = false;
@@ -120,7 +130,7 @@ function resetState(s) {
  * Apply a list of numeric SGR params to the current state object.
  * Handles compound sequences like 38;5;n and 38;2;r;g;b.
  */
-function applySgr(params, state) {
+function applySgr(params: number[], state: SgrState): void {
   let i = 0;
   while (i < params.length) {
     const p = params[i];
@@ -189,7 +199,7 @@ function applySgr(params, state) {
 /**
  * Returns true if the SGR state has any active styling.
  */
-function isStyled(state) {
+function isStyled(state: SgrState): boolean {
   return (
     state.fg !== null ||
     state.bg !== null ||
@@ -206,10 +216,10 @@ function isStyled(state) {
  * Text nodes are HTML-escaped. ANSI SGR sequences produce <span style="..."> wrappers.
  * All other control sequences (cursor movement, OSC, etc.) are stripped silently.
  *
- * @param {string} str - Input string potentially containing ANSI escape sequences
- * @returns {string} HTML string safe for innerHTML assignment
+ * @param str - Input string potentially containing ANSI escape sequences
+ * @returns HTML string safe for innerHTML assignment
  */
-export function ansiToHtml(str) {
+export function ansiToHtml(str: string): string {
   // Matches:
   //   ESC [ <params> <final>   — CSI sequence
   //   ESC ] <text> (BEL | ST) — OSC sequence

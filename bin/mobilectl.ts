@@ -5,26 +5,42 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const mainJs = path.join(projectRoot, 'server', 'main.js');
+// Walk up from the script's directory until a directory containing package.json
+// is found. This is necessary because this file runs from dist/bin/mobilectl.js,
+// so __dirname is dist/bin — not the project root.
+function findProjectRoot(): string {
+  let dir = path.dirname(new URL(import.meta.url).pathname);
+  while (true) {
+    if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) throw new Error('Could not find project root (no package.json found)');
+    dir = parent;
+  }
+}
 
-function stateDir() {
+const projectRoot = findProjectRoot();
+// Use built dist/server/main.js if it exists; otherwise fall back to TS source
+// for dev (Node >= 23.6 runs .ts natively).
+const mainJs = fs.existsSync(path.join(projectRoot, 'dist', 'server', 'main.js'))
+  ? path.join(projectRoot, 'dist', 'server', 'main.js')
+  : path.join(projectRoot, 'server', 'main.ts');
+
+function stateDir(): string {
   const dir = process.env.HERDR_PLUGIN_STATE_DIR
     || path.join(os.homedir(), '.local', 'state', 'herdr-mobile');
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }
 
-function configDir() {
+function configDir(): string {
   return process.env.HERDR_PLUGIN_CONFIG_DIR || stateDir();
 }
 
-function readConfig() {
+function readConfig(): Record<string, unknown> {
   const file = path.join(configDir(), 'config.json');
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
+    return JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
   } catch {
     return {};
   }
@@ -35,8 +51,8 @@ function readConfig() {
 const daemonPidFile = () => path.join(stateDir(), 'bridge.pid');
 const runPidFile = () => path.join(stateDir(), 'bridge-run.pid');
 
-function alivePid(file) {
-  let pid;
+function alivePid(file: string): number | null {
+  let pid: number;
   try {
     pid = Number(fs.readFileSync(file, 'utf8').trim());
   } catch {
@@ -51,9 +67,9 @@ function alivePid(file) {
   }
 }
 
-function baseUrl() {
+function baseUrl(): string {
   const cfg = readConfig();
-  const host = process.env.HERDR_MOBILE_HOST || cfg.host || '127.0.0.1';
+  const host = process.env.HERDR_MOBILE_HOST || (cfg.host as string) || '127.0.0.1';
   const port = Number(process.env.HERDR_MOBILE_PORT || cfg.port || 8390);
   return `http://${host}:${port}/`;
 }
@@ -61,19 +77,19 @@ function baseUrl() {
 // herdr captures action stdout into its plugin logs, so never print the token
 // here. The tokenized connect link is printed by the server itself: visible in
 // the "Mobile bridge" pane (run entrypoint) and in <state dir>/bridge.log.
-function printConnectInfo() {
+function printConnectInfo(): void {
   console.log(`url: ${baseUrl()}`);
   console.log(`token file: ${path.join(stateDir(), 'token')}`);
   console.log(`full connect link: see the Mobile bridge pane or ${path.join(stateDir(), 'bridge.log')}`);
 }
 
-function notify(title, body) {
+function notify(title: string, body: string): void {
   const herdr = process.env.HERDR_BIN_PATH;
   if (!herdr) return;
   spawnSync(herdr, ['notification', 'show', title, '--body', body], { stdio: 'ignore' });
 }
 
-function start() {
+function start(): number {
   const daemon = alivePid(daemonPidFile());
   const fg = alivePid(runPidFile());
   if (daemon || fg) {
@@ -99,7 +115,7 @@ function start() {
   return 0;
 }
 
-function stop() {
+function stop(): number {
   const daemon = alivePid(daemonPidFile());
   const fg = alivePid(runPidFile());
   const pid = daemon || fg;
@@ -115,7 +131,7 @@ function stop() {
   return 0;
 }
 
-function status() {
+function status(): number {
   const daemon = alivePid(daemonPidFile());
   const fg = alivePid(runPidFile());
   if (daemon || fg) {
@@ -129,13 +145,21 @@ function status() {
   return 0;
 }
 
-function tailscaleInfo(port) {
+interface TailscaleInfo {
+  dns: string | null;
+  ip: string | null;
+  serveActive: boolean;
+}
+
+function tailscaleInfo(port: number): TailscaleInfo {
   try {
-    const status = spawnSync('tailscale', ['status', '--json'], { encoding: 'utf8' });
-    if (status.status !== 0) return { dns: null, ip: null, serveActive: false };
-    const st = JSON.parse(status.stdout);
-    const dns = (st?.Self?.DNSName || '').replace(/\.$/, '') || null;
-    const ip = st?.Self?.TailscaleIPs?.[0] || null;
+    const statusResult = spawnSync('tailscale', ['status', '--json'], { encoding: 'utf8' });
+    if (statusResult.status !== 0) return { dns: null, ip: null, serveActive: false };
+    const st = JSON.parse(statusResult.stdout) as Record<string, unknown>;
+    const self = st?.Self as Record<string, unknown> | undefined;
+    const dns = ((self?.DNSName as string) || '').replace(/\.$/, '') || null;
+    const ips = self?.TailscaleIPs as string[] | undefined;
+    const ip = ips?.[0] || null;
     const serve = spawnSync('tailscale', ['serve', 'status'], { encoding: 'utf8' });
     const serveActive = serve.status === 0 && serve.stdout.includes(`:${port}`);
     return { dns, ip, serveActive };
@@ -147,8 +171,8 @@ function tailscaleInfo(port) {
 // Show the connect link as a QR code (pane entrypoint "connect", or manual CLI).
 // Unlike start/status this is an explicit, interactive surface, so the
 // tokenized URL is intentionally shown here.
-async function qr() {
-  let token;
+async function qr(): Promise<number> {
+  let token: string;
   try {
     token = fs.readFileSync(path.join(stateDir(), 'token'), 'utf8').trim();
   } catch {
@@ -159,7 +183,7 @@ async function qr() {
   const port = Number(process.env.HERDR_MOBILE_PORT || cfg.port || 8390);
   const ts = tailscaleInfo(port);
 
-  let url;
+  let url: string;
   if (ts.serveActive && ts.dns) {
     url = `https://${ts.dns}/?token=${token}`;
   } else if (ts.ip) {
@@ -180,12 +204,12 @@ async function qr() {
   }
   if (process.env.HERDR_PLUGIN_ENTRYPOINT_ID) {
     console.log('\npress Enter to close');
-    await new Promise((resolve) => process.stdin.once('data', resolve));
+    await new Promise<void>((resolve) => process.stdin.once('data', () => resolve()));
   }
   return 0;
 }
 
-function run() {
+function run(): Promise<number> | number {
   const daemon = alivePid(daemonPidFile());
   const fg = alivePid(runPidFile());
   if (daemon || fg) {
@@ -198,7 +222,7 @@ function run() {
     env: process.env,
   });
   fs.writeFileSync(runPidFile(), String(child.pid), { mode: 0o600 });
-  const forward = (sig) => child.kill(sig);
+  const forward = (sig: NodeJS.Signals) => child.kill(sig);
   process.on('SIGINT', () => forward('SIGINT'));
   process.on('SIGTERM', () => forward('SIGTERM'));
   return new Promise((resolve) => {
@@ -210,7 +234,7 @@ function run() {
 }
 
 const command = process.argv[2];
-const handlers = { run, start, stop, status, qr };
+const handlers: Record<string, () => number | Promise<number>> = { run, start, stop, status, qr };
 const handler = handlers[command];
 if (!handler) {
   console.error('usage: mobilectl.js <run|start|stop|status|qr>');

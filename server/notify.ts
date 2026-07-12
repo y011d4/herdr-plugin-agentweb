@@ -1,17 +1,19 @@
+import type { StatusChange, NormalizedState, WsAgentStatusMessage } from './types.ts';
+
 let ntfyErrorLogged = false;
 
 /**
  * Build the WS agent_status message for a status transition.
  *
- * @param {object} change  { paneId, from, to, agent }
- * @param {object} state   current normalized state
- * @returns {object}  WS message object
+ * @param change  { paneId, from, to, agent }
+ * @param state   current normalized state
+ * @returns WS message object
  */
-export function buildAgentStatusMessage(change, state) {
+export function buildAgentStatusMessage(change: StatusChange, state: Pick<NormalizedState, 'workspaces'>): WsAgentStatusMessage {
   const { paneId, from, to, agent } = change;
 
-  let workspaceLabel = null;
-  let tabLabel = null;
+  let workspaceLabel: string | null = null;
+  let tabLabel: string | null = null;
 
   outer:
   for (const ws of (state.workspaces || [])) {
@@ -42,11 +44,11 @@ export function buildAgentStatusMessage(change, state) {
  * Post an ntfy-style notification if notify_url is configured.
  * Failures are logged once and never crash the server.
  *
- * @param {object} change   { paneId, from, to, agent }
- * @param {object} state    current normalized state
- * @param {string|null} notifyUrl
+ * @param change   { paneId, from, to, agent }
+ * @param state    current normalized state
+ * @param notifyUrl
  */
-export async function sendNtfyNotification(change, state, notifyUrl) {
+export async function sendNtfyNotification(change: StatusChange, state: NormalizedState, notifyUrl: string | null): Promise<void> {
   if (!notifyUrl) return;
   if (change.to !== 'blocked' && change.to !== 'done') return;
 
@@ -71,7 +73,7 @@ export async function sendNtfyNotification(change, state, notifyUrl) {
     ntfyErrorLogged = false;
   } catch (err) {
     if (!ntfyErrorLogged) {
-      console.error('[notify] ntfy POST failed:', err.message);
+      console.error('[notify] ntfy POST failed:', (err as Error).message);
       ntfyErrorLogged = true;
     }
   }
