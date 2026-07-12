@@ -796,9 +796,18 @@ function bindPinchZoom(outputEl: HTMLElement): void {
   }, { passive: true });
 
   outputEl.addEventListener('touchmove', (e: TouchEvent) => {
-    if (e.touches.length === 1 && tapCandidate &&
-        Math.hypot(e.touches[0].clientX - tapStartX, e.touches[0].clientY - tapStartY) > 10) {
-      tapCandidate = false; // a scroll flick is not a tap
+    if (e.touches.length === 1) {
+      const dx = e.touches[0].clientX - tapStartX;
+      const dy = e.touches[0].clientY - tapStartY;
+      if (tapCandidate && Math.hypot(dx, dy) > 10) {
+        tapCandidate = false; // a scroll flick is not a tap
+      }
+      // Swiping down while already at the top requests history. The fitted
+      // live view usually has nothing to scroll, so scroll events never fire —
+      // the gesture itself is the trigger.
+      if (!historyMode && !historyLoading && dy > 60 && outputEl.scrollTop <= 0) {
+        historyPending = true;
+      }
     }
     if (e.touches.length !== 2 || pinchStartDist === 0) return;
     e.preventDefault(); // keep the browser from zooming the whole page
@@ -897,6 +906,13 @@ function exitHistoryMode(): void {
 }
 
 function bindHistoryScroll(outputEl: HTMLElement): void {
+  // desktop: wheel-up at the top loads history (no touch gesture available)
+  outputEl.addEventListener('wheel', (e: WheelEvent) => {
+    if (!historyMode && e.deltaY < 0 && outputEl.scrollTop <= 0) {
+      void enterHistoryMode();
+    }
+  }, { passive: true });
+
   let lastScrollTop = outputEl.scrollTop;
   outputEl.addEventListener('scroll', () => {
     const goingUp = outputEl.scrollTop < lastScrollTop;

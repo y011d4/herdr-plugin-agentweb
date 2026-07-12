@@ -58,6 +58,8 @@ html, body {
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 15px;
   line-height: 1.5;
+  /* top-edge swipes belong to the app (history load), not pull-to-refresh */
+  overscroll-behavior-y: none;
   -webkit-text-size-adjust: 100%;
   overscroll-behavior: none;
 }
@@ -387,6 +389,8 @@ a {
   -webkit-overflow-scrolling: touch;
   /* one finger pans, two fingers reach our pinch-zoom handler */
   touch-action: pan-x pan-y;
+  /* the top-of-terminal swipe means "load history", not pull-to-refresh */
+  overscroll-behavior: contain;
 }
 
 /* ── Input bar ── */
