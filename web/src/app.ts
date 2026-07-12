@@ -813,11 +813,23 @@ async function refreshPaneOutput(): Promise<void> {
     ) as Record<string, string | null>;
     renderPaneOutput(data.ansi ?? data.text ?? '');
   } catch (err) {
-    if ((err as Error).message !== '401') {
-      outputEl.textContent = `Error loading output: ${(err as Error).message}`;
+    const message = (err as Error).message;
+    if (message === '401') return;
+    // transient failures (bridge restart, herdr reconnect) must not wipe the
+    // terminal the user is reading — keep the last render and toast instead
+    if (outputEl.childElementCount > 0 || outputEl.textContent?.trim()) {
+      const now = Date.now();
+      if (now - lastReadErrorToastAt > 10_000) {
+        lastReadErrorToastAt = now;
+        showToast('Output refresh failed', message);
+      }
+    } else {
+      outputEl.textContent = `Error loading output: ${message}`;
     }
   }
 }
+
+let lastReadErrorToastAt = 0;
 
 // Right after sending input, fetch fresh output a couple of times so keypress
 // echo feels instant instead of waiting for the next push/poll cycle.
