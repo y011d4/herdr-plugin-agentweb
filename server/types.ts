@@ -23,6 +23,12 @@ export interface PaneNode {
   cwd: string | null;
   title: string | null;
   agent: AgentInfo | null;
+  // herdr scroll metadata: authoritative no-scrollback signal (alt-screen apps
+  // keep none) and the terminal height, used to tell a full-screen app apart
+  // from a normal pane whose output merely fits the screen. Both are low-churn
+  // (noScrollback flips once; viewportRows changes only on resize).
+  noScrollback: boolean;
+  viewportRows: number;
 }
 
 export interface TabNode {

@@ -14,7 +14,7 @@ const sw = self as unknown as ServiceWorkerGlobalScope;
 
 // Bump on every release that changes any static asset: cached assets are only
 // refreshed when the service worker itself changes.
-const CACHE_VERSION = 'herdr-mobile-v23';
+const CACHE_VERSION = 'herdr-mobile-v24';
 
 const STATIC_ASSETS = [
   '/',
@@ -77,14 +77,18 @@ sw.addEventListener('fetch', (event: FetchEvent) => {
 sw.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
   const paneId = event.notification.tag;
-  const targetUrl = paneId ? `/#/pane/${encodeURIComponent(paneId)}` : '/';
+  // navigate() in the app assigns the value to location.hash, so an existing
+  // client needs the bare hash (#/pane/…) — passing "/#/pane/…" would yield
+  // "#/#/pane/…". A newly opened window needs the full path instead.
+  const targetHash = paneId ? `#/pane/${encodeURIComponent(paneId)}` : '#/agents';
+  const targetUrl = `/${targetHash}`;
 
   event.waitUntil(
     sw.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if ('focus' in client) {
           client.focus();
-          client.postMessage({ type: 'navigate', url: targetUrl });
+          client.postMessage({ type: 'navigate', url: targetHash });
           return;
         }
       }

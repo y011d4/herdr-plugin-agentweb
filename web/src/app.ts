@@ -160,7 +160,7 @@ function wsConnect(): void {
   ws.addEventListener('open', () => {
     wsConnected = true;
     wsReconnectDelay = WS_RECONNECT_BASE_MS;
-    setConnected(true);
+    updateConnBadge();
     stopStatePoll();
     wsSendWatch(); // re-establish pane watch after reconnect
 
@@ -181,7 +181,7 @@ function wsConnect(): void {
 
   ws.addEventListener('close', () => {
     wsConnected = false;
-    setConnected(false);
+    updateConnBadge();
     if (wsPingTimer) clearInterval(wsPingTimer);
     startStatePoll();
     scheduleWsReconnect();
@@ -229,7 +229,11 @@ function wsSendWatch(): void {
   }
 }
 
-function setConnected(connected: boolean): void {
+// The badge reflects end-to-end connectivity: the WebSocket to the bridge AND
+// the bridge's own link to herdr (appState.connected). herdr can drop while the
+// WS stays open, so a green dot requires both to be up.
+function updateConnBadge(): void {
+  const connected = wsConnected && (appState?.connected ?? true);
   if (elConnDot) {
     elConnDot.classList.toggle('connected', connected);
     elConnDot.title = connected ? 'Connected' : 'Reconnecting…';
@@ -263,6 +267,7 @@ function stopStatePoll(): void {
 // ── State update handler ──────────────────────────────────────────────────────
 
 function onStateUpdate(): void {
+  updateConnBadge(); // state carries the bridge->herdr link status
   const hash = location.hash || '#/agents';
   if (hash === '#/agents') {
     renderAgentsDashboard();
@@ -999,11 +1004,19 @@ async function loadHistoryPrefix(): Promise<void> {
     const recentLines = (data.ansi ?? data.text ?? '').split('\n');
     const liveLineCount = lastLiveAnsi ? lastLiveAnsi.split('\n').length : 0;
     const prefix = recentLines.slice(0, Math.max(0, recentLines.length - liveLineCount)).join('\n');
-    // No terminal scrollback + an agent runs here: a full-screen app that
-    // handles wheel scrolling itself (verified for claude) — forward swipes
-    // as wheel events. Without an agent (fresh shell), injecting mouse
-    // sequences would type garbage, so show the start-of-output marker.
-    appScrollPane = !prefix && !!(activePaneId && findPane(activePaneId)?.pane.agent);
+    // A full-screen app (alt-screen, e.g. Claude Code tui:fullscreen) scrolls
+    // its own view on SGR wheel events, so forward swipes to it. herdr reports
+    // no terminal scrollback for such panes (noScrollback), but a normal agent
+    // pane whose output merely fits the screen also has none — forwarding wheel
+    // bytes there injects mouse sequences it doesn't expect. A full-screen app
+    // also paints most of the viewport, so require a nearly-full screen too.
+    const watched = activePaneId ? findPane(activePaneId)?.pane : null;
+    const liveNonEmpty = lastLiveAnsi
+      ? lastLiveAnsi.split('\n').filter(l => l.trim() !== '').length
+      : 0;
+    const screenFull = !!watched && watched.viewportRows > 0
+      && liveNonEmpty >= watched.viewportRows * 0.6;
+    appScrollPane = !!watched?.agent && watched.noScrollback && screenFull;
     // anchor by distance from the bottom: content only changes above the fold
     const fromBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight;
     historyEl.innerHTML = prefix
