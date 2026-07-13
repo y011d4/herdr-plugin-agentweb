@@ -687,7 +687,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     if (!text) return;
     try {
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true });
-      clearInput(); // clear only after a successful send, so a failure keeps the text
+      if (paneInput.value === text) clearInput(); // clear on success, but keep text typed mid-send
       queuePaneEcho();
     } catch (err) {
       showToast('Send failed', (err as Error).message);
@@ -698,7 +698,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     if (!text) return;
     try {
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text });
-      clearInput(); // clear only after a successful send, so a failure keeps the text
+      if (paneInput.value === text) clearInput(); // clear on success, but keep text typed mid-send
       queuePaneEcho();
     } catch (err) {
       showToast('Send failed', (err as Error).message);
@@ -917,6 +917,7 @@ function bindPinchZoom(outputEl: HTMLElement): void {
     pinchStartDist = 0;
     tapCandidate = false;
     singleFingerGesture = false;
+    flushPendingOutput(); // deliver any output deferred during the cancelled gesture
   }, { passive: true });
 }
 
@@ -1087,6 +1088,9 @@ function renderPaneOutput(ansiStr: string): void {
   }
   pendingAnsi = null;
   lastLiveAnsi = ansiStr;
+  // live advanced — lines may have scrolled off into history that the cached
+  // prefix doesn't have yet; mark it dirty so the next scroll-up refetches.
+  historyFetchedAt = 0;
   applyFitFontSize(outputEl, ansiStr);
   liveEl.innerHTML = ansiToHtml(ansiStr);
   outputEl.scrollTop = outputEl.scrollHeight;
