@@ -94,11 +94,24 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
 
   // ── snapshot ────────────────────────────────────────────────────────────────
 
-  async function fetchSnapshot(): Promise<NormalizedState> {
+  async function fetchSnapshot(emitStatusChanges = false): Promise<NormalizedState> {
     const result = await request('session.snapshot') as Record<string, unknown>;
     const snap = (result.snapshot ?? result) as Record<string, unknown>;
     const nowMs = Date.now();
+    const prev = currentState;
     currentState = createState(snap as Parameters<typeof createState>[0], nowMs, currentState);
+    // A subscription outage swallows live agent-status events. On reconnect, diff
+    // the snapshot against the pre-reconnect state and emit the changes so
+    // blocked/done notifications aren't lost. Skipped on the pane-rebuild path,
+    // where the old subscription is still delivering those events live.
+    if (emitStatusChanges && prev) {
+      for (const [paneId, pane] of currentState._paneById) {
+        if (!pane.agent) continue;
+        const from = prev._paneById.get(paneId)?.agent?.status ?? 'unknown';
+        const to = pane.agent.status;
+        if (from !== to) onAgentStatus?.({ paneId, from, to, agent: pane.agent }, currentState);
+      }
+    }
     // Deliver snapshot immediately (not debounced) so getState() callers see it
     // right away, and so a flood of queued events can't starve the initial delivery.
     onState?.(currentState);
@@ -281,7 +294,9 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   async function connect(): Promise<void> {
     if (destroyed) return;
     try {
-      await fetchSnapshot();
+      // emit status changes missed while the subscription was down (no-op on the
+      // very first connect, where there is no previous state to diff against)
+      await fetchSnapshot(true);
       const paneIds = getPaneIds(currentState!);
       if (subscribeConn) subscribeConn.destroy();
       subscribeConn = openSubscribeConnection(paneIds) ?? null;

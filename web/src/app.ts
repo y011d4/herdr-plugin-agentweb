@@ -273,6 +273,13 @@ function onStateUpdate(): void {
   if (hash === '#/agents') {
     renderAgentsDashboard();
   } else if (hash.startsWith('#/pane/')) {
+    // If the pane vanished (e.g. seen via /api/state polling while the WS is
+    // down, so the pane_gone push can't fire), leave the now-stale view.
+    if (activePaneId && !findPane(activePaneId)) {
+      showToast('Pane closed', 'This pane no longer exists.');
+      navigate('#/agents');
+      return;
+    }
     // Pane detail auto-refreshes via its own poller; header may need updating
     updatePaneDetailHeader();
   }
