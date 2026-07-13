@@ -65,13 +65,22 @@ function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
     });
     req.on('end', () => {
       if (settled) return;
+      let parsed: unknown;
       try {
         const text = Buffer.concat(chunks).toString('utf8');
-        settled = true;
-        resolve(text ? JSON.parse(text) as Record<string, unknown> : {});
+        parsed = text ? JSON.parse(text) : {};
       } catch {
         fail(Object.assign(new Error('invalid JSON body'), { status: 400 }));
+        return;
       }
+      // Reject non-object JSON (null, arrays, primitives) so route handlers can
+      // safely read/spread body fields without throwing outside this guard.
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        fail(Object.assign(new Error('invalid JSON body'), { status: 400 }));
+        return;
+      }
+      settled = true;
+      resolve(parsed as Record<string, unknown>);
     });
     req.on('error', fail);
   });

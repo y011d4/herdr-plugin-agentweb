@@ -787,6 +787,10 @@ function bindPinchZoom(outputEl: HTMLElement): void {
   let wheelAccum = 0;
   let touchVelocity = 0; // px/ms, positive = finger moving down (scroll up)
   let lastMoveAt = 0;
+  // Forward app-scroll wheel steps only for a gesture that began as a single
+  // finger and never became a pinch. Dropping from two fingers to one leaves
+  // lastTouchY stale, so forwarding then would send a large scroll burst.
+  let singleFingerGesture = false;
 
   const touchDist = (t: TouchList): number =>
     Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
@@ -795,10 +799,12 @@ function bindPinchZoom(outputEl: HTMLElement): void {
     terminalTouchActive = true;
     if (e.touches.length === 2) {
       tapCandidate = false;
+      singleFingerGesture = false;
       pinchStartDist = touchDist(e.touches);
       pinchStartPx = parseFloat(getComputedStyle(outputEl).fontSize) || 13;
     } else if (e.touches.length === 1) {
       tapCandidate = true;
+      singleFingerGesture = true;
       tapStartX = e.touches[0].clientX;
       tapStartY = e.touches[0].clientY;
       lastTouchY = e.touches[0].clientY;
@@ -815,8 +821,12 @@ function bindPinchZoom(outputEl: HTMLElement): void {
           Math.hypot(e.touches[0].clientX - tapStartX, e.touches[0].clientY - tapStartY) > 10) {
         tapCandidate = false; // a scroll flick is not a tap
       }
-      // app-scroll panes: translate vertical swipes into wheel events
-      if (appScrollPane) {
+      // app-scroll panes: translate vertical swipes into wheel events.
+      // preventDefault stops the browser from also scrolling the container
+      // off the bottom — that would defer the app's repaint into pendingAnsi
+      // and freeze the forwarded scroll until the user returns to the bottom.
+      if (appScrollPane && singleFingerGesture) {
+        e.preventDefault();
         const y = e.touches[0].clientY;
         const dy = y - lastTouchY;
         const now = performance.now();
@@ -860,7 +870,7 @@ function bindPinchZoom(outputEl: HTMLElement): void {
       lastTapEndAt = 0;
     }
 
-    if (appScrollPane) {
+    if (appScrollPane && singleFingerGesture) {
       startFling(touchVelocity);
     }
     flushPendingOutput();
@@ -870,6 +880,7 @@ function bindPinchZoom(outputEl: HTMLElement): void {
     terminalTouchActive = false;
     pinchStartDist = 0;
     tapCandidate = false;
+    singleFingerGesture = false;
   }, { passive: true });
 }
 
@@ -997,10 +1008,11 @@ function bindTerminalScroll(outputEl: HTMLElement): void {
   let wheelDeltaAccum = 0;
   outputEl.addEventListener('wheel', (e: WheelEvent) => {
     if (!appScrollPane) return;
+    e.preventDefault(); // forward to the app; don't also scroll the container
     wheelDeltaAccum += e.deltaY;
     while (wheelDeltaAccum <= -30) { wheelDeltaAccum += 30; queuePaneWheel(true); }
     while (wheelDeltaAccum >= 30) { wheelDeltaAccum -= 30; queuePaneWheel(false); }
-  }, { passive: true });
+  }, { passive: false });
 
   outputEl.addEventListener('scroll', () => {
     const fromBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight;

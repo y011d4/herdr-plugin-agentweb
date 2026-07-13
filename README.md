@@ -78,8 +78,10 @@ To stop publishing: `tailscale serve reset` (or check with `tailscale serve stat
 
 - **Pinch** zooms the terminal font (4–24px); **double-tap** returns to
   fit-to-width at the bottom. One finger pans.
-- **Swipe up** scrolls into the pane's history. For panes with terminal
-  scrollback this is instant and local (the last 1000 lines are preloaded).
+- **Swipe down** scrolls into the pane's history — older output sits above the
+  current screen, so dragging down reveals it (swipe up returns toward the
+  latest output). For panes with terminal scrollback this is instant and local
+  (the last 1000 lines are preloaded).
 - Full-screen apps that keep no scrollback (e.g. Claude Code with
   `"tui": "fullscreen"`) scroll **their own** view instead: swipes are
   forwarded to the app as mouse-wheel events, with fling momentum. Expect a
