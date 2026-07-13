@@ -938,6 +938,9 @@ let paneViewGen = 0;
 // Bumped whenever a newer screen is rendered (WS push or HTTP read), so an
 // in-flight HTTP read can drop its response if newer output arrived meanwhile.
 let outputSeq = 0;
+// Incremented when a pane read starts; only the latest in-flight read renders,
+// so an earlier HTTP read can't win over a later one.
+let refreshReqSeq = 0;
 let terminalTouchActive = false; // a finger is on the terminal
 let pendingAnsi: string | null = null; // output received while unsafe to render
 let lastLiveAnsi = ''; // last rendered screen (for line counts and refits)
@@ -1123,15 +1126,19 @@ async function refreshPaneOutput(): Promise<void> {
 
   const gen = paneViewGen;
   const seq = outputSeq;
+  const reqId = ++refreshReqSeq;
   const paneId = activePaneId;
   try {
     const data = await apiGet(
       `/api/panes/${encodeURIComponent(paneId)}/read?source=visible&lines=200&format=ansi`
     ) as Record<string, unknown>;
     if (gen !== paneViewGen || paneId !== activePaneId) return; // navigated away
-    // A newer screen (WS push or another read) rendered while this read was in
-    // flight — its response is stale, so drop it rather than overwrite the newer
-    // content with old output the server won't re-push.
+    // A later read started while this one was in flight — let the newest win, so
+    // an earlier HTTP read can't overwrite a newer one's fresher output.
+    if (reqId !== refreshReqSeq) return;
+    // A newer screen (WS push) rendered while this read was in flight — its
+    // response is stale, so drop it rather than overwrite the newer content with
+    // old output the server won't re-push.
     if (outputSeq !== seq) return;
     // Keep app-scroll fresh on the HTTP fallback path (WS down); the server
     // computes it the same way it does for pane_output pushes.
