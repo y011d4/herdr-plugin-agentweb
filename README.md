@@ -7,7 +7,7 @@ mobile-first PWA:
 - Dashboard of all agents across all workspaces with live status
   (idle / working / **blocked** / done), blocked agents sorted to the top
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
-  scrollback by swiping up, multiline input, and quick keys
+  scrollback by swiping down, multiline input, and quick keys
   (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …)
 - Live updates over WebSocket (sub-second); notifications when an agent
   becomes blocked or done — tap to jump to the pane, swipe right to dismiss

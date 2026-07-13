@@ -1022,7 +1022,11 @@ async function loadHistoryPrefix(): Promise<void> {
     historyEl.innerHTML = prefix
       ? ansiToHtml(prefix)
       : (appScrollPane ? '' : '<div class="history-start">&#183; start of output &#183;</div>');
-    historyFetchedAt = Date.now();
+    // Only treat the prefix as cached when there actually was scrollback. Caching
+    // an empty result would suppress refreshes for the next 10s, so lines that
+    // scroll off the live screen within that window would stay hidden behind the
+    // "start of output" marker.
+    if (prefix) historyFetchedAt = Date.now();
     outputEl.scrollTop = outputEl.scrollHeight - fromBottom - outputEl.clientHeight;
   } catch {
     // scrollback is best-effort; the live screen keeps working without it
