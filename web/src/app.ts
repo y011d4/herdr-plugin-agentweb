@@ -466,7 +466,11 @@ function renderTokenScreen(message?: string): void {
     // Immediately fetch state
     apiGet('/api/state').then((state) => {
       appState = state as AppState;
-      navigate('#/agents');
+      // navigate() re-renders only via hashchange; if the hash is already
+      // #/agents (e.g. token re-entry after expiry) no event fires, so route
+      // directly to avoid leaving the login screen up.
+      if (location.hash === '#/agents') handleRoute();
+      else navigate('#/agents');
     }).catch((err: Error) => {
       if (err.message !== '401') {
         renderTokenScreen('Could not connect. Check the token and try again.');

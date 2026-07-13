@@ -9,6 +9,7 @@ import type { HerdrClient, NormalizedState, StatusChange, Config } from './types
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
 const PANE_WATCH_INTERVAL_MS = 800; // server-side poll rate for watched panes
+const WATCH_MAX_ERRORS = 5; // consecutive watched-pane read failures before giving up
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -94,15 +95,24 @@ function serveStatic(webRoot: string, urlPath: string, res: ServerResponse): voi
     jsonError(res, 403, 'forbidden', 'forbidden');
     return;
   }
+  let st: ReturnType<typeof statSync>;
   try {
-    statSync(abs);
+    st = statSync(abs);
   } catch {
     jsonError(res, 404, 'not_found', 'not found');
     return;
   }
+  if (!st.isFile()) {
+    // directories (and other non-files) would make createReadStream emit an
+    // unhandled EISDIR and crash the process — treat them as not found
+    jsonError(res, 404, 'not_found', 'not found');
+    return;
+  }
   const mime = MIME[extname(abs)] || 'application/octet-stream';
+  const stream = createReadStream(abs);
+  stream.on('error', () => { res.destroy(); }); // e.g. file removed after stat
   res.writeHead(200, { 'Content-Type': mime });
-  createReadStream(abs).pipe(res);
+  stream.pipe(res);
 }
 
 export interface HttpServerResult {
@@ -209,7 +219,16 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
           jsonError(res, herdrErr.status || 400, 'bad_request', herdrErr.message);
           return;
         }
-        const keys = [...((body.keys as string[]) || [])];
+        if (body.keys !== undefined &&
+            !(Array.isArray(body.keys) && body.keys.every((k) => typeof k === 'string'))) {
+          jsonError(res, 400, 'invalid_params', 'keys must be an array of strings');
+          return;
+        }
+        if (body.text != null && typeof body.text !== 'string') {
+          jsonError(res, 400, 'invalid_params', 'text must be a string');
+          return;
+        }
+        const keys = [...((body.keys as string[] | undefined) ?? [])];
         if (body.enter) keys.push('enter');
         const params: Record<string, unknown> = { pane_id: paneId };
         if (body.text != null) params.text = body.text;
@@ -279,6 +298,10 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
           jsonError(res, herdrErr.status || 400, 'bad_request', herdrErr.message);
           return;
         }
+        if (body.text != null && typeof body.text !== 'string') {
+          jsonError(res, 400, 'invalid_params', 'text must be a string');
+          return;
+        }
         try {
           await herdrClient.rpc('agent.send', { target, text: body.text || '' });
           jsonOk(res, { ok: true });
@@ -330,12 +353,14 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
       let watchTimer: ReturnType<typeof setInterval> | null = null;
       let lastOutput: string | null = null;
       let readInFlight = false;
+      let watchErrors = 0; // consecutive read failures; transient ones are tolerated
 
       const stopWatch = (): void => {
         if (watchTimer) clearInterval(watchTimer);
         watchTimer = null;
         watchedPaneId = null;
         lastOutput = null;
+        watchErrors = 0;
       };
 
       const pollWatchedPane = async (): Promise<void> => {
@@ -350,14 +375,17 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
             format: 'ansi',
           })) as { read?: { text?: string } };
           const ansi = result.read?.text ?? '';
+          watchErrors = 0;
           if (paneId === watchedPaneId && ansi !== lastOutput && ws.readyState === WebSocket.OPEN) {
             lastOutput = ansi;
             ws.send(JSON.stringify({ type: 'pane_output', paneId, ansi }));
           }
         } catch {
-          // pane gone or herdr unreachable — stop pushing; the client's
-          // fallback polling keeps the view alive.
-          if (paneId === watchedPaneId) stopWatch();
+          // Tolerate transient herdr/read errors — one failure must not kill the
+          // watch and silently freeze the view. Give up only after several
+          // consecutive failures (pane likely gone), by which point the state
+          // broadcast has dropped the pane and the client navigates away anyway.
+          if (paneId === watchedPaneId && ++watchErrors >= WATCH_MAX_ERRORS) stopWatch();
         } finally {
           readInFlight = false;
         }
@@ -388,9 +416,11 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
   let lastStateMsg: string | null = null;
 
   function broadcastState(state: NormalizedState): void {
-    if (wsClients.size === 0) return;
     const msg = JSON.stringify({ type: 'state', state: toClientState(state) });
-    // focus churn in the TUI produces frequent no-op state updates; skip resends
+    // focus churn in the TUI produces frequent no-op state updates; skip resends.
+    // The dedupe baseline is updated even with no clients connected, so a client
+    // that connects during a lull isn't left stale when state later returns to a
+    // previously-broadcast value (its initial snapshot came straight from getState).
     if (msg === lastStateMsg) return;
     lastStateMsg = msg;
     for (const ws of wsClients) {
