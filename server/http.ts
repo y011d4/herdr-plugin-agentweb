@@ -122,6 +122,25 @@ function serveStatic(webRoot: string, urlPath: string, res: ServerResponse): voi
   stream.pipe(res);
 }
 
+interface RawPaneInfo {
+  agent?: string;
+  scroll?: { max_offset_from_bottom?: number; viewport_rows?: number };
+}
+
+// Whether a pane should receive forwarded SGR wheel events: it must run an
+// agent, have no terminal scrollback (a full-screen alt-screen app keeps none),
+// and actually paint most of the viewport. A normal pane whose output merely
+// fits the screen has few filled rows and must keep local scrolling, so wheel
+// bytes aren't injected as unexpected mouse sequences.
+function computeAppScroll(pane: RawPaneInfo | undefined, ansi: string): boolean {
+  if (!pane?.agent) return false;
+  const maxOffset = pane.scroll?.max_offset_from_bottom;
+  const viewportRows = pane.scroll?.viewport_rows;
+  if (maxOffset !== 0 || typeof viewportRows !== 'number' || viewportRows <= 0) return false;
+  const nonEmpty = ansi.split('\n').filter((l) => l.trim() !== '').length;
+  return nonEmpty >= viewportRows * 0.6;
+}
+
 export interface HttpServerResult {
   server: ReturnType<typeof createServer>;
   broadcastState: (state: NormalizedState) => void;
@@ -367,6 +386,7 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
       let watchedPaneId: string | null = null;
       let watchTimer: ReturnType<typeof setInterval> | null = null;
       let lastOutput: string | null = null;
+      let lastAppScroll: boolean | null = null;
       let readInFlight = false;
 
       const stopWatch = (): void => {
@@ -374,6 +394,7 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
         watchTimer = null;
         watchedPaneId = null;
         lastOutput = null;
+        lastAppScroll = null;
       };
 
       const pollWatchedPane = async (): Promise<void> => {
@@ -388,9 +409,17 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
             format: 'ansi',
           })) as { read?: { text?: string } };
           const ansi = result.read?.text ?? '';
-          if (paneId === watchedPaneId && ansi !== lastOutput && ws.readyState === WebSocket.OPEN) {
+          // Fresh scroll metadata (pane.get is a cheap single-pane query) drives
+          // the app-scroll decision authoritatively, so the phone never relies on
+          // stale snapshot fields or a fixed row threshold to tell a full-screen
+          // app apart from a normal pane whose output merely fits the screen.
+          const info = (await herdrClient.rpc('pane.get', { pane_id: paneId })) as { pane?: RawPaneInfo };
+          const appScroll = computeAppScroll(info.pane, ansi);
+          if (paneId === watchedPaneId && (ansi !== lastOutput || appScroll !== lastAppScroll)
+              && ws.readyState === WebSocket.OPEN) {
             lastOutput = ansi;
-            ws.send(JSON.stringify({ type: 'pane_output', paneId, ansi }));
+            lastAppScroll = appScroll;
+            ws.send(JSON.stringify({ type: 'pane_output', paneId, ansi, appScroll }));
           }
         } catch {
           // Transient herdr/read errors must not kill the watch — the client only

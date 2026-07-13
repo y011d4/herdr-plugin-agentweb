@@ -208,6 +208,7 @@ function handleWsMessage(msg: WsMessage): void {
     onAgentStatus(msg);
   } else if (msg.type === 'pane_output') {
     if (msg.paneId === activePaneId) {
+      appScrollPane = msg.appScroll; // server decides from fresh scroll metadata
       renderPaneOutput(msg.ansi);
     }
   } else if (msg.type === 'pane_gone') {
@@ -921,10 +922,6 @@ let historyRefreshing = false;
 // Full-screen apps (claude etc.) keep no terminal scrollback but scroll their
 // own view on SGR mouse wheel events — forward swipes through the bridge's
 // /scroll endpoint, which injects real wheel events into the pty.
-// A full-screen app fills most of the terminal; require at least this many
-// non-blank rows on the live screen before forwarding wheel gestures, so a
-// normal pane with a little output is never mistaken for one.
-const FULL_SCREEN_MIN_ROWS = 20;
 let appScrollPane = false;
 let wheelRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1008,19 +1005,10 @@ async function loadHistoryPrefix(): Promise<void> {
     const recentLines = (data.ansi ?? data.text ?? '').split('\n');
     const liveLineCount = lastLiveAnsi ? lastLiveAnsi.split('\n').length : 0;
     const prefix = recentLines.slice(0, Math.max(0, recentLines.length - liveLineCount)).join('\n');
-    // A full-screen app (alt-screen, e.g. Claude Code tui:fullscreen) keeps no
-    // terminal scrollback (empty prefix) yet paints most of the screen, and
-    // scrolls its own view on SGR wheel events — forward swipes to it. A normal
-    // agent pane whose output merely fits the screen also has an empty prefix
-    // but only a few filled rows; forwarding wheel bytes there would inject
-    // mouse sequences it doesn't expect, so require a nearly-full live screen
-    // too. Both signals are recomputed from fresh reads on every refresh, so
-    // they can't go stale when a pane enters full-screen or resizes.
-    const hasAgent = !!(activePaneId && findPane(activePaneId)?.pane.agent);
-    const liveNonEmpty = lastLiveAnsi
-      ? lastLiveAnsi.split('\n').filter(l => l.trim() !== '').length
-      : 0;
-    appScrollPane = !prefix && hasAgent && liveNonEmpty >= FULL_SCREEN_MIN_ROWS;
+    // appScrollPane is driven by the WS pane_output push (server-computed from
+    // fresh herdr scroll metadata) — nothing to recompute here. It only affects
+    // the history-start marker below; an empty prefix on a full-screen app shows
+    // no marker.
     // anchor by distance from the bottom: content only changes above the fold
     const fromBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight;
     historyEl.innerHTML = prefix

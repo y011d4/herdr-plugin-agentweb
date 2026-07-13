@@ -72,6 +72,9 @@ export interface WsPaneOutputMessage {
   type: 'pane_output';
   paneId: string;
   ansi: string;
+  // server-computed from fresh herdr scroll metadata: true for a full-screen app
+  // that should receive forwarded SGR wheel events instead of local scrolling.
+  appScroll: boolean;
 }
 
 export interface WsPaneGoneMessage {

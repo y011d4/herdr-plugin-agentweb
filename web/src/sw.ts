@@ -14,7 +14,7 @@ const sw = self as unknown as ServiceWorkerGlobalScope;
 
 // Bump on every release that changes any static asset: cached assets are only
 // refreshed when the service worker itself changes.
-const CACHE_VERSION = 'herdr-mobile-v25';
+const CACHE_VERSION = 'herdr-mobile-v26';
 
 const STATIC_ASSETS = [
   '/',
@@ -62,8 +62,11 @@ sw.addEventListener('fetch', (event: FetchEvent) => {
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
       return fetch(event.request).then((response) => {
-        // Cache successful GET responses for static content
-        if (response.ok && event.request.method === 'GET') {
+        // Cache successful GET responses for static content. Never cache a URL
+        // that carries a query string (e.g. /?token=…): the bearer token would
+        // be persisted in Cache Storage and survive "clear token & sign out".
+        // Old tokenized entries are dropped when CACHE_VERSION bumps (activate).
+        if (response.ok && event.request.method === 'GET' && !url.search) {
           const responseClone = response.clone();
           caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, responseClone));
         }
