@@ -266,8 +266,12 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
           jsonError(res, 400, 'invalid_params', 'text must be a string');
           return;
         }
+        if (body.enter !== undefined && typeof body.enter !== 'boolean') {
+          jsonError(res, 400, 'invalid_params', 'enter must be a boolean');
+          return;
+        }
         const keys = [...((body.keys as string[] | undefined) ?? [])];
-        if (body.enter) keys.push('enter');
+        if (body.enter === true) keys.push('enter'); // strict: a string like "false" must not submit
         const params: Record<string, unknown> = { pane_id: paneId };
         if (body.text != null) params.text = body.text;
         if (keys.length > 0) params.keys = keys;
