@@ -120,6 +120,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
     // clobber a status a concurrent event just set (see dispatchEvent).
     if (snapshotDepth === 0) {
       preBufferStatus = new Map();
+      replayedPanes = new Set();
       if (currentState) {
         // Record a baseline for every pane (agentless panes as 'unknown') so a
         // pane that gains an agent during the buffer window replays its real
@@ -141,7 +142,10 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
           if (!pane.agent || coverage.has(paneId)) continue;
           const from = prev._paneById.get(paneId)?.agent?.status ?? 'unknown';
           const to = pane.agent.status;
-          if (from !== to) onAgentStatus?.({ paneId, from, to, agent: pane.agent }, currentState);
+          if (from !== to) {
+            onAgentStatus?.({ paneId, from, to, agent: pane.agent }, currentState);
+            replayedPanes?.add(paneId); // buffered replay must not re-emit this
+          }
         }
       }
       // Deliver snapshot immediately (not debounced) so getState() callers see it
@@ -149,7 +153,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
       onState?.(currentState);
       return currentState;
     } finally {
-      if (--snapshotDepth === 0) { drainEvents(); preBufferStatus = null; }
+      if (--snapshotDepth === 0) { drainEvents(); preBufferStatus = null; replayedPanes = null; }
     }
   }
 
@@ -281,10 +285,13 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   // is a no-op when from===to) once every in-flight snapshot has settled.
   let snapshotDepth = 0;
   const eventBuffer: Array<[string, Record<string, unknown>]> = [];
-  // Per-pane agent status captured when buffering begins, so a coalesced replay
-  // can emit the true net transition (pre-buffer -> final) instead of a bogus one
-  // relative to whatever the snapshot happens to reflect.
+  // Per-pane agent status captured when buffering begins, so the buffered replay
+  // can reset a pane to its true pre-buffer status before replaying its events.
   let preBufferStatus: Map<string, string> | null = null;
+  // Panes whose transition a snapshot's own replay already emitted this buffering
+  // window; their buffered events must NOT be reset+re-emitted (that would
+  // duplicate the notification), so the drain leaves them at the snapshot status.
+  let replayedPanes: Set<string> | null = null;
 
   function dispatchEvent(eventName: string, data: Record<string, unknown>): void {
     if (snapshotDepth > 0) { eventBuffer.push([eventName, data]); return; }
@@ -313,6 +320,10 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
       }
     }
     for (const paneId of statusPanes) {
+      // A pane the snapshot replay already emitted for stays at the snapshot
+      // status: its buffered event continues from there rather than being reset,
+      // so a single transition isn't emitted twice.
+      if (replayedPanes?.has(paneId)) continue;
       const preStatus = preBufferStatus?.get(paneId);
       if (preStatus === undefined || !currentState) continue; // new pane / no baseline
       const { state } = applyEvent(
