@@ -6,9 +6,11 @@ mobile-first PWA:
 
 - Dashboard of all agents across all workspaces with live status
   (idle / working / **blocked** / done), blocked agents sorted to the top
-- Pane view with colored terminal output, text input, and quick keys
-  (Enter, Esc, Ctrl+C, arrows, y/n, …)
-- Live updates over WebSocket; notifications when an agent becomes blocked or done
+- Pane view: colored terminal output fitted to the phone width, pinch zoom,
+  scrollback by swiping up, multiline input, and quick keys
+  (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …)
+- Live updates over WebSocket (sub-second); notifications when an agent
+  becomes blocked or done — tap to jump to the pane, swipe right to dismiss
 - No accounts, no cloud, no third-party services. Everything stays on your machine
   and (recommended) inside your Tailscale tailnet.
 
@@ -71,6 +73,23 @@ the service worker and Web Notifications. Traffic never leaves the WireGuard
 tunnel; nothing is exposed to the public internet (don't use `tailscale funnel`).
 
 To stop publishing: `tailscale serve reset` (or check with `tailscale serve status`).
+
+## Pane view gestures
+
+- **Pinch** zooms the terminal font (4–24px); **double-tap** returns to
+  fit-to-width at the bottom. One finger pans.
+- **Swipe up** scrolls into the pane's history. For panes with terminal
+  scrollback this is instant and local (the last 1000 lines are preloaded).
+- Full-screen apps that keep no scrollback (e.g. Claude Code with
+  `"tui": "fullscreen"`) scroll **their own** view instead: swipes are
+  forwarded to the app as mouse-wheel events, with fling momentum. Expect a
+  short delay per step — the app repaints remotely.
+- While you read history, live updates pause; returning to the bottom (or
+  double-tapping) resumes them.
+
+Tip: Claude Code's `"tui": "fullscreen"` setting is what prevents scrollback
+from accumulating. Remove it (default renderer) and restarted sessions build
+terminal scrollback, giving you the smooth local scrolling path everywhere.
 
 ### Keybinding (optional)
 
