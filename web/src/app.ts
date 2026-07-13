@@ -660,8 +660,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       <div class="input-bar">
         <div class="input-row">
           <textarea id="pane-input" rows="1" placeholder="Send text…" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
-          <button class="input-send-btn" id="btn-send-enter">Send+&#x23CE;</button>
-          <button class="input-send-literal" id="btn-send-literal">Send</button>
+          <button class="input-send-btn" id="btn-send-enter">Send</button>
         </div>
         <div class="quickkey-row" id="quickkey-row"></div>
       </div>
@@ -672,8 +671,8 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   bindPinchZoom(terminalEl);
   bindTerminalScroll(terminalEl);
 
-  // Send buttons. Enter in the field inserts a newline — sending happens only
-  // via the buttons, so the phone keyboard can't fire off half-typed commands.
+  // Send button. Enter in the field inserts a newline — sending happens only
+  // via the button, so the phone keyboard can't fire off half-typed commands.
   const paneInput = document.getElementById('pane-input') as HTMLTextAreaElement;
 
   const autoGrow = (): void => {
@@ -692,17 +691,6 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     if (!text) return;
     try {
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true });
-      if (paneInput.value === text) clearInput(); // clear on success, but keep text typed mid-send
-      queuePaneEcho();
-    } catch (err) {
-      showToast('Send failed', (err as Error).message);
-    }
-  });
-  document.getElementById('btn-send-literal')!.addEventListener('click', async () => {
-    const text = paneInput.value;
-    if (!text) return;
-    try {
-      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text });
       if (paneInput.value === text) clearInput(); // clear on success, but keep text typed mid-send
       queuePaneEcho();
     } catch (err) {
