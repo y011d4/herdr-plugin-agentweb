@@ -20,10 +20,6 @@ export interface PaneNode {
   cwd: string | null;
   title: string | null;
   agent: AgentInfo | null;
-  // herdr scroll metadata (see server contract): noScrollback marks a pane with
-  // no terminal scrollback (alt-screen apps); viewportRows is the terminal height.
-  noScrollback: boolean;
-  viewportRows: number;
 }
 
 export interface TabNode {

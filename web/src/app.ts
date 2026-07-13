@@ -921,6 +921,10 @@ let historyRefreshing = false;
 // Full-screen apps (claude etc.) keep no terminal scrollback but scroll their
 // own view on SGR mouse wheel events — forward swipes through the bridge's
 // /scroll endpoint, which injects real wheel events into the pty.
+// A full-screen app fills most of the terminal; require at least this many
+// non-blank rows on the live screen before forwarding wheel gestures, so a
+// normal pane with a little output is never mistaken for one.
+const FULL_SCREEN_MIN_ROWS = 20;
 let appScrollPane = false;
 let wheelRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1004,19 +1008,19 @@ async function loadHistoryPrefix(): Promise<void> {
     const recentLines = (data.ansi ?? data.text ?? '').split('\n');
     const liveLineCount = lastLiveAnsi ? lastLiveAnsi.split('\n').length : 0;
     const prefix = recentLines.slice(0, Math.max(0, recentLines.length - liveLineCount)).join('\n');
-    // A full-screen app (alt-screen, e.g. Claude Code tui:fullscreen) scrolls
-    // its own view on SGR wheel events, so forward swipes to it. herdr reports
-    // no terminal scrollback for such panes (noScrollback), but a normal agent
-    // pane whose output merely fits the screen also has none — forwarding wheel
-    // bytes there injects mouse sequences it doesn't expect. A full-screen app
-    // also paints most of the viewport, so require a nearly-full screen too.
-    const watched = activePaneId ? findPane(activePaneId)?.pane : null;
+    // A full-screen app (alt-screen, e.g. Claude Code tui:fullscreen) keeps no
+    // terminal scrollback (empty prefix) yet paints most of the screen, and
+    // scrolls its own view on SGR wheel events — forward swipes to it. A normal
+    // agent pane whose output merely fits the screen also has an empty prefix
+    // but only a few filled rows; forwarding wheel bytes there would inject
+    // mouse sequences it doesn't expect, so require a nearly-full live screen
+    // too. Both signals are recomputed from fresh reads on every refresh, so
+    // they can't go stale when a pane enters full-screen or resizes.
+    const hasAgent = !!(activePaneId && findPane(activePaneId)?.pane.agent);
     const liveNonEmpty = lastLiveAnsi
       ? lastLiveAnsi.split('\n').filter(l => l.trim() !== '').length
       : 0;
-    const screenFull = !!watched && watched.viewportRows > 0
-      && liveNonEmpty >= watched.viewportRows * 0.6;
-    appScrollPane = !!watched?.agent && watched.noScrollback && screenFull;
+    appScrollPane = !prefix && hasAgent && liveNonEmpty >= FULL_SCREEN_MIN_ROWS;
     // anchor by distance from the bottom: content only changes above the fold
     const fromBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight;
     historyEl.innerHTML = prefix

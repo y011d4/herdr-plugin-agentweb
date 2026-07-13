@@ -55,27 +55,6 @@ describe('createState', () => {
     assert.equal(state.herdr.protocol, 16);
   });
 
-  it('normalizes herdr scroll metadata into noScrollback/viewportRows', () => {
-    const state = createState(makeSnapshot({
-      panes: [
-        { pane_id: 'w0:p1', workspace_id: 'w0', tab_id: 'w0:t1', agent: 'claude',
-          scroll: { max_offset_from_bottom: 0, viewport_rows: 78 } },
-        { pane_id: 'w0:p2', workspace_id: 'w0', tab_id: 'w0:t1',
-          scroll: { max_offset_from_bottom: 5581, viewport_rows: 40 } },
-        { pane_id: 'w0:p3', workspace_id: 'w0', tab_id: 'w0:t1' }, // no scroll field
-      ],
-    }));
-    const p1 = state._paneById.get('w0:p1')!;
-    const p2 = state._paneById.get('w0:p2')!;
-    const p3 = state._paneById.get('w0:p3')!;
-    assert.equal(p1.noScrollback, true);   // max_offset 0 → alt-screen / no scrollback
-    assert.equal(p1.viewportRows, 78);
-    assert.equal(p2.noScrollback, false);  // real scrollback present
-    assert.equal(p2.viewportRows, 40);
-    assert.equal(p3.noScrollback, true);   // missing scroll defaults safely
-    assert.equal(p3.viewportRows, 0);
-  });
-
   it('sets focused ids from snapshot', () => {
     const state = createState(makeSnapshot());
     assert.equal(state.focused.workspaceId, 'w0');

@@ -64,17 +64,12 @@ function normalizeAgent(pane: RawPane, nowMs: number): AgentInfo | null {
 }
 
 function normalizePane(pane: RawPane, nowMs: number): PaneNode {
-  const scroll = (pane.scroll ?? {}) as { max_offset_from_bottom?: unknown; viewport_rows?: unknown };
-  const maxOffset = typeof scroll.max_offset_from_bottom === 'number' ? scroll.max_offset_from_bottom : 0;
-  const viewportRows = typeof scroll.viewport_rows === 'number' ? scroll.viewport_rows : 0;
   return {
     paneId: pane.pane_id,
     focused: pane.focused || false,
     cwd: pane.foreground_cwd || pane.cwd || null,
     title: pane.title || null,
     agent: normalizeAgent(pane, nowMs),
-    noScrollback: maxOffset === 0,
-    viewportRows,
   };
 }
 

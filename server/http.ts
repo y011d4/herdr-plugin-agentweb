@@ -32,7 +32,9 @@ interface HerdrError extends Error {
 function mapHerdrError(err: HerdrError): number {
   const code = err.herdrCode;
   if (code === 'not_found') return 404;
-  if (code === 'invalid_params' || code === 'invalid_request') return 400;
+  // herdr returns a clean error (not a connection drop) for an unsupported key
+  // name in pane.send_input; surface it as a client error, not a 502.
+  if (code === 'invalid_params' || code === 'invalid_request' || code === 'invalid_key') return 400;
   return 502;
 }
 
