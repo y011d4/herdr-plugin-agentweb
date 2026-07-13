@@ -935,6 +935,9 @@ function bindPinchZoom(outputEl: HTMLElement): void {
 // Bumped on every pane-view render; async work captures it and bails if the
 // user navigated away, so stale fetches can't poison the next pane's view.
 let paneViewGen = 0;
+// Bumped whenever a newer screen is rendered (WS push or HTTP read), so an
+// in-flight HTTP read can drop its response if newer output arrived meanwhile.
+let outputSeq = 0;
 let terminalTouchActive = false; // a finger is on the terminal
 let pendingAnsi: string | null = null; // output received while unsafe to render
 let lastLiveAnsi = ''; // last rendered screen (for line counts and refits)
@@ -1086,6 +1089,7 @@ function renderPaneOutput(ansiStr: string): void {
   const outputEl = document.getElementById('terminal-output');
   const liveEl = document.getElementById('term-live');
   if (!outputEl || !liveEl) return;
+  outputSeq++; // newer screen content — invalidates any in-flight HTTP read
   const atBottom =
     outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight < 40;
   // Replacing the DOM under an active touch cancels the scroll gesture, and
@@ -1118,12 +1122,17 @@ async function refreshPaneOutput(): Promise<void> {
   if (!liveEl) return;
 
   const gen = paneViewGen;
+  const seq = outputSeq;
   const paneId = activePaneId;
   try {
     const data = await apiGet(
       `/api/panes/${encodeURIComponent(paneId)}/read?source=visible&lines=200&format=ansi`
     ) as Record<string, unknown>;
     if (gen !== paneViewGen || paneId !== activePaneId) return; // navigated away
+    // A newer screen (WS push or another read) rendered while this read was in
+    // flight — its response is stale, so drop it rather than overwrite the newer
+    // content with old output the server won't re-push.
+    if (outputSeq !== seq) return;
     // Keep app-scroll fresh on the HTTP fallback path (WS down); the server
     // computes it the same way it does for pane_output pushes.
     if (typeof data.appScroll === 'boolean') appScrollPane = data.appScroll;
