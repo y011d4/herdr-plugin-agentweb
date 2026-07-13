@@ -1085,9 +1085,12 @@ async function refreshPaneOutput(): Promise<void> {
   try {
     const data = await apiGet(
       `/api/panes/${encodeURIComponent(paneId)}/read?source=visible&lines=200&format=ansi`
-    ) as Record<string, string | null>;
+    ) as Record<string, unknown>;
     if (gen !== paneViewGen || paneId !== activePaneId) return; // navigated away
-    renderPaneOutput(data.ansi ?? data.text ?? '');
+    // Keep app-scroll fresh on the HTTP fallback path (WS down); the server
+    // computes it the same way it does for pane_output pushes.
+    if (typeof data.appScroll === 'boolean') appScrollPane = data.appScroll;
+    renderPaneOutput((data.ansi ?? data.text ?? '') as string);
   } catch (err) {
     const message = (err as Error).message;
     if (message === '401') return;

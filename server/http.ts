@@ -231,9 +231,17 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
           // Unwrap herdr's {type, read: {text, ...}} envelope to contract shape {text?} or {ansi?}.
           // herdr always puts the content in read.text; format=ansi means that text contains ANSI escapes.
           const inner = (result.read ?? result) as Record<string, unknown>;
-          const out = format === 'ansi'
-            ? { ansi: inner.text ?? null }
-            : { text: inner.text ?? null };
+          const text = (inner.text ?? null) as string | null;
+          const out: Record<string, unknown> = format === 'ansi' ? { ansi: text } : { text };
+          // For the live screen, attach the same server-side app-scroll decision
+          // the WS watch pushes, so the HTTP fallback (used while the socket is
+          // down) keeps wheel forwarding correct instead of stuck at false.
+          if (source === 'visible') {
+            try {
+              const info = (await herdrClient.rpc('pane.get', { pane_id: paneId })) as { pane?: RawPaneInfo };
+              out.appScroll = computeAppScroll(info.pane, text ?? '');
+            } catch { /* best-effort; omit appScroll if pane.get fails */ }
+          }
           jsonOk(res, out);
         } catch (err) {
           const herdrErr = err as HerdrError;
