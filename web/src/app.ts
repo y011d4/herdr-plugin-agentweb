@@ -180,6 +180,9 @@ function wsConnect(): void {
   });
 
   ws.addEventListener('close', () => {
+    // Ignore a delayed close from a socket we've already replaced or torn down at
+    // sign-out — otherwise it would revive polling/reconnect on the login screen.
+    if (wsSocket !== ws || !token) return;
     wsConnected = false;
     updateConnBadge();
     if (wsPingTimer) clearInterval(wsPingTimer);

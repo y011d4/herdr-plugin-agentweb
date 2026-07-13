@@ -39,7 +39,9 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   function safeParamsForLog(params: Record<string, unknown>): string {
     const parts: string[] = [];
     for (const k of ['pane_id', 'target', 'source', 'format']) {
-      if (typeof params[k] === 'string') parts.push(`${k}=${params[k] as string}`);
+      // JSON.stringify escapes control chars (ids come from decoded URL path
+      // segments) so a newline/escape can't forge or corrupt a log line.
+      if (typeof params[k] === 'string') parts.push(`${k}=${JSON.stringify(params[k])}`);
     }
     return parts.join(' ');
   }
@@ -114,23 +116,30 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   // created during a rebuild until the new subscription acks. Covered panes get
   // their changes live, so replaying them would duplicate.
   async function fetchSnapshot(replayMissed = false, coverage: Set<string> = subscribedPaneIds): Promise<NormalizedState> {
-    const result = await request('session.snapshot') as Record<string, unknown>;
-    const snap = (result.snapshot ?? result) as Record<string, unknown>;
-    const nowMs = Date.now();
-    const prev = currentState;
-    currentState = createState(snap as Parameters<typeof createState>[0], nowMs, currentState);
-    if (replayMissed && prev) {
-      for (const [paneId, pane] of currentState._paneById) {
-        if (!pane.agent || coverage.has(paneId)) continue;
-        const from = prev._paneById.get(paneId)?.agent?.status ?? 'unknown';
-        const to = pane.agent.status;
-        if (from !== to) onAgentStatus?.({ paneId, from, to, agent: pane.agent }, currentState);
+    // Hold live events while the snapshot RPC is in flight so applying it can't
+    // clobber a status a concurrent event just set (see dispatchEvent).
+    snapshotDepth++;
+    try {
+      const result = await request('session.snapshot') as Record<string, unknown>;
+      const snap = (result.snapshot ?? result) as Record<string, unknown>;
+      const nowMs = Date.now();
+      const prev = currentState;
+      currentState = createState(snap as Parameters<typeof createState>[0], nowMs, currentState);
+      if (replayMissed && prev) {
+        for (const [paneId, pane] of currentState._paneById) {
+          if (!pane.agent || coverage.has(paneId)) continue;
+          const from = prev._paneById.get(paneId)?.agent?.status ?? 'unknown';
+          const to = pane.agent.status;
+          if (from !== to) onAgentStatus?.({ paneId, from, to, agent: pane.agent }, currentState);
+        }
       }
+      // Deliver snapshot immediately (not debounced) so getState() callers see it
+      // right away, and so a flood of queued events can't starve the initial delivery.
+      onState?.(currentState);
+      return currentState;
+    } finally {
+      if (--snapshotDepth === 0) drainEvents();
     }
-    // Deliver snapshot immediately (not debounced) so getState() callers see it
-    // right away, and so a flood of queued events can't starve the initial delivery.
-    onState?.(currentState);
-    return currentState;
   }
 
   // ── subscribe connection ────────────────────────────────────────────────────
@@ -201,10 +210,15 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
             // change between the pre-subscribe snapshot and this ack is delivered
             // by neither the old nor the new subscription. Replay one more
             // snapshot against the coverage that was live before this ack to catch
-            // those, then adopt this subscription's coverage.
+            // those (buffering keeps it from clobbering live state), then adopt
+            // this subscription's coverage. On failure, reconnect so the gap is
+            // still replayed rather than silently swallowed by the new coverage.
             const prevCoverage = subscribedPaneIds;
             subscribedPaneIds = new Set(paneIds);
-            void fetchSnapshot(true, prevCoverage);
+            fetchSnapshot(true, prevCoverage).catch((err: Error) => {
+              console.error('[herdr-client] subscription reconcile failed:', err.message);
+              if (conn === subscribeConn && !destroyed) scheduleReconnect();
+            });
             onReady?.();
           }
           continue;
@@ -218,7 +232,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
         const data = (eventMsg.data || {}) as Record<string, unknown>;
         if (!eventName) continue;
 
-        handleEvent(eventName, data);
+        dispatchEvent(eventName, data);
       }
     });
 
@@ -244,6 +258,27 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
     });
 
     return conn;
+  }
+
+  // All subscription events flow through dispatchEvent so they can be held while
+  // a snapshot is in flight. Otherwise a snapshot's createState() reassignment
+  // could clobber a status a live event just applied — or emit a bogus reverse
+  // transition. Buffered events drain (in order, and idempotently — applyEvent
+  // is a no-op when from===to) once every in-flight snapshot has settled.
+  let snapshotDepth = 0;
+  const eventBuffer: Array<[string, Record<string, unknown>]> = [];
+
+  function dispatchEvent(eventName: string, data: Record<string, unknown>): void {
+    if (snapshotDepth > 0) { eventBuffer.push([eventName, data]); return; }
+    handleEvent(eventName, data);
+  }
+
+  function drainEvents(): void {
+    // one synchronous turn — apply everything buffered so far, in order
+    while (eventBuffer.length > 0) {
+      const [name, data] = eventBuffer.shift()!;
+      handleEvent(name, data);
+    }
   }
 
   function handleEvent(eventName: string, data: Record<string, unknown>): void {
