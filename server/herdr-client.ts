@@ -136,7 +136,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
     return subscriptions;
   }
 
-  function openSubscribeConnection(paneIds: string[]): Socket | undefined {
+  function openSubscribeConnection(paneIds: string[], onReady?: () => void): Socket | undefined {
     if (destroyed) return;
 
     const conn = createConnection(socketPath);
@@ -169,6 +169,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
             clearTimeout(ackTimer);
             setConnected(true);
             backoffMs = BACKOFF_INITIAL_MS;
+            onReady?.();
           }
           continue;
         }
@@ -195,6 +196,12 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
       if (conn === subscribeConn) {
         subscribeConn = null;
         setConnected(false);
+        // Reflect the drop in the cached state so /api/state and WS clients stop
+        // showing stale data as connected; the next snapshot restores connected.
+        if (currentState) {
+          currentState = { ...currentState, connected: false };
+          onState?.(currentState);
+        }
         scheduleReconnect();
       }
     });
@@ -234,10 +241,19 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
       try {
         await fetchSnapshot();
         const paneIds = getPaneIds(currentState!);
+        // Keep the old subscription alive until the new one is acknowledged so no
+        // events (agent status, notifications) are lost in the gap. Drop the old
+        // one once the new sub is ready — or if the new connection dies first,
+        // which would otherwise leave the old one a zombie feeding stale events.
         const oldConn = subscribeConn;
-        subscribeConn = openSubscribeConnection(paneIds) ?? null;
-        // close old after new is established
-        if (oldConn) oldConn.destroy();
+        let oldDropped = false;
+        const dropOld = (): void => {
+          if (!oldDropped && oldConn) { oldDropped = true; oldConn.destroy(); }
+        };
+        const newConn = openSubscribeConnection(paneIds, dropOld);
+        subscribeConn = newConn ?? null;
+        if (newConn) newConn.once('close', dropOld);
+        else dropOld();
       } catch (err) {
         console.error('[herdr-client] rebuild failed:', (err as Error).message);
         scheduleReconnect();

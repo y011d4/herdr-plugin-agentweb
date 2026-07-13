@@ -9,7 +9,6 @@ import type { HerdrClient, NormalizedState, StatusChange, Config } from './types
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
 const PANE_WATCH_INTERVAL_MS = 800; // server-side poll rate for watched panes
-const WATCH_MAX_ERRORS = 5; // consecutive watched-pane read failures before giving up
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -45,6 +44,12 @@ function jsonError(res: ServerResponse, status: number, code: string, message: s
 function jsonOk(res: ServerResponse, body: unknown): void {
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
+}
+
+// decodeURIComponent throws a URIError on malformed percent-encoding; return
+// null so callers can answer with a clean 400 instead of an unhandled rejection.
+function decodePathSegment(seg: string): string | null {
+  try { return decodeURIComponent(seg); } catch { return null; }
 }
 
 function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -169,7 +174,11 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
 
     const paneMatch = PANE_RE.exec(pathname);
     if (paneMatch) {
-      const paneId = decodeURIComponent(paneMatch[1]);
+      const paneId = decodePathSegment(paneMatch[1]);
+      if (paneId === null) {
+        jsonError(res, 400, 'invalid_params', 'malformed pane id');
+        return;
+      }
       const action = paneMatch[2];
 
       if (action === 'read' && method === 'GET') {
@@ -288,7 +297,11 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
 
     const agentMatch = AGENT_RE.exec(pathname);
     if (agentMatch) {
-      const target = decodeURIComponent(agentMatch[1]);
+      const target = decodePathSegment(agentMatch[1]);
+      if (target === null) {
+        jsonError(res, 400, 'invalid_params', 'malformed agent id');
+        return;
+      }
       const action = agentMatch[2];
 
       if (action === 'send' && method === 'POST') {
@@ -353,14 +366,12 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
       let watchTimer: ReturnType<typeof setInterval> | null = null;
       let lastOutput: string | null = null;
       let readInFlight = false;
-      let watchErrors = 0; // consecutive read failures; transient ones are tolerated
 
       const stopWatch = (): void => {
         if (watchTimer) clearInterval(watchTimer);
         watchTimer = null;
         watchedPaneId = null;
         lastOutput = null;
-        watchErrors = 0;
       };
 
       const pollWatchedPane = async (): Promise<void> => {
@@ -375,17 +386,17 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
             format: 'ansi',
           })) as { read?: { text?: string } };
           const ansi = result.read?.text ?? '';
-          watchErrors = 0;
           if (paneId === watchedPaneId && ansi !== lastOutput && ws.readyState === WebSocket.OPEN) {
             lastOutput = ansi;
             ws.send(JSON.stringify({ type: 'pane_output', paneId, ansi }));
           }
         } catch {
-          // Tolerate transient herdr/read errors — one failure must not kill the
-          // watch and silently freeze the view. Give up only after several
-          // consecutive failures (pane likely gone), by which point the state
-          // broadcast has dropped the pane and the client navigates away anyway.
-          if (paneId === watchedPaneId && ++watchErrors >= WATCH_MAX_ERRORS) stopWatch();
+          // Transient herdr/read errors must not kill the watch. The client only
+          // falls back to HTTP polling when the WebSocket drops, so stopping here
+          // would freeze the pane view for the rest of the session after even a
+          // few seconds of outage. Keep the interval running — the next
+          // successful read resumes pushes. The watch is torn down when the
+          // client unwatches, switches panes, or the socket closes.
         } finally {
           readInFlight = false;
         }
