@@ -118,6 +118,14 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   async function fetchSnapshot(replayMissed = false, coverage: Set<string> = subscribedPaneIds): Promise<NormalizedState> {
     // Hold live events while the snapshot RPC is in flight so applying it can't
     // clobber a status a concurrent event just set (see dispatchEvent).
+    if (snapshotDepth === 0) {
+      preBufferStatus = new Map();
+      if (currentState) {
+        for (const [id, p] of currentState._paneById) {
+          if (p.agent) preBufferStatus.set(id, p.agent.status);
+        }
+      }
+    }
     snapshotDepth++;
     try {
       const result = await request('session.snapshot') as Record<string, unknown>;
@@ -138,7 +146,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
       onState?.(currentState);
       return currentState;
     } finally {
-      if (--snapshotDepth === 0) drainEvents();
+      if (--snapshotDepth === 0) { drainEvents(); preBufferStatus = null; }
     }
   }
 
@@ -270,6 +278,10 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   // is a no-op when from===to) once every in-flight snapshot has settled.
   let snapshotDepth = 0;
   const eventBuffer: Array<[string, Record<string, unknown>]> = [];
+  // Per-pane agent status captured when buffering begins, so a coalesced replay
+  // can emit the true net transition (pre-buffer -> final) instead of a bogus one
+  // relative to whatever the snapshot happens to reflect.
+  let preBufferStatus: Map<string, string> | null = null;
 
   function dispatchEvent(eventName: string, data: Record<string, unknown>): void {
     if (snapshotDepth > 0) { eventBuffer.push([eventName, data]); return; }
@@ -277,23 +289,28 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   }
 
   function drainEvents(): void {
-    // One synchronous turn — apply everything buffered so far, in order. But for
-    // per-pane status events, only the LAST matters: applying an earlier one
-    // after the snapshot already advanced that pane would roll it back and emit a
-    // bogus reverse transition. Skip status events superseded by a later one for
-    // the same pane. (Event names are already normalized to underscore form.)
+    // One synchronous turn. First reset each pane that has buffered status changes
+    // back to its pre-buffer status (the snapshot may have advanced it) WITHOUT
+    // emitting, then replay every buffered event in order. handleEvent then emits
+    // each real transition — including intermediate blocked/done — and lands on
+    // the final status, with no rollback and no bogus reverse notifications.
+    // (Event names are already normalized to underscore form.)
     const buffered = eventBuffer.splice(0);
-    const lastStatusIdx = new Map<string, number>();
-    buffered.forEach(([name, data], i) => {
+    const statusPanes = new Set<string>();
+    for (const [name, data] of buffered) {
       if (name === 'pane_agent_status_changed' && typeof data.pane_id === 'string') {
-        lastStatusIdx.set(data.pane_id, i);
+        statusPanes.add(data.pane_id);
       }
-    });
-    buffered.forEach(([name, data], i) => {
-      if (name === 'pane_agent_status_changed' && typeof data.pane_id === 'string'
-          && lastStatusIdx.get(data.pane_id) !== i) return;
-      handleEvent(name, data);
-    });
+    }
+    for (const paneId of statusPanes) {
+      const preStatus = preBufferStatus?.get(paneId);
+      if (preStatus === undefined || !currentState) continue; // new pane / no baseline
+      const { state } = applyEvent(
+        currentState, 'pane_agent_status_changed', { pane_id: paneId, agent_status: preStatus }, Date.now(),
+      );
+      currentState = state; // reset only — the resulting change is intentionally not emitted
+    }
+    for (const [name, data] of buffered) handleEvent(name, data);
   }
 
   function handleEvent(eventName: string, data: Record<string, unknown>): void {
