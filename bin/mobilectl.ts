@@ -5,12 +5,13 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Walk up from the script's directory until a directory containing package.json
 // is found. This is necessary because this file runs from dist/bin/mobilectl.js,
 // so __dirname is dist/bin — not the project root.
 function findProjectRoot(): string {
-  let dir = path.dirname(new URL(import.meta.url).pathname);
+  let dir = path.dirname(fileURLToPath(import.meta.url));
   while (true) {
     if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
     const parent = path.dirname(dir);
@@ -89,6 +90,26 @@ function notify(title: string, body: string): void {
   spawnSync(herdr, ['notification', 'show', title, '--body', body], { stdio: 'ignore' });
 }
 
+function pidAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+// Synchronous sleep — this CLI is entirely synchronous; block the thread on a
+// throwaway SharedArrayBuffer for `ms` rather than busy-looping.
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// Wait until `pid` exits or the timeout elapses; returns true if it exited.
+function waitForExit(pid: number, timeoutMs: number): boolean {
+  const deadline = Date.now() + timeoutMs;
+  while (pidAlive(pid)) {
+    if (Date.now() >= deadline) return false;
+    sleepSync(100);
+  }
+  return true;
+}
+
 function start(): number {
   const daemon = alivePid(daemonPidFile());
   const fg = alivePid(runPidFile());
@@ -108,6 +129,15 @@ function start(): number {
   child.unref();
   fs.closeSync(log);
   fs.writeFileSync(daemonPidFile(), String(child.pid), { mode: 0o600 });
+  // Give the child a moment to bind the port; if it died immediately (e.g. a
+  // previous bridge still held the port) surface the failure instead of
+  // reporting a false success and leaving a stale pidfile behind.
+  sleepSync(400);
+  if (child.pid === undefined || !pidAlive(child.pid)) {
+    fs.rmSync(daemonPidFile(), { force: true });
+    console.error(`bridge failed to start; see ${logPath}`);
+    return 1;
+  }
   console.log(`bridge started (pid ${child.pid})`);
   printConnectInfo();
   console.log(`log: ${logPath}`);
@@ -125,6 +155,12 @@ function stop(): number {
     return 0;
   }
   process.kill(pid, 'SIGTERM');
+  // Wait for the process to actually release the port before returning, so a
+  // following start() doesn't race the dying bridge and die with EADDRINUSE.
+  if (!waitForExit(pid, 5000)) {
+    try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+    waitForExit(pid, 1000);
+  }
   fs.rmSync(daemon ? daemonPidFile() : runPidFile(), { force: true });
   console.log(`bridge stopped (pid ${pid})`);
   notify('herdr mobile stopped', `pid ${pid}`);

@@ -391,12 +391,20 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
             ws.send(JSON.stringify({ type: 'pane_output', paneId, ansi }));
           }
         } catch {
-          // Transient herdr/read errors must not kill the watch. The client only
-          // falls back to HTTP polling when the WebSocket drops, so stopping here
-          // would freeze the pane view for the rest of the session after even a
-          // few seconds of outage. Keep the interval running — the next
-          // successful read resumes pushes. The watch is torn down when the
-          // client unwatches, switches panes, or the socket closes.
+          // Transient herdr/read errors must not kill the watch — the client only
+          // falls back to HTTP polling when the socket drops, so stopping on a
+          // brief outage would freeze the view for the session. But a pane that
+          // has vanished from the snapshot is gone for good: stop polling it and
+          // tell the client to leave, rather than failing every 800ms forever.
+          if (paneId === watchedPaneId) {
+            const state = getState();
+            if (state && !state._paneById.has(paneId)) {
+              stopWatch();
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'pane_gone', paneId }));
+              }
+            }
+          }
         } finally {
           readInFlight = false;
         }

@@ -210,6 +210,11 @@ function handleWsMessage(msg: WsMessage): void {
     if (msg.paneId === activePaneId) {
       renderPaneOutput(msg.ansi);
     }
+  } else if (msg.type === 'pane_gone') {
+    if (msg.paneId === activePaneId) {
+      showToast('Pane closed', 'This pane no longer exists.');
+      navigate('#/agents');
+    }
   }
   // pong — no-op
 }
@@ -420,7 +425,13 @@ function handleRoute(): void {
     renderAgentsDashboard();
   } else if (hash.startsWith('#/pane/')) {
     const encoded = hash.slice('#/pane/'.length);
-    const paneId = decodeURIComponent(encoded);
+    let paneId: string;
+    try {
+      paneId = decodeURIComponent(encoded);
+    } catch {
+      navigate('#/agents'); // malformed pane hash — don't break routing
+      return;
+    }
     activePaneId = paneId;
     renderPaneDetail(paneId);
   } else if (hash === '#/settings') {

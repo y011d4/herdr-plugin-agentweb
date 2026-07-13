@@ -74,8 +74,14 @@ export interface WsPaneOutputMessage {
   ansi: string;
 }
 
+export interface WsPaneGoneMessage {
+  type: 'pane_gone';
+  paneId: string;
+}
+
 export type WsMessage =
   | WsStateMessage
   | WsAgentStatusMessage
   | WsPongMessage
-  | WsPaneOutputMessage;
+  | WsPaneOutputMessage
+  | WsPaneGoneMessage;
