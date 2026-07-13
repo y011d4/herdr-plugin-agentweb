@@ -270,7 +270,9 @@ async function qr(): Promise<number> {
     }
   }
 
-  const enc = spawnSync('qrencode', ['-t', 'UTF8', url], { encoding: 'utf8' });
+  // Feed the tokenized URL to qrencode via stdin, not argv — a command-line
+  // argument would expose the bearer token in process listings (ps).
+  const enc = spawnSync('qrencode', ['-t', 'UTF8'], { encoding: 'utf8', input: url });
   if (enc.status === 0) {
     console.log(enc.stdout);
   } else {

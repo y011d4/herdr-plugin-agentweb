@@ -417,12 +417,16 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
             format: 'ansi',
           })) as { read?: { text?: string } };
           const ansi = result.read?.text ?? '';
-          // Fresh scroll metadata (pane.get is a cheap single-pane query) drives
-          // the app-scroll decision authoritatively, so the phone never relies on
-          // stale snapshot fields or a fixed row threshold to tell a full-screen
-          // app apart from a normal pane whose output merely fits the screen.
-          const info = (await herdrClient.rpc('pane.get', { pane_id: paneId })) as { pane?: RawPaneInfo };
-          const appScroll = computeAppScroll(info.pane, ansi);
+          // Fresh scroll metadata (pane.get, a cheap single-pane query) drives the
+          // app-scroll decision. Fetch it in its own try so a metadata blip can't
+          // drop the output we already read — keep the last appScroll (or false)
+          // and still push the content, since the client stops polling while the
+          // socket is connected.
+          let appScroll = lastAppScroll ?? false;
+          try {
+            const info = (await herdrClient.rpc('pane.get', { pane_id: paneId })) as { pane?: RawPaneInfo };
+            appScroll = computeAppScroll(info.pane, ansi);
+          } catch { /* keep previous appScroll; pane.read already succeeded */ }
           if (paneId === watchedPaneId && (ansi !== lastOutput || appScroll !== lastAppScroll)
               && ws.readyState === WebSocket.OPEN) {
             lastOutput = ansi;

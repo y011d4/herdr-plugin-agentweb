@@ -926,6 +926,7 @@ let terminalTouchActive = false; // a finger is on the terminal
 let pendingAnsi: string | null = null; // output received while unsafe to render
 let lastLiveAnsi = ''; // last rendered screen (for line counts and refits)
 let historyFetchedAt = 0;
+let lastPrefixEmpty = false; // last prefix fetch found no scrollback
 let historyRefreshing = false;
 // Full-screen apps (claude etc.) keep no terminal scrollback but scroll their
 // own view on SGR mouse wheel events — forward swipes through the bridge's
@@ -993,6 +994,7 @@ function startFling(velocityPxMs: number): void {
 
 const HISTORY_LINES = 1000;
 const HISTORY_REFRESH_MS = 10_000;
+const EMPTY_HISTORY_RETRY_MS = 1_500; // shorter retry when the last prefix was empty
 
 // Fetch the scrollback and place everything ABOVE the current screen into
 // #term-history. source=recent ends with the lines currently on screen, so
@@ -1022,11 +1024,12 @@ async function loadHistoryPrefix(): Promise<void> {
     historyEl.innerHTML = prefix
       ? ansiToHtml(prefix)
       : (appScrollPane ? '' : '<div class="history-start">&#183; start of output &#183;</div>');
-    // Only treat the prefix as cached when there actually was scrollback. Caching
-    // an empty result would suppress refreshes for the next 10s, so lines that
-    // scroll off the live screen within that window would stay hidden behind the
-    // "start of output" marker.
-    if (prefix) historyFetchedAt = Date.now();
+    // Throttle refetches, but retry an empty result much sooner (see the scroll
+    // handler): output may scroll off the live screen and become fetchable
+    // history well before the normal 10s window, yet a per-scroll refetch would
+    // flood the bridge.
+    historyFetchedAt = Date.now();
+    lastPrefixEmpty = !prefix;
     outputEl.scrollTop = outputEl.scrollHeight - fromBottom - outputEl.clientHeight;
   } catch {
     // scrollback is best-effort; the live screen keeps working without it
@@ -1050,9 +1053,11 @@ function bindTerminalScroll(outputEl: HTMLElement): void {
     const fromBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight;
     if (fromBottom < 40) {
       flushPendingOutput();
-    } else if (Date.now() - historyFetchedAt > HISTORY_REFRESH_MS) {
-      // reading scrollback — freshen the prefix occasionally so lines that
-      // scrolled off the live screen since the last fetch appear
+    } else if (Date.now() - historyFetchedAt >
+               (lastPrefixEmpty ? EMPTY_HISTORY_RETRY_MS : HISTORY_REFRESH_MS)) {
+      // reading scrollback — freshen the prefix so lines that scrolled off the
+      // live screen since the last fetch appear. An empty prefix is retried
+      // sooner so newly-produced history shows up without a 10s wait.
       void loadHistoryPrefix();
     }
   }, { passive: true });
