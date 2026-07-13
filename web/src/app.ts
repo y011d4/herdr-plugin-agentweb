@@ -1022,6 +1022,10 @@ async function loadHistoryPrefix(): Promise<void> {
       `/api/panes/${encodeURIComponent(paneId)}/read?source=recent&lines=${HISTORY_LINES}&format=ansi`
     ) as Record<string, string | null>;
     if (gen !== paneViewGen || paneId !== activePaneId) return; // navigated away
+    // A gesture may have started while the fetch was in flight; replacing the
+    // history DOM / adjusting scrollTop now would cancel or jump it. Bail and
+    // leave the cache dirty so the next above-bottom scroll refetches.
+    if (terminalTouchActive) { historyFetchedAt = 0; return; }
     const outputEl = document.getElementById('terminal-output');
     const historyEl = document.getElementById('term-history');
     if (!outputEl || !historyEl) return;
