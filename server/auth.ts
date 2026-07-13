@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import type { IncomingMessage } from 'node:http';
 
@@ -19,6 +19,10 @@ export function initAuth(stateDir: string): string {
     hex = randomBytes(16).toString('hex');
     writeFileSync(tokenPath, hex, { mode: 0o600 });
   }
+  // The mode option only applies when a file is created; an existing token file
+  // may have looser permissions. The token is a bearer credential, so tighten it
+  // on every init — other local users must not be able to read it.
+  chmodSync(tokenPath, 0o600);
 
   tokenBuf = Buffer.from(hex, 'utf8');
   return hex;

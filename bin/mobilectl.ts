@@ -139,6 +139,9 @@ function start(): number {
   }
   const logPath = path.join(stateDir(), 'bridge.log');
   const log = fs.openSync(logPath, 'a', 0o600);
+  // mode on open only applies when the file is created; the server writes the
+  // tokenized connect URL to this log, so tighten an existing log's perms too.
+  fs.chmodSync(logPath, 0o600);
   const child = spawn(process.execPath, [mainJs], {
     cwd: projectRoot,
     detached: true,

@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, chmodSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -74,6 +74,21 @@ describe('auth', () => {
     const second = readFileSync(join(tmpDir, 'token'), 'utf8').trim();
     assert.equal(token, second);
     assert.ok(auth2.verifyToken(token));
+  });
+
+  it('repairs a pre-existing token file with loose permissions', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'herdr-mobile-auth-perms-'));
+    try {
+      const existing = 'cd'.repeat(16); // valid 32-hex token
+      writeFileSync(join(dir, 'token'), existing);
+      chmodSync(join(dir, 'token'), 0o644); // world/group-readable, as if pre-existing
+      await freshAuth(dir);
+      // token value preserved, but the mode must be tightened to 0600
+      assert.equal(readFileSync(join(dir, 'token'), 'utf8').trim(), existing);
+      assert.equal(statSync(join(dir, 'token')).mode & 0o777, 0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
