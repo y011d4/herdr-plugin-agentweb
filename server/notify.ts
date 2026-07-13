@@ -62,7 +62,7 @@ export async function sendNtfyNotification(change: StatusChange, state: Normaliz
     : `pane ${change.paneId}`;
 
   try {
-    await fetch(notifyUrl, {
+    const res = await fetch(notifyUrl, {
       method: 'POST',
       headers: {
         'Title': title,
@@ -70,6 +70,9 @@ export async function sendNtfyNotification(change: StatusChange, state: Normaliz
       },
       body,
     });
+    // fetch only rejects on network errors; an HTTP 4xx/5xx from ntfy still
+    // resolves, so check the status or a broken notify_url would look healthy.
+    if (!res.ok) throw new Error(`ntfy responded ${res.status}`);
     ntfyErrorLogged = false;
   } catch (err) {
     if (!ntfyErrorLogged) {

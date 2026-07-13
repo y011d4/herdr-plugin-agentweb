@@ -52,6 +52,21 @@ function readConfig(): Record<string, unknown> {
 const daemonPidFile = () => path.join(stateDir(), 'bridge.pid');
 const runPidFile = () => path.join(stateDir(), 'bridge-run.pid');
 
+// A live PID from a pidfile isn't proof it's still our bridge — the file can be
+// stale and the PID reused by an unrelated same-user process. Best-effort verify
+// via `ps` that the process is still running our bridge entry (main.js/main.ts,
+// how both start() and run() launch it). If `ps` is unavailable or gives no
+// output, fall back to trusting the PID rather than risk ignoring a real bridge.
+function looksLikeBridge(pid: number): boolean {
+  const ps = spawnSync('ps', ['-p', String(pid), '-o', 'args='], { encoding: 'utf8' });
+  if (ps.status !== 0 || typeof ps.stdout !== 'string') return true;
+  const cmd = ps.stdout.trim();
+  if (!cmd) return true;
+  const mainTs = path.join(projectRoot, 'server', 'main.ts');
+  const mainJsBuilt = path.join(projectRoot, 'dist', 'server', 'main.js');
+  return cmd.includes(mainJsBuilt) || cmd.includes(mainTs);
+}
+
 function alivePid(file: string): number | null {
   let pid: number;
   try {
@@ -156,12 +171,17 @@ function stop(): number {
   }
   process.kill(pid, 'SIGTERM');
   // Wait for the process to actually release the port before returning, so a
-  // following start() doesn't race the dying bridge and die with EADDRINUSE.
-  if (!waitForExit(pid, 5000)) {
-    try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
-    waitForExit(pid, 1000);
-  }
+  // following start() doesn't race the dying bridge into EADDRINUSE. Do NOT
+  // escalate to SIGKILL: a stale pidfile's PID may have been reused by an
+  // unrelated same-user process, and force-killing that is worse than a slow
+  // stop. If SIGTERM doesn't take within the timeout, warn and clear the pidfile.
+  const exited = waitForExit(pid, 5000);
   fs.rmSync(daemon ? daemonPidFile() : runPidFile(), { force: true });
+  if (!exited) {
+    console.error(`bridge (pid ${pid}) did not exit within 5s of SIGTERM; not force-killing`);
+    notify('herdr mobile stop timed out', `pid ${pid}`);
+    return 1;
+  }
   console.log(`bridge stopped (pid ${pid})`);
   notify('herdr mobile stopped', `pid ${pid}`);
   return 0;
