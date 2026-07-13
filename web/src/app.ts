@@ -180,12 +180,14 @@ function wsConnect(): void {
   });
 
   ws.addEventListener('close', () => {
-    // Ignore a delayed close from a socket we've already replaced or torn down at
-    // sign-out — otherwise it would revive polling/reconnect on the login screen.
-    if (wsSocket !== ws || !token) return;
+    // A delayed close from a socket we've already replaced isn't ours to act on.
+    if (wsSocket !== ws) return;
+    // Always clean up this socket's connection state...
     wsConnected = false;
     updateConnBadge();
     if (wsPingTimer) clearInterval(wsPingTimer);
+    // ...but don't revive polling/reconnect once signed out (e.g. after a 401).
+    if (!token) return;
     startStatePoll();
     scheduleWsReconnect();
   });

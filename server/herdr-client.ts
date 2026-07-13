@@ -217,7 +217,10 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
             subscribedPaneIds = new Set(paneIds);
             fetchSnapshot(true, prevCoverage).catch((err: Error) => {
               console.error('[herdr-client] subscription reconcile failed:', err.message);
-              if (conn === subscribeConn && !destroyed) scheduleReconnect();
+              // Drop this subscription so its close handler clears coverage and
+              // reconnects: the reconnect's snapshot then replays the gap, which
+              // the already-adopted new coverage would otherwise skip.
+              if (conn === subscribeConn && !destroyed) conn.destroy();
             });
             onReady?.();
           }
@@ -274,11 +277,23 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   }
 
   function drainEvents(): void {
-    // one synchronous turn — apply everything buffered so far, in order
-    while (eventBuffer.length > 0) {
-      const [name, data] = eventBuffer.shift()!;
+    // One synchronous turn — apply everything buffered so far, in order. But for
+    // per-pane status events, only the LAST matters: applying an earlier one
+    // after the snapshot already advanced that pane would roll it back and emit a
+    // bogus reverse transition. Skip status events superseded by a later one for
+    // the same pane. (Event names are already normalized to underscore form.)
+    const buffered = eventBuffer.splice(0);
+    const lastStatusIdx = new Map<string, number>();
+    buffered.forEach(([name, data], i) => {
+      if (name === 'pane_agent_status_changed' && typeof data.pane_id === 'string') {
+        lastStatusIdx.set(data.pane_id, i);
+      }
+    });
+    buffered.forEach(([name, data], i) => {
+      if (name === 'pane_agent_status_changed' && typeof data.pane_id === 'string'
+          && lastStatusIdx.get(data.pane_id) !== i) return;
       handleEvent(name, data);
-    }
+    });
   }
 
   function handleEvent(eventName: string, data: Record<string, unknown>): void {
