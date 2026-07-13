@@ -677,28 +677,28 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   };
   paneInput.addEventListener('input', autoGrow);
 
-  const takeText = (): string => {
-    const text = paneInput.value;
+  const clearInput = (): void => {
     paneInput.value = '';
     autoGrow();
-    return text;
   };
 
   document.getElementById('btn-send-enter')!.addEventListener('click', async () => {
-    const text = takeText();
+    const text = paneInput.value;
     if (!text) return;
     try {
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true });
+      clearInput(); // clear only after a successful send, so a failure keeps the text
       queuePaneEcho();
     } catch (err) {
       showToast('Send failed', (err as Error).message);
     }
   });
   document.getElementById('btn-send-literal')!.addEventListener('click', async () => {
-    const text = takeText();
+    const text = paneInput.value;
     if (!text) return;
     try {
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text });
+      clearInput(); // clear only after a successful send, so a failure keeps the text
       queuePaneEcho();
     } catch (err) {
       showToast('Send failed', (err as Error).message);

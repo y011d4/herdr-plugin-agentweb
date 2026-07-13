@@ -94,20 +94,23 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
 
   // ── snapshot ────────────────────────────────────────────────────────────────
 
-  async function fetchSnapshot(emitStatusChanges = false): Promise<NormalizedState> {
+  // Replay agent-status changes from a fresh snapshot for events that live
+  // subscriptions missed. 'all' — reconnect, the subscription was fully down.
+  // 'new-only' — pane rebuild: the old subscription still delivers changes for
+  // existing panes, but never covered panes created during the gap. 'none' —
+  // initial connect (nothing to diff against).
+  async function fetchSnapshot(replay: 'all' | 'new-only' | 'none' = 'none'): Promise<NormalizedState> {
     const result = await request('session.snapshot') as Record<string, unknown>;
     const snap = (result.snapshot ?? result) as Record<string, unknown>;
     const nowMs = Date.now();
     const prev = currentState;
     currentState = createState(snap as Parameters<typeof createState>[0], nowMs, currentState);
-    // A subscription outage swallows live agent-status events. On reconnect, diff
-    // the snapshot against the pre-reconnect state and emit the changes so
-    // blocked/done notifications aren't lost. Skipped on the pane-rebuild path,
-    // where the old subscription is still delivering those events live.
-    if (emitStatusChanges && prev) {
+    if (replay !== 'none' && prev) {
       for (const [paneId, pane] of currentState._paneById) {
         if (!pane.agent) continue;
-        const from = prev._paneById.get(paneId)?.agent?.status ?? 'unknown';
+        const before = prev._paneById.get(paneId);
+        if (replay === 'new-only' && before) continue; // existing pane: old subscription covers it
+        const from = before?.agent?.status ?? 'unknown';
         const to = pane.agent.status;
         if (from !== to) onAgentStatus?.({ paneId, from, to, agent: pane.agent }, currentState);
       }
@@ -252,7 +255,9 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
     rebuildTimer = setTimeout(async () => {
       rebuildTimer = null;
       try {
-        await fetchSnapshot();
+        // replay status for panes created during the rebuild — the old
+        // subscription never covered them, so their changes are snapshot-only
+        await fetchSnapshot('new-only');
         const paneIds = getPaneIds(currentState!);
         // Keep the old subscription alive until the new one is acknowledged so no
         // events (agent status, notifications) are lost in the gap. Drop the old
@@ -294,9 +299,9 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   async function connect(): Promise<void> {
     if (destroyed) return;
     try {
-      // emit status changes missed while the subscription was down (no-op on the
-      // very first connect, where there is no previous state to diff against)
-      await fetchSnapshot(true);
+      // replay status changes missed while the subscription was down (no-op on
+      // the very first connect, where there is no previous state to diff against)
+      await fetchSnapshot('all');
       const paneIds = getPaneIds(currentState!);
       if (subscribeConn) subscribeConn.destroy();
       subscribeConn = openSubscribeConnection(paneIds) ?? null;
