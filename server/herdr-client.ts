@@ -121,8 +121,11 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
     if (snapshotDepth === 0) {
       preBufferStatus = new Map();
       if (currentState) {
+        // Record a baseline for every pane (agentless panes as 'unknown') so a
+        // pane that gains an agent during the buffer window replays its real
+        // transition from unknown instead of being reset to nothing.
         for (const [id, p] of currentState._paneById) {
-          if (p.agent) preBufferStatus.set(id, p.agent.status);
+          preBufferStatus.set(id, p.agent?.status ?? 'unknown');
         }
       }
     }
@@ -295,6 +298,13 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
     // each real transition — including intermediate blocked/done — and lands on
     // the final status, with no rollback and no bogus reverse notifications.
     // (Event names are already normalized to underscore form.)
+    //
+    // Accepted limitation: if a pane changes status 2+ times within the same
+    // in-flight reconnect/rebuild snapshot window, the snapshot's own net replay
+    // can overlap this one and mis-order or duplicate a single notification. That
+    // needs multiple sub-millisecond status changes during a snapshot, which real
+    // agents never produce; full correctness would require drain-time
+    // notification coordination or herdr event revision ordering.
     const buffered = eventBuffer.splice(0);
     const statusPanes = new Set<string>();
     for (const [name, data] of buffered) {
