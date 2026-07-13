@@ -36,6 +36,7 @@ herdr server
 git clone https://github.com/y011d4/herdr-plugin-mobile
 cd herdr-plugin-mobile
 npm install                      # only dependency: ws
+npm run build                    # generate dist/ — `herdr plugin link` does not run the manifest build
 herdr plugin link "$(pwd)"
 ```
 

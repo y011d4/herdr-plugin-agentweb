@@ -703,7 +703,12 @@ async function renderPaneDetail(paneId: string): Promise<void> {
 
   // Current screen first (small, fast), then the scrollback above it so the
   // view is continuously scrollable from the very first swipe.
+  const gen = paneViewGen;
   await refreshPaneOutput();
+  // If the user switched panes while the first read was in flight, this old
+  // continuation must not run loadHistoryPrefix against the new pane — it would
+  // slice the recent buffer with lastLiveAnsi='' and duplicate the screen.
+  if (gen !== paneViewGen || paneId !== activePaneId) return;
   void loadHistoryPrefix();
 
   // Start polling while this pane is visible
@@ -892,6 +897,9 @@ function bindPinchZoom(outputEl: HTMLElement): void {
     }
 
     if (appScrollPane && singleFingerGesture) {
+      // A pause before lifting means the last recorded velocity is stale — don't
+      // fling off an earlier fast move the user has already stopped.
+      if (performance.now() - lastMoveAt > 100) touchVelocity = 0;
       startFling(touchVelocity);
     }
     flushPendingOutput();
