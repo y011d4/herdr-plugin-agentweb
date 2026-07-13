@@ -77,10 +77,14 @@ function alivePid(file: string): number | null {
   if (!Number.isInteger(pid) || pid <= 0) return null;
   try {
     process.kill(pid, 0);
-    return pid;
   } catch {
     return null;
   }
+  if (!looksLikeBridge(pid)) {
+    fs.rmSync(file, { force: true }); // stale pidfile whose PID was reused
+    return null;
+  }
+  return pid;
 }
 
 function baseUrl(): string {
