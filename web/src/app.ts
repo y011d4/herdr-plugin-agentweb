@@ -898,8 +898,8 @@ function bindPinchZoom(outputEl: HTMLElement): void {
         // double-tap (two stationary taps): back to the fitted bottom
         lastTapEndAt = 0;
         paneFontPx = null;
-        pendingAnsi = null;
         outputEl.scrollTop = outputEl.scrollHeight;
+        flushPendingOutput(); // render any deferred screen now we're back at the bottom
         void refreshPaneOutput();
         return;
       }
@@ -961,6 +961,7 @@ let wheelFlushTimer: ReturnType<typeof setTimeout> | null = null;
 let lastWheelRefreshAt = 0;
 
 function queuePaneWheel(up: boolean): void {
+  if (!appScrollPane) return; // app-scroll off — never queue SGR wheels for a normal pane
   wheelQueue += up ? 1 : -1;
   if (!wheelFlushTimer) {
     wheelFlushTimer = setTimeout(() => { void flushWheelQueue(); }, 70);
@@ -969,6 +970,9 @@ function queuePaneWheel(up: boolean): void {
 
 async function flushWheelQueue(): Promise<void> {
   wheelFlushTimer = null;
+  // app-scroll may have turned off (pane left full-screen) since these were
+  // queued — drop them so we don't inject SGR wheel bytes into a normal pane.
+  if (!appScrollPane) { wheelQueue = 0; stopFling(); return; }
   if (!activePaneId || wheelQueue === 0) return;
   const direction = wheelQueue > 0 ? 'up' : 'down';
   const steps = Math.min(30, Math.abs(wheelQueue));
@@ -1003,6 +1007,7 @@ function startFling(velocityPxMs: number): void {
   let v = Math.max(-3, Math.min(3, velocityPxMs));
   if (Math.abs(v) < 0.4) return;
   flingTimer = setInterval(() => {
+    if (!appScrollPane) { stopFling(); return; } // pane left full-screen mid-fling
     v *= 0.82;
     const dist = v * 80;
     const steps = Math.floor(Math.abs(dist) / WHEEL_STEP_PX);
@@ -1019,7 +1024,11 @@ const EMPTY_HISTORY_RETRY_MS = 1_500; // shorter retry when the last prefix was 
 // #term-history. source=recent ends with the lines currently on screen, so
 // the live section's line count is dropped from its tail to avoid the overlap.
 async function loadHistoryPrefix(): Promise<void> {
-  if (!activePaneId || historyRefreshing || terminalTouchActive) return;
+  // Requires a live screen: source=recent ends with the current screen, and
+  // without lastLiveAnsi we can't trim it off, so we'd duplicate it into history.
+  // (Bails harmlessly when the first pane read hasn't rendered yet; historyFetchedAt
+  // stays 0 so the next above-bottom scroll retries once live output exists.)
+  if (!activePaneId || historyRefreshing || terminalTouchActive || !lastLiveAnsi) return;
   const gen = paneViewGen;
   const paneId = activePaneId;
   historyRefreshing = true;
