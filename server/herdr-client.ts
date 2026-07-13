@@ -34,6 +34,16 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
     }
   }
 
+  // Only non-sensitive identifiers reach the logs — never text/keys/prompts,
+  // which pane.send_input and agent.send carry and bridge.log would persist.
+  function safeParamsForLog(params: Record<string, unknown>): string {
+    const parts: string[] = [];
+    for (const k of ['pane_id', 'target', 'source', 'format']) {
+      if (typeof params[k] === 'string') parts.push(`${k}=${params[k] as string}`);
+    }
+    return parts.join(' ');
+  }
+
   // ── single-request RPC ──────────────────────────────────────────────────────
 
   function request(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
@@ -79,7 +89,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
         if (!settled) {
           settled = true;
           clearTimeout(timer);
-          console.error(`[herdr-client] rpc ${method} error: ${err.message} params=${JSON.stringify(params).slice(0, 200)}`);
+          console.error(`[herdr-client] rpc ${method} error: ${err.message} ${safeParamsForLog(params)}`);
           reject(err);
         }
       });
@@ -88,7 +98,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
         if (!settled) {
           settled = true;
           clearTimeout(timer);
-          console.error(`[herdr-client] rpc ${method} closed without response params=${JSON.stringify(params).slice(0, 200)}`);
+          console.error(`[herdr-client] rpc ${method} closed without response ${safeParamsForLog(params)}`);
           reject(new Error('connection closed'));
         }
       });
@@ -103,7 +113,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   // pane right after a full reconnect (coverage cleared on drop), and panes
   // created during a rebuild until the new subscription acks. Covered panes get
   // their changes live, so replaying them would duplicate.
-  async function fetchSnapshot(replayMissed = false): Promise<NormalizedState> {
+  async function fetchSnapshot(replayMissed = false, coverage: Set<string> = subscribedPaneIds): Promise<NormalizedState> {
     const result = await request('session.snapshot') as Record<string, unknown>;
     const snap = (result.snapshot ?? result) as Record<string, unknown>;
     const nowMs = Date.now();
@@ -111,7 +121,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
     currentState = createState(snap as Parameters<typeof createState>[0], nowMs, currentState);
     if (replayMissed && prev) {
       for (const [paneId, pane] of currentState._paneById) {
-        if (!pane.agent || subscribedPaneIds.has(paneId)) continue;
+        if (!pane.agent || coverage.has(paneId)) continue;
         const from = prev._paneById.get(paneId)?.agent?.status ?? 'unknown';
         const to = pane.agent.status;
         if (from !== to) onAgentStatus?.({ paneId, from, to, agent: pane.agent }, currentState);
@@ -187,7 +197,14 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
             clearTimeout(ackTimer);
             setConnected(true);
             backoffMs = BACKOFF_INITIAL_MS;
-            subscribedPaneIds = new Set(paneIds); // this subscription is now the acknowledged coverage
+            // Subscriptions are future-only (verified against herdr): a status
+            // change between the pre-subscribe snapshot and this ack is delivered
+            // by neither the old nor the new subscription. Replay one more
+            // snapshot against the coverage that was live before this ack to catch
+            // those, then adopt this subscription's coverage.
+            const prevCoverage = subscribedPaneIds;
+            subscribedPaneIds = new Set(paneIds);
+            void fetchSnapshot(true, prevCoverage);
             onReady?.();
           }
           continue;
@@ -270,13 +287,27 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
         // which would otherwise leave the old one a zombie feeding stale events.
         const oldConn = subscribeConn;
         let oldDropped = false;
+        let newAcked = false;
         const dropOld = (): void => {
           if (!oldDropped && oldConn) { oldDropped = true; oldConn.destroy(); }
         };
-        const newConn = openSubscribeConnection(paneIds, dropOld);
+        const newConn = openSubscribeConnection(paneIds, () => { newAcked = true; dropOld(); });
         subscribeConn = newConn ?? null;
         if (newConn) newConn.once('close', dropOld);
         else dropOld();
+        // If the old subscription drops on its own before the new one is
+        // acknowledged, coverage for the existing panes is lost while the
+        // replacement isn't live yet. subscribeConn already points at newConn, so
+        // the old conn's own close handler ignores it — force a reconnect, which
+        // re-snapshots and replays the gap.
+        if (oldConn) {
+          oldConn.once('close', () => {
+            if (!oldDropped && !newAcked && !destroyed) {
+              subscribedPaneIds = new Set();
+              scheduleReconnect();
+            }
+          });
+        }
       } catch (err) {
         console.error('[herdr-client] rebuild failed:', (err as Error).message);
         scheduleReconnect();
