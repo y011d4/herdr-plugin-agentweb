@@ -785,16 +785,19 @@ async function initChatAvailability(paneId: string): Promise<void> {
     if (gen !== paneViewGen || paneId !== activePaneId) return;
     chatAvailable = data.available;
     showViewToggle(chatAvailable);
-    if (chatAvailable && preferredView() === 'chat') switchToChat(data);
+    if (chatAvailable && preferredView() === 'chat') switchToChat(data, false);
   } catch {
     // leave the terminal view; toggle stays hidden
   }
 }
 
-function switchToChat(initial?: TranscriptResponse): void {
+// persist=true only for an explicit user toggle; automatic switches (honoring an
+// existing preference, or falling back on a transient transcript miss) must not
+// rewrite the stored preference.
+function switchToChat(initial?: TranscriptResponse, persist = true): void {
   if (!chatAvailable || !activePaneId) return;
   paneViewMode = 'chat';
-  localStorage.setItem(STORAGE_VIEW, 'chat');
+  if (persist) localStorage.setItem(STORAGE_VIEW, 'chat');
   document.getElementById('terminal-output')?.style.setProperty('display', 'none');
   document.getElementById('chat-log')?.style.setProperty('display', '');
   updateViewToggleLabel();
@@ -808,9 +811,9 @@ function switchToChat(initial?: TranscriptResponse): void {
   wsSendWatch(); // server: stop pane watch, start transcript watch
 }
 
-function switchToTerminal(): void {
+function switchToTerminal(persist = true): void {
   paneViewMode = 'terminal';
-  localStorage.setItem(STORAGE_VIEW, 'terminal');
+  if (persist) localStorage.setItem(STORAGE_VIEW, 'terminal');
   document.getElementById('chat-log')?.style.setProperty('display', 'none');
   document.getElementById('terminal-output')?.style.setProperty('display', '');
   updateViewToggleLabel();
@@ -825,7 +828,7 @@ async function loadChatInitial(): Promise<void> {
   try {
     const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript`) as TranscriptResponse;
     if (gen !== paneViewGen || paneId !== activePaneId || paneViewMode !== 'chat') return;
-    if (!data.available) { chatAvailable = false; showViewToggle(false); switchToTerminal(); return; }
+    if (!data.available) { chatAvailable = false; showViewToggle(false); switchToTerminal(false); return; }
     chatSessionId = data.sessionId ?? null;
     chatCursor = data.cursor ?? 0;
     renderChatReset(data.items ?? []);
@@ -862,7 +865,7 @@ function onTranscriptItems(msg: WsTranscriptItemsMessage): void {
   if (!msg.available) {
     chatAvailable = false;
     showViewToggle(false);
-    if (paneViewMode === 'chat') switchToTerminal();
+    if (paneViewMode === 'chat') switchToTerminal(false);
     return;
   }
   chatAvailable = true;
@@ -894,7 +897,7 @@ async function pollChatFallback(): Promise<void> {
   try {
     const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript${q}`) as TranscriptResponse;
     if (gen !== paneViewGen || paneId !== activePaneId || paneViewMode !== 'chat') return;
-    if (!data.available) { chatAvailable = false; showViewToggle(false); switchToTerminal(); return; }
+    if (!data.available) { chatAvailable = false; showViewToggle(false); switchToTerminal(false); return; }
     if (data.reset || data.sessionId !== chatSessionId) {
       chatSessionId = data.sessionId ?? null;
       chatCursor = data.cursor ?? 0;

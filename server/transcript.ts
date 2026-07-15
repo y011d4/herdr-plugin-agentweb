@@ -68,6 +68,9 @@ export interface TranscriptChunk {
   items: TimelineItem[];
   /** byte offset just past the last complete line consumed */
   cursor: number;
+  /** true when the cursor was too far behind: items are a rebuilt tail to
+   *  replace, not append (the caller must forward reset to the client). */
+  reset: boolean;
 }
 
 /**
@@ -76,26 +79,37 @@ export interface TranscriptChunk {
  * next read picks it up whole; `cursor` only advances past complete lines.
  * `byteOffset` always lands on a newline boundary, so it can't split a
  * multi-byte character.
+ *
+ * If the gap from `byteOffset` to EOF exceeds TAIL_MAX_BYTES (a stale or
+ * caller-supplied `after`, or a huge burst), the incremental read is abandoned
+ * and a bounded tail is returned with `reset: true` so the read stays bounded
+ * and the caller rebuilds instead of streaming megabytes.
  */
-export function readTranscriptFrom(file: string, byteOffset: number): TranscriptChunk {
+export function readTranscriptFrom(file: string, byteOffset: number, resetMaxItems = 300): TranscriptChunk {
   let size: number;
-  try { size = statSync(file).size; } catch { return { items: [], cursor: byteOffset }; }
-  if (size <= byteOffset) return { items: [], cursor: byteOffset }; // nothing new
+  try { size = statSync(file).size; } catch { return { items: [], cursor: byteOffset, reset: false }; }
+  if (size <= byteOffset) return { items: [], cursor: byteOffset, reset: false }; // nothing new
+  if (size - byteOffset > TAIL_MAX_BYTES) {
+    const tail = readTranscriptTail(file, resetMaxItems);
+    return { items: tail.items, cursor: tail.cursor, reset: true };
+  }
   const len = size - byteOffset;
   const buf = Buffer.alloc(len);
   const fd = openSync(file, 'r');
   try { readSync(fd, buf, 0, len, byteOffset); } finally { closeSync(fd); }
   const text = buf.toString('utf8');
   const lastNl = text.lastIndexOf('\n');
-  if (lastNl === -1) return { items: [], cursor: byteOffset }; // no complete line yet
+  if (lastNl === -1) return { items: [], cursor: byteOffset, reset: false }; // no complete line yet
   const complete = text.slice(0, lastNl);
   const consumed = Buffer.byteLength(complete, 'utf8') + 1; // +1 for the newline
   const items = complete.split('\n').filter(Boolean).flatMap(normalizeLine);
-  return { items, cursor: byteOffset + consumed };
+  return { items, cursor: byteOffset + consumed, reset: false };
 }
 
-export interface TranscriptTail extends TranscriptChunk {
-  /** true when older items were dropped to respect maxItems */
+export interface TranscriptTail {
+  items: TimelineItem[];
+  cursor: number;
+  /** true when older items were dropped (byte cap or maxItems) */
   truncated: boolean;
 }
 

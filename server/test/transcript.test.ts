@@ -80,7 +80,26 @@ describe('readTranscriptFrom — byte cursor with multi-byte UTF-8', () => {
     appendFileSync(f, userLine('二行目 🎉') + '\n');
     const inc = readTranscriptFrom(f, first.cursor);
     assert.deepEqual(inc.items.map((i) => (i as { text: string }).text), ['二行目 🎉']);
+    assert.equal(inc.reset, false);
     // and the cursor is now at EOF
     assert.equal(readTranscriptFrom(f, inc.cursor).items.length, 0);
+  });
+});
+
+describe('readTranscriptFrom — bounded when the cursor is far behind', () => {
+  it('returns a rebuilt tail with reset=true when the gap exceeds the cap', () => {
+    const f = join(dir, 'gap.jsonl');
+    const filler = 'x'.repeat(1000);
+    writeFileSync(f, Array.from({ length: 2400 }, (_, i) => userLine(`${i}-${filler}`)).join('\n') + '\n');
+    // after=0 on a >2 MB file: must not stream the whole file
+    const r = readTranscriptFrom(f, 0, 300);
+    assert.equal(r.reset, true);
+    assert.equal(r.items.length, 300);
+    assert.ok((r.items[r.items.length - 1] as { text: string }).text.startsWith('2399-'));
+    // a small gap does not reset
+    const tail = readTranscriptTail(f, 300);
+    const near = readTranscriptFrom(f, tail.cursor);
+    assert.equal(near.reset, false);
+    assert.equal(near.items.length, 0);
   });
 });

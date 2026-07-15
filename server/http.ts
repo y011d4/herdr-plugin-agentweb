@@ -369,8 +369,10 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
         const afterParam = url.searchParams.get('after');
         const after = afterParam !== null ? parseInt(afterParam, 10) : NaN;
         if (sessionParam === sessionId && Number.isInteger(after) && after >= 0) {
-          const { items, cursor } = readTranscriptFrom(file, after);
-          jsonOk(res, { available: true, sessionId, items, cursor, reset: false });
+          // reset=true when `after` is too far behind (readTranscriptFrom bounds
+          // the read and returns a rebuilt tail); the client replaces, not appends.
+          const { items, cursor, reset } = readTranscriptFrom(file, after, TRANSCRIPT_INITIAL_ITEMS);
+          jsonOk(res, { available: true, sessionId, items, cursor, reset });
         } else {
           const { items, cursor, truncated } = readTranscriptTail(file, TRANSCRIPT_INITIAL_ITEMS);
           jsonOk(res, { available: true, sessionId, items, cursor, reset: true, truncated });
@@ -569,10 +571,10 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
           }
           // Cheap incremental tail of the already-resolved file every tick.
           if (transcriptFile && transcriptSessionId) {
-            const { items, cursor } = readTranscriptFrom(transcriptFile, transcriptCursor);
+            const { items, cursor, reset } = readTranscriptFrom(transcriptFile, transcriptCursor, TRANSCRIPT_INITIAL_ITEMS);
             transcriptCursor = cursor;
-            if (items.length > 0) {
-              ws.send(JSON.stringify({ type: 'transcript_items', paneId, available: true, sessionId: transcriptSessionId, items, cursor, reset: false }));
+            if (reset || items.length > 0) {
+              ws.send(JSON.stringify({ type: 'transcript_items', paneId, available: true, sessionId: transcriptSessionId, items, cursor, reset }));
             }
           }
         } catch {
