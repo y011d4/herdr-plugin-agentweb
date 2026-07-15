@@ -86,24 +86,28 @@ export interface TranscriptChunk {
  * and the caller rebuilds instead of streaming megabytes.
  */
 export function readTranscriptFrom(file: string, byteOffset: number, resetMaxItems = 300): TranscriptChunk {
-  let size: number;
-  try { size = statSync(file).size; } catch { return { items: [], cursor: byteOffset, reset: false }; }
-  if (size <= byteOffset) return { items: [], cursor: byteOffset, reset: false }; // nothing new
-  if (size - byteOffset > TAIL_MAX_BYTES) {
-    const tail = readTranscriptTail(file, resetMaxItems);
-    return { items: tail.items, cursor: tail.cursor, reset: true };
+  try {
+    const size = statSync(file).size;
+    if (size <= byteOffset) return { items: [], cursor: byteOffset, reset: false }; // nothing new
+    if (size - byteOffset > TAIL_MAX_BYTES) {
+      const tail = readTranscriptTail(file, resetMaxItems);
+      return { items: tail.items, cursor: tail.cursor, reset: true };
+    }
+    const len = size - byteOffset;
+    const buf = Buffer.alloc(len);
+    const fd = openSync(file, 'r');
+    try { readSync(fd, buf, 0, len, byteOffset); } finally { closeSync(fd); }
+    const text = buf.toString('utf8');
+    const lastNl = text.lastIndexOf('\n');
+    if (lastNl === -1) return { items: [], cursor: byteOffset, reset: false }; // no complete line yet
+    const complete = text.slice(0, lastNl);
+    const consumed = Buffer.byteLength(complete, 'utf8') + 1; // +1 for the newline
+    const items = complete.split('\n').filter(Boolean).flatMap(normalizeLine);
+    return { items, cursor: byteOffset + consumed, reset: false };
+  } catch {
+    // file removed / rotated / unreadable between stat and read — no update this round
+    return { items: [], cursor: byteOffset, reset: false };
   }
-  const len = size - byteOffset;
-  const buf = Buffer.alloc(len);
-  const fd = openSync(file, 'r');
-  try { readSync(fd, buf, 0, len, byteOffset); } finally { closeSync(fd); }
-  const text = buf.toString('utf8');
-  const lastNl = text.lastIndexOf('\n');
-  if (lastNl === -1) return { items: [], cursor: byteOffset, reset: false }; // no complete line yet
-  const complete = text.slice(0, lastNl);
-  const consumed = Buffer.byteLength(complete, 'utf8') + 1; // +1 for the newline
-  const items = complete.split('\n').filter(Boolean).flatMap(normalizeLine);
-  return { items, cursor: byteOffset + consumed, reset: false };
 }
 
 export interface TranscriptTail {
@@ -122,30 +126,34 @@ export interface TranscriptTail {
  * items exist above.
  */
 export function readTranscriptTail(file: string, maxItems: number): TranscriptTail {
-  let size: number;
-  try { size = statSync(file).size; } catch { return { items: [], cursor: 0, truncated: false }; }
-  const start = Math.max(0, size - TAIL_MAX_BYTES);
-  const len = size - start;
-  if (len === 0) return { items: [], cursor: size, truncated: false };
-  const buf = Buffer.alloc(len);
-  const fd = openSync(file, 'r');
-  try { readSync(fd, buf, 0, len, start); } finally { closeSync(fd); }
-  let text = buf.toString('utf8');
-  // When we start mid-file the first line is partial (its start was cut off) —
-  // drop it up to the first newline, which is a clean byte boundary so the
-  // remainder decodes without splitting a multi-byte character.
-  const cappedFromStart = start > 0;
-  if (cappedFromStart) {
-    const firstNl = text.indexOf('\n');
-    text = firstNl === -1 ? '' : text.slice(firstNl + 1);
+  try {
+    const size = statSync(file).size;
+    const start = Math.max(0, size - TAIL_MAX_BYTES);
+    const len = size - start;
+    if (len === 0) return { items: [], cursor: size, truncated: false };
+    const buf = Buffer.alloc(len);
+    const fd = openSync(file, 'r');
+    try { readSync(fd, buf, 0, len, start); } finally { closeSync(fd); }
+    let text = buf.toString('utf8');
+    // When we start mid-file the first line is partial (its start was cut off) —
+    // drop it up to the first newline, which is a clean byte boundary so the
+    // remainder decodes without splitting a multi-byte character.
+    const cappedFromStart = start > 0;
+    if (cappedFromStart) {
+      const firstNl = text.indexOf('\n');
+      text = firstNl === -1 ? '' : text.slice(firstNl + 1);
+    }
+    // Exclude a trailing partial line; the cursor (an absolute byte offset) sits
+    // before it so a later readTranscriptFrom re-reads it whole once it completes.
+    const lastNl = text.lastIndexOf('\n');
+    const trailingPartial = lastNl === -1 ? text : text.slice(lastNl + 1);
+    const cursor = size - Buffer.byteLength(trailingPartial, 'utf8');
+    const usable = lastNl === -1 ? '' : text.slice(0, lastNl + 1);
+    const all = usable.split('\n').filter(Boolean).flatMap(normalizeLine);
+    const truncated = cappedFromStart || all.length > maxItems;
+    return { items: all.length > maxItems ? all.slice(-maxItems) : all, cursor, truncated };
+  } catch {
+    // file removed / rotated / unreadable between stat and read
+    return { items: [], cursor: 0, truncated: false };
   }
-  // Exclude a trailing partial line; the cursor (an absolute byte offset) sits
-  // before it so a later readTranscriptFrom re-reads it whole once it completes.
-  const lastNl = text.lastIndexOf('\n');
-  const trailingPartial = lastNl === -1 ? text : text.slice(lastNl + 1);
-  const cursor = size - Buffer.byteLength(trailingPartial, 'utf8');
-  const usable = lastNl === -1 ? '' : text.slice(0, lastNl + 1);
-  const all = usable.split('\n').filter(Boolean).flatMap(normalizeLine);
-  const truncated = cappedFromStart || all.length > maxItems;
-  return { items: all.length > maxItems ? all.slice(-maxItems) : all, cursor, truncated };
 }
