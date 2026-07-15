@@ -1,5 +1,5 @@
 {
-  "name": "Herdr Mobile",
+  "name": "Herdr Agent Web",
   "short_name": "Herdr",
   "description": "Monitor and control coding agents running in herdr",
   "start_url": "/",

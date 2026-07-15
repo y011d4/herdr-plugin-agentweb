@@ -1,5 +1,5 @@
 /**
- * Shared type definitions for the herdr-mobile bridge server.
+ * Shared type definitions for the herdr-agentweb bridge server.
  */
 
 // ── Agent status ─────────────────────────────────────────────────────────────

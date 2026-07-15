@@ -17,7 +17,7 @@ function loadFileConfig(): Record<string, unknown> {
 function resolveStateDir(): string {
   return (
     process.env.HERDR_PLUGIN_STATE_DIR ||
-    join(homedir(), '.local', 'state', 'herdr-mobile')
+    join(homedir(), '.local', 'state', 'herdr-agentweb')
   );
 }
 
@@ -32,13 +32,13 @@ export function loadConfig(): Config {
   const file = loadFileConfig();
 
   const host =
-    process.env.HERDR_MOBILE_HOST ||
+    process.env.HERDR_AGENTWEB_HOST ||
     (typeof file.host === 'string' ? file.host : null) ||
     '127.0.0.1';
 
   const port =
-    process.env.HERDR_MOBILE_PORT
-      ? parseInt(process.env.HERDR_MOBILE_PORT, 10)
+    process.env.HERDR_AGENTWEB_PORT
+      ? parseInt(process.env.HERDR_AGENTWEB_PORT, 10)
       : (typeof file.port === 'number' ? file.port : 8390);
 
   const notifyUrl = typeof file.notify_url === 'string' ? file.notify_url : null;

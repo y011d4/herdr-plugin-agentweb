@@ -50,7 +50,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
 
   function request(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
     return new Promise((resolve, reject) => {
-      const id = `mobile:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+      const id = `agentweb:${Date.now()}:${Math.random().toString(36).slice(2)}`;
       const conn = createConnection(socketPath);
       const splitter = createSplitter();
       let settled = false;
@@ -194,7 +194,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
     const conn = createConnection(socketPath);
     const splitter = createSplitter();
     let ackReceived = false;
-    const id = `mobile:sub:${Date.now()}`;
+    const id = `agentweb:sub:${Date.now()}`;
 
     // A socket that connects but never acks would otherwise hang forever:
     // reconnection is only triggered by 'close'.

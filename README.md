@@ -1,4 +1,4 @@
-# herdr-plugin-mobile
+# herdr-plugin-agentweb
 
 **English** | [日本語](./README.ja.md)
 
@@ -39,8 +39,8 @@ herdr server
 Install straight from GitHub — herdr fetches the repo and runs the build for you:
 
 ```bash
-herdr plugin install y011d4/herdr-plugin-mobile
-# or pin a version:  herdr plugin install y011d4/herdr-plugin-mobile --ref v0.1.0
+herdr plugin install y011d4/herdr-plugin-agentweb
+# or pin a version:  herdr plugin install y011d4/herdr-plugin-agentweb --ref v0.1.0
 ```
 
 No clone, no manual build: `herdr plugin install` runs the manifest `[[build]]` steps
@@ -50,15 +50,15 @@ the plugin from a local checkout instead, see [Development](#development).
 Start the bridge (any of these):
 
 ```bash
-herdr plugin action invoke y011d4.mobile.start   # detached daemon
-herdr plugin pane open --plugin y011d4.mobile --entrypoint server  # visible in a pane
+herdr plugin action invoke y011d4.agentweb.start   # detached daemon
+herdr plugin pane open --plugin y011d4.agentweb --entrypoint server  # visible in a pane
 ```
 
 Then connect the phone by scanning a QR code (requires the `qrencode` system
 package; falls back to printing the URL):
 
 ```bash
-herdr plugin pane open --plugin y011d4.mobile --entrypoint connect
+herdr plugin pane open --plugin y011d4.agentweb --entrypoint connect
 ```
 
 The overlay pane shows a QR of your connect URL with the access token included:
@@ -74,14 +74,14 @@ The plugin exposes three workspace actions and two panes:
 
 | Entrypoint | Kind | What it does |
 | --- | --- | --- |
-| `y011d4.mobile.start` | action | Start the bridge as a detached daemon |
-| `y011d4.mobile.stop` | action | Stop the running bridge |
-| `y011d4.mobile.status` | action | Report whether it's running and print the URL (no token) |
+| `y011d4.agentweb.start` | action | Start the bridge as a detached daemon |
+| `y011d4.agentweb.stop` | action | Stop the running bridge |
+| `y011d4.agentweb.status` | action | Report whether it's running and print the URL (no token) |
 | `server` | pane | Run the bridge in a visible pane (foreground; the tokenized URL is shown here) |
 | `connect` | pane | Show the connect QR / URL as an overlay |
 
 Invoke an action with `herdr plugin action invoke <id>`; open a pane with
-`herdr plugin pane open --plugin y011d4.mobile --entrypoint <id>`. The detached
+`herdr plugin pane open --plugin y011d4.agentweb --entrypoint <id>`. The detached
 daemon and the foreground `server` pane are mutually exclusive — start one or the
 other, not both.
 
@@ -174,8 +174,8 @@ terminal scrollback, giving you the smooth local scrolling path everywhere.
 [[keys.command]]
 key = "prefix+m"
 type = "plugin_action"
-command = "y011d4.mobile.status"
-description = "mobile bridge status"
+command = "y011d4.agentweb.status"
+description = "agent web bridge status"
 ```
 
 ## Configuration
@@ -185,7 +185,7 @@ change anything, create a `config.json` in the plugin config dir. Print that dir
 with:
 
 ```bash
-herdr plugin config-dir y011d4.mobile
+herdr plugin config-dir y011d4.agentweb
 ```
 
 Every key is optional; include only the ones you want to override. The full shape,
@@ -219,9 +219,9 @@ with defaults, is:
   your tailnet, point the ntfy Android app at the same topic.
 
 **Applying changes:** the config is read once at startup, so restart the bridge
-after editing — `herdr plugin action invoke y011d4.mobile.stop`, then `…start`.
+after editing — `herdr plugin action invoke y011d4.agentweb.stop`, then `…start`.
 
-**Environment overrides:** `HERDR_MOBILE_HOST` and `HERDR_MOBILE_PORT` take
+**Environment overrides:** `HERDR_AGENTWEB_HOST` and `HERDR_AGENTWEB_PORT` take
 precedence over `config.json` for `host`/`port` (`public_url` and `notify_url` are
 config-file only). Effective precedence is env var → `config.json` → built-in
 default.
@@ -270,8 +270,8 @@ For local development, clone and **link** a working tree instead of installing f
 GitHub — `herdr plugin link` points herdr at your checkout so your edits take effect:
 
 ```bash
-git clone https://github.com/y011d4/herdr-plugin-mobile
-cd herdr-plugin-mobile
+git clone https://github.com/y011d4/herdr-plugin-agentweb
+cd herdr-plugin-agentweb
 npm install && npm run build     # only dependency: ws
 herdr plugin link "$(pwd)"
 ```
@@ -293,5 +293,5 @@ Runtime of the built `dist/` requires Node >= 20. Running TS sources directly
 (dev mode) requires Node >= 23.6 for native type stripping.
 
 Logs for the detached daemon go to `<state dir>/bridge.log`
-(`herdr plugin config-dir y011d4.mobile` prints the config dir; state dir is its
+(`herdr plugin config-dir y011d4.agentweb` prints the config dir; state dir is its
 sibling, or `$HERDR_PLUGIN_STATE_DIR` inside plugin commands).

@@ -1,5 +1,5 @@
 /**
- * app.ts — Herdr Mobile PWA
+ * app.ts — Herdr Agent Web PWA
  *
  * Single-page application with hash routing:
  *   #/agents    — dashboard (default)
@@ -470,7 +470,7 @@ function renderTokenScreen(message?: string): void {
   elScreen!.innerHTML = `
     <div id="screen-login" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:32px 24px;height:100%;overflow-y:auto;">
       <div class="login-logo">&#128241;</div>
-      <div class="login-title">Herdr Mobile</div>
+      <div class="login-title">Herdr Agent Web</div>
       <div class="login-subtitle">${message ? escHtml(message) : 'Enter the access token shown when the bridge server started.'}</div>
       <form class="login-form" id="token-form" style="width:100%;max-width:360px;display:flex;flex-direction:column;gap:12px;">
         <input type="password" id="token-input" placeholder="Paste access token…" autocomplete="off" autocorrect="off" spellcheck="false" />

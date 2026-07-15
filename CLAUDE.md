@@ -1,4 +1,4 @@
-# herdr-plugin-mobile
+# herdr-plugin-agentweb
 
 herdr plugin: a Node.js bridge server that translates the herdr unix-socket API
 into HTTP/WebSocket, plus a mobile-first PWA it serves. Lets a phone monitor
@@ -19,9 +19,9 @@ herdr server
 - `server/state.ts` — pure snapshot/event → normalized State (unit-tested; keep it I/O-free)
 - `server/http.ts` — REST routes, WS (state pushes, per-client pane watch), static files
 - `server/auth.ts` / `notify.ts` / `config.ts` — token, agent-status fanout + optional ntfy, config
-- `bin/mobilectl.ts` — plugin entrypoints: run | start | stop | status | qr
+- `bin/agentwebctl.ts` — plugin entrypoints: run | start | stop | status | qr
 - `web/src/app.ts` — SPA (hash routing), `ansi.ts` — pure ANSI→HTML, `sw.ts` — service worker
-- `herdr-plugin.toml` — actions/panes call `dist/bin/mobilectl.js`; `[[build]]` runs on
+- `herdr-plugin.toml` — actions/panes call `dist/bin/agentwebctl.js`; `[[build]]` runs on
   `herdr plugin install` but NOT on `herdr plugin link`
 
 The REST/WS/State JSON contract is documented in README "API surface". Server
@@ -40,8 +40,8 @@ Deploying a change to the running bridge:
 
 ```bash
 npm run build
-herdr plugin action invoke y011d4.mobile.stop
-herdr plugin action invoke y011d4.mobile.start
+herdr plugin action invoke y011d4.agentweb.stop
+herdr plugin action invoke y011d4.agentweb.start
 curl -s http://127.0.0.1:8390/healthz   # expect {"ok":true,"herdrConnected":true}
 ```
 

@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Walk up from the script's directory until a directory containing package.json
-// is found. This is necessary because this file runs from dist/bin/mobilectl.js,
+// is found. This is necessary because this file runs from dist/bin/agentwebctl.js,
 // so __dirname is dist/bin — not the project root.
 function findProjectRoot(): string {
   let dir = path.dirname(fileURLToPath(import.meta.url));
@@ -29,7 +29,7 @@ const mainJs = fs.existsSync(path.join(projectRoot, 'dist', 'server', 'main.js')
 
 function stateDir(): string {
   const dir = process.env.HERDR_PLUGIN_STATE_DIR
-    || path.join(os.homedir(), '.local', 'state', 'herdr-mobile');
+    || path.join(os.homedir(), '.local', 'state', 'herdr-agentweb');
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }
@@ -89,18 +89,18 @@ function alivePid(file: string): number | null {
 
 function baseUrl(): string {
   const cfg = readConfig();
-  const host = process.env.HERDR_MOBILE_HOST || (cfg.host as string) || '127.0.0.1';
-  const port = Number(process.env.HERDR_MOBILE_PORT || cfg.port || 8390);
+  const host = process.env.HERDR_AGENTWEB_HOST || (cfg.host as string) || '127.0.0.1';
+  const port = Number(process.env.HERDR_AGENTWEB_PORT || cfg.port || 8390);
   return `http://${host}:${port}/`;
 }
 
 // herdr captures action stdout into its plugin logs, so never print the token
 // here. The tokenized connect link is printed by the server itself: visible in
-// the "Mobile bridge" pane (run entrypoint) and in <state dir>/bridge.log.
+// the "Agent Web bridge" pane (run entrypoint) and in <state dir>/bridge.log.
 function printConnectInfo(): void {
   console.log(`url: ${baseUrl()}`);
   console.log(`token file: ${path.join(stateDir(), 'token')}`);
-  console.log(`full connect link: see the Mobile bridge pane or ${path.join(stateDir(), 'bridge.log')}`);
+  console.log(`full connect link: see the Agent Web bridge pane or ${path.join(stateDir(), 'bridge.log')}`);
 }
 
 function notify(title: string, body: string): void {
@@ -163,7 +163,7 @@ function start(): number {
   console.log(`bridge started (pid ${child.pid})`);
   printConnectInfo();
   console.log(`log: ${logPath}`);
-  notify('herdr mobile started', baseUrl());
+  notify('herdr agent web started', baseUrl());
   return 0;
 }
 
@@ -186,11 +186,11 @@ function stop(): number {
   fs.rmSync(daemon ? daemonPidFile() : runPidFile(), { force: true });
   if (!exited) {
     console.error(`bridge (pid ${pid}) did not exit within 5s of SIGTERM; not force-killing`);
-    notify('herdr mobile stop timed out', `pid ${pid}`);
+    notify('herdr agent web stop timed out', `pid ${pid}`);
     return 1;
   }
   console.log(`bridge stopped (pid ${pid})`);
-  notify('herdr mobile stopped', `pid ${pid}`);
+  notify('herdr agent web stopped', `pid ${pid}`);
   return 0;
 }
 
@@ -200,10 +200,10 @@ function status(): number {
   if (daemon || fg) {
     console.log(`bridge running (pid ${daemon || fg}${fg ? ', foreground pane' : ''})`);
     printConnectInfo();
-    notify('herdr mobile running', baseUrl());
+    notify('herdr agent web running', baseUrl());
   } else {
     console.log('bridge is not running');
-    notify('herdr mobile stopped', 'invoke y011d4.mobile.start to launch');
+    notify('herdr agent web stopped', 'invoke y011d4.agentweb.start to launch');
   }
   return 0;
 }
@@ -239,11 +239,11 @@ async function qr(): Promise<number> {
   try {
     token = fs.readFileSync(path.join(stateDir(), 'token'), 'utf8').trim();
   } catch {
-    console.error('no token yet — start the bridge first (action y011d4.mobile.start)');
+    console.error('no token yet — start the bridge first (action y011d4.agentweb.start)');
     return 1;
   }
   const cfg = readConfig();
-  const port = Number(process.env.HERDR_MOBILE_PORT || cfg.port || 8390);
+  const port = Number(process.env.HERDR_AGENTWEB_PORT || cfg.port || 8390);
 
   // config public_url wins; tailscale auto-detection is only a zero-config
   // convenience fallback, not a dependency.
@@ -266,7 +266,7 @@ async function qr(): Promise<number> {
       url = `${baseUrl()}?token=${token}`;
     }
     if (!ts.serveActive) {
-      hint = `hint: set "public_url" in config.json (herdr plugin config-dir y011d4.mobile) to your reverse-proxy / tunnel / VPN address (Cloudflare Tunnel, Caddy, ngrok, ...). Tailscale is auto-detected; for tailnet HTTPS run: tailscale serve --bg ${port}`;
+      hint = `hint: set "public_url" in config.json (herdr plugin config-dir y011d4.agentweb) to your reverse-proxy / tunnel / VPN address (Cloudflare Tunnel, Caddy, ngrok, ...). Tailscale is auto-detected; for tailnet HTTPS run: tailscale serve --bg ${port}`;
     }
   }
 
@@ -317,7 +317,7 @@ const command = process.argv[2];
 const handlers: Record<string, () => number | Promise<number>> = { run, start, stop, status, qr };
 const handler = handlers[command];
 if (!handler) {
-  console.error('usage: mobilectl.js <run|start|stop|status|qr>');
+  console.error('usage: agentwebctl.js <run|start|stop|status|qr>');
   process.exit(2);
 }
 process.exit(await handler());

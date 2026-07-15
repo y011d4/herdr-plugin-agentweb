@@ -57,7 +57,7 @@ describe('auth', () => {
   });
 
   it('keeps a legacy 64-hex token from an older version', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'herdr-mobile-auth-legacy-'));
+    const dir = mkdtempSync(join(tmpdir(), 'herdr-agentweb-auth-legacy-'));
     try {
       const legacy = 'ab'.repeat(32); // 64 hex chars
       writeFileSync(join(dir, 'token'), legacy, { mode: 0o600 });
@@ -77,7 +77,7 @@ describe('auth', () => {
   });
 
   it('repairs a pre-existing token file with loose permissions', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'herdr-mobile-auth-perms-'));
+    const dir = mkdtempSync(join(tmpdir(), 'herdr-agentweb-auth-perms-'));
     try {
       const existing = 'cd'.repeat(16); // valid 32-hex token
       writeFileSync(join(dir, 'token'), existing);

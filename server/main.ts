@@ -57,14 +57,14 @@ broadcastAgentStatus = http.broadcastAgentStatus;
 
 httpServer.listen(config.port, config.host, () => {
   const base = `http://${config.host}:${config.port}`;
-  console.log(`herdr-mobile listening on ${base}`);
+  console.log(`herdr-agentweb listening on ${base}`);
   console.log(`connect: ${base}?token=${token}`);
 });
 
 herdrClient.start();
 
 function shutdown(): void {
-  console.log('[herdr-mobile] shutting down');
+  console.log('[herdr-agentweb] shutting down');
   herdrClient.destroy();
   httpServer!.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000);
@@ -74,5 +74,5 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 process.on('unhandledRejection', (reason) => {
-  console.error('[herdr-mobile] unhandled rejection:', reason);
+  console.error('[herdr-agentweb] unhandled rejection:', reason);
 });
