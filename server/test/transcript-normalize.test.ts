@@ -99,6 +99,12 @@ describe('normalizeLine — skipped and malformed lines', () => {
     assert.deepEqual(normalizeLine('not json{'), []);
   });
 
+  it('returns [] for valid-but-non-object JSON without throwing', () => {
+    for (const line of ['null', '123', '"a string"', '[1,2,3]', 'true']) {
+      assert.deepEqual(normalizeLine(line), [], `line: ${line}`);
+    }
+  });
+
   it('carries the sidechain flag from isSidechain', () => {
     const items = normalizeLine(line({ type: 'assistant', isSidechain: true, message: { role: 'assistant', content: [{ type: 'text', text: 'sub' }] } }));
     assert.equal((items[0] as { sidechain: boolean }).sidechain, true);

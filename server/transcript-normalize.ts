@@ -115,7 +115,11 @@ function toolResultText(content: unknown): string {
 export function normalizeLine(rawLine: string): TimelineItem[] {
   let o: Record<string, unknown>;
   try {
-    o = JSON.parse(rawLine) as Record<string, unknown>;
+    const parsed: unknown = JSON.parse(rawLine);
+    // A valid-but-non-object line (null, array, number, string) has no fields to
+    // read — skip it rather than throwing on a property access below.
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return [];
+    o = parsed as Record<string, unknown>;
   } catch {
     return [];
   }
