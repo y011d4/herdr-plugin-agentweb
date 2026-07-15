@@ -52,6 +52,7 @@ let paneViewMode: 'terminal' | 'chat' = 'terminal';
 let chatAvailable = false;
 let chatSessionId: string | null = null;
 let chatCursor = 0; // byte offset into the transcript for incremental fetches
+let chatProbeSeq = 0; // guards against overlapping availability probes
 
 /** source toggle: 'visible' | 'recent' */
 
@@ -780,9 +781,13 @@ function showViewToggle(visible: boolean): void {
 // switches straight in using the payload it just fetched — no second request.
 async function initChatAvailability(paneId: string): Promise<void> {
   const gen = paneViewGen;
+  const probeId = ++chatProbeSeq;
   try {
     const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript`) as TranscriptResponse;
     if (gen !== paneViewGen || paneId !== activePaneId) return;
+    // A newer probe superseded this one — its result is authoritative, so a slow
+    // older available:false must not clobber a fresh available:true.
+    if (probeId !== chatProbeSeq) return;
     chatAvailable = data.available;
     showViewToggle(chatAvailable);
     if (chatAvailable && preferredView() === 'chat') switchToChat(data, false);
