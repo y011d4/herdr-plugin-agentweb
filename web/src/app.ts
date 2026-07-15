@@ -899,8 +899,11 @@ async function pollChatFallback(): Promise<void> {
   try {
     const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript${q}`) as TranscriptResponse;
     if (gen !== paneViewGen || paneId !== activePaneId || paneViewMode !== 'chat') return;
-    if (!data.available) { chatAvailable = false; showViewToggle(false); switchToTerminal(false); return; }
+    // Drop any response whose request start no longer matches the current state
+    // BEFORE acting on it — a stale available:false must not force the terminal
+    // after a WS push/reset already advanced the chat.
     if (chatSessionId !== reqSession || chatCursor !== reqCursor) return; // superseded in flight
+    if (!data.available) { chatAvailable = false; showViewToggle(false); switchToTerminal(false); return; }
     if (data.reset || data.sessionId !== chatSessionId) {
       chatSessionId = data.sessionId ?? null;
       chatCursor = data.cursor ?? 0;
