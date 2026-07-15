@@ -830,9 +830,16 @@ async function loadChatInitial(): Promise<void> {
   if (!activePaneId) return;
   const gen = paneViewGen;
   const paneId = activePaneId;
+  // switchToChat starts the WS transcript watch alongside this request; if that
+  // watch (or anything else) advances the chat state while this GET is in flight,
+  // its result is stale — capture the start state and drop a mismatched reply so
+  // the slower initial load can't replace a fresher log or rewind the cursor.
+  const reqSession = chatSessionId;
+  const reqCursor = chatCursor;
   try {
     const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript`) as TranscriptResponse;
     if (gen !== paneViewGen || paneId !== activePaneId || paneViewMode !== 'chat') return;
+    if (chatSessionId !== reqSession || chatCursor !== reqCursor) return; // superseded in flight
     if (!data.available) { chatAvailable = false; showViewToggle(false); switchToTerminal(false); return; }
     chatSessionId = data.sessionId ?? null;
     chatCursor = data.cursor ?? 0;
