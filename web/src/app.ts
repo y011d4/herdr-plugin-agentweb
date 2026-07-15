@@ -886,7 +886,11 @@ async function pollChatFallback(): Promise<void> {
   if (!activePaneId || paneViewMode !== 'chat') return;
   const gen = paneViewGen;
   const paneId = activePaneId;
-  const q = chatSessionId ? `?session=${encodeURIComponent(chatSessionId)}&after=${chatCursor}` : '';
+  // The response is contiguous with what's shown only from this cursor. If
+  // anything (a WS reconnect reset/push) advances chatCursor while the request is
+  // in flight, the response overlaps already-rendered items and must be dropped.
+  const reqCursor = chatCursor;
+  const q = chatSessionId ? `?session=${encodeURIComponent(chatSessionId)}&after=${reqCursor}` : '';
   try {
     const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript${q}`) as TranscriptResponse;
     if (gen !== paneViewGen || paneId !== activePaneId || paneViewMode !== 'chat') return;
@@ -896,8 +900,9 @@ async function pollChatFallback(): Promise<void> {
       chatCursor = data.cursor ?? 0;
       renderChatReset(data.items ?? []);
     } else {
-      // Ignore a response that doesn't advance past what we've shown (a stale or
-      // overlapping fetch) so the cursor never rewinds and items aren't re-appended.
+      // Drop the response unless chatCursor is still exactly where the request
+      // started (nothing appended meanwhile) and the response actually advances it.
+      if (chatCursor !== reqCursor) return;
       const next = data.cursor ?? chatCursor;
       if (next <= chatCursor) return;
       chatCursor = next;
