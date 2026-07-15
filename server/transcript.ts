@@ -94,11 +94,15 @@ export function readTranscriptFrom(file: string, byteOffset: number, resetMaxIte
       // catch below and becomes "no update", never an empty reset that would
       // clear the client's log and rewind the cursor.
       const tail = tailUnsafe(file, resetMaxItems);
-      // Only reset when the tail read strictly advances past byteOffset. A cursor
-      // at or behind it means no forward progress (a truncate/recreate race, or a
-      // huge trailing partial line) — a same-session file only grows, so treat it
-      // as no-update rather than clearing/rebuilding the client without advancing.
-      if (tail.cursor <= byteOffset) return { items: [], cursor: byteOffset, reset: false };
+      // Only reset when the tail strictly advances past byteOffset AND has content
+      // to show. A cursor at/behind byteOffset means no forward progress (a
+      // truncate/recreate race); zero items means the capped window held no
+      // complete line (a single >cap unterminated line). Either way, resetting
+      // would clear the log and skip past unshown content — so treat it as
+      // no-update; the next read makes progress once a complete line lands.
+      if (tail.cursor <= byteOffset || tail.items.length === 0) {
+        return { items: [], cursor: byteOffset, reset: false };
+      }
       return { items: tail.items, cursor: tail.cursor, reset: true };
     }
     const len = size - byteOffset;

@@ -111,4 +111,23 @@ describe('readTranscriptFrom — bounded when the cursor is far behind', () => {
     assert.equal(r.items.length, 0);
     assert.equal(readTranscriptTail(missing, 300).items.length, 0);
   });
+
+  it('does not reset past a single >cap unterminated line (no skip)', () => {
+    const f = join(dir, 'giant.jsonl');
+    const first = userLine('first');
+    writeFileSync(f, first + '\n'); // one complete line
+    const afterFirst = Buffer.byteLength(first + '\n', 'utf8');
+    // a single unterminated line larger than the 2 MB cap
+    appendFileSync(f, 'y'.repeat(2_300_000));
+    const stuck = readTranscriptFrom(f, afterFirst, 300);
+    assert.equal(stuck.reset, false); // no complete line in the window → no reset
+    assert.equal(stuck.cursor, afterFirst); // cursor not advanced past the unshown line
+    assert.equal(stuck.items.length, 0);
+    // once the giant line ends and a normal line follows, progress resumes
+    appendFileSync(f, '\n' + userLine('next') + '\n');
+    const resumed = readTranscriptFrom(f, afterFirst, 300);
+    assert.equal(resumed.reset, true);
+    assert.ok(resumed.items.some((i) => (i as { text: string }).text === 'next'));
+    assert.ok(resumed.cursor > afterFirst);
+  });
 });
