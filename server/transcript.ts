@@ -90,7 +90,10 @@ export function readTranscriptFrom(file: string, byteOffset: number, resetMaxIte
     const size = statSync(file).size;
     if (size <= byteOffset) return { items: [], cursor: byteOffset, reset: false }; // nothing new
     if (size - byteOffset > TAIL_MAX_BYTES) {
-      const tail = readTranscriptTail(file, resetMaxItems);
+      // tailUnsafe (not readTranscriptTail) so a tail-read failure throws into the
+      // catch below and becomes "no update", never an empty reset that would
+      // clear the client's log and rewind the cursor.
+      const tail = tailUnsafe(file, resetMaxItems);
       return { items: tail.items, cursor: tail.cursor, reset: true };
     }
     const len = size - byteOffset;
@@ -117,43 +120,47 @@ export interface TranscriptTail {
   truncated: boolean;
 }
 
+// Core tail read; MAY THROW on fs errors. Callers pick how to treat a failure:
+// readTranscriptTail swallows it (empty tail), while readTranscriptFrom lets it
+// propagate so a failed large-gap read becomes "no update" rather than an empty
+// reset that would clear the client's log.
+function tailUnsafe(file: string, maxItems: number): TranscriptTail {
+  const size = statSync(file).size;
+  const start = Math.max(0, size - TAIL_MAX_BYTES);
+  const len = size - start;
+  if (len === 0) return { items: [], cursor: size, truncated: false };
+  const buf = Buffer.alloc(len);
+  const fd = openSync(file, 'r');
+  try { readSync(fd, buf, 0, len, start); } finally { closeSync(fd); }
+  let text = buf.toString('utf8');
+  // When we start mid-file the first line is partial (its start was cut off) —
+  // drop it up to the first newline, which is a clean byte boundary so the
+  // remainder decodes without splitting a multi-byte character.
+  const cappedFromStart = start > 0;
+  if (cappedFromStart) {
+    const firstNl = text.indexOf('\n');
+    text = firstNl === -1 ? '' : text.slice(firstNl + 1);
+  }
+  // Exclude a trailing partial line; the cursor (an absolute byte offset) sits
+  // before it so a later readTranscriptFrom re-reads it whole once it completes.
+  const lastNl = text.lastIndexOf('\n');
+  const trailingPartial = lastNl === -1 ? text : text.slice(lastNl + 1);
+  const cursor = size - Buffer.byteLength(trailingPartial, 'utf8');
+  const usable = lastNl === -1 ? '' : text.slice(0, lastNl + 1);
+  const all = usable.split('\n').filter(Boolean).flatMap(normalizeLine);
+  const truncated = cappedFromStart || all.length > maxItems;
+  return { items: all.length > maxItems ? all.slice(-maxItems) : all, cursor, truncated };
+}
+
 /**
  * Initial load: read at most the last TAIL_MAX_BYTES of the file, normalize the
  * complete lines within, and return the last `maxItems` items with a cursor at
  * the end of the last complete line. Older history (beyond the cap or maxItems)
  * is dropped — chat views only need the recent tail — which also bounds the work
  * so a large transcript can't stall the event loop. `truncated` flags that older
- * items exist above.
+ * items exist above. Returns an empty tail if the file can't be read.
  */
 export function readTranscriptTail(file: string, maxItems: number): TranscriptTail {
-  try {
-    const size = statSync(file).size;
-    const start = Math.max(0, size - TAIL_MAX_BYTES);
-    const len = size - start;
-    if (len === 0) return { items: [], cursor: size, truncated: false };
-    const buf = Buffer.alloc(len);
-    const fd = openSync(file, 'r');
-    try { readSync(fd, buf, 0, len, start); } finally { closeSync(fd); }
-    let text = buf.toString('utf8');
-    // When we start mid-file the first line is partial (its start was cut off) —
-    // drop it up to the first newline, which is a clean byte boundary so the
-    // remainder decodes without splitting a multi-byte character.
-    const cappedFromStart = start > 0;
-    if (cappedFromStart) {
-      const firstNl = text.indexOf('\n');
-      text = firstNl === -1 ? '' : text.slice(firstNl + 1);
-    }
-    // Exclude a trailing partial line; the cursor (an absolute byte offset) sits
-    // before it so a later readTranscriptFrom re-reads it whole once it completes.
-    const lastNl = text.lastIndexOf('\n');
-    const trailingPartial = lastNl === -1 ? text : text.slice(lastNl + 1);
-    const cursor = size - Buffer.byteLength(trailingPartial, 'utf8');
-    const usable = lastNl === -1 ? '' : text.slice(0, lastNl + 1);
-    const all = usable.split('\n').filter(Boolean).flatMap(normalizeLine);
-    const truncated = cappedFromStart || all.length > maxItems;
-    return { items: all.length > maxItems ? all.slice(-maxItems) : all, cursor, truncated };
-  } catch {
-    // file removed / rotated / unreadable between stat and read
-    return { items: [], cursor: 0, truncated: false };
-  }
+  try { return tailUnsafe(file, maxItems); }
+  catch { return { items: [], cursor: 0, truncated: false }; } // removed/rotated/unreadable
 }

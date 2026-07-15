@@ -102,4 +102,13 @@ describe('readTranscriptFrom — bounded when the cursor is far behind', () => {
     assert.equal(near.reset, false);
     assert.equal(near.items.length, 0);
   });
+
+  it('treats an unreadable file as no-update, never an empty reset', () => {
+    const missing = join(dir, 'does-not-exist.jsonl');
+    const r = readTranscriptFrom(missing, 12345, 300);
+    assert.equal(r.reset, false); // must NOT clear the client's log
+    assert.equal(r.cursor, 12345); // cursor preserved, not rewound to 0
+    assert.equal(r.items.length, 0);
+    assert.equal(readTranscriptTail(missing, 300).items.length, 0);
+  });
 });
