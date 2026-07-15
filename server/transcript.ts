@@ -94,6 +94,10 @@ export function readTranscriptFrom(file: string, byteOffset: number, resetMaxIte
       // catch below and becomes "no update", never an empty reset that would
       // clear the client's log and rewind the cursor.
       const tail = tailUnsafe(file, resetMaxItems);
+      // A tail cursor behind byteOffset means the file shrank between the outer
+      // stat and this read (truncated/recreated) — a same-session file only grows,
+      // so treat it as no-update rather than resetting the client backward.
+      if (tail.cursor < byteOffset) return { items: [], cursor: byteOffset, reset: false };
       return { items: tail.items, cursor: tail.cursor, reset: true };
     }
     const len = size - byteOffset;
