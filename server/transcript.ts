@@ -94,16 +94,17 @@ export function readTranscriptFrom(file: string, byteOffset: number, resetMaxIte
       // catch below and becomes "no update", never an empty reset that would
       // clear the client's log and rewind the cursor.
       const tail = tailUnsafe(file, resetMaxItems);
-      // Only reset when the tail strictly advances past byteOffset AND has content
-      // to show. A cursor at/behind byteOffset means no forward progress (a
-      // truncate/recreate race); zero items means the capped window held no
-      // complete line (a single >cap unterminated line). Either way, resetting
-      // would clear the log and skip past unshown content — so treat it as
-      // no-update; the next read makes progress once a complete line lands.
-      if (tail.cursor <= byteOffset || tail.items.length === 0) {
+      // No complete line in the capped window (a single >cap unterminated line),
+      // or no forward progress (a truncate/recreate race): don't advance or reset
+      // — the next read makes progress once a complete line lands.
+      if (!tail.hadCompleteLine || tail.cursor <= byteOffset) {
         return { items: [], cursor: byteOffset, reset: false };
       }
-      return { items: tail.items, cursor: tail.cursor, reset: true };
+      // Complete lines exist past the cursor. Advance past them; rebuild the
+      // client log only when there's something to show. A window of only skipped
+      // lines (system/meta/summary) advances the cursor silently so the watcher
+      // catches up instead of re-reading the same window every poll.
+      return { items: tail.items, cursor: tail.cursor, reset: tail.items.length > 0 };
     }
     const len = size - byteOffset;
     const buf = Buffer.alloc(len);
@@ -132,12 +133,17 @@ export interface TranscriptTail {
 // Core tail read; MAY THROW on fs errors. Callers pick how to treat a failure:
 // readTranscriptTail swallows it (empty tail), while readTranscriptFrom lets it
 // propagate so a failed large-gap read becomes "no update" rather than an empty
-// reset that would clear the client's log.
-function tailUnsafe(file: string, maxItems: number): TranscriptTail {
+// reset that would clear the client's log. `hadCompleteLine` distinguishes a
+// window with at least one complete line (cursor may advance) from one holding a
+// single >cap unterminated line (no progress possible) — separate from whether
+// those complete lines produced any renderable item.
+type TailResult = TranscriptTail & { hadCompleteLine: boolean };
+
+function tailUnsafe(file: string, maxItems: number): TailResult {
   const size = statSync(file).size;
   const start = Math.max(0, size - TAIL_MAX_BYTES);
   const len = size - start;
-  if (len === 0) return { items: [], cursor: size, truncated: false };
+  if (len === 0) return { items: [], cursor: size, truncated: false, hadCompleteLine: false };
   const buf = Buffer.alloc(len);
   const fd = openSync(file, 'r');
   try { readSync(fd, buf, 0, len, start); } finally { closeSync(fd); }
@@ -153,12 +159,13 @@ function tailUnsafe(file: string, maxItems: number): TranscriptTail {
   // Exclude a trailing partial line; the cursor (an absolute byte offset) sits
   // before it so a later readTranscriptFrom re-reads it whole once it completes.
   const lastNl = text.lastIndexOf('\n');
-  const trailingPartial = lastNl === -1 ? text : text.slice(lastNl + 1);
+  const hadCompleteLine = lastNl !== -1;
+  const trailingPartial = hadCompleteLine ? text.slice(lastNl + 1) : text;
   const cursor = size - Buffer.byteLength(trailingPartial, 'utf8');
-  const usable = lastNl === -1 ? '' : text.slice(0, lastNl + 1);
+  const usable = hadCompleteLine ? text.slice(0, lastNl + 1) : '';
   const all = usable.split('\n').filter(Boolean).flatMap(normalizeLine);
   const truncated = cappedFromStart || all.length > maxItems;
-  return { items: all.length > maxItems ? all.slice(-maxItems) : all, cursor, truncated };
+  return { items: all.length > maxItems ? all.slice(-maxItems) : all, cursor, truncated, hadCompleteLine };
 }
 
 /**
@@ -170,6 +177,10 @@ function tailUnsafe(file: string, maxItems: number): TranscriptTail {
  * items exist above. Returns an empty tail if the file can't be read.
  */
 export function readTranscriptTail(file: string, maxItems: number): TranscriptTail {
-  try { return tailUnsafe(file, maxItems); }
-  catch { return { items: [], cursor: 0, truncated: false }; } // removed/rotated/unreadable
+  try {
+    const { items, cursor, truncated } = tailUnsafe(file, maxItems);
+    return { items, cursor, truncated };
+  } catch {
+    return { items: [], cursor: 0, truncated: false }; // removed/rotated/unreadable
+  }
 }

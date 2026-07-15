@@ -130,4 +130,21 @@ describe('readTranscriptFrom — bounded when the cursor is far behind', () => {
     assert.ok(resumed.items.some((i) => (i as { text: string }).text === 'next'));
     assert.ok(resumed.cursor > afterFirst);
   });
+
+  it('advances the cursor over a large all-skipped tail without resetting', () => {
+    const f = join(dir, 'meta.jsonl');
+    const first = userLine('first');
+    writeFileSync(f, first + '\n');
+    const afterFirst = Buffer.byteLength(first + '\n', 'utf8');
+    // >2 MB of complete lines that normalize to nothing (system/meta)
+    const metaLine = JSON.stringify({ type: 'system', content: 'x'.repeat(500) });
+    let bytes = 0;
+    const chunks: string[] = [];
+    while (bytes < 2_300_000) { chunks.push(metaLine); bytes += metaLine.length + 1; }
+    appendFileSync(f, chunks.join('\n') + '\n');
+    const r = readTranscriptFrom(f, afterFirst, 300);
+    assert.equal(r.reset, false); // nothing renderable → don't clear the log
+    assert.equal(r.items.length, 0);
+    assert.ok(r.cursor > afterFirst); // but the cursor advances — no re-read loop
+  });
 });
