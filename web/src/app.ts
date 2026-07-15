@@ -1371,12 +1371,26 @@ function queuePaneEcho(): void {
   setTimeout(() => { void refreshPaneOutput(); }, 500);
 }
 
+// Whether the state currently reports this pane as running Claude — the only
+// kind that can ever have a transcript, so the only kind worth re-probing.
+function paneIsClaude(paneId: string): boolean {
+  const agent = findPane(paneId)?.pane?.agent;
+  return (agent?.name ?? agent?.displayName ?? '').toLowerCase().includes('claude');
+}
+
 function startPaneRefresh(): void {
   stopPaneRefresh();
   paneRefreshTimer = setInterval(() => {
+    if (!activePaneId || document.hidden) return;
+    // A claude pane's transcript may appear shortly after the pane opens (session
+    // just started, JSONL not written yet). Re-probe until chat is found so the
+    // view upgrades without a manual reload; non-claude panes are never probed.
+    if (!chatAvailable && paneViewMode === 'terminal' && paneIsClaude(activePaneId)) {
+      void initChatAvailability(activePaneId);
+    }
     // While the WS watch is pushing, client polling is redundant — poll only as
     // a fallback when the socket is down, for whichever view is active.
-    if (activePaneId && !document.hidden && !wsConnected) {
+    if (!wsConnected) {
       if (paneViewMode === 'chat') void pollChatFallback();
       else refreshPaneOutput();
     }
