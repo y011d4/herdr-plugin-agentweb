@@ -147,24 +147,29 @@ function tailUnsafe(file: string, maxItems: number): TailResult {
   const buf = Buffer.alloc(len);
   const fd = openSync(file, 'r');
   try { readSync(fd, buf, 0, len, start); } finally { closeSync(fd); }
-  let text = buf.toString('utf8');
-  // When we start mid-file the first line is partial (its start was cut off) —
-  // drop it up to the first newline, which is a clean byte boundary so the
-  // remainder decodes without splitting a multi-byte character.
-  const cappedFromStart = start > 0;
-  if (cappedFromStart) {
-    const firstNl = text.indexOf('\n');
-    text = firstNl === -1 ? '' : text.slice(firstNl + 1);
-  }
-  // Exclude a trailing partial line; the cursor (an absolute byte offset) sits
-  // before it so a later readTranscriptFrom re-reads it whole once it completes.
-  const lastNl = text.lastIndexOf('\n');
-  const hadCompleteLine = lastNl !== -1;
-  const trailingPartial = hadCompleteLine ? text.slice(lastNl + 1) : text;
+  const raw = buf.toString('utf8');
+  // The last newline in the raw window ends the last complete line; the cursor
+  // sits just past it. hadCompleteLine is derived from the RAW window (any
+  // newline at all) so that a completed line LARGER than the cap still advances
+  // the cursor — even though, dropped below as a leading partial, it yields no
+  // item. Computing it after the leading-partial drop would miss exactly that
+  // case and stall the cursor forever.
+  const rawLastNl = raw.lastIndexOf('\n');
+  const hadCompleteLine = rawLastNl !== -1;
+  const trailingPartial = hadCompleteLine ? raw.slice(rawLastNl + 1) : raw;
   const cursor = size - Buffer.byteLength(trailingPartial, 'utf8');
-  const usable = hadCompleteLine ? text.slice(0, lastNl + 1) : '';
+  // For PARSING, also drop a leading partial line (its start was cut off when we
+  // began mid-file) so it can't corrupt a parse; a newline is a clean byte
+  // boundary, so the remainder decodes without splitting a multi-byte character.
+  let body = raw;
+  if (start > 0) {
+    const firstNl = body.indexOf('\n');
+    body = firstNl === -1 ? '' : body.slice(firstNl + 1);
+  }
+  const bodyLastNl = body.lastIndexOf('\n');
+  const usable = bodyLastNl === -1 ? '' : body.slice(0, bodyLastNl + 1);
   const all = usable.split('\n').filter(Boolean).flatMap(normalizeLine);
-  const truncated = cappedFromStart || all.length > maxItems;
+  const truncated = start > 0 || all.length > maxItems;
   return { items: all.length > maxItems ? all.slice(-maxItems) : all, cursor, truncated, hadCompleteLine };
 }
 

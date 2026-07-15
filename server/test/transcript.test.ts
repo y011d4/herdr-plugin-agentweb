@@ -147,4 +147,21 @@ describe('readTranscriptFrom — bounded when the cursor is far behind', () => {
     assert.equal(r.items.length, 0);
     assert.ok(r.cursor > afterFirst); // but the cursor advances — no re-read loop
   });
+
+  it('advances past a completed >cap line with no following line (no loop)', () => {
+    const f = join(dir, 'giant-done.jsonl');
+    const first = userLine('first');
+    writeFileSync(f, first + '\n');
+    const afterFirst = Buffer.byteLength(first + '\n', 'utf8');
+    // a single COMPLETE line larger than the cap, terminated, with nothing after
+    writeFileSync(f, first + '\n' + 'z'.repeat(2_300_000) + '\n');
+    const size = Buffer.byteLength(first + '\n' + 'z'.repeat(2_300_000) + '\n', 'utf8');
+    const r = readTranscriptFrom(f, afterFirst, 300);
+    assert.equal(r.reset, false);   // giant line is unrenderable → no reset
+    assert.equal(r.items.length, 0);
+    assert.equal(r.cursor, size);   // cursor advances to EOF past the completed line
+    // and a follow-up read finds nothing new — no re-read loop
+    assert.equal(readTranscriptFrom(f, r.cursor, 300).items.length, 0);
+    assert.equal(readTranscriptFrom(f, r.cursor, 300).reset, false);
+  });
 });
