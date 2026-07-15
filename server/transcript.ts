@@ -10,10 +10,14 @@
 
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { existsSync, readdirSync, statSync, openSync, readSync, closeSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { normalizeLine, type TimelineItem } from './transcript-normalize.ts';
 
 const PROJECTS_ROOT = resolve(join(homedir(), '.claude', 'projects'));
+
+// Cap the initial/reset read so a large transcript (many MB) can't block the
+// event loop or exhaust memory; only the recent tail is needed for the chat view.
+const TAIL_MAX_BYTES = 2 * 1024 * 1024;
 
 // A session id must be a bare file-stem (UUID in practice). Reject anything with
 // path separators or dots so it can't escape a project directory.
@@ -96,21 +100,38 @@ export interface TranscriptTail extends TranscriptChunk {
 }
 
 /**
- * Initial load: read the whole file once, normalize every line, and return the
- * last `maxItems` items with a cursor at the end of the last complete line.
- * Older items are dropped (chat views only need the recent tail; lazy older
- * history can be layered on later).
+ * Initial load: read at most the last TAIL_MAX_BYTES of the file, normalize the
+ * complete lines within, and return the last `maxItems` items with a cursor at
+ * the end of the last complete line. Older history (beyond the cap or maxItems)
+ * is dropped — chat views only need the recent tail — which also bounds the work
+ * so a large transcript can't stall the event loop. `truncated` flags that older
+ * items exist above.
  */
 export function readTranscriptTail(file: string, maxItems: number): TranscriptTail {
-  let content: string;
-  try { content = readFileSync(file, 'utf8'); } catch { return { items: [], cursor: 0, truncated: false }; }
-  // Drop a trailing partial line and set the cursor before it, so a
-  // subsequent readTranscriptFrom re-reads that line whole once it completes.
-  let usable = content;
-  const lastNl = content.lastIndexOf('\n');
-  if (lastNl !== content.length - 1) usable = lastNl === -1 ? '' : content.slice(0, lastNl + 1);
-  const cursor = Buffer.byteLength(usable, 'utf8');
+  let size: number;
+  try { size = statSync(file).size; } catch { return { items: [], cursor: 0, truncated: false }; }
+  const start = Math.max(0, size - TAIL_MAX_BYTES);
+  const len = size - start;
+  if (len === 0) return { items: [], cursor: size, truncated: false };
+  const buf = Buffer.alloc(len);
+  const fd = openSync(file, 'r');
+  try { readSync(fd, buf, 0, len, start); } finally { closeSync(fd); }
+  let text = buf.toString('utf8');
+  // When we start mid-file the first line is partial (its start was cut off) —
+  // drop it up to the first newline, which is a clean byte boundary so the
+  // remainder decodes without splitting a multi-byte character.
+  const cappedFromStart = start > 0;
+  if (cappedFromStart) {
+    const firstNl = text.indexOf('\n');
+    text = firstNl === -1 ? '' : text.slice(firstNl + 1);
+  }
+  // Exclude a trailing partial line; the cursor (an absolute byte offset) sits
+  // before it so a later readTranscriptFrom re-reads it whole once it completes.
+  const lastNl = text.lastIndexOf('\n');
+  const trailingPartial = lastNl === -1 ? text : text.slice(lastNl + 1);
+  const cursor = size - Buffer.byteLength(trailingPartial, 'utf8');
+  const usable = lastNl === -1 ? '' : text.slice(0, lastNl + 1);
   const all = usable.split('\n').filter(Boolean).flatMap(normalizeLine);
-  const truncated = all.length > maxItems;
-  return { items: truncated ? all.slice(-maxItems) : all, cursor, truncated };
+  const truncated = cappedFromStart || all.length > maxItems;
+  return { items: all.length > maxItems ? all.slice(-maxItems) : all, cursor, truncated };
 }

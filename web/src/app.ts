@@ -896,7 +896,11 @@ async function pollChatFallback(): Promise<void> {
       chatCursor = data.cursor ?? 0;
       renderChatReset(data.items ?? []);
     } else {
-      chatCursor = data.cursor ?? chatCursor;
+      // Ignore a response that doesn't advance past what we've shown (a stale or
+      // overlapping fetch) so the cursor never rewinds and items aren't re-appended.
+      const next = data.cursor ?? chatCursor;
+      if (next <= chatCursor) return;
+      chatCursor = next;
       appendChatItems(data.items ?? []);
     }
   } catch {
@@ -1538,9 +1542,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Stop pane polling when tab is hidden, resume when visible
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && activePaneId) {
-      if (paneViewMode === 'chat') void pollChatFallback();
-      else refreshPaneOutput();
-    }
+    if (document.hidden || !activePaneId) return;
+    // In chat mode the transcript watch keeps pushing while the WS is up, so the
+    // HTTP fallback must only run when the socket is down — otherwise a fallback
+    // response racing a WS push duplicates items and rewinds chatCursor.
+    if (paneViewMode === 'chat') { if (!wsConnected) void pollChatFallback(); }
+    else refreshPaneOutput();
   });
 });
