@@ -5,10 +5,14 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { verifyToken, extractToken } from './auth.ts';
 import { toClientState } from './state.ts';
 import { buildAgentStatusMessage } from './notify.ts';
+import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail } from './transcript.ts';
 import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
 const PANE_WATCH_INTERVAL_MS = 800; // server-side poll rate for watched panes
+const TRANSCRIPT_WATCH_INTERVAL_MS = 1000; // poll rate for a watched chat transcript
+const TRANSCRIPT_RESOLVE_INTERVAL_MS = 5000; // re-resolve session id (pane.get + dir scan) at most this often
+const TRANSCRIPT_INITIAL_ITEMS = 300; // last-N items sent on initial chat load
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -125,6 +129,32 @@ function serveStatic(webRoot: string, urlPath: string, res: ServerResponse): voi
 interface RawPaneInfo {
   agent?: string;
   scroll?: { max_offset_from_bottom?: number; viewport_rows?: number };
+}
+
+// pane.get also returns the claude session identity and cwd, used to locate the
+// pane's transcript on disk for the chat view.
+interface RawPaneFull extends RawPaneInfo {
+  agent_session?: { value?: string; source?: string };
+  cwd?: string;
+  foreground_cwd?: string;
+}
+
+// Locate a pane's Claude Code transcript: fetch its session id + cwd from herdr,
+// then resolve the on-disk JSONL. Returns nulls when the pane isn't a claude
+// session or its transcript isn't on this host (→ chat view unavailable).
+async function resolvePaneTranscript(
+  herdrClient: HerdrClient,
+  paneId: string,
+): Promise<{ sessionId: string | null; file: string | null }> {
+  try {
+    const info = (await herdrClient.rpc('pane.get', { pane_id: paneId })) as { pane?: RawPaneFull };
+    const sess = info.pane?.agent_session;
+    const sessionId = sess?.source?.startsWith('herdr:claude') && typeof sess.value === 'string' ? sess.value : null;
+    const cwd = info.pane?.foreground_cwd || info.pane?.cwd || null;
+    return { sessionId, file: sessionId ? resolveTranscriptPath(sessionId, cwd) : null };
+  } catch {
+    return { sessionId: null, file: null };
+  }
 }
 
 // Whether a pane should receive forwarded SGR wheel events: it must run an
@@ -324,6 +354,30 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
         return;
       }
 
+      // Structured chat view: the pane's Claude Code JSONL transcript as
+      // TimelineItems. `?session=<id>&after=<cursor>` fetches only items past a
+      // byte cursor for the same session (HTTP-fallback polling); otherwise the
+      // recent tail is returned with reset=true. available=false → not a claude
+      // pane, or its transcript isn't on this host (client keeps the terminal).
+      if (action === 'transcript' && method === 'GET') {
+        const { sessionId, file } = await resolvePaneTranscript(herdrClient, paneId);
+        if (!sessionId || !file) {
+          jsonOk(res, { available: false });
+          return;
+        }
+        const sessionParam = url.searchParams.get('session');
+        const afterParam = url.searchParams.get('after');
+        const after = afterParam !== null ? parseInt(afterParam, 10) : NaN;
+        if (sessionParam === sessionId && Number.isInteger(after) && after >= 0) {
+          const { items, cursor } = readTranscriptFrom(file, after);
+          jsonOk(res, { available: true, sessionId, items, cursor, reset: false });
+        } else {
+          const { items, cursor, truncated } = readTranscriptTail(file, TRANSCRIPT_INITIAL_ITEMS);
+          jsonOk(res, { available: true, sessionId, items, cursor, reset: true, truncated });
+        }
+        return;
+      }
+
       jsonError(res, 404, 'not_found', 'unknown pane endpoint');
       return;
     }
@@ -457,6 +511,77 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
         }
       };
 
+      // Transcript watch: while a client views a claude pane in chat mode, tail
+      // its JSONL transcript and push new TimelineItems. Independent of the pane
+      // watch above (the client runs one or the other per view mode). The session
+      // id is re-resolved (a pane.get RPC + projects-dir scan) only every
+      // TRANSCRIPT_RESOLVE_INTERVAL_MS to catch a mid-session reset (/clear → new
+      // session file); the resolved file is tailed cheaply on every tick.
+      let watchedTranscriptPaneId: string | null = null;
+      let transcriptTimer: ReturnType<typeof setInterval> | null = null;
+      let transcriptSessionId: string | null = null; // '' = last resolved unavailable
+      let transcriptFile: string | null = null;
+      let transcriptCursor = 0;
+      let transcriptResolveAt = 0; // last session-id resolution (Date.now())
+      let transcriptPollInFlight = false;
+
+      const stopTranscriptWatch = (): void => {
+        if (transcriptTimer) clearInterval(transcriptTimer);
+        transcriptTimer = null;
+        watchedTranscriptPaneId = null;
+        transcriptSessionId = null;
+        transcriptFile = null;
+        transcriptCursor = 0;
+        transcriptResolveAt = 0;
+      };
+
+      const pollTranscript = async (): Promise<void> => {
+        if (!watchedTranscriptPaneId || transcriptPollInFlight || ws.readyState !== WebSocket.OPEN) return;
+        transcriptPollInFlight = true;
+        const paneId = watchedTranscriptPaneId;
+        try {
+          // Throttled re-resolution: catches a session switch without a per-tick
+          // herdr RPC + directory scan (transcriptResolveAt starts 0 → first tick
+          // always resolves).
+          if (Date.now() - transcriptResolveAt >= TRANSCRIPT_RESOLVE_INTERVAL_MS) {
+            transcriptResolveAt = Date.now();
+            const { sessionId, file } = await resolvePaneTranscript(herdrClient, paneId);
+            if (paneId !== watchedTranscriptPaneId || ws.readyState !== WebSocket.OPEN) return;
+            if (!sessionId || !file) {
+              // Not a claude pane, or transcript not on this host — tell the
+              // client once so it falls back to the terminal, then keep it flagged.
+              if (transcriptSessionId !== '') {
+                transcriptSessionId = '';
+                transcriptFile = null;
+                ws.send(JSON.stringify({ type: 'transcript_items', paneId, available: false, reset: true, items: [], cursor: 0 }));
+              }
+              return;
+            }
+            if (sessionId !== transcriptSessionId || file !== transcriptFile) {
+              // First resolve for this session (or a mid-session switch): send the tail.
+              transcriptSessionId = sessionId;
+              transcriptFile = file;
+              const { items, cursor } = readTranscriptTail(file, TRANSCRIPT_INITIAL_ITEMS);
+              transcriptCursor = cursor;
+              ws.send(JSON.stringify({ type: 'transcript_items', paneId, available: true, sessionId, items, cursor, reset: true }));
+              return;
+            }
+          }
+          // Cheap incremental tail of the already-resolved file every tick.
+          if (transcriptFile && transcriptSessionId) {
+            const { items, cursor } = readTranscriptFrom(transcriptFile, transcriptCursor);
+            transcriptCursor = cursor;
+            if (items.length > 0) {
+              ws.send(JSON.stringify({ type: 'transcript_items', paneId, available: true, sessionId: transcriptSessionId, items, cursor, reset: false }));
+            }
+          }
+        } catch {
+          // transient herdr/file errors — keep watching, retry next tick
+        } finally {
+          transcriptPollInFlight = false;
+        }
+      };
+
       ws.on('message', (data: Buffer) => {
         let msg: Record<string, unknown>;
         try { msg = JSON.parse(data.toString()) as Record<string, unknown>; } catch { return; }
@@ -469,11 +594,18 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
           void pollWatchedPane();
         } else if (msg?.type === 'unwatch_pane') {
           stopWatch();
+        } else if (msg?.type === 'watch_transcript' && typeof msg.paneId === 'string') {
+          stopTranscriptWatch();
+          watchedTranscriptPaneId = msg.paneId;
+          transcriptTimer = setInterval(() => { void pollTranscript(); }, TRANSCRIPT_WATCH_INTERVAL_MS);
+          void pollTranscript();
+        } else if (msg?.type === 'unwatch_transcript') {
+          stopTranscriptWatch();
         }
       });
 
-      ws.on('close', () => { stopWatch(); wsClients.delete(ws); });
-      ws.on('error', () => { stopWatch(); wsClients.delete(ws); });
+      ws.on('close', () => { stopWatch(); stopTranscriptWatch(); wsClients.delete(ws); });
+      ws.on('error', () => { stopWatch(); stopTranscriptWatch(); wsClients.delete(ws); });
     });
   });
 

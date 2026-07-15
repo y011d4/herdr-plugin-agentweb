@@ -10,7 +10,9 @@
  */
 
 import { ansiToHtml } from './ansi.ts';
-import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage } from './types.ts';
+import { renderItems } from './transcript.ts';
+import type { TimelineItem } from './transcript.ts';
+import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 
 // ── App version ──────────────────────────────────────────────────────────────
 const APP_VERSION = '0.1.0';
@@ -18,6 +20,7 @@ const APP_VERSION = '0.1.0';
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
 const STORAGE_NOTIF = 'herdr_notifications';
+const STORAGE_VIEW = 'herdr_pane_view'; // preferred pane view: 'terminal' | 'chat'
 
 // ── WS reconnect config ───────────────────────────────────────────────────────
 const WS_PING_INTERVAL_MS = 30_000;
@@ -41,6 +44,14 @@ let appState: AppState | null = null;
 
 /** paneId currently shown in detail view (null if not on pane screen) */
 let activePaneId: string | null = null;
+
+// ── Chat view (Claude Code transcript) ────────────────────────────────────────
+// A claude pane can be shown as its structured transcript instead of the raw
+// terminal. Availability is probed per pane; the terminal stays the fallback.
+let paneViewMode: 'terminal' | 'chat' = 'terminal';
+let chatAvailable = false;
+let chatSessionId: string | null = null;
+let chatCursor = 0; // byte offset into the transcript for incremental fetches
 
 /** source toggle: 'visible' | 'recent' */
 
@@ -221,17 +232,26 @@ function handleWsMessage(msg: WsMessage): void {
       showToast('Pane closed', 'This pane no longer exists.');
       navigate('#/agents');
     }
+  } else if (msg.type === 'transcript_items') {
+    if (msg.paneId === activePaneId) onTranscriptItems(msg);
   }
   // pong — no-op
 }
 
-// Tell the server which pane (if any) to watch for output pushes.
+// Tell the server what to watch for the active pane: its transcript in chat
+// mode, its terminal output otherwise. The two watches are mutually exclusive,
+// so the unused one is always cancelled. Re-sent on reconnect and mode switches.
 function wsSendWatch(): void {
   if (!wsSocket || wsSocket.readyState !== WebSocket.OPEN) return;
-  if (activePaneId) {
+  if (activePaneId && paneViewMode === 'chat') {
+    wsSocket.send(JSON.stringify({ type: 'unwatch_pane' }));
+    wsSocket.send(JSON.stringify({ type: 'watch_transcript', paneId: activePaneId }));
+  } else if (activePaneId) {
+    wsSocket.send(JSON.stringify({ type: 'unwatch_transcript' }));
     wsSocket.send(JSON.stringify({ type: 'watch_pane', paneId: activePaneId }));
   } else {
     wsSocket.send(JSON.stringify({ type: 'unwatch_pane' }));
+    wsSocket.send(JSON.stringify({ type: 'unwatch_transcript' }));
   }
 }
 
@@ -635,7 +655,12 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     document.getElementById('topbar-title')!.innerHTML = paneHeaderHtml(found, paneId);
     document.getElementById('topbar-left')!.innerHTML =
       `<button class="topbar-back" aria-label="Back">&#8592; Agents</button>`;
-    document.getElementById('topbar-right')!.innerHTML = '';
+    // View toggle (terminal ⇄ chat). Hidden until a claude transcript is found.
+    document.getElementById('topbar-right')!.innerHTML =
+      `<button class="topbar-action view-toggle" id="btn-view-toggle" style="display:none;">Chat</button>`;
+    document.getElementById('btn-view-toggle')!.addEventListener('click', () => {
+      if (paneViewMode === 'chat') switchToTerminal(); else switchToChat();
+    });
     document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate('#/agents'));
   }
 
@@ -650,6 +675,11 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   appScrollPane = false;
   wheelQueue = 0;
   stopFling();
+  // chat view starts closed; availability is probed after the terminal loads
+  paneViewMode = 'terminal';
+  chatAvailable = false;
+  chatSessionId = null;
+  chatCursor = 0;
 
   // Build screen HTML. The terminal holds two sections that are updated
   // independently so live pushes never touch the scrollback DOM above:
@@ -657,6 +687,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   elScreen!.innerHTML = `
     <div id="screen-pane" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
       <div class="terminal-output" id="terminal-output"><div id="term-history"></div><div id="term-live"><span class="loading-spinner"></span></div></div>
+      <div class="chat-log" id="chat-log" style="display:none;"></div>
       <div class="input-bar">
         <div class="input-row">
           <textarea id="pane-input" rows="1" placeholder="Send text…" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
@@ -713,6 +744,164 @@ async function renderPaneDetail(paneId: string): Promise<void> {
 
   // Start polling while this pane is visible
   startPaneRefresh();
+
+  // Probe whether this pane has a Claude transcript; if so reveal the toggle and
+  // switch to chat when it's the preferred view.
+  void initChatAvailability(paneId);
+}
+
+// ── Chat view ─────────────────────────────────────────────────────────────────
+
+interface TranscriptResponse {
+  available: boolean;
+  sessionId?: string;
+  items?: TimelineItem[];
+  cursor?: number;
+  reset?: boolean;
+  truncated?: boolean;
+}
+
+// Chat is the default view; the terminal is only preferred if explicitly chosen.
+function preferredView(): 'terminal' | 'chat' {
+  return localStorage.getItem(STORAGE_VIEW) === 'terminal' ? 'terminal' : 'chat';
+}
+
+function updateViewToggleLabel(): void {
+  const btn = document.getElementById('btn-view-toggle');
+  if (btn) btn.textContent = paneViewMode === 'chat' ? 'Terminal' : 'Chat';
+}
+
+function showViewToggle(visible: boolean): void {
+  const btn = document.getElementById('btn-view-toggle');
+  if (btn) btn.style.display = visible ? '' : 'none';
+}
+
+// One GET decides availability, reveals the toggle, and (when chat is preferred)
+// switches straight in using the payload it just fetched — no second request.
+async function initChatAvailability(paneId: string): Promise<void> {
+  const gen = paneViewGen;
+  try {
+    const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript`) as TranscriptResponse;
+    if (gen !== paneViewGen || paneId !== activePaneId) return;
+    chatAvailable = data.available;
+    showViewToggle(chatAvailable);
+    if (chatAvailable && preferredView() === 'chat') switchToChat(data);
+  } catch {
+    // leave the terminal view; toggle stays hidden
+  }
+}
+
+function switchToChat(initial?: TranscriptResponse): void {
+  if (!chatAvailable || !activePaneId) return;
+  paneViewMode = 'chat';
+  localStorage.setItem(STORAGE_VIEW, 'chat');
+  document.getElementById('terminal-output')?.style.setProperty('display', 'none');
+  document.getElementById('chat-log')?.style.setProperty('display', '');
+  updateViewToggleLabel();
+  if (initial?.items) {
+    chatSessionId = initial.sessionId ?? null;
+    chatCursor = initial.cursor ?? 0;
+    renderChatReset(initial.items);
+  } else {
+    void loadChatInitial();
+  }
+  wsSendWatch(); // server: stop pane watch, start transcript watch
+}
+
+function switchToTerminal(): void {
+  paneViewMode = 'terminal';
+  localStorage.setItem(STORAGE_VIEW, 'terminal');
+  document.getElementById('chat-log')?.style.setProperty('display', 'none');
+  document.getElementById('terminal-output')?.style.setProperty('display', '');
+  updateViewToggleLabel();
+  wsSendWatch(); // server: stop transcript watch, resume pane watch
+  void refreshPaneOutput(); // repaint the live screen the user returns to
+}
+
+async function loadChatInitial(): Promise<void> {
+  if (!activePaneId) return;
+  const gen = paneViewGen;
+  const paneId = activePaneId;
+  try {
+    const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript`) as TranscriptResponse;
+    if (gen !== paneViewGen || paneId !== activePaneId || paneViewMode !== 'chat') return;
+    if (!data.available) { chatAvailable = false; showViewToggle(false); switchToTerminal(); return; }
+    chatSessionId = data.sessionId ?? null;
+    chatCursor = data.cursor ?? 0;
+    renderChatReset(data.items ?? []);
+  } catch {
+    // keep whatever is shown; the WS watch will refresh
+  }
+}
+
+function renderChatReset(items: TimelineItem[], preserveScroll = false): void {
+  const chat = document.getElementById('chat-log');
+  if (!chat) return;
+  // A reconnect re-watch resends the same session's tail; keep the user where
+  // they were reading instead of snapping to the bottom.
+  const prevTop = chat.scrollTop;
+  const prevFromBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight;
+  chat.innerHTML = items.length ? renderItems(items) : '<div class="chat-empty">No messages yet.</div>';
+  chat.scrollTop = preserveScroll
+    ? (prevFromBottom < 40 ? chat.scrollHeight : prevTop)
+    : chat.scrollHeight;
+}
+
+function appendChatItems(items: TimelineItem[]): void {
+  const chat = document.getElementById('chat-log');
+  if (!chat || items.length === 0) return;
+  // follow the bottom only if the user is already there — don't yank them out of
+  // history they've scrolled up to read.
+  const atBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 60;
+  chat.querySelector('.chat-empty')?.remove();
+  chat.insertAdjacentHTML('beforeend', renderItems(items));
+  if (atBottom) chat.scrollTop = chat.scrollHeight;
+}
+
+function onTranscriptItems(msg: WsTranscriptItemsMessage): void {
+  if (!msg.available) {
+    chatAvailable = false;
+    showViewToggle(false);
+    if (paneViewMode === 'chat') switchToTerminal();
+    return;
+  }
+  chatAvailable = true;
+  showViewToggle(true);
+  if (paneViewMode !== 'chat') return; // availability noted; content applies only in chat mode
+  if (msg.reset || msg.sessionId !== chatSessionId) {
+    // Same session (a reconnect re-watch) → keep scroll; a new session → bottom.
+    const sameSession = msg.sessionId != null && msg.sessionId === chatSessionId;
+    chatSessionId = msg.sessionId ?? null;
+    chatCursor = msg.cursor;
+    renderChatReset(msg.items, sameSession);
+  } else {
+    chatCursor = msg.cursor;
+    appendChatItems(msg.items);
+  }
+}
+
+// HTTP fallback while the WS is down: fetch items past the cursor for the same
+// session (mirrors the transcript watch).
+async function pollChatFallback(): Promise<void> {
+  if (!activePaneId || paneViewMode !== 'chat') return;
+  const gen = paneViewGen;
+  const paneId = activePaneId;
+  const q = chatSessionId ? `?session=${encodeURIComponent(chatSessionId)}&after=${chatCursor}` : '';
+  try {
+    const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript${q}`) as TranscriptResponse;
+    if (gen !== paneViewGen || paneId !== activePaneId || paneViewMode !== 'chat') return;
+    if (!data.available) { chatAvailable = false; showViewToggle(false); switchToTerminal(); return; }
+    if (data.reset || data.sessionId !== chatSessionId) {
+      chatSessionId = data.sessionId ?? null;
+      chatCursor = data.cursor ?? 0;
+      renderChatReset(data.items ?? []);
+    } else {
+      chatCursor = data.cursor ?? chatCursor;
+      appendChatItems(data.items ?? []);
+    }
+  } catch {
+    // transient; retry next tick
+  }
 }
 
 function buildQuickKeys(paneId: string): void {
@@ -1170,10 +1359,11 @@ function queuePaneEcho(): void {
 function startPaneRefresh(): void {
   stopPaneRefresh();
   paneRefreshTimer = setInterval(() => {
-    // While the WS pane watch is pushing, client polling is redundant —
-    // poll only as a fallback when the socket is down.
+    // While the WS watch is pushing, client polling is redundant — poll only as
+    // a fallback when the socket is down, for whichever view is active.
     if (activePaneId && !document.hidden && !wsConnected) {
-      refreshPaneOutput();
+      if (paneViewMode === 'chat') void pollChatFallback();
+      else refreshPaneOutput();
     }
   }, PANE_REFRESH_INTERVAL_MS);
 }
@@ -1349,7 +1539,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Stop pane polling when tab is hidden, resume when visible
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && activePaneId) {
-      refreshPaneOutput();
+      if (paneViewMode === 'chat') void pollChatFallback();
+      else refreshPaneOutput();
     }
   });
 });
