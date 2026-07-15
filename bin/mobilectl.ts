@@ -266,7 +266,7 @@ async function qr(): Promise<number> {
       url = `${baseUrl()}?token=${token}`;
     }
     if (!ts.serveActive) {
-      hint = `hint: set "public_url" in config.json (herdr plugin config-dir y011d4.mobile), or run \`tailscale serve --bg ${port}\` for tailnet-only HTTPS`;
+      hint = `hint: set "public_url" in config.json (herdr plugin config-dir y011d4.mobile) to your reverse-proxy / tunnel / VPN address (Cloudflare Tunnel, Caddy, ngrok, ...). Tailscale is auto-detected; for tailnet HTTPS run: tailscale serve --bg ${port}`;
     }
   }
 

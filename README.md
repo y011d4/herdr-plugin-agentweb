@@ -1,5 +1,7 @@
 # herdr-plugin-mobile
 
+**English** | [日本語](./README.ja.md)
+
 Monitor and control every coding agent running in [herdr](https://herdr.dev) from your
 phone. A herdr plugin that runs a small local bridge server (Node.js) and serves a
 mobile-first PWA:
@@ -11,12 +13,12 @@ mobile-first PWA:
   (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …)
 - Live updates over WebSocket (sub-second); notifications when an agent
   becomes blocked or done — tap to jump to the pane, swipe right to dismiss
-- No accounts, no cloud, no third-party services. Everything stays on your machine
-  and (recommended) inside your Tailscale tailnet.
+- No accounts, no cloud, no third-party services. Everything stays on your machine;
+  remote access is your choice of transport — a reverse proxy, a tunnel, or a VPN.
 
 ```
 Android (Chrome / installed PWA)
-   │  HTTPS via `tailscale serve` (tailnet-only)
+   │  HTTPS via a reverse proxy, tunnel, or VPN (see "Exposing the bridge")
    ▼
 bridge server (this plugin, binds 127.0.0.1:8390)
    │  ndjson over the herdr unix socket
@@ -28,17 +30,22 @@ herdr server
 
 - herdr >= 0.7.0 (Linux/macOS)
 - Node.js >= 20
-- Tailscale on both the machine and the phone (recommended access path)
+- A way to reach the bridge from your phone — a reverse proxy, a tunnel, or a VPN
+  (see [Exposing the bridge to your phone](#exposing-the-bridge-to-your-phone)).
+  Tailscale is one easy option, not a requirement.
 
 ## Setup
 
+Install straight from GitHub — herdr fetches the repo and runs the build for you:
+
 ```bash
-git clone https://github.com/y011d4/herdr-plugin-mobile
-cd herdr-plugin-mobile
-npm install                      # only dependency: ws
-npm run build                    # generate dist/ — `herdr plugin link` does not run the manifest build
-herdr plugin link "$(pwd)"
+herdr plugin install y011d4/herdr-plugin-mobile
+# or pin a version:  herdr plugin install y011d4/herdr-plugin-mobile --ref v0.1.0
 ```
+
+No clone, no manual build: `herdr plugin install` runs the manifest `[[build]]` steps
+(`npm ci`, then `npm run build`), so it needs Node.js and `npm` on `PATH`. To hack on
+the plugin from a local checkout instead, see [Development](#development).
 
 Start the bridge (any of these):
 
@@ -54,26 +61,92 @@ package; falls back to printing the URL):
 herdr plugin pane open --plugin y011d4.mobile --entrypoint connect
 ```
 
-The overlay pane shows a QR of the best reachable URL — the `tailscale serve`
-HTTPS address when active, otherwise the Tailscale IP — with the access token
-included. `start`/`status` print the URL without the token; the token lives in
-the state dir (`token` file, printed path in the action output).
+The overlay pane shows a QR of your connect URL with the access token included:
+your configured `public_url` when set, otherwise an auto-detected Tailscale
+address, otherwise `http://127.0.0.1:<port>`. See
+[Exposing the bridge to your phone](#exposing-the-bridge-to-your-phone) to pick a
+transport and set `public_url`. `start`/`status` print the URL without the token;
+the token lives in the state dir (`token` file, printed path in the action output).
 
-### Expose to your phone (Tailscale, recommended)
+### Managing the bridge
 
-The bridge binds to `127.0.0.1` only. Publish it inside your tailnet with
-automatic HTTPS:
+The plugin exposes three workspace actions and two panes:
 
-```bash
-tailscale serve --bg 8390
+| Entrypoint | Kind | What it does |
+| --- | --- | --- |
+| `y011d4.mobile.start` | action | Start the bridge as a detached daemon |
+| `y011d4.mobile.stop` | action | Stop the running bridge |
+| `y011d4.mobile.status` | action | Report whether it's running and print the URL (no token) |
+| `server` | pane | Run the bridge in a visible pane (foreground; the tokenized URL is shown here) |
+| `connect` | pane | Show the connect QR / URL as an overlay |
+
+Invoke an action with `herdr plugin action invoke <id>`; open a pane with
+`herdr plugin pane open --plugin y011d4.mobile --entrypoint <id>`. The detached
+daemon and the foreground `server` pane are mutually exclusive — start one or the
+other, not both.
+
+### Exposing the bridge to your phone
+
+The bridge binds to `127.0.0.1` only, so something has to carry traffic from your
+phone to that loopback port. Pick **one** of the transports below and set
+`public_url` (see [Configuration](#configuration)) to the address your phone will
+use. The bridge doesn't care which one you use — it just serves the PWA and the API
+on loopback.
+
+Prefer a transport that gives you **HTTPS with a valid certificate**: that makes the
+page a *secure context*, which is what enables the service worker, "Add to Home
+screen", and Web Notifications. Plain HTTP still works for viewing, but those PWA
+features stay off.
+
+**Reverse proxy + your own domain** (Caddy / nginx / Traefik) — terminate TLS with a
+real certificate and forward to the bridge. Caddy needs one line and provisions the
+certificate for you:
+
+```
+# Caddyfile — DNS for herdr.example.com must resolve to this host
+herdr.example.com {
+    reverse_proxy 127.0.0.1:8390
+}
 ```
 
-Then open `https://<machine>.<tailnet>.ts.net/?token=<token>` on the phone and use
-Chrome's "Add to Home screen". HTTPS gives the PWA a secure context, which enables
-the service worker and Web Notifications. Traffic never leaves the WireGuard
-tunnel; nothing is exposed to the public internet (don't use `tailscale funnel`).
+Set `"public_url": "https://herdr.example.com"`. (On nginx, pass the WebSocket
+`Upgrade`/`Connection` headers through so `/ws` works.)
 
-To stop publishing: `tailscale serve reset` (or check with `tailscale serve status`).
+**Cloudflare Tunnel** — no open ports, no public IP, valid HTTPS:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8390   # prints an https://…trycloudflare.com URL
+```
+
+Set `public_url` to that URL, or bind a named tunnel to your own domain for a stable
+address.
+
+**Quick tunnel** (ngrok, localtunnel, …) — fastest to try, but the URL changes each
+run:
+
+```bash
+ngrok http 8390                                  # prints an https URL with a valid cert
+```
+
+Because the address is ephemeral, either update `public_url` each run, or skip the QR
+pane and just open `<printed-url>/?token=<token>` on the phone.
+
+**VPN** (Tailscale, WireGuard, ZeroTier, …) — put the phone and the machine on the
+same private network. Tailscale can also terminate HTTPS for you, so it needs no
+separate reverse proxy:
+
+```bash
+tailscale serve --bg 8390                        # tailnet-only HTTPS, valid cert
+```
+
+Then open `https://<machine>.<tailnet>.ts.net/?token=<token>` (stop with `tailscale
+serve reset`; don't use `tailscale funnel`). With a plain VPN IP instead — e.g.
+`"public_url": "http://100.x.y.z:8390"` — it works over HTTP but without a secure
+context, so the PWA features above stay off; front it with a reverse proxy if you
+want them.
+
+Whichever you pick, open `<public_url>/?token=<token>` on the phone (the connect QR
+pane builds exactly this link) and use Chrome's "Add to Home screen".
 
 ## Pane view gestures
 
@@ -107,8 +180,16 @@ description = "mobile bridge status"
 
 ## Configuration
 
-Optional `config.json` in the plugin config dir
-(`herdr plugin config-dir y011d4.mobile`):
+Configuration is entirely optional — the bridge runs with working defaults. To
+change anything, create a `config.json` in the plugin config dir. Print that dir
+with:
+
+```bash
+herdr plugin config-dir y011d4.mobile
+```
+
+Every key is optional; include only the ones you want to override. The full shape,
+with defaults, is:
 
 ```json
 {
@@ -119,21 +200,36 @@ Optional `config.json` in the plugin config dir
 }
 ```
 
-- `host` — bind address. Keep `127.0.0.1` and use `tailscale serve`. Setting this
-  to your Tailscale IP serves plain HTTP directly on the tailnet (works, but the
-  PWA runs without a secure context: no service worker, no system notifications).
+- `host` — bind address. Keep `127.0.0.1` and put a transport in front of it (see
+  [Exposing the bridge to your phone](#exposing-the-bridge-to-your-phone)). Binding
+  to a LAN/VPN IP serves plain HTTP directly (works, but the PWA then runs without a
+  secure context: no service worker, no system notifications).
 - `port` — bridge port (default 8390).
-- `public_url` — the base URL your phone reaches the bridge at, e.g.
-  `"https://gram.your-tailnet.ts.net"` or any reverse-proxy address. Used by the
-  connect QR pane. When unset, the pane falls back to auto-detecting Tailscale
-  (serve HTTPS address, else tailnet IP); set this if you don't use Tailscale.
+- `public_url` — **the main switch for remote access**: the base URL your phone uses
+  to reach the bridge, e.g. `"https://herdr.example.com"` (reverse proxy or Cloudflare
+  Tunnel), an ngrok URL, or `"https://gram.your-tailnet.ts.net"` (Tailscale). The
+  connect QR pane builds its link from this. When unset, the pane falls back to
+  auto-detecting Tailscale (serve HTTPS address, else tailnet IP), then to
+  `http://127.0.0.1:<port>` — so set it for any transport other than Tailscale. See
+  [Exposing the bridge to your phone](#exposing-the-bridge-to-your-phone).
 - `notify_url` — optional [ntfy](https://ntfy.sh) topic URL for background push
   notifications, e.g. `https://ntfy.example.internal/herdr` for a **self-hosted**
   ntfy instance. When unset (default) the bridge performs no outbound requests at
   all. If you want pushes while the app is closed: self-host ntfy, bind it to
   your tailnet, point the ntfy Android app at the same topic.
 
-Environment overrides: `HERDR_MOBILE_HOST`, `HERDR_MOBILE_PORT`.
+**Applying changes:** the config is read once at startup, so restart the bridge
+after editing — `herdr plugin action invoke y011d4.mobile.stop`, then `…start`.
+
+**Environment overrides:** `HERDR_MOBILE_HOST` and `HERDR_MOBILE_PORT` take
+precedence over `config.json` for `host`/`port` (`public_url` and `notify_url` are
+config-file only). Effective precedence is env var → `config.json` → built-in
+default.
+
+> When you run the server directly for development (`node server/main.ts`),
+> `config.json` is only read if `HERDR_PLUGIN_CONFIG_DIR` points at the config dir.
+> herdr sets that automatically for plugin actions and panes, so it "just works"
+> when launched through herdr.
 
 ## Security model
 
@@ -142,8 +238,16 @@ Environment overrides: `HERDR_MOBILE_HOST`, `HERDR_MOBILE_PORT`.
 - Every `/api` and `/ws` request requires a bearer token, generated on first start
   and stored with mode 0600 in the plugin state dir. Unauthenticated requests get
   401. `GET /healthz` is the only open endpoint and returns no session data.
-- Default bind is loopback-only; remote reachability is delegated to Tailscale
-  (`tailscale serve` is tailnet-only and terminates TLS with a valid certificate).
+- Default bind is loopback-only; remote reachability is delegated to whatever
+  transport you put in front (reverse proxy, tunnel, or VPN — see
+  [Exposing the bridge to your phone](#exposing-the-bridge-to-your-phone)). A VPN
+  such as `tailscale serve` keeps the bridge inside a private network, adding a
+  network-layer boundary on top of the token.
+- Exposing it through a **public** domain (reverse proxy / Cloudflare Tunnel) makes
+  the bridge reachable from the internet at the network layer, so the bearer token is
+  then your only line of defense. The token is 128-bit (not brute-forceable), but
+  treat the connect URL as a secret: it also rides in the query string, so it can
+  land in reverse-proxy access logs. A VPN transport avoids that exposure.
 - No telemetry, no external requests (unless you opt into `notify_url`).
 - Anyone with the token can read agent output and type into your panes — treat the
   URL like an SSH key. Rotate by deleting `token` in the state dir and restarting.
@@ -162,18 +266,28 @@ Environment overrides: `HERDR_MOBILE_HOST`, `HERDR_MOBILE_PORT`.
 
 ## Development
 
+For local development, clone and **link** a working tree instead of installing from
+GitHub — `herdr plugin link` points herdr at your checkout so your edits take effect:
+
+```bash
+git clone https://github.com/y011d4/herdr-plugin-mobile
+cd herdr-plugin-mobile
+npm install && npm run build     # only dependency: ws
+herdr plugin link "$(pwd)"
+```
+
 Source is TypeScript under `server/`, `bin/`, and `web/src/`. The built JS
 distribution lives in `dist/` (server and bin) and `web/` (PWA assets).
 
 ```bash
-npm install && npm run build   # install deps and compile TS → JS
+npm run build                  # recompile TS → JS after changes
 npm test                       # unit tests (node --test, runs .ts natively, needs Node >= 23.6)
 node server/main.ts            # run against your live herdr in the foreground (dev, Node >= 23.6)
 ```
 
-`herdr plugin link` does **not** run build commands; run `npm install && npm run build`
-manually after cloning or linking. `herdr plugin install` does run the manifest
-build commands automatically.
+`herdr plugin link` does **not** run build commands — rebuild with `npm run build`
+after edits (and re-run `herdr plugin link` only when `herdr-plugin.toml` changed).
+`herdr plugin install` runs the manifest build commands automatically.
 
 Runtime of the built `dist/` requires Node >= 20. Running TS sources directly
 (dev mode) requires Node >= 23.6 for native type stripping.
