@@ -64,12 +64,15 @@ describe('promptIdentity', () => {
     assert.ok(promptIdentity(t1).includes('Keep going?'));
   });
 
-  it('recognizes the same hint variants parsePrompt accepts (Tab/Space to …)', () => {
+  it('does not treat the composer status bar (shift+tab to cycle) as a menu hint', () => {
+    // "Tab to"/"Space to" are NOT menu hints — the composer's "shift+tab to cycle"
+    // line must not extend the identity into the ticking status bar, or it churns.
     const base = ['● Choose an action', '❯ 1. Commit', '  2. Amend'].join('\n');
-    const withHint = base + '\n' + 'Tab to expand · Space to toggle' + '\n' + '  [OMC] volatile 0h39m';
-    // The hint is recognized, so the volatile status line after it is excluded.
-    const churned = base + '\n' + 'Tab to expand · Space to toggle' + '\n' + '  [OMC] volatile 9h99m';
-    assert.equal(promptIdentity(withHint), promptIdentity(churned));
+    const hint = 'Enter to select · ↑/↓ to navigate · Esc to cancel';
+    const t1 = [base, hint, '⏵⏵ auto mode on (shift+tab to cycle) · ← for agents', '[OMC] 0h39m'].join('\n');
+    const t2 = [base, hint, '⏵⏵ auto mode on (shift+tab to cycle) · ← for agents', '[OMC] 9h99m'].join('\n');
+    assert.equal(promptIdentity(t1), promptIdentity(t2));
+    assert.ok(!promptIdentity(t1).includes('shift+tab'));
   });
 
   it('keys off the bottom-most (active) prompt when an older hint is scrolled above', () => {

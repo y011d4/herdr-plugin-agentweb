@@ -16,25 +16,23 @@ export function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;:?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g, '');
 }
 
-// Identity of the visible prompt region: the context and menu down through the
-// "Enter to select…" navigation hint, with box-drawing and ❯ selection markers
-// stripped and the volatile status bar below the hint excluded. Captures the
-// literal on-screen question text (even when parsing yields no question), so two
-// distinct prompts that share a parsed signature still get different identities,
-// while cursor moves and status-bar ticks don't churn it.
+// A menu's navigation hint line. Menu-specific on purpose — NOT "Tab to"/"Space to",
+// which appear in the composer/status bar ("shift+tab to cycle") and would sweep the
+// volatile status bar into the identity. Kept in sync with web/src/prompt.ts.
+const MENU_HINT = /(Enter to (select|confirm)|↑\/↓|↑ ↓|Esc to (cancel|close))/i;
+
+// Identity of the visible prompt region: the context and menu down through the last
+// navigation hint or last numbered option (a ❯-only menu has no hint), with box-
+// drawing and ❯ selection markers stripped and the volatile status bar below the menu
+// excluded. Captures the literal on-screen question text (even when parsing yields no
+// question), so two distinct prompts that share a parsed signature still get different
+// identities, while cursor moves and status-bar ticks don't churn it.
 export function promptIdentity(text: string): string {
   const lines = text.split('\n').map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼❯➤▶►]/g, ' ').replace(/\s+$/, ''));
-  // The active prompt's bottom edge is the LAST of its navigation hint or its last
-  // numbered option (a ❯-only menu has no hint); everything below is the volatile
-  // status bar and must be excluded or the identity churns and every tap 409s. The
-  // hint set MUST match parsePrompt's guard and the option pattern its matcher (with
-  // ❯ markers already stripped above), so the identity always covers exactly the
-  // block parsePrompt renders buttons for — never the status bar, never nothing.
-  const HINT = /(Enter to select|to navigate|to select|Esc to (cancel|close)|↑\/↓|↑ ↓|Tab to|Space to)/i;
   const OPTION = /^\s*\d+[.)]\s+\S/;
   let end = lines.length;
   for (let i = 0; i < lines.length; i++) {
-    if (HINT.test(lines[i]) || OPTION.test(lines[i])) end = i + 1;
+    if (MENU_HINT.test(lines[i]) || OPTION.test(lines[i])) end = i + 1;
   }
   return lines.slice(0, end).join('\n').replace(/\n{2,}/g, '\n').trim();
 }

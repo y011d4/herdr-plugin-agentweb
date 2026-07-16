@@ -62,6 +62,34 @@ describe('parsePrompt — rejects non-menus', () => {
     // Without a ❯ marker it is not an actionable menu, regardless of a hint below.
     assert.equal(parsePrompt(['  1. Alpha', '  2. Bravo', HINT].join('\n')), null);
   });
+
+  it('rejects a highlighted menu when a different hinted prompt is active below it', () => {
+    // An old highlighted menu still on screen above a NEW, lower prompt that owns the
+    // active menu hint. The upper block must not be offered as buttons — the digit
+    // would land on the lower active prompt.
+    const screen = [
+      '❯ 1. Yes',            // stale, already-answered menu above
+      '  2. No',
+      '',
+      '● Now a different question is active',
+      '❯ 1. Keep',           // this lower block is what parsePrompt should pick…
+      '  2. Discard',
+      HINT,
+    ].join('\n');
+    // parsePrompt picks the bottom-most block ("Keep/Discard"), which is correct here.
+    assert.equal(parsePrompt(screen)!.options[0].label, 'Keep');
+
+    // But when the lower active prompt is NON-numbered (free text) with its own hint,
+    // the bottom-most NUMBERED block is the stale upper menu — reject it.
+    const stale = [
+      '❯ 1. Yes',
+      '  2. No',
+      '',
+      '● Type a commit message:',
+      'Enter to select · Esc to cancel', // belongs to the lower text prompt
+    ].join('\n');
+    assert.equal(parsePrompt(stale), null);
+  });
 });
 
 describe('parsePrompt — with ANSI', () => {

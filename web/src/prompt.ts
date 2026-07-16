@@ -9,6 +9,13 @@
 export interface PromptOption { send: string; label: string }
 export interface ParsedPrompt { question: string | null; options: PromptOption[]; selected: number }
 
+// A menu's navigation hint line. Deliberately menu-specific ("Enter to select /
+// confirm", the ↑/↓ arrows, "Esc to cancel / close") — NOT generic phrases like
+// "Tab to" or "Space to", which appear in the composer/status bar (e.g. "shift+tab
+// to cycle") and would otherwise sweep the volatile status bar into the identity or
+// mislabel it as a prompt hint.
+const MENU_HINT = /(Enter to (select|confirm)|↑\/↓|↑ ↓|Esc to (cancel|close))/i;
+
 // Strip ANSI escapes to plain text for parsing the on-screen prompt. ESC/BEL are
 // written as \x1b/\x07 escapes (not raw control bytes).
 export function stripAnsi(s: string): string {
@@ -28,14 +35,15 @@ export function stripAnsi(s: string): string {
 export function parsePrompt(text: string): ParsedPrompt | null {
   const raw = text.split('\n'); // kept un-stripped so the menu box border (│) is visible
   const lines = raw.map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼]/g, ' ').replace(/\s+$/, ''));
-  const blocks: Array<{ options: PromptOption[]; selected: number; first: number }> = [];
+  const blocks: Array<{ options: PromptOption[]; selected: number; first: number; last: number }> = [];
   let cur: PromptOption[] = [];
   let sel = 0;
   let first = -1;
+  let last = -1;
   let gap = 0;
   const commit = (): void => {
-    if (cur.length >= 2) blocks.push({ options: cur, selected: sel, first });
-    cur = []; sel = 0; first = -1; gap = 0;
+    if (cur.length >= 2) blocks.push({ options: cur, selected: sel, first, last });
+    cur = []; sel = 0; first = -1; last = -1; gap = 0;
   };
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^\s*([❯➤▶►])?\s*(\d+)[.)]\s+(\S.*)$/);
@@ -44,11 +52,12 @@ export function parsePrompt(text: string): ParsedPrompt | null {
     const num = Number(m[2]);
     if (num === cur.length + 1) {
       if (first < 0) first = i;
+      last = i;
       if (m[1]) sel = num;
       cur.push({ send: m[2], label: m[3].trim() });
     } else {
       commit();
-      if (num === 1) { cur = [{ send: '1', label: m[3].trim() }]; first = i; if (m[1]) sel = 1; }
+      if (num === 1) { cur = [{ send: '1', label: m[3].trim() }]; first = i; last = i; if (m[1]) sel = 1; }
     }
   }
   commit();
@@ -60,6 +69,21 @@ export function parsePrompt(text: string): ParsedPrompt | null {
   // prose, which must not become tappable buttons. Unhighlighted numbers are plain
   // terminal output; the raw terminal (always shown) stays the way to answer them.
   if (best.selected === 0) return null;
+  // Reject if the active prompt is actually a DIFFERENT one below this block. Walk
+  // down from the last option: a real active menu's own hint follows through only
+  // menu-continuation lines (blank, stripped rule, indented option description). If a
+  // left-aligned non-continuation line appears first (a new prompt's text), any menu
+  // hint after it belongs to that lower prompt — this highlighted block is stale
+  // scrollback and must not be offered as buttons. A ❯-only menu with just the
+  // composer/status bar below (no menu hint) is fine. Hints ABOVE are ignored.
+  let sawForeign = false;
+  for (let i = best.last + 1; i < lines.length; i++) {
+    const t = lines[i];
+    if (MENU_HINT.test(t)) { if (sawForeign) return null; break; } // own adjacent hint → keep
+    if (!t.trim()) continue; // blank / stripped rule — continuation
+    if (/^\s+\S/.test(t)) continue; // indented option description — continuation
+    sawForeign = true; // left-aligned content below the options → a different prompt
+  }
   // Question: the contiguous lines just above the first option (a long prompt wraps
   // across several lines). Claude renders the prompt inside a box drawn with a
   // horizontal ─ rule on top and a ☐ category line, with a blank padding line
@@ -95,11 +119,10 @@ export function parsePrompt(text: string): ParsedPrompt | null {
 // ❯ selection markers are stripped so cursor movement and borders don't churn it.
 export function promptIdentity(text: string): string {
   const lines = text.split('\n').map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼❯➤▶►]/g, ' ').replace(/\s+$/, ''));
-  const HINT = /(Enter to select|to navigate|to select|Esc to (cancel|close)|↑\/↓|↑ ↓|Tab to|Space to)/i;
   const OPTION = /^\s*\d+[.)]\s+\S/;
   let end = lines.length;
   for (let i = 0; i < lines.length; i++) {
-    if (HINT.test(lines[i]) || OPTION.test(lines[i])) end = i + 1;
+    if (MENU_HINT.test(lines[i]) || OPTION.test(lines[i])) end = i + 1;
   }
   return lines.slice(0, end).join('\n').replace(/\n{2,}/g, '\n').trim();
 }
