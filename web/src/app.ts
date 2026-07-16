@@ -18,7 +18,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v63';
+const BUILD = 'v64';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -67,6 +67,7 @@ let promptPollSeq = 0; // monotonic request id; bumped on stop to invalidate an 
 let promptPollActive = 0; // reqId of the poll currently in flight (0 = none) — prevents overlap
 let promptAnswerInFlight = false; // true while/just after a tapped answer is sent — blocks re-taps
 let answerCooldownTimer: ReturnType<typeof setTimeout> | null = null; // floors the post-send re-tap block
+let answerGen = 0; // per-answer token so a stale POST/timer can't clear the guard for a newer answer
 
 /** source toggle: 'visible' | 'recent' */
 
@@ -1628,22 +1629,25 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   // terminal (always shown below) as the way to answer that out-of-range case.
   if (!Number.isInteger(to) || to < 1 || to > 9) return;
   const paneId = activePaneId;
+  const myGen = ++answerGen; // token for THIS answer; a stale POST/timer must not touch a newer one
   promptAnswerInFlight = true;
+  if (answerCooldownTimer) { clearTimeout(answerCooldownTimer); answerCooldownTimer = null; }
   const panel = document.getElementById('chat-prompt');
   panel?.classList.add('chat-prompt-sending'); // disable the buttons while the answer settles
   btn.classList.add('ask-opt-sent');
   try {
     await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { press: String(to) });
+    if (myGen !== answerGen) return; // a newer tap already superseded this — don't touch shared state
     // The digit already submitted this prompt, but the panel keeps showing it (with
     // tappable buttons) until the pane's status refreshes. Hold the guard through
     // that window so a double-tap can't fire the same digit again into the *next*
     // prompt or the terminal. It's released the moment the pane leaves `blocked` or a
-    // fresh prompt renders (endAnswerCooldown, from updatePromptPanel); this timer is
-    // only a floor. No DOM is mutated here — that would risk clobbering another pane's
-    // panel if the user navigated away during the request.
-    if (answerCooldownTimer) clearTimeout(answerCooldownTimer);
-    answerCooldownTimer = setTimeout(endAnswerCooldown, 1500);
+    // fresh prompt renders (endAnswerCooldown); this timer is only a floor, and it
+    // no-ops if a newer answer has since started. No DOM is mutated here — that would
+    // risk clobbering another pane's panel if the user navigated away mid-request.
+    answerCooldownTimer = setTimeout(() => { if (myGen === answerGen) endAnswerCooldown(); }, 1500);
   } catch (err) {
+    if (myGen !== answerGen) return; // superseded — the newer answer owns the guard now
     showToast('Send failed', (err as Error).message);
     btn.classList.remove('ask-opt-sent');
     endAnswerCooldown();
