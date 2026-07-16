@@ -492,10 +492,15 @@ function showSystemNotification(title: string, body: string, paneId: string): vo
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.getRegistration()
       .then((reg) => {
+        // The app may have become visible while getRegistration() resolved; a
+        // return-to-visible dismiss would then run before this notification exists.
+        // Re-check the same document.hidden gate so a now-visible pane is never
+        // left with a stale OS notification.
+        if (!document.hidden) return;
         if (reg) reg.showNotification(title, { body, tag: paneId });
         else pageNotification(title, body, paneId);
       })
-      .catch(() => pageNotification(title, body, paneId));
+      .catch(() => { if (document.hidden) pageNotification(title, body, paneId); });
   } else {
     pageNotification(title, body, paneId);
   }
