@@ -71,14 +71,17 @@ Verified live against herdr 0.7.3 / protocol 16:
 - **`pane.send_input` wraps text in bracketed paste** when the app enables it,
   and apps discard control sequences inside a paste. Raw bytes (e.g. SGR mouse
   wheel) must go through `pane.send_text`.
-- **Selecting a numbered menu option (e.g. AskUserQuestion) needs the digit sent
-  as a raw keystroke via `pane.send_text`.** A digit in `send_input` `text` is
-  bracketed-paste-wrapped and ignored by the menu; a digit in `send_input` `keys`
-  is dropped (herdr's `keys` are named keys only). `pane.send_text "3"` delivers
-  the raw byte, which the menu treats as pressing `3` (verified live: a raw-mode
-  reader received `b'3'`, and Claude's menu selects that option). Not every
-  `❯`-menu binds digits, though — the startup trust prompt takes only Enter/Esc —
-  so arrow-nav + Enter stays as the fallback.
+- **Selecting a numbered menu option (e.g. AskUserQuestion) is one atomic
+  keystroke: the option's digit sent as a raw byte via `pane.send_text`.** Pressing
+  the digit selects AND submits the option — no Enter, no cursor movement (verified
+  live: sending `"3"` to an AskUserQuestion answered "cherry" outright). It MUST go
+  as a raw keystroke: a digit in `send_input` `text` is bracketed-paste-wrapped and
+  ignored by the menu, and a digit in `send_input` `keys` is dropped (herdr's `keys`
+  are named keys only). Because the digit is atomic, the bridge's answer path sends
+  just the digit — no follow-up read/Enter/arrow that could land on a later prompt,
+  and the `❯` position is irrelevant (selection is by number). The startup trust
+  prompt is a different widget (Enter/Esc only, no digits), but it never surfaces as
+  a `blocked` pane, so the chat answer UI never needs to drive it.
 - herdr emits focus events ~10/s during desktop activity. Never let them
   trigger WS pushes; apply them to the model silently.
 - Invalid enum values in request params make herdr **drop the connection

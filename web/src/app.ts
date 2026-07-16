@@ -18,7 +18,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v59';
+const BUILD = 'v60';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -60,7 +60,6 @@ let chatProbeActive = 0; // reqId of the availability probe in flight (0 = none)
 // Pending-prompt panel: when a claude pane is blocked (waiting for input), the
 // chat surfaces an answer UI — tappable options for a pending AskUserQuestion,
 // or the live terminal screen for any other prompt (permission, plan, y/n).
-let promptSelectedNum = 0; // 1-based index of the menu option the TUI currently highlights (❯)
 let promptPanelKind: 'none' | 'blocked' = 'none';
 let promptScreenTimer: ReturnType<typeof setInterval> | null = null;
 let promptOptionsSig = ''; // last-rendered answer options, to avoid re-render churn
@@ -697,7 +696,6 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   chatSessionId = null;
   chatCursor = 0;
   chatProbeActive = 0; // a prior pane's in-flight probe must not block this pane's probe
-  promptSelectedNum = 0;
   promptPanelKind = 'none';
   promptOptionsSig = '';
   stopPromptScreenPoll();
@@ -1545,7 +1543,6 @@ function promptSig(p: ParsedPrompt | null): string {
 function renderPromptPanel(parsed: ParsedPrompt | null): void {
   const optsEl = document.getElementById('chat-prompt-options');
   if (!optsEl) return;
-  promptSelectedNum = parsed?.selected ?? 0; // current ❯ option, for arrow-nav on tap
   const sig = promptSig(parsed);
   if (sig === promptOptionsSig) return; // unchanged — don't rebuild (keeps a tap from being wiped)
   promptOptionsSig = sig;
@@ -1591,63 +1588,22 @@ function stopPromptScreenPoll(): void {
   promptPollActive = 0; // let a fresh poll start after re-entering (the old one won't clear this)
 }
 
-// Read the live prompt off the screen (null if it can't be parsed right now).
-async function readPromptScreen(paneId: string): Promise<ParsedPrompt | null> {
-  try {
-    const d = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
-    return parsePrompt(stripAnsi((d.ansi ?? d.text ?? '') as string));
-  } catch { return null; }
-}
-
-const answerWait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
-// Converge a numbered menu onto option `to` with ↑/↓ and confirm with Enter, used
-// when a digit press didn't take (a widget that ignores digits) or for options past
-// 9. Every step re-reads the live screen: it re-derives the ❯ position (so a cursor
-// moved on the desktop can't misdirect it) AND re-checks the prompt identity `sig`.
-// If the prompt changes out from under us — the one we're answering already closed —
-// it stops immediately WITHOUT pressing Enter, so keystrokes never land on a
-// different prompt. Enter is sent only once the target is provably highlighted on
-// the same prompt; if it never settles, it aborts without answering. Returns whether
-// the answer was delivered (or the prompt was already gone — nothing left to do).
-async function answerByArrows(paneId: string, to: number, sig: string): Promise<boolean> {
-  for (let guard = 0; guard < 20; guard++) {
-    const p = await readPromptScreen(paneId);
-    if (p && promptSig(p) !== sig) return true; // a different prompt now — ours is already answered; don't touch it
-    const cur = p?.selected ?? 0;
-    if (!p || !cur) { await answerWait(90); continue; } // gone/unreadable this tick — retry, don't move blindly
-    if (cur === to) {
-      await answerWait(60);
-      const p2 = await readPromptScreen(paneId); // re-confirm identity + position immediately before Enter
-      if (p2 && promptSig(p2) !== sig) return true;
-      if ((p2?.selected ?? 0) !== to) continue; // slipped off target — keep converging
-      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: ['enter'] });
-      return true;
-    }
-    await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: [to > cur ? 'down' : 'up'] });
-    await answerWait(120);
-  }
-  showToast('Could not confirm selection', 'The prompt did not settle on the tapped option — use the terminal below to answer.');
-  return false;
-}
-
-// Answer by selecting the tapped option. The target is the option NUMBER, which is
-// stable — unlike the ❯ cursor, which may sit anywhere (moved on the desktop, a
-// stale poll). Preferred path: deliver that digit as a raw keystroke, which selects
-// the option directly, exactly like pressing the key, wherever the cursor is. (A
-// digit via send_input is bracketed-paste-wrapped and ignored, and keys:[digit] is
-// dropped by herdr — both verified live; send_text delivers the raw byte, verified
-// live.) Then observe against the prompt's identity: the menu is gone or a different
-// prompt is up → the digit already submitted ours, stop; the same prompt is still up
-// → let arrow-nav converge and confirm (covers a digit that only highlighted, and a
-// widget that ignores digits). Guarding on identity means a stale read can't make us
-// answer the *next* prompt. An in-flight guard blocks re-taps.
+// Answer by selecting the tapped option. Pressing an option's digit in a numbered
+// menu selects AND submits it in one atomic keystroke — verified live: sending "3"
+// to an AskUserQuestion answered "cherry" with no Enter and no cursor movement. So
+// this just delivers that digit; there is no follow-up read, Enter, or arrow step,
+// which means no keystroke can ever land on a later prompt, and the ❯ cursor's
+// position (which may have moved on the desktop) is irrelevant — selection is by
+// number. The digit must go as a raw keystroke via send_text (`press`): a digit
+// through send_input is bracketed-paste-wrapped and ignored, and keys:[digit] is
+// dropped by herdr (both verified live). An in-flight guard blocks double-taps.
 async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   if (!activePaneId || promptAnswerInFlight) return;
   const to = parseInt(target, 10);
-  if (!Number.isInteger(to) || to < 1) return;
-  const sig = promptOptionsSig; // identity of the prompt these buttons belong to
-  if (!sig) return;
+  // Claude's prompts never exceed ~6 options, so every option is a single digit; a
+  // multi-digit option would submit on its first digit, so refuse it and leave the
+  // terminal (always shown below) as the way to answer that out-of-range case.
+  if (!Number.isInteger(to) || to < 1 || to > 9) return;
   const paneId = activePaneId;
   promptAnswerInFlight = true;
   const panel = document.getElementById('chat-prompt');
@@ -1655,21 +1611,7 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   btn.classList.add('ask-opt-sent');
   let ok = true;
   try {
-    if (to <= 9) {
-      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { press: String(to) });
-      await answerWait(180);
-      let parsed = await readPromptScreen(paneId);
-      if (!parsed) { await answerWait(150); parsed = await readPromptScreen(paneId); }
-      // Menu gone, or a *different* prompt is now up → the digit submitted ours.
-      // Only when the SAME prompt is still on screen do we continue (digit merely
-      // highlighted, or was ignored) — never send keys into a changed prompt.
-      if (!parsed || promptSig(parsed) !== sig) { promptSelectedNum = to; return; }
-      ok = await answerByArrows(paneId, to, sig);
-    } else {
-      // options past 9: a multi-digit press is ambiguous, so navigate with arrows
-      ok = await answerByArrows(paneId, to, sig);
-    }
-    if (ok) promptSelectedNum = to;
+    await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { press: String(to) });
   } catch (err) {
     ok = false;
     showToast('Send failed', (err as Error).message);
