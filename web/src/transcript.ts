@@ -80,17 +80,23 @@ function renderTodos(todos: TodoEntry[]): string {
 // buttons (data-ask-* consumed by app.ts) for a pending prompt; false emits a
 // read-only list for transcript history.
 export function renderAskQuestions(ask: AskQuestion[], interactive: boolean): string {
-  return ask.map((q, qi) => {
+  // Interactive option buttons only when there is a single question: a tapped
+  // option sends a bare number that the TUI applies to whichever question it is
+  // currently showing, so buttons spanning multiple questions could answer the
+  // wrong one. Multi-question prompts render read-only; the live screen and
+  // quick-keys drive those answers.
+  const asButtons = interactive && ask.length === 1;
+  return ask.map((q) => {
     const header = q.header ? `<span class="ask-q-header">${escapeHtml(q.header)}</span>` : '';
     const opts = q.options.map((op, oi) => {
       const num = `<span class="ask-opt-num">${oi + 1}</span>`;
       const label = `<span class="ask-opt-label">${escapeHtml(op.label)}</span>`;
       const desc = op.description ? `<span class="ask-opt-desc">${escapeHtml(op.description)}</span>` : '';
-      return interactive
-        ? `<button class="ask-opt" type="button" data-ask-qi="${qi}" data-ask-oi="${oi}" data-ask-label="${escapeHtml(op.label)}">${num}${label}${desc}</button>`
+      return asButtons
+        ? `<button class="ask-opt" type="button" data-ask-oi="${oi}" data-ask-label="${escapeHtml(op.label)}">${num}${label}${desc}</button>`
         : `<li class="ask-opt-static">${num}${label}${desc}</li>`;
     }).join('');
-    const body = interactive ? `<div class="ask-opts">${opts}</div>` : `<ul class="ask-opts-static">${opts}</ul>`;
+    const body = asButtons ? `<div class="ask-opts">${opts}</div>` : `<ul class="ask-opts-static">${opts}</ul>`;
     return `<div class="ask-q">${header}<div class="ask-q-text">${escapeHtml(q.question)}</div>${body}</div>`;
   }).join('');
 }
