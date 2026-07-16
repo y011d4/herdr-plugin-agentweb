@@ -1,0 +1,74 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+// The live-prompt parser lives in the web module; it is DOM-free so it runs here.
+import { parsePrompt, stripAnsi } from '../../web/src/prompt.ts';
+
+const HINT = 'Enter to select · ↑/↓ to navigate · Esc to cancel';
+
+describe('parsePrompt — real menus', () => {
+  it('parses a highlighted AskUserQuestion menu with its question', () => {
+    const screen = [
+      '────────────────────────────',
+      ' ☐ Fruit',
+      'Which fruit would you like to pick?',
+      '',
+      '❯ 1. apple',
+      '     Pick an apple.',
+      '  2. banana',
+      '     Pick a banana.',
+      '  3. cherry',
+      HINT,
+      '  [OMC] status 0h39m',
+    ].join('\n');
+    const p = parsePrompt(screen);
+    assert.ok(p, 'should parse');
+    assert.equal(p!.options.length, 3);
+    assert.equal(p!.selected, 1);
+    assert.equal(p!.options[2].send, '3');
+    assert.ok(p!.question!.includes('Which fruit'));
+  });
+
+  it('captures a highlight that is not on the first option', () => {
+    const p = parsePrompt(['● Proceed?', '  1. Yes', '❯ 2. No', HINT].join('\n'));
+    assert.equal(p!.selected, 2);
+  });
+});
+
+describe('parsePrompt — rejects non-menus', () => {
+  it('rejects ordinary numbered prose (no highlight)', () => {
+    const prose = ['Plan:', '1. read the config', '2. validate', '3. write output', 'done'].join('\n');
+    assert.equal(parsePrompt(prose), null);
+  });
+
+  it('rejects a single numbered item', () => {
+    assert.equal(parsePrompt('❯ 1. only one option here\nsome text'), null);
+  });
+
+  // The regression the branch review asked for: numbered prose sitting just above a
+  // DIFFERENT, non-numbered prompt whose navigation hint would otherwise be borrowed.
+  it('does not turn numbered prose above a separate hinted prompt into buttons', () => {
+    const screen = [
+      'Here is the plan:',
+      '1. do the first thing',
+      '2. do the second thing',
+      '',
+      'Type your answer below:',
+      HINT, // this hint belongs to the text prompt, NOT the numbered list above
+    ].join('\n');
+    assert.equal(parsePrompt(screen), null);
+  });
+
+  it('rejects an unhighlighted numbered block even with a nearby hint', () => {
+    // Without a ❯ marker it is not an actionable menu, regardless of a hint below.
+    assert.equal(parsePrompt(['  1. Alpha', '  2. Bravo', HINT].join('\n')), null);
+  });
+});
+
+describe('parsePrompt — with ANSI', () => {
+  it('parses after stripping ANSI escapes', () => {
+    const ansi = '\x1b[1m❯ 1. Yes\x1b[0m\n  2. No\n' + HINT;
+    const p = parsePrompt(stripAnsi(ansi));
+    assert.equal(p!.options.length, 2);
+    assert.equal(p!.selected, 1);
+  });
+});

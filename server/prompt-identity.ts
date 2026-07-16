@@ -2,7 +2,7 @@
  * prompt-identity.ts — pure identity of an on-screen TUI prompt region.
  *
  * MUST stay byte-for-byte in sync with stripAnsi()/promptIdentity() in
- * web/src/app.ts. The client sends the identity it computed as `expect_prompt`,
+ * web/src/prompt.ts. The client sends the identity it computed as `expect_prompt`,
  * and the bridge recomputes it from a fresh read to confirm the prompt hasn't
  * changed before pressing the answer digit (closing the client read->POST TOCTOU
  * gap). If the two implementations diverge, every answer would 409. Server and web
