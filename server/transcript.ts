@@ -3,7 +3,8 @@
  * and read it incrementally. The pure line→TimelineItem mapping lives in
  * transcript-normalize.ts; this module does the filesystem work only.
  *
- * Reads are confined to ~/.claude/projects. The session id is supplied by herdr
+ * Reads are confined to the Claude Code projects roots (~/.claude/projects and
+ * ~/.config/claude/<name>/projects). The session id is supplied by herdr
  * (pane.agent_session.value) and the cwd by the pane — never by the client — so
  * a client can't steer these reads; the containment check is defence in depth.
  */
@@ -13,11 +14,30 @@ import { join, resolve, sep } from 'node:path';
 import { existsSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { normalizeLine, type TimelineItem } from './transcript-normalize.ts';
 
-const PROJECTS_ROOT = resolve(join(homedir(), '.claude', 'projects'));
+// Default Claude Code config root. Alternate CLAUDE_CONFIG_DIRs (per-org setups
+// etc.) live under ~/.config/claude/<name>/ and each has its own projects/ dir,
+// so both are searched — a pane whose claude uses a non-default config dir still
+// resolves instead of falling back to the terminal.
+const DEFAULT_PROJECTS_ROOT = resolve(join(homedir(), '.claude', 'projects'));
+const CONFIG_BASE = resolve(join(homedir(), '.config', 'claude'));
 
 // Cap the initial/reset read so a large transcript (many MB) can't block the
 // event loop or exhaust memory; only the recent tail is needed for the chat view.
 const TAIL_MAX_BYTES = 2 * 1024 * 1024;
+
+// Discover the transcript "projects" roots present on this host: the default
+// plus any ~/.config/claude/<name>/projects. Cheap (a couple of readdir/exists
+// calls) and recomputed per resolve so a new config dir is picked up live.
+function projectsRoots(): string[] {
+  const roots = [DEFAULT_PROJECTS_ROOT];
+  try {
+    for (const name of readdirSync(CONFIG_BASE)) {
+      const p = resolve(join(CONFIG_BASE, name, 'projects'));
+      if (existsSync(p)) roots.push(p);
+    }
+  } catch { /* no ~/.config/claude — only the default root */ }
+  return roots;
+}
 
 // A session id must be a bare file-stem (UUID in practice). Reject anything with
 // path separators or dots so it can't escape a project directory.
@@ -31,35 +51,42 @@ export function slugForCwd(cwd: string): string {
   return cwd.replace(/[/._]/g, '-');
 }
 
-function contained(p: string): string | null {
+function containedIn(p: string, root: string): string | null {
   const abs = resolve(p);
-  return abs === PROJECTS_ROOT || abs.startsWith(PROJECTS_ROOT + sep) ? abs : null;
+  return abs === root || abs.startsWith(root + sep) ? abs : null;
 }
 
 /**
  * Resolve the on-disk transcript for a claude session. `sessionId` comes from
  * herdr's `agent_session.value`, `cwd` from the pane. Returns an absolute path
- * under ~/.claude/projects, or null if this session's transcript is not on this
- * host (e.g. a remote/containerized claude, or an alternate CLAUDE_CONFIG_DIR).
+ * under one of the projects roots, or null if this session's transcript is not
+ * on this host (e.g. a remote/containerized claude).
  */
 export function resolveTranscriptPath(sessionId: string | null | undefined, cwd: string | null): string | null {
   if (!sessionId || !SESSION_ID_RE.test(sessionId)) return null;
   const fileName = `${sessionId}.jsonl`;
+  const roots = projectsRoots();
 
-  // Fast path: the pane's current cwd slug. Correct when claude was launched in
-  // the directory the pane still reports.
+  // Fast path: the pane's current cwd slug under each root. Correct when claude
+  // was launched in the directory the pane still reports.
   if (cwd) {
-    const direct = contained(join(PROJECTS_ROOT, slugForCwd(cwd), fileName));
-    if (direct && existsSync(direct)) return direct;
+    const slug = slugForCwd(cwd);
+    for (const root of roots) {
+      const direct = containedIn(join(root, slug, fileName), root);
+      if (direct && existsSync(direct)) return direct;
+    }
   }
 
   // Fallback: claude's launch cwd can differ from the pane's current
-  // foreground_cwd, so scan project dirs for the globally-unique session id.
-  let dirs: string[];
-  try { dirs = readdirSync(PROJECTS_ROOT); } catch { return null; }
-  for (const d of dirs) {
-    const cand = contained(join(PROJECTS_ROOT, d, fileName));
-    if (cand && existsSync(cand)) return cand;
+  // foreground_cwd, so scan each root's project dirs for the globally-unique
+  // session id.
+  for (const root of roots) {
+    let dirs: string[];
+    try { dirs = readdirSync(root); } catch { continue; }
+    for (const d of dirs) {
+      const cand = containedIn(join(root, d, fileName), root);
+      if (cand && existsSync(cand)) return cand;
+    }
   }
   return null;
 }
