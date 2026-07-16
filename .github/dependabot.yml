@@ -9,6 +9,11 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Wait 7 days after a new version is published before opening an update PR.
+    # A freshly-published compromised/broken release is usually pulled within a
+    # few days, so this avoids auto-adopting one.
+    cooldown:
+      default-days: 7
 
   # npm dependency + lockfile updates (ws, typescript, @types/*).
   - package-ecosystem: npm
@@ -16,3 +21,8 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Same 7-day cooldown for npm dependency bumps (see note above). This pairs
+    # with the repo-wide `.npmrc` min-release-age=7, which enforces the same
+    # delay for every `npm install` / `npm ci` (CI included), not just Dependabot.
+    cooldown:
+      default-days: 7
