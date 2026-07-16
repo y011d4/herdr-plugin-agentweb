@@ -259,6 +259,9 @@ default.
 - `GET /api/state` — normalized workspaces/tabs/panes/agents tree
 - `GET /api/panes/:paneId/read?source=visible|recent&lines=N&format=text|ansi`
 - `POST /api/panes/:paneId/input` `{"text": "ls", "enter": true}` or `{"keys": ["ctrl+c"]}`
+  — add `"clear": true` to wipe the pane's composer (repeated Ctrl+U) before the
+  text lands, so a message composed here submits alone instead of being appended
+  to a draft already typed straight into the pane
 - `POST /api/panes/:paneId/focus`
 - `POST /api/panes/:paneId/scroll` `{"direction": "up", "steps": 3}` — SGR wheel events for full-screen apps
 - `GET /api/panes/:paneId/transcript` — Claude Code chat view: the pane's JSONL

@@ -774,7 +774,14 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     const text = paneInput.value;
     if (!text) return;
     try {
-      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true });
+      // clear:true wipes the pane's composer first so this message submits on its
+      // own — never merged with a half-typed draft the user left in the pane that
+      // agentweb can't see. Scope it to Claude Code panes: Ctrl+U safely clears
+      // Claude's input box, but to another app it's a raw control byte a
+      // full-screen / non-readline TUI could act on. Other panes just get
+      // text+enter. enter:true then submits in the same request.
+      const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
+      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true, ...(isClaude ? { clear: true } : {}) });
       if (paneInput.value === text) clearInput(); // clear on success, but keep text typed mid-send
       queuePaneEcho();
     } catch (err) {
