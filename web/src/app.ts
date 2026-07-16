@@ -1443,21 +1443,22 @@ function stripAnsi(s: string): string {
 // output containing "1." isn't taken for a menu; box-drawing chars are stripped.
 function parsePromptOptions(text: string): PromptOption[] | null {
   const lines = text.split('\n').map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼]/g, ' ').replace(/\s+$/, ''));
-  // Keep the BOTTOM-most complete block: the active prompt is at the foot of the
-  // screen, so numbered prose above it must not win.
+  // Bottom-most sequential 1,2,3… block (the active prompt is at the foot of the
+  // screen). Non-option lines — each option's OWN description, dividers, blanks —
+  // sit between options in Claude Code's menus, so they're skipped without ending
+  // the block; only a long run of unrelated lines (gap > 4) ends it, and a fresh
+  // "1." restarts it. (Verified against a real captured AskUserQuestion screen.)
   let best: PromptOption[] | null = null;
   let cur: PromptOption[] = [];
-  const flush = (): void => { if (cur.length >= 2) best = cur; cur = []; };
+  let gap = 0;
+  const flush = (): void => { if (cur.length >= 2) best = cur; cur = []; gap = 0; };
   for (const line of lines) {
     const m = line.match(/^\s*[❯➤»▶>*]?\s*(\d+)[.)]\s+(\S.*)$/);
-    if (m && Number(m[1]) === cur.length + 1) {
-      cur.push({ send: m[1], label: m[2].trim() });
-    } else if (m && m[1] === '1') {
-      flush(); // a new block starting at 1
-      cur = [{ send: '1', label: m[2].trim() }];
-    } else if (line.trim()) {
-      flush(); // a non-option, non-blank line ends the current block
-    }
+    if (!m) { if (cur.length && ++gap > 4) flush(); continue; }
+    gap = 0;
+    const num = Number(m[1]);
+    if (num === cur.length + 1) cur.push({ send: m[1], label: m[2].trim() });
+    else { flush(); if (num === 1) cur = [{ send: '1', label: m[2].trim() }]; }
   }
   flush();
   return best;
