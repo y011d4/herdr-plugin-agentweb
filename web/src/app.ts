@@ -615,7 +615,9 @@ function renderAgentsDashboard(): void {
     for (const { pane, tabLabel, tabAgentIndex, tabAgentCount } of agentPanes) {
       const { paneId, agent, title } = pane;
       const { displayName, name, status, customStatus, message, sinceUnixMs } = agent!;
-      const agentKind = displayName || name || 'agent';
+      // The chip shows the stable agent kind, so prefer `name` (raw pane.agent,
+      // e.g. "claude"/"codex") over displayName, which can be a richer label.
+      const agentKind = name || displayName || 'agent';
       // Tab name is the human-meaningful identifier within a workspace; fall
       // back to the agent kind if a tab somehow has no label. When the tab runs
       // multiple agent panes, suffix a per-tab index so the cards differ.
