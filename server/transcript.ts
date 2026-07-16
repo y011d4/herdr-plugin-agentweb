@@ -178,13 +178,13 @@ export function readTranscriptFrom(file: string, byteOffset: number, resetMaxIte
     const buf = Buffer.alloc(len);
     const fd = openSync(file, 'r');
     try { readSync(fd, buf, 0, len, byteOffset); } finally { closeSync(fd); }
-    const text = buf.toString('utf8');
-    const lastNl = text.lastIndexOf('\n');
-    if (lastNl === -1) return { items: [], cursor: byteOffset, reset: false }; // no complete line yet
-    const complete = text.slice(0, lastNl);
-    const consumed = Buffer.byteLength(complete, 'utf8') + 1; // +1 for the newline
-    const items = complete.split('\n').filter(Boolean).flatMap(normalizeLine);
-    return { items, cursor: byteOffset + consumed, reset: false };
+    // Byte-space newline boundary (see tailUnsafe): keeps the cursor byte-exact
+    // even when the read ends mid multi-byte character.
+    const lastNlByte = buf.lastIndexOf(0x0a);
+    if (lastNlByte === -1) return { items: [], cursor: byteOffset, reset: false }; // no complete line yet
+    const completeText = buf.toString('utf8', 0, lastNlByte + 1); // ends on a newline → no split char
+    const items = completeText.split('\n').filter(Boolean).flatMap(normalizeLine);
+    return { items, cursor: byteOffset + lastNlByte + 1, reset: false };
   } catch {
     // file removed / rotated / unreadable between stat and read — no update this round
     return { items: [], cursor: byteOffset, reset: false };
@@ -215,27 +215,25 @@ function tailUnsafe(file: string, maxItems: number): TailResult {
   const buf = Buffer.alloc(len);
   const fd = openSync(file, 'r');
   try { readSync(fd, buf, 0, len, start); } finally { closeSync(fd); }
-  const raw = buf.toString('utf8');
-  // The last newline in the raw window ends the last complete line; the cursor
-  // sits just past it. hadCompleteLine is derived from the RAW window (any
-  // newline at all) so that a completed line LARGER than the cap still advances
-  // the cursor — even though, dropped below as a leading partial, it yields no
-  // item. Computing it after the leading-partial drop would miss exactly that
-  // case and stall the cursor forever.
-  const rawLastNl = raw.lastIndexOf('\n');
-  const hadCompleteLine = rawLastNl !== -1;
-  const trailingPartial = hadCompleteLine ? raw.slice(rawLastNl + 1) : raw;
-  const cursor = size - Buffer.byteLength(trailingPartial, 'utf8');
+  // Find newline boundaries in BYTE space (not the decoded string): an incomplete
+  // multi-byte char at EOF decodes to U+FFFD, whose byte length differs from the
+  // raw bytes, so a string-derived cursor could land off the true byte boundary
+  // and replay lines. hadCompleteLine uses the RAW window (any newline at all) so
+  // that a completed line LARGER than the cap still advances the cursor even
+  // though it's dropped below as a leading partial.
+  const NL = 0x0a;
+  const lastNlByte = buf.lastIndexOf(NL); // byte index within buf, or -1
+  const hadCompleteLine = lastNlByte !== -1;
+  const cursor = hadCompleteLine ? start + lastNlByte + 1 : start; // just past the last newline
   // For PARSING, also drop a leading partial line (its start was cut off when we
-  // began mid-file) so it can't corrupt a parse; a newline is a clean byte
-  // boundary, so the remainder decodes without splitting a multi-byte character.
-  let body = raw;
+  // began mid-file), then decode only the complete-line byte range. Both bounds
+  // are newline positions, so the slice never splits a multi-byte character.
+  let bodyStart = 0;
   if (start > 0) {
-    const firstNl = body.indexOf('\n');
-    body = firstNl === -1 ? '' : body.slice(firstNl + 1);
+    const firstNlByte = buf.indexOf(NL);
+    bodyStart = firstNlByte === -1 ? len : firstNlByte + 1;
   }
-  const bodyLastNl = body.lastIndexOf('\n');
-  const usable = bodyLastNl === -1 ? '' : body.slice(0, bodyLastNl + 1);
+  const usable = hadCompleteLine && bodyStart <= lastNlByte ? buf.toString('utf8', bodyStart, lastNlByte + 1) : '';
   const all = usable.split('\n').filter(Boolean).flatMap(normalizeLine);
   const truncated = start > 0 || all.length > maxItems;
   return { items: all.length > maxItems ? all.slice(-maxItems) : all, cursor, truncated, hadCompleteLine };

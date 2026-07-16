@@ -84,6 +84,22 @@ describe('readTranscriptFrom — byte cursor with multi-byte UTF-8', () => {
     // and the cursor is now at EOF
     assert.equal(readTranscriptFrom(f, inc.cursor).items.length, 0);
   });
+
+  it('keeps the cursor byte-exact when the tail ends mid multi-byte char (no replay)', () => {
+    const f = join(dir, 'mb-partial.jsonl');
+    const line = userLine('done') + '\n';
+    writeFileSync(f, line);
+    const afterLine = Buffer.byteLength(line, 'utf8');
+    // append the first 2 of the 3 bytes of ☕ (e2 98 95) — an unterminated char
+    appendFileSync(f, Buffer.from([0xe2, 0x98]));
+    const tail = readTranscriptTail(f, 300);
+    assert.deepEqual(tail.items.map((i) => (i as { text: string }).text), ['done']);
+    // cursor must sit exactly after the complete line's newline, not skewed back
+    // by the U+FFFD replacement char's byte length
+    assert.equal(tail.cursor, afterLine);
+    // an incremental read from there must not replay 'done'
+    assert.equal(readTranscriptFrom(f, tail.cursor).items.length, 0);
+  });
 });
 
 describe('readTranscriptFrom — bounded when the cursor is far behind', () => {
