@@ -501,6 +501,10 @@ function showSystemNotification(title: string, body: string, paneId: string): vo
   }
 }
 
+// Page-constructor notifications are not reachable via getNotifications(), so track
+// them per pane to close on pane open.
+const pageNotifications = new Map<string, Notification[]>();
+
 function pageNotification(title: string, body: string, paneId: string): void {
   try {
     const n = new Notification(title, { body, tag: paneId });
@@ -508,6 +512,16 @@ function pageNotification(title: string, body: string, paneId: string): void {
       window.focus();
       navigate(`#/pane/${encodeURIComponent(paneId)}`);
     };
+    const list = pageNotifications.get(paneId) ?? [];
+    list.push(n);
+    pageNotifications.set(paneId, list);
+    n.addEventListener('close', () => {
+      const cur = pageNotifications.get(paneId);
+      if (!cur) return;
+      const rest = cur.filter((x) => x !== n);
+      if (rest.length) pageNotifications.set(paneId, rest);
+      else pageNotifications.delete(paneId);
+    });
   } catch {
     // `new Notification()` is an illegal constructor on some platforms — ignore
   }
@@ -515,6 +529,13 @@ function pageNotification(title: string, body: string, paneId: string): void {
 
 /** Close any OS notifications for a pane once its page is opened. */
 function dismissNotificationsForPane(paneId: string): void {
+  // page-constructor fallbacks: closed via the tracked references
+  const tracked = pageNotifications.get(paneId);
+  if (tracked) {
+    for (const n of tracked) n.close();
+    pageNotifications.delete(paneId);
+  }
+  // SW-shown notifications: reachable via the registration
   if (!('serviceWorker' in navigator)) return;
   navigator.serviceWorker.getRegistration()
     .then((reg) => reg?.getNotifications({ tag: paneId }).then((ns) => ns.forEach((n) => n.close())))
@@ -1885,6 +1906,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Stop pane polling when tab is hidden, resume when visible
   document.addEventListener('visibilitychange', () => {
     if (document.hidden || !activePaneId) return;
+    // Returning to a pane that's already open (app switch, no route change) won't
+    // fire handleRoute, so clear any OS notification raised for it while hidden.
+    dismissNotificationsForPane(activePaneId);
     // In chat mode the transcript watch keeps pushing while the WS is up, so the
     // HTTP fallback must only run when the socket is down — otherwise a fallback
     // response racing a WS push duplicates items and rewinds chatCursor.
