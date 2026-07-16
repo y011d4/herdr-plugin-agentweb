@@ -20,7 +20,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v78';
+const BUILD = 'v80';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -583,11 +583,25 @@ function renderAgentsDashboard(): void {
 
   for (const ws of sortedWorkspaces) {
     const { workspaceId, label: wsLabel, tabs = [] } = ws;
-    const allPanes = tabs.flatMap((t) => t.panes ?? []);
+    // Carry each pane's tab label so cards can show which tab they belong to —
+    // pane.title is usually null, so the tab name is the only distinguishing
+    // label when a workspace runs several agents. When one tab runs several
+    // agent panes (split panes), also carry a 1-based index among that tab's
+    // agent panes so those otherwise-identical cards stay distinguishable.
+    const allPanes = tabs.flatMap((t) => {
+      const panes = t.panes ?? [];
+      const tabAgentPanes = panes.filter((p) => p.agent);
+      return panes.map((pane) => ({
+        pane,
+        tabLabel: t.label,
+        tabAgentIndex: tabAgentPanes.indexOf(pane) + 1,
+        tabAgentCount: tabAgentPanes.length,
+      }));
+    });
     const agentPanes = allPanes
-      .filter((p) => p.agent)
-      .sort((a, b) => statusOrder(a.agent!.status) - statusOrder(b.agent!.status));
-    const inactivePanes = allPanes.filter((p) => !p.agent);
+      .filter((x) => x.pane.agent)
+      .sort((a, b) => statusOrder(a.pane.agent!.status) - statusOrder(b.pane.agent!.status));
+    const inactivePanes = allPanes.filter((x) => !x.pane.agent);
 
     if (allPanes.length === 0) continue;
 
@@ -598,10 +612,17 @@ function renderAgentsDashboard(): void {
       html += `<div class="inactive-panes-count">${inactivePanes.length} pane${inactivePanes.length !== 1 ? 's' : ''} (no active agents)</div>`;
     }
 
-    for (const pane of agentPanes) {
+    for (const { pane, tabLabel, tabAgentIndex, tabAgentCount } of agentPanes) {
       const { paneId, agent, title } = pane;
       const { displayName, name, status, customStatus, message, sinceUnixMs } = agent!;
-      const displayLabel = displayName || name || 'Agent';
+      // The chip shows the stable agent kind, so prefer `name` (raw pane.agent,
+      // e.g. "claude"/"codex") over displayName, which can be a richer label.
+      const agentKind = name || displayName || 'agent';
+      // Tab name is the human-meaningful identifier within a workspace; fall
+      // back to the agent kind if a tab somehow has no label. When the tab runs
+      // multiple agent panes, suffix a per-tab index so the cards differ.
+      const baseLabel = tabLabel || agentKind;
+      const cardLabel = tabAgentCount > 1 ? `${baseLabel} #${tabAgentIndex}` : baseLabel;
       const statusClass = status || 'unknown';
       const meta = customStatus || message || '';
       const relTime = relativeTime(sinceUnixMs);
@@ -609,19 +630,16 @@ function renderAgentsDashboard(): void {
       html += `
         <div class="agent-card" data-pane-id="${escHtml(paneId)}" role="button" tabindex="0">
           <div class="agent-card-header">
-            <span class="agent-name">${escHtml(displayLabel)}</span>
+            <span class="agent-name">${escHtml(cardLabel)}</span>
             <span class="status-badge ${escHtml(statusClass)}">${escHtml(statusClass)}</span>
           </div>
           ${meta ? `<div class="agent-custom-status">${escHtml(meta)}</div>` : ''}
           <div class="agent-card-meta">
+            <span class="agent-kind">${escHtml(agentKind)}</span>
             ${title ? `<span class="pane-title">${escHtml(title)}</span>` : ''}
             ${relTime ? `<span>${escHtml(relTime)}</span>` : ''}
           </div>
         </div>`;
-    }
-
-    if (agentPanes.length > 0 && inactivePanes.length > 0) {
-      html += `<div class="inactive-panes-count">+${inactivePanes.length} pane${inactivePanes.length !== 1 ? 's' : ''} without agents</div>`;
     }
 
     html += '</div>'; // workspace-group
