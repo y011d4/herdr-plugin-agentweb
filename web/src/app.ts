@@ -10,8 +10,8 @@
  */
 
 import { ansiToHtml } from './ansi.ts';
-import { renderItems } from './transcript.ts';
-import type { TimelineItem } from './transcript.ts';
+import { renderItems, renderAskQuestions } from './transcript.ts';
+import type { TimelineItem, AskQuestion } from './transcript.ts';
 import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 
 // ── App version ──────────────────────────────────────────────────────────────
@@ -53,6 +53,13 @@ let chatAvailable = false;
 let chatSessionId: string | null = null;
 let chatCursor = 0; // byte offset into the transcript for incremental fetches
 let chatProbeSeq = 0; // guards against overlapping availability probes
+// Pending-prompt panel: when a claude pane is blocked (waiting for input), the
+// chat surfaces an answer UI — tappable options for a pending AskUserQuestion,
+// or the live terminal screen for any other prompt (permission, plan, y/n).
+let pendingAsk: AskQuestion[] | null = null;
+let promptPanelKind: 'none' | 'blocked' = 'none';
+let promptAskRef: AskQuestion[] | null = null;
+let promptScreenTimer: ReturnType<typeof setInterval> | null = null;
 
 /** source toggle: 'visible' | 'recent' */
 
@@ -308,6 +315,7 @@ function onStateUpdate(): void {
     }
     // Pane detail auto-refreshes via its own poller; header may need updating
     updatePaneDetailHeader();
+    updatePromptPanel(); // agent may have just become (un)blocked
   }
 }
 
@@ -681,6 +689,10 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   chatAvailable = false;
   chatSessionId = null;
   chatCursor = 0;
+  pendingAsk = null;
+  promptPanelKind = 'none';
+  promptAskRef = null;
+  stopPromptScreenPoll();
 
   // Build screen HTML. The terminal holds two sections that are updated
   // independently so live pushes never touch the scrollback DOM above:
@@ -689,6 +701,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     <div id="screen-pane" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
       <div class="terminal-output" id="terminal-output"><div id="term-history"></div><div id="term-live"><span class="loading-spinner"></span></div></div>
       <div class="chat-log" id="chat-log" style="display:none;"></div>
+      <div class="chat-prompt" id="chat-prompt" style="display:none;"></div>
       <div class="input-bar">
         <div class="input-row">
           <textarea id="pane-input" rows="1" placeholder="Send text…" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
@@ -702,6 +715,15 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   const terminalEl = document.getElementById('terminal-output')!;
   bindPinchZoom(terminalEl);
   bindTerminalScroll(terminalEl);
+
+  // Answer a pending AskUserQuestion: tapping an option sends its number.
+  document.getElementById('chat-prompt')!.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest('.ask-opt') as HTMLElement | null;
+    if (!btn || !activePaneId) return;
+    const oi = parseInt(btn.dataset.askOi ?? '', 10);
+    if (!Number.isInteger(oi)) return;
+    void sendAskAnswer(oi, btn);
+  });
 
   // Send button. Enter in the field inserts a newline — sending happens only
   // via the button, so the phone keyboard can't fire off half-typed commands.
@@ -814,6 +836,7 @@ function switchToChat(initial?: TranscriptResponse, persist = true): void {
     void loadChatInitial();
   }
   wsSendWatch(); // server: stop pane watch, start transcript watch
+  updatePromptPanel(); // reveal the answer panel if the pane is already blocked
 }
 
 function switchToTerminal(persist = true): void {
@@ -822,6 +845,7 @@ function switchToTerminal(persist = true): void {
   document.getElementById('chat-log')?.style.setProperty('display', 'none');
   document.getElementById('terminal-output')?.style.setProperty('display', '');
   updateViewToggleLabel();
+  updatePromptPanel(); // hide the answer panel (chat-only)
   wsSendWatch(); // server: stop transcript watch, resume pane watch
   void refreshPaneOutput(); // repaint the live screen the user returns to
 }
@@ -860,6 +884,17 @@ function renderChatReset(items: TimelineItem[], preserveScroll = false): void {
   chat.scrollTop = preserveScroll
     ? (prevFromBottom < 40 ? chat.scrollHeight : prevTop)
     : chat.scrollHeight;
+  pendingAsk = derivePendingAsk(items);
+  updatePromptPanel();
+}
+
+// A pending AskUserQuestion is the tail item being an AskUserQuestion tool_use
+// with no following tool_result (any answer would appear as a later item).
+function derivePendingAsk(items: TimelineItem[]): AskQuestion[] | null {
+  const last = items[items.length - 1];
+  return last && last.kind === 'tool_use' && last.name === 'AskUserQuestion' && last.ask && last.ask.length
+    ? last.ask
+    : null;
 }
 
 function appendChatItems(items: TimelineItem[]): void {
@@ -871,6 +906,8 @@ function appendChatItems(items: TimelineItem[]): void {
   chat.querySelector('.chat-empty')?.remove();
   chat.insertAdjacentHTML('beforeend', renderItems(items));
   if (atBottom) chat.scrollTop = chat.scrollHeight;
+  pendingAsk = derivePendingAsk(items); // the appended batch's last item is the new tail
+  updatePromptPanel();
 }
 
 function onTranscriptItems(msg: WsTranscriptItemsMessage): void {
@@ -1381,6 +1418,75 @@ let lastReadErrorToastAt = 0;
 function queuePaneEcho(): void {
   setTimeout(() => { void refreshPaneOutput(); }, 120);
   setTimeout(() => { void refreshPaneOutput(); }, 500);
+}
+
+// ── Pending-prompt panel (answer UI when the pane is blocked) ──────────────────
+
+const PROMPT_SCREEN_INTERVAL_MS = 1200;
+
+// When a claude pane is blocked (waiting for input) and chat is active, show an
+// answer panel above the input bar: the live terminal screen (so any prompt —
+// permission, plan, y/n — is visible), plus tappable option buttons when a
+// pending AskUserQuestion is the transcript tail. The existing composer and
+// quick-keys remain the way to send the answer.
+function updatePromptPanel(): void {
+  const panel = document.getElementById('chat-prompt');
+  if (!panel) return;
+  const status = activePaneId ? findPane(activePaneId)?.pane?.agent?.status : null;
+  const blocked = paneViewMode === 'chat' && status === 'blocked';
+  if (!blocked) {
+    if (promptPanelKind !== 'none') { panel.style.display = 'none'; panel.innerHTML = ''; promptPanelKind = 'none'; promptAskRef = null; }
+    stopPromptScreenPoll();
+    return;
+  }
+  panel.style.display = '';
+  // Rebuild the static parts (heading + ask buttons) only when newly blocked or
+  // the pending question changed; the screen is refreshed by the poller so it
+  // isn't wiped every state tick.
+  if (promptPanelKind !== 'blocked' || promptAskRef !== pendingAsk) {
+    const head = '<div class="chat-prompt-head">&#9203; Waiting for your input &#183; answer below</div>';
+    const asks = pendingAsk ? renderAskQuestions(pendingAsk, true) : '';
+    panel.innerHTML = head + asks + '<div class="chat-prompt-screen" id="chat-prompt-screen"><span class="loading-spinner"></span></div>';
+    promptPanelKind = 'blocked';
+    promptAskRef = pendingAsk;
+  }
+  startPromptScreenPoll();
+}
+
+function startPromptScreenPoll(): void {
+  if (promptScreenTimer) return;
+  const tick = async (): Promise<void> => {
+    if (paneViewMode !== 'chat' || !activePaneId) { stopPromptScreenPoll(); return; }
+    if (findPane(activePaneId)?.pane?.agent?.status !== 'blocked') { updatePromptPanel(); return; }
+    const paneId = activePaneId;
+    try {
+      const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
+      if (paneViewMode !== 'chat' || paneId !== activePaneId) return;
+      const screen = document.getElementById('chat-prompt-screen');
+      if (screen) screen.innerHTML = ansiToHtml((data.ansi ?? data.text ?? '') as string);
+    } catch { /* transient — keep the last screen */ }
+  };
+  void tick();
+  promptScreenTimer = setInterval(() => { void tick(); }, PROMPT_SCREEN_INTERVAL_MS);
+}
+
+function stopPromptScreenPoll(): void {
+  if (promptScreenTimer) { clearInterval(promptScreenTimer); promptScreenTimer = null; }
+}
+
+// Answer a pending AskUserQuestion by sending its option number — the same input
+// as the '1'/'2'/'3' quick-keys, so it's proven and low-risk. The live screen
+// shows the result; Enter (quick-key) confirms if the menu needs it, and
+// multi-select is driven from the quick-keys / terminal view.
+async function sendAskAnswer(optionIndex: number, btn: HTMLElement): Promise<void> {
+  if (!activePaneId) return;
+  btn.classList.add('ask-opt-sent');
+  setTimeout(() => btn.classList.remove('ask-opt-sent'), 1000);
+  try {
+    await apiPost(`/api/panes/${encodeURIComponent(activePaneId)}/input`, { text: String(optionIndex + 1) });
+  } catch (err) {
+    showToast('Send failed', (err as Error).message);
+  }
 }
 
 // Whether the state currently reports this pane as running Claude — the only

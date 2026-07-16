@@ -22,12 +22,26 @@ export type TimelineItem =
   | { kind: 'user'; text: string; sidechain: boolean; ts: number | null }
   | { kind: 'assistant'; text: string; sidechain: boolean; ts: number | null }
   | { kind: 'thinking'; text: string; truncated: boolean; sidechain: boolean; ts: number | null }
-  | { kind: 'tool_use'; id: string; name: string; summary: string; todos: TodoEntry[] | null; sidechain: boolean; ts: number | null }
+  | { kind: 'tool_use'; id: string; name: string; summary: string; todos: TodoEntry[] | null; ask: AskQuestion[] | null; sidechain: boolean; ts: number | null }
   | { kind: 'tool_result'; forId: string | null; text: string; truncated: boolean; isError: boolean; sidechain: boolean; ts: number | null };
 
 export interface TodoEntry {
   content: string;
   status: string;
+}
+
+// AskUserQuestion input, surfaced so the chat view can show the question and
+// render tappable answer options for a pending prompt.
+export interface AskOption {
+  label: string;
+  description: string;
+}
+
+export interface AskQuestion {
+  question: string;
+  header: string;
+  multiSelect: boolean;
+  options: AskOption[];
 }
 
 function truncate(s: string, max: number): { text: string; truncated: boolean } {
@@ -69,6 +83,11 @@ export function summarizeToolInput(name: string, input: unknown): string {
     case 'TodoWrite':
       s = Array.isArray(o.todos) ? `${o.todos.length} items` : '';
       break;
+    case 'AskUserQuestion': {
+      const q0 = Array.isArray(o.questions) ? (o.questions[0] as Record<string, unknown> | undefined) : undefined;
+      s = (typeof q0?.question === 'string' ? q0.question : '') || (typeof q0?.header === 'string' ? q0.header : '');
+      break;
+    }
     case 'WebFetch':
     case 'WebSearch':
       s = str(o.url) || str(o.query);
@@ -89,6 +108,25 @@ function extractTodos(input: unknown): TodoEntry[] | null {
   return todos.map((t) => {
     const o = (t ?? {}) as Record<string, unknown>;
     return { content: typeof o.content === 'string' ? o.content : '', status: typeof o.status === 'string' ? o.status : '' };
+  });
+}
+
+function extractAsk(input: unknown): AskQuestion[] | null {
+  if (!input || typeof input !== 'object') return null;
+  const questions = (input as Record<string, unknown>).questions;
+  if (!Array.isArray(questions)) return null;
+  return questions.map((q) => {
+    const o = (q ?? {}) as Record<string, unknown>;
+    const opts = Array.isArray(o.options) ? o.options : [];
+    return {
+      question: typeof o.question === 'string' ? o.question : '',
+      header: typeof o.header === 'string' ? o.header : '',
+      multiSelect: o.multiSelect === true,
+      options: opts.map((op) => {
+        const oo = (op ?? {}) as Record<string, unknown>;
+        return { label: typeof oo.label === 'string' ? oo.label : '', description: typeof oo.description === 'string' ? oo.description : '' };
+      }),
+    };
   });
 }
 
@@ -176,6 +214,7 @@ export function normalizeLine(rawLine: string): TimelineItem[] {
           name,
           summary: summarizeToolInput(name, b.input),
           todos: name === 'TodoWrite' ? extractTodos(b.input) : null,
+          ask: name === 'AskUserQuestion' ? extractAsk(b.input) : null,
           sidechain,
           ts,
         });

@@ -13,11 +13,23 @@ export interface TodoEntry {
   status: string;
 }
 
+export interface AskOption {
+  label: string;
+  description: string;
+}
+
+export interface AskQuestion {
+  question: string;
+  header: string;
+  multiSelect: boolean;
+  options: AskOption[];
+}
+
 export type TimelineItem =
   | { kind: 'user'; text: string; sidechain: boolean; ts: number | null }
   | { kind: 'assistant'; text: string; sidechain: boolean; ts: number | null }
   | { kind: 'thinking'; text: string; truncated: boolean; sidechain: boolean; ts: number | null }
-  | { kind: 'tool_use'; id: string; name: string; summary: string; todos: TodoEntry[] | null; sidechain: boolean; ts: number | null }
+  | { kind: 'tool_use'; id: string; name: string; summary: string; todos: TodoEntry[] | null; ask: AskQuestion[] | null; sidechain: boolean; ts: number | null }
   | { kind: 'tool_result'; forId: string | null; text: string; truncated: boolean; isError: boolean; sidechain: boolean; ts: number | null };
 
 function escapeHtml(s: string): string {
@@ -64,6 +76,25 @@ function renderTodos(todos: TodoEntry[]): string {
   return `<ul class="chat-todos">${rows}</ul>`;
 }
 
+// Render AskUserQuestion questions + options. interactive=true emits tappable
+// buttons (data-ask-* consumed by app.ts) for a pending prompt; false emits a
+// read-only list for transcript history.
+export function renderAskQuestions(ask: AskQuestion[], interactive: boolean): string {
+  return ask.map((q, qi) => {
+    const header = q.header ? `<span class="ask-q-header">${escapeHtml(q.header)}</span>` : '';
+    const opts = q.options.map((op, oi) => {
+      const num = `<span class="ask-opt-num">${oi + 1}</span>`;
+      const label = `<span class="ask-opt-label">${escapeHtml(op.label)}</span>`;
+      const desc = op.description ? `<span class="ask-opt-desc">${escapeHtml(op.description)}</span>` : '';
+      return interactive
+        ? `<button class="ask-opt" type="button" data-ask-qi="${qi}" data-ask-oi="${oi}" data-ask-label="${escapeHtml(op.label)}">${num}${label}${desc}</button>`
+        : `<li class="ask-opt-static">${num}${label}${desc}</li>`;
+    }).join('');
+    const body = interactive ? `<div class="ask-opts">${opts}</div>` : `<ul class="ask-opts-static">${opts}</ul>`;
+    return `<div class="ask-q">${header}<div class="ask-q-text">${escapeHtml(q.question)}</div>${body}</div>`;
+  }).join('');
+}
+
 /** Render a single TimelineItem to a self-contained HTML block (safe to append). */
 export function renderItem(item: TimelineItem): string {
   const sub = item.sidechain ? ' chat-sidechain' : '';
@@ -76,6 +107,11 @@ export function renderItem(item: TimelineItem): string {
     case 'thinking':
       return `<div class="chat-item chat-thinking-wrap${sub}"><details class="chat-thinking"><summary>Thinking</summary><div class="chat-thinking-body">${inlineMd(item.text)}${item.truncated ? '<span class="chat-more">…</span>' : ''}</div></details></div>`;
     case 'tool_use': {
+      // AskUserQuestion renders as a labelled question card (read-only in
+      // history; the pending prompt gets interactive buttons via the prompt panel).
+      if (item.name === 'AskUserQuestion' && item.ask && item.ask.length) {
+        return `<div class="chat-item chat-tool chat-ask${sub}"><div class="chat-tool-head"><span class="chat-tool-name">Question</span></div>${renderAskQuestions(item.ask, false)}</div>`;
+      }
       const todos = item.name === 'TodoWrite' && item.todos ? renderTodos(item.todos) : '';
       const summary = item.summary ? `<span class="chat-tool-summary">${escapeHtml(item.summary)}</span>` : '';
       return `<div class="chat-item chat-tool${sub}"><div class="chat-tool-head"><span class="chat-tool-name">${escapeHtml(item.name)}</span>${summary}</div>${todos}</div>`;
