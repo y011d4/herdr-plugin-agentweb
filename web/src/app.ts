@@ -583,11 +583,14 @@ function renderAgentsDashboard(): void {
 
   for (const ws of sortedWorkspaces) {
     const { workspaceId, label: wsLabel, tabs = [] } = ws;
-    const allPanes = tabs.flatMap((t) => t.panes ?? []);
+    // Carry each pane's tab label so cards can show which tab they belong to —
+    // pane.title is usually null, so the tab name is the only distinguishing
+    // label when a workspace runs several agents.
+    const allPanes = tabs.flatMap((t) => (t.panes ?? []).map((pane) => ({ pane, tabLabel: t.label })));
     const agentPanes = allPanes
-      .filter((p) => p.agent)
-      .sort((a, b) => statusOrder(a.agent!.status) - statusOrder(b.agent!.status));
-    const inactivePanes = allPanes.filter((p) => !p.agent);
+      .filter((x) => x.pane.agent)
+      .sort((a, b) => statusOrder(a.pane.agent!.status) - statusOrder(b.pane.agent!.status));
+    const inactivePanes = allPanes.filter((x) => !x.pane.agent);
 
     if (allPanes.length === 0) continue;
 
@@ -598,10 +601,13 @@ function renderAgentsDashboard(): void {
       html += `<div class="inactive-panes-count">${inactivePanes.length} pane${inactivePanes.length !== 1 ? 's' : ''} (no active agents)</div>`;
     }
 
-    for (const pane of agentPanes) {
+    for (const { pane, tabLabel } of agentPanes) {
       const { paneId, agent, title } = pane;
       const { displayName, name, status, customStatus, message, sinceUnixMs } = agent!;
-      const displayLabel = displayName || name || 'Agent';
+      const agentKind = displayName || name || 'agent';
+      // Tab name is the human-meaningful identifier within a workspace; fall
+      // back to the agent kind if a tab somehow has no label.
+      const cardLabel = tabLabel || agentKind;
       const statusClass = status || 'unknown';
       const meta = customStatus || message || '';
       const relTime = relativeTime(sinceUnixMs);
@@ -609,19 +615,16 @@ function renderAgentsDashboard(): void {
       html += `
         <div class="agent-card" data-pane-id="${escHtml(paneId)}" role="button" tabindex="0">
           <div class="agent-card-header">
-            <span class="agent-name">${escHtml(displayLabel)}</span>
+            <span class="agent-name">${escHtml(cardLabel)}</span>
             <span class="status-badge ${escHtml(statusClass)}">${escHtml(statusClass)}</span>
           </div>
           ${meta ? `<div class="agent-custom-status">${escHtml(meta)}</div>` : ''}
           <div class="agent-card-meta">
+            <span class="agent-kind">${escHtml(agentKind)}</span>
             ${title ? `<span class="pane-title">${escHtml(title)}</span>` : ''}
             ${relTime ? `<span>${escHtml(relTime)}</span>` : ''}
           </div>
         </div>`;
-    }
-
-    if (agentPanes.length > 0 && inactivePanes.length > 0) {
-      html += `<div class="inactive-panes-count">+${inactivePanes.length} pane${inactivePanes.length !== 1 ? 's' : ''} without agents</div>`;
     }
 
     html += '</div>'; // workspace-group
