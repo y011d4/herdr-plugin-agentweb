@@ -18,7 +18,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v57';
+const BUILD = 'v58';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -1584,68 +1584,93 @@ function stopPromptScreenPoll(): void {
   promptPollActive = 0; // let a fresh poll start after re-entering (the old one won't clear this)
 }
 
-// Answer by selecting the tapped option. These menus navigate with ↑/↓ and
-// confirm with Enter (number keys do NOT select — a digit is wrapped in bracketed
-// paste and ignored; verified live). The target is the option NUMBER, which is
-// stable; the ❯ cursor is not — it may sit anywhere (moved on the desktop, or a
-// poll snapshot went stale). So read the LIVE cursor position from the screen,
-// step toward the target, then re-read to verify and nudge before Enter, instead
-// of trusting a possibly-stale index. An in-flight guard blocks re-taps mid-send.
+// Read the live prompt off the screen (null if it can't be parsed right now).
+async function readPromptScreen(paneId: string): Promise<ParsedPrompt | null> {
+  try {
+    const d = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
+    return parsePrompt(stripAnsi((d.ansi ?? d.text ?? '') as string));
+  } catch { return null; }
+}
+
+const answerWait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+// Fallback for a numbered menu that doesn't bind digit keys (e.g. a non-Claude
+// select widget): navigate with ↑/↓ and confirm with Enter, re-reading the live ❯
+// position so a cursor moved on the desktop can't misdirect the jump. Enter is sent
+// ONLY once the target is provably highlighted; if it never settles (dropped keys,
+// an unreadable screen), it aborts without answering rather than submit the wrong
+// option. Returns whether it confirmed the target.
+async function answerByArrows(paneId: string, to: number, fromKnown: number): Promise<boolean> {
+  const readSel = async (): Promise<number> => (await readPromptScreen(paneId))?.selected ?? 0;
+  let cur = fromKnown > 0 ? fromKnown : (await readSel()) || 1;
+  for (let i = 0; i < Math.abs(to - cur) && i < 16; i++) {
+    await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: [to > cur ? 'down' : 'up'] });
+    await answerWait(120);
+  }
+  let confirmed = false;
+  for (let guard = 0; guard < 10; guard++) {
+    await answerWait(90);
+    const now = await readSel();
+    if (now === to) { confirmed = true; break; }
+    if (!now) continue; // transient unreadable screen — retry, don't move blindly
+    await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: [to > now ? 'down' : 'up'] });
+  }
+  if (!confirmed) {
+    showToast('Could not confirm selection', 'The prompt did not settle on the tapped option — use the terminal below to answer.');
+    return false;
+  }
+  await answerWait(60);
+  await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: ['enter'] });
+  return true;
+}
+
+// Answer by selecting the tapped option. The target is the option NUMBER, which is
+// stable — unlike the ❯ cursor, which may sit anywhere (moved on the desktop, a
+// stale poll). Preferred path: deliver that digit as a raw keystroke, which selects
+// the option directly, exactly like pressing the key, wherever the cursor is. (A
+// digit via send_input is bracketed-paste-wrapped and ignored, and keys:[digit] is
+// dropped by herdr — both verified live; send_text delivers the raw byte, verified
+// live.) Then observe: menu gone → the digit submitted; ❯ moved onto the target but
+// menu still up → confirm with Enter; digit had no effect (a widget that ignores
+// digits) → fall back to arrow navigation. An in-flight guard blocks re-taps.
 async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   if (!activePaneId || promptAnswerInFlight) return;
   const to = parseInt(target, 10);
-  if (!Number.isInteger(to)) return;
+  if (!Number.isInteger(to) || to < 1) return;
   const paneId = activePaneId;
-  const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-  // The option currently highlighted by ❯ on the live screen (0 = couldn't tell).
-  const readSelected = async (): Promise<number> => {
-    try {
-      const d = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
-      const p = parsePrompt(stripAnsi((d.ansi ?? d.text ?? '') as string));
-      return p && p.selected > 0 ? p.selected : 0;
-    } catch { return 0; }
-  };
   promptAnswerInFlight = true;
   const panel = document.getElementById('chat-prompt');
   panel?.classList.add('chat-prompt-sending'); // disable the buttons while sending
   btn.classList.add('ask-opt-sent');
+  let ok = true;
   try {
-    // Each keystroke is its own event with a beat between: batching an arrow and
-    // Enter in one send loses the arrow (verified live). Jump from the live cursor
-    // toward the target…
-    let cur = (await readSelected()) || promptSelectedNum || 1;
-    for (let i = 0; i < Math.abs(to - cur) && i < 16; i++) {
-      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: [to > cur ? 'down' : 'up'] });
-      await wait(120);
+    if (to <= 9) {
+      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { press: String(to) });
+      await answerWait(180);
+      let parsed = await readPromptScreen(paneId);
+      if (!parsed) { await answerWait(150); parsed = await readPromptScreen(paneId); }
+      if (!parsed) { promptSelectedNum = to; return; } // menu gone → the digit selected it
+      if (parsed.selected === to) { // digit highlighted the target → confirm
+        await answerWait(40);
+        await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: ['enter'] });
+        promptSelectedNum = to;
+        return;
+      }
+      ok = await answerByArrows(paneId, to, parsed.selected); // digit ignored → arrows
+    } else {
+      // options past 9: a multi-digit press is ambiguous, so navigate with arrows
+      const start = (await readPromptScreen(paneId))?.selected ?? 0;
+      ok = await answerByArrows(paneId, to, start);
     }
-    // …then verify by re-reading: confirm with Enter only once the ❯ is provably on
-    // the target. If a keystroke dropped or the cursor moved, nudge and re-check; if
-    // the screen is momentarily unreadable, retry rather than move blindly. Crucially
-    // Enter is sent ONLY when the target is confirmed — if it never settles (dropped
-    // keys, an unreadable screen, an unexpected menu), abort without answering so a
-    // wrong option can't be submitted; the terminal below stays as the fallback.
-    let confirmed = false;
-    for (let guard = 0; guard < 10; guard++) {
-      await wait(90);
-      const now = await readSelected();
-      if (now === to) { confirmed = true; break; }
-      if (!now) continue; // transient unreadable screen — retry, don't move blindly
-      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: [to > now ? 'down' : 'up'] });
-    }
-    if (!confirmed) {
-      btn.classList.remove('ask-opt-sent');
-      showToast('Could not confirm selection', 'The prompt did not settle on the tapped option — use the terminal below to answer.');
-      return; // do NOT press Enter on an unverified option
-    }
-    await wait(60);
-    await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: ['enter'] });
-    promptSelectedNum = to; // reflect the move so a later tap starts from the right place
+    if (ok) promptSelectedNum = to;
   } catch (err) {
+    ok = false;
     showToast('Send failed', (err as Error).message);
   } finally {
     promptAnswerInFlight = false;
     panel?.classList.remove('chat-prompt-sending');
-    setTimeout(() => btn.classList.remove('ask-opt-sent'), 2000);
+    if (ok) setTimeout(() => btn.classList.remove('ask-opt-sent'), 2000);
+    else btn.classList.remove('ask-opt-sent');
   }
 }
 

@@ -342,6 +342,24 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
           jsonError(res, 400, 'invalid_params', 'enter must be a boolean');
           return;
         }
+        // A single digit delivered as a raw keystroke (via pane.send_text, NOT
+        // send_input): a numbered menu selects that option directly. It must NOT go
+        // through send_input, which wraps text in bracketed paste that the menu then
+        // ignores. Scoped to one digit — the only raw-key case the client needs.
+        if (body.press !== undefined) {
+          if (typeof body.press !== 'string' || !/^[0-9]$/.test(body.press)) {
+            jsonError(res, 400, 'invalid_params', 'press must be a single digit');
+            return;
+          }
+          try {
+            await herdrClient.rpc('pane.send_text', { pane_id: paneId, text: body.press });
+            jsonOk(res, { ok: true });
+          } catch (err) {
+            const herdrErr = err as HerdrError;
+            jsonError(res, mapHerdrError(herdrErr), herdrErr.herdrCode || 'error', herdrErr.message);
+          }
+          return;
+        }
         const keys = [...((body.keys as string[] | undefined) ?? [])];
         if (body.enter === true) keys.push('enter'); // strict: a string like "false" must not submit
         const params: Record<string, unknown> = { pane_id: paneId };

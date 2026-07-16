@@ -71,6 +71,14 @@ Verified live against herdr 0.7.3 / protocol 16:
 - **`pane.send_input` wraps text in bracketed paste** when the app enables it,
   and apps discard control sequences inside a paste. Raw bytes (e.g. SGR mouse
   wheel) must go through `pane.send_text`.
+- **Selecting a numbered menu option (e.g. AskUserQuestion) needs the digit sent
+  as a raw keystroke via `pane.send_text`.** A digit in `send_input` `text` is
+  bracketed-paste-wrapped and ignored by the menu; a digit in `send_input` `keys`
+  is dropped (herdr's `keys` are named keys only). `pane.send_text "3"` delivers
+  the raw byte, which the menu treats as pressing `3` (verified live: a raw-mode
+  reader received `b'3'`, and Claude's menu selects that option). Not every
+  `❯`-menu binds digits, though — the startup trust prompt takes only Enter/Esc —
+  so arrow-nav + Enter stays as the fallback.
 - herdr emits focus events ~10/s during desktop activity. Never let them
   trigger WS pushes; apply them to the model silently.
 - Invalid enum values in request params make herdr **drop the connection
