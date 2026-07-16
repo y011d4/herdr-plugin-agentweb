@@ -18,7 +18,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v62';
+const BUILD = 'v63';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -1570,6 +1570,13 @@ function renderPromptPanel(parsed: ParsedPrompt | null): void {
   ).join('');
   const term = document.getElementById('chat-prompt-term') as HTMLDetailsElement | null;
   if (term) term.open = !parsed; // menu parsed → collapse terminal; none → show it
+  // A real, different prompt is now on screen (its buttons were just rebuilt, so they
+  // are NOT the stale answered ones) — end any post-answer cooldown so these fresh
+  // buttons are immediately tappable, even if the pane went blocked→blocked without an
+  // observed unblock. A same-signature prompt hits the early return above and stays
+  // guarded (can't tell it apart from the answered one); a transient unparsable screen
+  // (parsed === null) is left to the unblock/floor path, not treated as a new prompt.
+  if (parsed) endAnswerCooldown();
 }
 
 function startPromptScreenPoll(): void {
