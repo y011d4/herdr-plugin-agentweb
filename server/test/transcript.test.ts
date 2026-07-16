@@ -1,9 +1,9 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, appendFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, appendFileSync, rmSync, mkdirSync, symlinkSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readTranscriptTail, readTranscriptFrom, slugForCwd } from '../transcript.ts';
+import { readTranscriptTail, readTranscriptFrom, slugForCwd, resolveTranscriptPath } from '../transcript.ts';
 
 // One JSONL line (a minimal user turn) whose content is `n` bytes of filler, so
 // tests can build files of a known size.
@@ -20,6 +20,43 @@ describe('slugForCwd', () => {
     assert.equal(slugForCwd('/home/y011d4/ghq/github.com/y011d4/herdr-plugin-mobile'),
       '-home-y011d4-ghq-github-com-y011d4-herdr-plugin-mobile');
     assert.equal(slugForCwd('/a/b_c.d'), '-a-b-c-d');
+  });
+});
+
+describe('resolveTranscriptPath — symlink containment', () => {
+  const CWD = '/w/proj';
+  it('resolves a regular transcript file under the root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'projroot-'));
+    const proj = join(root, slugForCwd(CWD));
+    mkdirSync(proj, { recursive: true });
+    const f = join(proj, 'sessone.jsonl');
+    writeFileSync(f, userLine('hi') + '\n');
+    assert.equal(resolveTranscriptPath('sessone', CWD, [root]), realpathSync(f));
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rejects a transcript that is a symlink escaping the root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'projroot-'));
+    const outside = mkdtempSync(join(tmpdir(), 'outside-'));
+    const secret = join(outside, 'secret.jsonl');
+    writeFileSync(secret, userLine('secret') + '\n');
+    const proj = join(root, slugForCwd(CWD));
+    mkdirSync(proj, { recursive: true });
+    symlinkSync(secret, join(proj, 'sesstwo.jsonl')); // points outside the root
+    assert.equal(resolveTranscriptPath('sesstwo', CWD, [root]), null);
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  it('allows a symlink whose target stays inside the root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'projroot-'));
+    const proj = join(root, slugForCwd(CWD));
+    mkdirSync(proj, { recursive: true });
+    const real = join(proj, 'real.jsonl');
+    writeFileSync(real, userLine('ok') + '\n');
+    symlinkSync(real, join(proj, 'sessthree.jsonl')); // target inside the root
+    assert.equal(resolveTranscriptPath('sessthree', CWD, [root]), realpathSync(real));
+    rmSync(root, { recursive: true, force: true });
   });
 });
 

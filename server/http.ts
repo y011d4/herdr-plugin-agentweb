@@ -150,32 +150,32 @@ interface RawPaneFull extends RawPaneInfo {
 }
 
 // Locate a pane's Claude Code transcript: fetch its session id + cwd from herdr,
-// then resolve the on-disk JSONL. Returns nulls when the pane isn't a claude
-// session or its transcript isn't on this host (→ chat view unavailable).
+// then resolve the on-disk JSONL. Returns nulls ONLY on a successful lookup that
+// proves the pane isn't a claude session or its transcript isn't on this host (→
+// chat view unavailable). A transient herdr RPC failure THROWS instead of returning
+// nulls, so callers can retry / keep the current view rather than mistake a flaky
+// pane.get for "no transcript" and drop the user back to the terminal.
 async function resolvePaneTranscript(
   herdrClient: HerdrClient,
   paneId: string,
 ): Promise<{ sessionId: string | null; file: string | null }> {
-  try {
-    const info = (await herdrClient.rpc('pane.get', { pane_id: paneId })) as { pane?: RawPaneFull };
-    const sess = info.pane?.agent_session;
-    const sessionId = sess?.source?.startsWith('herdr:claude') && typeof sess.value === 'string' ? sess.value : null;
-    if (!sessionId) return { sessionId: null, file: null };
-    const cwd = info.pane?.foreground_cwd || info.pane?.cwd || null;
-    // First try the safe filesystem roots only (default + ~/.config/claude/*),
-    // which needs no process environment access.
-    let file = resolveTranscriptPath(sessionId, cwd);
-    // Last resort: follow the pane's claude to a non-standard CLAUDE_CONFIG_DIR
-    // via /proc. Only when the safe roots miss, so the common case never reads a
-    // process environment (which would pull in unrelated secrets).
-    if (!file) {
-      const extraRoots = await claudeConfigRoots(herdrClient, paneId);
-      if (extraRoots.length) file = resolveTranscriptPath(sessionId, cwd, extraRoots);
-    }
-    return { sessionId, file };
-  } catch {
-    return { sessionId: null, file: null };
+  const info = (await herdrClient.rpc('pane.get', { pane_id: paneId })) as { pane?: RawPaneFull };
+  const sess = info.pane?.agent_session;
+  const sessionId = sess?.source?.startsWith('herdr:claude') && typeof sess.value === 'string' ? sess.value : null;
+  if (!sessionId) return { sessionId: null, file: null };
+  const cwd = info.pane?.foreground_cwd || info.pane?.cwd || null;
+  // First try the safe filesystem roots only (default + ~/.config/claude/*),
+  // which needs no process environment access.
+  let file = resolveTranscriptPath(sessionId, cwd);
+  // Last resort: follow the pane's claude to a non-standard CLAUDE_CONFIG_DIR
+  // via /proc. Only when the safe roots miss, so the common case never reads a
+  // process environment (which would pull in unrelated secrets). claudeConfigRoots
+  // is best-effort (returns [] on its own RPC failure), so it won't mask a miss.
+  if (!file) {
+    const extraRoots = await claudeConfigRoots(herdrClient, paneId);
+    if (extraRoots.length) file = resolveTranscriptPath(sessionId, cwd, extraRoots);
   }
+  return { sessionId, file };
 }
 
 // Ask herdr for the pane's foreground processes, find the local claude, and
@@ -446,7 +446,18 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
       // recent tail is returned with reset=true. available=false → not a claude
       // pane, or its transcript isn't on this host (client keeps the terminal).
       if (action === 'transcript' && method === 'GET') {
-        const { sessionId, file } = await resolvePaneTranscript(herdrClient, paneId);
+        let sessionId: string | null;
+        let file: string | null;
+        try {
+          ({ sessionId, file } = await resolvePaneTranscript(herdrClient, paneId));
+        } catch (err) {
+          // Transient herdr failure — surface an error, NOT available:false, so the
+          // client retries (its re-probe keeps polling) and keeps its current view
+          // instead of being told definitively that there is no transcript.
+          const herdrErr = err as HerdrError;
+          jsonError(res, mapHerdrError(herdrErr), herdrErr.herdrCode || 'error', herdrErr.message);
+          return;
+        }
         if (!sessionId || !file) {
           jsonOk(res, { available: false });
           return;

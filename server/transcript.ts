@@ -11,7 +11,7 @@
 
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { existsSync, readdirSync, statSync, fstatSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, realpathSync, fstatSync, openSync, readSync, closeSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { normalizeLine, type TimelineItem } from './transcript-normalize.ts';
 
@@ -94,6 +94,20 @@ function containedIn(p: string, root: string): string | null {
   return abs === root || abs.startsWith(root + sep) ? abs : null;
 }
 
+// Confirm a candidate transcript is a REGULAR FILE that, after symlinks are
+// resolved on both it and the root, still lives under the root. The lexical
+// containedIn check can't see through a symlink, and existsSync/openSync follow
+// links — so a `<root>/<slug>/<uuid>.jsonl` that is really a symlink to a file
+// outside the roots would otherwise be tailed. Returns the real path, or null.
+function safeRealFile(candidate: string, root: string): string | null {
+  try {
+    const realRoot = realpathSync(root);
+    const real = realpathSync(candidate); // resolves symlinks; throws if missing
+    if (real !== realRoot && !real.startsWith(realRoot + sep)) return null;
+    return statSync(real).isFile() ? real : null;
+  } catch { return null; }
+}
+
 /**
  * Resolve the on-disk transcript for a claude session. `sessionId` comes from
  * herdr's `agent_session.value`, `cwd` from the pane. Returns an absolute path
@@ -114,7 +128,8 @@ export function resolveTranscriptPath(sessionId: string | null | undefined, cwd:
     const slug = slugForCwd(cwd);
     for (const root of roots) {
       const direct = containedIn(join(root, slug, fileName), root);
-      if (direct && existsSync(direct)) return direct;
+      const safe = direct ? safeRealFile(direct, root) : null;
+      if (safe) return safe;
     }
   }
 
@@ -126,7 +141,8 @@ export function resolveTranscriptPath(sessionId: string | null | undefined, cwd:
     try { dirs = readdirSync(root); } catch { continue; }
     for (const d of dirs) {
       const cand = containedIn(join(root, d, fileName), root);
-      if (cand && existsSync(cand)) return cand;
+      const safe = cand ? safeRealFile(cand, root) : null;
+      if (safe) return safe;
     }
   }
   return null;
