@@ -17,10 +17,13 @@ herdr server
 
 - `server/herdr-client.ts` — socket RPC + persistent event subscription + reconnect
 - `server/state.ts` — pure snapshot/event → normalized State (unit-tested; keep it I/O-free)
-- `server/http.ts` — REST routes, WS (state pushes, per-client pane watch), static files
+- `server/transcript-normalize.ts` — pure JSONL line → chat TimelineItem[] (unit-tested; I/O-free)
+- `server/transcript.ts` — resolve + tail a claude pane's transcript file (I/O)
+- `server/http.ts` — REST routes, WS (state pushes, per-client pane + transcript watch), static files
 - `server/auth.ts` / `notify.ts` / `config.ts` — token, agent-status fanout + optional ntfy, config
 - `bin/agentwebctl.ts` — plugin entrypoints: run | start | stop | status | qr
-- `web/src/app.ts` — SPA (hash routing), `ansi.ts` — pure ANSI→HTML, `sw.ts` — service worker
+- `web/src/app.ts` — SPA (hash routing), `ansi.ts` — pure ANSI→HTML,
+  `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker
 - `herdr-plugin.toml` — actions/panes call `dist/bin/agentwebctl.js`; `[[build]]` runs on
   `herdr plugin install` but NOT on `herdr plugin link`
 
@@ -68,6 +71,17 @@ Verified live against herdr 0.7.3 / protocol 16:
 - **`pane.send_input` wraps text in bracketed paste** when the app enables it,
   and apps discard control sequences inside a paste. Raw bytes (e.g. SGR mouse
   wheel) must go through `pane.send_text`.
+- **Selecting a numbered menu option (e.g. AskUserQuestion) is one atomic
+  keystroke: the option's digit sent as a raw byte via `pane.send_text`.** Pressing
+  the digit selects AND submits the option — no Enter, no cursor movement (verified
+  live: sending `"3"` to an AskUserQuestion answered "cherry" outright). It MUST go
+  as a raw keystroke: a digit in `send_input` `text` is bracketed-paste-wrapped and
+  ignored by the menu, and a digit in `send_input` `keys` is dropped (herdr's `keys`
+  are named keys only). Because the digit is atomic, the bridge's answer path sends
+  just the digit — no follow-up read/Enter/arrow that could land on a later prompt,
+  and the `❯` position is irrelevant (selection is by number). The startup trust
+  prompt is a different widget (Enter/Esc only, no digits), but it never surfaces as
+  a `blocked` pane, so the chat answer UI never needs to drive it.
 - herdr emits focus events ~10/s during desktop activity. Never let them
   trigger WS pushes; apply them to the model silently.
 - Invalid enum values in request params make herdr **drop the connection
@@ -87,6 +101,32 @@ Verified live against herdr 0.7.3 / protocol 16:
    updated screen comes back via watch pushes. Heuristic: empty history
    prefix + pane has an agent (`appScrollPane`). Arrow keys are NOT a
    substitute — they trigger composer history in Claude Code.
+
+## The chat view (Claude Code transcript rendering)
+
+A claude pane can be shown as a structured chat timeline instead of the raw
+terminal. It does NOT scrape the terminal — it tails Claude Code's own JSONL
+session transcript on disk. Terminal view stays the universal fallback for every
+agent; chat is an additive, feature-detected layer (`available`), so
+vendor-neutrality is preserved.
+
+- **Exact pane→transcript mapping (don't use newest-mtime).** herdr's raw pane
+  carries `agent_session = { source:"herdr:claude", value:"<uuid>" }` (seen via
+  `session.snapshot` / `pane.get`). That `value` IS the transcript filename:
+  `~/.claude/projects/<slug>/<value>.jsonl`, slug = `cwd.replace(/[/._]/g,'-')`.
+  A pane's launch cwd can differ from its current `foreground_cwd`, so resolve by
+  the slug first, then fall back to globbing `~/.claude/projects/*/<value>.jsonl`.
+- **Graceful degradation is expected.** Some claude sessions' transcripts aren't
+  on this host (remote/containerized, alternate `CLAUDE_CONFIG_DIR`) → the endpoint
+  returns `available:false` and the client keeps the terminal. Never guess a
+  wrong session by mtime.
+- Reads are confined to `~/.claude/projects` (sessionId regex + path containment);
+  the client only sends a paneId — sessionId/cwd come from herdr. The `session`
+  query param is an equality gate only, never used to build a path.
+- The tailer reads new bytes from a byte cursor that always sits on a newline
+  boundary (safe for multi-byte UTF-8); a trailing partial line is left for the
+  next read. WS `watch_transcript` re-resolves the session id each tick so a
+  mid-session reset (`/clear` → new session file) triggers a `reset` rebuild.
 
 ## Touch/DOM rules in app.ts (regression-prone)
 

@@ -10,14 +10,22 @@
  */
 
 import { ansiToHtml } from './ansi.ts';
-import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage } from './types.ts';
+import { renderItems } from './transcript.ts';
+import type { TimelineItem } from './transcript.ts';
+import { stripAnsi, parsePrompt, promptIdentity } from './prompt.ts';
+import type { PromptOption, ParsedPrompt } from './prompt.ts';
+import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 
 // ── App version ──────────────────────────────────────────────────────────────
 const APP_VERSION = '0.1.0';
+// Bumped each deploy and shown in the prompt panel + settings, so a stale cached
+// bundle is immediately visible (the SW cache version tracks this).
+const BUILD = 'v77';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
 const STORAGE_NOTIF = 'herdr_notifications';
+const STORAGE_VIEW = 'herdr_pane_view'; // preferred pane view: 'terminal' | 'chat'
 
 // ── WS reconnect config ───────────────────────────────────────────────────────
 const WS_PING_INTERVAL_MS = 30_000;
@@ -41,6 +49,27 @@ let appState: AppState | null = null;
 
 /** paneId currently shown in detail view (null if not on pane screen) */
 let activePaneId: string | null = null;
+
+// ── Chat view (Claude Code transcript) ────────────────────────────────────────
+// A claude pane can be shown as its structured transcript instead of the raw
+// terminal. Availability is probed per pane; the terminal stays the fallback.
+let paneViewMode: 'terminal' | 'chat' = 'terminal';
+let chatAvailable = false;
+let chatSessionId: string | null = null;
+let chatCursor = 0; // byte offset into the transcript for incremental fetches
+let chatProbeSeq = 0; // monotonic probe id, to invalidate a probe from a prior pane
+let chatProbeActive = 0; // reqId of the availability probe in flight (0 = none) — prevents overlap
+// Pending-prompt panel: when a claude pane is blocked (waiting for input), the
+// chat surfaces an answer UI — tappable options for a pending AskUserQuestion,
+// or the live terminal screen for any other prompt (permission, plan, y/n).
+let promptPanelKind: 'none' | 'blocked' = 'none';
+let promptScreenTimer: ReturnType<typeof setInterval> | null = null;
+let promptScreenId = ''; // identity of the on-screen prompt whose buttons are rendered (avoids re-render churn; guards stale taps)
+let promptPollSeq = 0; // monotonic request id; bumped on stop to invalidate an in-flight poll
+let promptPollActive = 0; // reqId of the poll currently in flight (0 = none) — prevents overlap
+let promptAnswerInFlight = false; // true while/just after a tapped answer is sent — blocks re-taps
+let answerCooldownTimer: ReturnType<typeof setTimeout> | null = null; // floors the post-send re-tap block
+let answerGen = 0; // per-answer token so a stale POST/timer can't clear the guard for a newer answer
 
 /** source toggle: 'visible' | 'recent' */
 
@@ -141,7 +170,10 @@ async function apiPost(path: string, body: Record<string, unknown> = {}): Promis
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({})) as Record<string, unknown>;
     const err = data?.error as Record<string, unknown> | undefined;
-    throw new Error((err?.message as string | undefined) ?? `HTTP ${resp.status}`);
+    const e = new Error((err?.message as string | undefined) ?? `HTTP ${resp.status}`) as Error & { code?: string; status?: number };
+    e.code = err?.code as string | undefined; // e.g. 'prompt_changed' — lets callers branch on the reason
+    e.status = resp.status;
+    throw e;
   }
   return resp.json();
 }
@@ -221,17 +253,26 @@ function handleWsMessage(msg: WsMessage): void {
       showToast('Pane closed', 'This pane no longer exists.');
       navigate('#/agents');
     }
+  } else if (msg.type === 'transcript_items') {
+    if (msg.paneId === activePaneId) onTranscriptItems(msg);
   }
   // pong — no-op
 }
 
-// Tell the server which pane (if any) to watch for output pushes.
+// Tell the server what to watch for the active pane: its transcript in chat
+// mode, its terminal output otherwise. The two watches are mutually exclusive,
+// so the unused one is always cancelled. Re-sent on reconnect and mode switches.
 function wsSendWatch(): void {
   if (!wsSocket || wsSocket.readyState !== WebSocket.OPEN) return;
-  if (activePaneId) {
+  if (activePaneId && paneViewMode === 'chat') {
+    wsSocket.send(JSON.stringify({ type: 'unwatch_pane' }));
+    wsSocket.send(JSON.stringify({ type: 'watch_transcript', paneId: activePaneId }));
+  } else if (activePaneId) {
+    wsSocket.send(JSON.stringify({ type: 'unwatch_transcript' }));
     wsSocket.send(JSON.stringify({ type: 'watch_pane', paneId: activePaneId }));
   } else {
     wsSocket.send(JSON.stringify({ type: 'unwatch_pane' }));
+    wsSocket.send(JSON.stringify({ type: 'unwatch_transcript' }));
   }
 }
 
@@ -287,6 +328,7 @@ function onStateUpdate(): void {
     }
     // Pane detail auto-refreshes via its own poller; header may need updating
     updatePaneDetailHeader();
+    updatePromptPanel(); // agent may have just become (un)blocked
   }
 }
 
@@ -635,7 +677,12 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     document.getElementById('topbar-title')!.innerHTML = paneHeaderHtml(found, paneId);
     document.getElementById('topbar-left')!.innerHTML =
       `<button class="topbar-back" aria-label="Back">&#8592; Agents</button>`;
-    document.getElementById('topbar-right')!.innerHTML = '';
+    // View toggle (terminal ⇄ chat). Hidden until a claude transcript is found.
+    document.getElementById('topbar-right')!.innerHTML =
+      `<button class="topbar-action view-toggle" id="btn-view-toggle" style="display:none;">Chat</button>`;
+    document.getElementById('btn-view-toggle')!.addEventListener('click', () => {
+      if (paneViewMode === 'chat') switchToTerminal(); else switchToChat();
+    });
     document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate('#/agents'));
   }
 
@@ -650,6 +697,15 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   appScrollPane = false;
   wheelQueue = 0;
   stopFling();
+  // chat view starts closed; availability is probed after the terminal loads
+  paneViewMode = 'terminal';
+  chatAvailable = false;
+  chatSessionId = null;
+  chatCursor = 0;
+  chatProbeActive = 0; // a prior pane's in-flight probe must not block this pane's probe
+  promptPanelKind = 'none';
+  promptScreenId = '';
+  stopPromptScreenPoll();
 
   // Build screen HTML. The terminal holds two sections that are updated
   // independently so live pushes never touch the scrollback DOM above:
@@ -657,6 +713,8 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   elScreen!.innerHTML = `
     <div id="screen-pane" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
       <div class="terminal-output" id="terminal-output"><div id="term-history"></div><div id="term-live"><span class="loading-spinner"></span></div></div>
+      <div class="chat-log" id="chat-log" style="display:none;"></div>
+      <div class="chat-prompt" id="chat-prompt" style="display:none;"></div>
       <div class="input-bar">
         <div class="input-row">
           <textarea id="pane-input" rows="1" placeholder="Send text…" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
@@ -670,6 +728,14 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   const terminalEl = document.getElementById('terminal-output')!;
   bindPinchZoom(terminalEl);
   bindTerminalScroll(terminalEl);
+
+  // Answer a pending prompt: tapping an option sends its menu key.
+  document.getElementById('chat-prompt')!.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest('.ask-opt') as HTMLElement | null;
+    if (!btn || !activePaneId) return;
+    const send = btn.dataset.askSend;
+    if (send) void sendAskAnswer(send, btn);
+  });
 
   // Send button. Enter in the field inserts a newline — sending happens only
   // via the button, so the phone keyboard can't fire off half-typed commands.
@@ -713,6 +779,195 @@ async function renderPaneDetail(paneId: string): Promise<void> {
 
   // Start polling while this pane is visible
   startPaneRefresh();
+
+  // Probe whether this pane has a Claude transcript; if so reveal the toggle and
+  // switch to chat when it's the preferred view.
+  void initChatAvailability(paneId);
+}
+
+// ── Chat view ─────────────────────────────────────────────────────────────────
+
+interface TranscriptResponse {
+  available: boolean;
+  sessionId?: string;
+  items?: TimelineItem[];
+  cursor?: number;
+  reset?: boolean;
+  truncated?: boolean;
+}
+
+// Chat is the default view; the terminal is only preferred if explicitly chosen.
+function preferredView(): 'terminal' | 'chat' {
+  return localStorage.getItem(STORAGE_VIEW) === 'terminal' ? 'terminal' : 'chat';
+}
+
+function updateViewToggleLabel(): void {
+  const btn = document.getElementById('btn-view-toggle');
+  if (btn) btn.textContent = paneViewMode === 'chat' ? 'Terminal' : 'Chat';
+}
+
+function showViewToggle(visible: boolean): void {
+  const btn = document.getElementById('btn-view-toggle');
+  if (btn) btn.style.display = visible ? '' : 'none';
+}
+
+// One GET decides availability, reveals the toggle, and (when chat is preferred)
+// switches straight in using the payload it just fetched — no second request.
+async function initChatAvailability(paneId: string): Promise<void> {
+  if (chatProbeActive) return; // one probe in flight — don't overlap (so a slow probe still applies)
+  const gen = paneViewGen;
+  const probeId = ++chatProbeSeq;
+  chatProbeActive = probeId;
+  try {
+    const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript`) as TranscriptResponse;
+    // gen/paneId invalidate a probe from a prior pane; the in-flight guard means
+    // no concurrent re-probe supersedes this one, so a slow probe still applies.
+    if (probeId !== chatProbeSeq || gen !== paneViewGen || paneId !== activePaneId) return;
+    chatAvailable = data.available;
+    showViewToggle(chatAvailable);
+    if (chatAvailable && preferredView() === 'chat') switchToChat(data, false);
+  } catch {
+    // leave the terminal view; toggle stays hidden
+  } finally {
+    if (chatProbeActive === probeId) chatProbeActive = 0; // only our own probe clears the guard
+  }
+}
+
+// persist=true only for an explicit user toggle; automatic switches (honoring an
+// existing preference, or falling back on a transient transcript miss) must not
+// rewrite the stored preference.
+function switchToChat(initial?: TranscriptResponse, persist = true): void {
+  if (!chatAvailable || !activePaneId) return;
+  paneViewMode = 'chat';
+  if (persist) localStorage.setItem(STORAGE_VIEW, 'chat');
+  document.getElementById('terminal-output')?.style.setProperty('display', 'none');
+  document.getElementById('chat-log')?.style.setProperty('display', '');
+  updateViewToggleLabel();
+  if (initial?.items) {
+    chatSessionId = initial.sessionId ?? null;
+    chatCursor = initial.cursor ?? 0;
+    renderChatReset(initial.items);
+  } else {
+    void loadChatInitial();
+  }
+  wsSendWatch(); // server: stop pane watch, start transcript watch
+  updatePromptPanel(); // reveal the answer panel if the pane is already blocked
+}
+
+function switchToTerminal(persist = true): void {
+  paneViewMode = 'terminal';
+  if (persist) localStorage.setItem(STORAGE_VIEW, 'terminal');
+  document.getElementById('chat-log')?.style.setProperty('display', 'none');
+  document.getElementById('terminal-output')?.style.setProperty('display', '');
+  updateViewToggleLabel();
+  updatePromptPanel(); // hide the answer panel (chat-only)
+  wsSendWatch(); // server: stop transcript watch, resume pane watch
+  void refreshPaneOutput(); // repaint the live screen the user returns to
+}
+
+async function loadChatInitial(): Promise<void> {
+  if (!activePaneId) return;
+  const gen = paneViewGen;
+  const paneId = activePaneId;
+  // switchToChat starts the WS transcript watch alongside this request; if that
+  // watch (or anything else) advances the chat state while this GET is in flight,
+  // its result is stale — capture the start state and drop a mismatched reply so
+  // the slower initial load can't replace a fresher log or rewind the cursor.
+  const reqSession = chatSessionId;
+  const reqCursor = chatCursor;
+  try {
+    const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript`) as TranscriptResponse;
+    if (gen !== paneViewGen || paneId !== activePaneId || paneViewMode !== 'chat') return;
+    if (chatSessionId !== reqSession || chatCursor !== reqCursor) return; // superseded in flight
+    if (!data.available) { chatAvailable = false; showViewToggle(false); switchToTerminal(false); return; }
+    chatSessionId = data.sessionId ?? null;
+    chatCursor = data.cursor ?? 0;
+    renderChatReset(data.items ?? []);
+  } catch {
+    // keep whatever is shown; the WS watch will refresh
+  }
+}
+
+function renderChatReset(items: TimelineItem[], preserveScroll = false): void {
+  const chat = document.getElementById('chat-log');
+  if (!chat) return;
+  // A reconnect re-watch resends the same session's tail; keep the user where
+  // they were reading instead of snapping to the bottom.
+  const prevTop = chat.scrollTop;
+  const prevFromBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight;
+  chat.innerHTML = items.length ? renderItems(items) : '<div class="chat-empty">No messages yet.</div>';
+  chat.scrollTop = preserveScroll
+    ? (prevFromBottom < 40 ? chat.scrollHeight : prevTop)
+    : chat.scrollHeight;
+}
+
+function appendChatItems(items: TimelineItem[]): void {
+  const chat = document.getElementById('chat-log');
+  if (!chat || items.length === 0) return;
+  // follow the bottom only if the user is already there — don't yank them out of
+  // history they've scrolled up to read.
+  const atBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 60;
+  chat.querySelector('.chat-empty')?.remove();
+  chat.insertAdjacentHTML('beforeend', renderItems(items));
+  if (atBottom) chat.scrollTop = chat.scrollHeight;
+}
+
+function onTranscriptItems(msg: WsTranscriptItemsMessage): void {
+  if (!msg.available) {
+    chatAvailable = false;
+    showViewToggle(false);
+    if (paneViewMode === 'chat') switchToTerminal(false);
+    return;
+  }
+  chatAvailable = true;
+  showViewToggle(true);
+  if (paneViewMode !== 'chat') return; // availability noted; content applies only in chat mode
+  if (msg.reset || msg.sessionId !== chatSessionId) {
+    // Same session (a reconnect re-watch) → keep scroll; a new session → bottom.
+    const sameSession = msg.sessionId != null && msg.sessionId === chatSessionId;
+    chatSessionId = msg.sessionId ?? null;
+    chatCursor = msg.cursor;
+    renderChatReset(msg.items, sameSession);
+  } else {
+    chatCursor = msg.cursor;
+    appendChatItems(msg.items);
+  }
+}
+
+// HTTP fallback while the WS is down: fetch items past the cursor for the same
+// session (mirrors the transcript watch).
+async function pollChatFallback(): Promise<void> {
+  if (!activePaneId || paneViewMode !== 'chat') return;
+  const gen = paneViewGen;
+  const paneId = activePaneId;
+  // The response is only valid against the state this request started from. If
+  // anything (a WS reset/push, or a newer poll) advances the session or cursor
+  // while the request is in flight, applying it — append OR reset — would
+  // duplicate or rewind, so capture the start state and drop a mismatched reply.
+  const reqCursor = chatCursor;
+  const reqSession = chatSessionId;
+  const q = chatSessionId ? `?session=${encodeURIComponent(chatSessionId)}&after=${reqCursor}` : '';
+  try {
+    const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript${q}`) as TranscriptResponse;
+    if (gen !== paneViewGen || paneId !== activePaneId || paneViewMode !== 'chat') return;
+    // Drop any response whose request start no longer matches the current state
+    // BEFORE acting on it — a stale available:false must not force the terminal
+    // after a WS push/reset already advanced the chat.
+    if (chatSessionId !== reqSession || chatCursor !== reqCursor) return; // superseded in flight
+    if (!data.available) { chatAvailable = false; showViewToggle(false); switchToTerminal(false); return; }
+    if (data.reset || data.sessionId !== chatSessionId) {
+      chatSessionId = data.sessionId ?? null;
+      chatCursor = data.cursor ?? 0;
+      renderChatReset(data.items ?? []);
+    } else {
+      const next = data.cursor ?? chatCursor;
+      if (next <= chatCursor) return; // no new items past what we've shown
+      chatCursor = next;
+      appendChatItems(data.items ?? []);
+    }
+  } catch {
+    // transient; retry next tick
+  }
 }
 
 function buildQuickKeys(paneId: string): void {
@@ -1167,13 +1422,209 @@ function queuePaneEcho(): void {
   setTimeout(() => { void refreshPaneOutput(); }, 500);
 }
 
+// ── Pending-prompt panel (answer UI when the pane is blocked) ──────────────────
+
+const PROMPT_SCREEN_INTERVAL_MS = 1200;
+
+
+// When a claude pane is blocked (waiting for input) and chat is active, show an
+// answer panel above the input bar: the question and tappable option buttons
+// parsed from the live prompt, with the raw terminal screen as collapsible
+// context. The composer and quick-keys remain available.
+function updatePromptPanel(): void {
+  const panel = document.getElementById('chat-prompt');
+  if (!panel) return;
+  const status = activePaneId ? findPane(activePaneId)?.pane?.agent?.status : null;
+  const blocked = paneViewMode === 'chat' && status === 'blocked';
+  if (!blocked) {
+    // Pane is no longer waiting: the answer (if one was just sent) has landed, so
+    // end the post-send cooldown that was suppressing re-taps.
+    if (promptPanelKind !== 'none') { panel.style.display = 'none'; panel.innerHTML = ''; promptPanelKind = 'none'; promptScreenId = ''; }
+    endAnswerCooldown();
+    stopPromptScreenPoll();
+    return;
+  }
+  if (promptPanelKind !== 'blocked') {
+    // A fresh blocked episode (panel was hidden, now shown): a distinct prompt, so
+    // clear any lingering cooldown from a prior answer before rendering its buttons.
+    endAnswerCooldown();
+    panel.style.display = '';
+    panel.innerHTML =
+      `<div class="chat-prompt-head">&#9203; Waiting for your input <span class="chat-prompt-build">${BUILD}</span></div>` +
+      '<div class="chat-prompt-q" id="chat-prompt-q"></div>' +
+      '<div class="chat-prompt-options" id="chat-prompt-options"></div>' +
+      // starts open (no buttons yet, so the terminal is the only UI);
+      // renderPromptPanel collapses it once a menu is parsed.
+      '<details class="chat-prompt-term" id="chat-prompt-term" open><summary>Terminal</summary>' +
+      '<div class="chat-prompt-screen" id="chat-prompt-screen"><span class="loading-spinner"></span></div></details>';
+    promptPanelKind = 'blocked';
+    promptScreenId = '';
+  }
+  startPromptScreenPoll();
+}
+
+// Clear the "answer just sent" state: re-enable the option buttons and drop the
+// in-flight guard. Called when the pane leaves `blocked` (answer landed) or a fresh
+// prompt appears, and by a timeout floor in case neither is observed.
+function endAnswerCooldown(): void {
+  if (answerCooldownTimer) { clearTimeout(answerCooldownTimer); answerCooldownTimer = null; }
+  promptAnswerInFlight = false;
+  document.getElementById('chat-prompt')?.classList.remove('chat-prompt-sending');
+}
+
+
+// Render the question + option buttons. Rebuild only when the prompt identity
+// changes, so a poll tick can't wipe a button the instant the user taps it, and a
+// genuinely new prompt (even one with the same parsed signature) does get fresh
+// buttons. `sid` is the identity of the screen `parsed` came from.
+function renderPromptPanel(parsed: ParsedPrompt | null, sid: string): void {
+  const optsEl = document.getElementById('chat-prompt-options');
+  if (!optsEl) return;
+  if (sid === promptScreenId) return; // same prompt still on screen — don't rebuild (keeps a tap from being wiped)
+  promptScreenId = sid;
+  const qEl = document.getElementById('chat-prompt-q');
+  if (qEl) qEl.textContent = parsed?.question ?? '';
+  optsEl.innerHTML = (parsed?.options ?? []).map((o) =>
+    `<button class="ask-opt" type="button" data-ask-send="${escHtml(o.send)}"><span class="ask-opt-num">${escHtml(o.send)}</span>` +
+    `<span class="ask-opt-label">${escHtml(o.label)}</span></button>`,
+  ).join('');
+  const term = document.getElementById('chat-prompt-term') as HTMLDetailsElement | null;
+  // Collapse the terminal only when we have a question to show above the buttons.
+  // If a menu parsed but its question couldn't be extracted, bare "Yes/No" buttons
+  // would have no context — keep the terminal open so the user can read the prompt.
+  if (term) term.open = !parsed?.question;
+  // A different prompt is now on screen (its buttons were just rebuilt, so they are
+  // NOT the stale answered ones) — end any post-answer cooldown so these fresh buttons
+  // are immediately tappable, even if the pane went blocked→blocked without an observed
+  // unblock. A transient unparsable screen (parsed === null) is left to the
+  // unblock/floor path, not treated as a new prompt.
+  if (parsed) endAnswerCooldown();
+}
+
+function startPromptScreenPoll(): void {
+  if (promptScreenTimer) return;
+  const tick = async (): Promise<void> => {
+    if (promptPollActive) return; // a poll is in flight — don't overlap (so slow reads aren't all discarded)
+    if (paneViewMode !== 'chat' || !activePaneId) { stopPromptScreenPoll(); return; }
+    if (findPane(activePaneId)?.pane?.agent?.status !== 'blocked') { updatePromptPanel(); return; }
+    const reqId = ++promptPollSeq;
+    promptPollActive = reqId;
+    const paneId = activePaneId;
+    try {
+      const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
+      // stopPromptScreenPoll bumps promptPollSeq to invalidate a poll from a prior
+      // session; the in-flight guard means no concurrent tick supersedes this one.
+      if (reqId !== promptPollSeq || paneViewMode !== 'chat' || paneId !== activePaneId) return;
+      const ansi = (data.ansi ?? data.text ?? '') as string;
+      const stripped = stripAnsi(ansi);
+      const parsed = parsePrompt(stripped);
+      renderPromptPanel(parsed, parsed ? promptIdentity(stripped) : '');
+      const screen = document.getElementById('chat-prompt-screen');
+      if (screen) screen.innerHTML = ansiToHtml(ansi);
+    } catch { /* transient — keep the last screen */ } finally {
+      if (promptPollActive === reqId) promptPollActive = 0; // only our own poll clears the guard
+    }
+  };
+  void tick();
+  promptScreenTimer = setInterval(() => { void tick(); }, PROMPT_SCREEN_INTERVAL_MS);
+}
+
+function stopPromptScreenPoll(): void {
+  if (promptScreenTimer) { clearInterval(promptScreenTimer); promptScreenTimer = null; }
+  promptPollSeq++;      // invalidate any in-flight poll so its late response can't render
+  promptPollActive = 0; // let a fresh poll start after re-entering (the old one won't clear this)
+}
+
+// Read the live prompt off the screen: its parsed form and its region identity
+// (null if the read fails). `id` is '' when no prompt/menu is present.
+async function readPromptScreen(paneId: string): Promise<{ parsed: ParsedPrompt | null; id: string } | null> {
+  try {
+    const d = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
+    const stripped = stripAnsi((d.ansi ?? d.text ?? '') as string);
+    const parsed = parsePrompt(stripped);
+    return { parsed, id: parsed ? promptIdentity(stripped) : '' };
+  } catch { return null; }
+}
+
+// Answer by selecting the tapped option. Pressing an option's digit in a numbered
+// menu selects AND submits it in one atomic keystroke — verified live: sending "3"
+// to an AskUserQuestion answered "cherry" with no Enter and no cursor movement. The
+// digit goes as a raw keystroke via send_text (`press`): a digit through send_input
+// is bracketed-paste-wrapped and ignored, and keys:[digit] is dropped by herdr (both
+// verified live). Selection is by number, so the ❯ cursor's position is irrelevant.
+//
+// The buttons are only re-rendered on the ~1.2s poll, so the prompt on screen may
+// have changed (answered on the desktop, timed out) since they were drawn. We send
+// the buttons' prompt identity as `expect_prompt`; the bridge re-reads the screen and
+// presses the digit ONLY if it still matches — check and send back-to-back on the
+// server, so nothing can slip in between (a client-side check would leave a round-trip
+// gap). A mismatch returns 409 and we refresh. An in-flight guard and a per-answer
+// generation token keep double-taps and stale async work off the shared guard.
+async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
+  if (!activePaneId || promptAnswerInFlight) return;
+  const to = parseInt(target, 10);
+  // Claude's prompts never exceed ~6 options, so every option is a single digit; a
+  // multi-digit option would submit on its first digit, so refuse it and leave the
+  // terminal (always shown below) as the way to answer that out-of-range case.
+  if (!Number.isInteger(to) || to < 1 || to > 9) return;
+  const expectedId = promptScreenId; // region identity of the prompt these buttons belong to
+  if (!expectedId) return;
+  const paneId = activePaneId;
+  const myGen = ++answerGen; // token for THIS answer; a stale POST/timer must not touch a newer one
+  promptAnswerInFlight = true;
+  if (answerCooldownTimer) { clearTimeout(answerCooldownTimer); answerCooldownTimer = null; }
+  const panel = document.getElementById('chat-prompt');
+  panel?.classList.add('chat-prompt-sending'); // disable the buttons while the answer settles
+  btn.classList.add('ask-opt-sent');
+  try {
+    await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { press: String(to), expect_prompt: expectedId });
+    if (myGen !== answerGen) return; // a newer tap already superseded this — don't touch shared state
+    // The digit already submitted this prompt, but the panel keeps showing it (with
+    // tappable buttons) until the pane's status refreshes. Hold the guard through
+    // that window so a double-tap can't fire the same digit again into the *next*
+    // prompt or the terminal. It's released the moment the pane leaves `blocked` or a
+    // fresh prompt renders (endAnswerCooldown); this timer is only a floor, and it
+    // no-ops if a newer answer has since started. No DOM is mutated here — that would
+    // risk clobbering another pane's panel if the user navigated away mid-request.
+    answerCooldownTimer = setTimeout(() => { if (myGen === answerGen) endAnswerCooldown(); }, 1500);
+  } catch (err) {
+    if (myGen !== answerGen) return; // superseded — the newer answer owns the guard now
+    btn.classList.remove('ask-opt-sent');
+    endAnswerCooldown();
+    if ((err as { code?: string }).code === 'prompt_changed') {
+      // The prompt advanced before the digit landed — refresh to the live prompt and
+      // let the user retap; never send into a different prompt.
+      const live = await readPromptScreen(paneId);
+      if (myGen === answerGen && paneId === activePaneId) renderPromptPanel(live?.parsed ?? null, live?.id ?? '');
+      showToast('Prompt changed', 'The prompt updated before your tap was sent — try again.');
+    } else {
+      showToast('Send failed', (err as Error).message);
+    }
+  }
+}
+
+// Whether the state currently reports this pane as running Claude — the only
+// kind that can ever have a transcript, so the only kind worth re-probing.
+function paneIsClaude(paneId: string): boolean {
+  const agent = findPane(paneId)?.pane?.agent;
+  return (agent?.name ?? agent?.displayName ?? '').toLowerCase().includes('claude');
+}
+
 function startPaneRefresh(): void {
   stopPaneRefresh();
   paneRefreshTimer = setInterval(() => {
-    // While the WS pane watch is pushing, client polling is redundant —
-    // poll only as a fallback when the socket is down.
-    if (activePaneId && !document.hidden && !wsConnected) {
-      refreshPaneOutput();
+    if (!activePaneId || document.hidden) return;
+    // A claude pane's transcript may appear shortly after the pane opens (session
+    // just started, JSONL not written yet). Re-probe until chat is found so the
+    // view upgrades without a manual reload; non-claude panes are never probed.
+    if (!chatAvailable && paneViewMode === 'terminal' && paneIsClaude(activePaneId)) {
+      void initChatAvailability(activePaneId);
+    }
+    // While the WS watch is pushing, client polling is redundant — poll only as
+    // a fallback when the socket is down, for whichever view is active.
+    if (!wsConnected) {
+      if (paneViewMode === 'chat') void pollChatFallback();
+      else refreshPaneOutput();
     }
   }, PANE_REFRESH_INTERVAL_MS);
 }
@@ -1253,7 +1704,7 @@ function renderSettingsScreen(): void {
         <div class="settings-section-title">About</div>
         <div class="settings-row">
           <span class="settings-row-label">App version</span>
-          <span class="settings-row-value">${escHtml(APP_VERSION)}</span>
+          <span class="settings-row-value">${escHtml(APP_VERSION)} (${escHtml(BUILD)})</span>
         </div>
       </div>
     </div>
@@ -1348,8 +1799,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Stop pane polling when tab is hidden, resume when visible
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && activePaneId) {
-      refreshPaneOutput();
-    }
+    if (document.hidden || !activePaneId) return;
+    // In chat mode the transcript watch keeps pushing while the WS is up, so the
+    // HTTP fallback must only run when the socket is down — otherwise a fallback
+    // response racing a WS push duplicates items and rewinds chatCursor.
+    if (paneViewMode === 'chat') { if (!wsConnected) void pollChatFallback(); }
+    else refreshPaneOutput();
   });
 });

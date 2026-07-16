@@ -261,8 +261,17 @@ default.
 - `POST /api/panes/:paneId/input` `{"text": "ls", "enter": true}` or `{"keys": ["ctrl+c"]}`
 - `POST /api/panes/:paneId/focus`
 - `POST /api/panes/:paneId/scroll` `{"direction": "up", "steps": 3}` — SGR wheel events for full-screen apps
+- `GET /api/panes/:paneId/transcript` — Claude Code chat view: the pane's JSONL
+  session transcript as normalized `items` (`user`/`assistant`/`thinking`/
+  `tool_use`/`tool_result`) plus `sessionId` and a byte `cursor`. Returns
+  `{"available": false}` when the pane isn't a claude session or its transcript
+  isn't on this host. Add `?session=<id>&after=<cursor>` to fetch only items past
+  the cursor for that session (incremental polling).
 - `POST /api/agents/:target/send` `{"text": "continue"}`
-- `WS /ws?token=…` — `{"type":"state"}` snapshots and `{"type":"agent_status"}` transitions
+- `WS /ws?token=…` — `{"type":"state"}` snapshots and `{"type":"agent_status"}`
+  transitions. `{"type":"watch_transcript","paneId":…}` starts a live tail that
+  pushes `{"type":"transcript_items",…}` (`reset` rebuilds, else appends);
+  `{"type":"unwatch_transcript"}` stops it (mirrors `watch_pane`/`pane_output`).
 
 ## Development
 

@@ -3,6 +3,8 @@
  * Duplicated from server shapes — the two builds are separate; do not cross-import server code.
  */
 
+import type { TimelineItem } from './transcript.ts';
+
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown';
 
 export interface AgentInfo {
@@ -82,9 +84,23 @@ export interface WsPaneGoneMessage {
   paneId: string;
 }
 
+// Chat-view transcript push. available=false → not a claude pane (or transcript
+// not on this host); the client keeps the terminal view. reset=true replaces the
+// log (initial load / new session); reset=false appends new items.
+export interface WsTranscriptItemsMessage {
+  type: 'transcript_items';
+  paneId: string;
+  available: boolean;
+  sessionId?: string;
+  items: TimelineItem[];
+  cursor: number;
+  reset: boolean;
+}
+
 export type WsMessage =
   | WsStateMessage
   | WsAgentStatusMessage
   | WsPongMessage
   | WsPaneOutputMessage
-  | WsPaneGoneMessage;
+  | WsPaneGoneMessage
+  | WsTranscriptItemsMessage;

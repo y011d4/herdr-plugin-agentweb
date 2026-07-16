@@ -13,6 +13,7 @@
   "include": [
     "web/src/app.ts",
     "web/src/ansi.ts",
+    "web/src/transcript.ts",
     "web/src/types.ts"
   ],
   "exclude": []
