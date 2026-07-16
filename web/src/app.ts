@@ -18,7 +18,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v56';
+const BUILD = 'v57';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -1618,14 +1618,24 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: [to > cur ? 'down' : 'up'] });
       await wait(120);
     }
-    // …then verify: if a keystroke dropped or the cursor moved again, converge on
-    // the target before confirming. Give up correcting only if the screen becomes
-    // unreadable (readSelected → 0), never sending Enter on the wrong option.
-    for (let guard = 0; guard < 8; guard++) {
+    // …then verify by re-reading: confirm with Enter only once the ❯ is provably on
+    // the target. If a keystroke dropped or the cursor moved, nudge and re-check; if
+    // the screen is momentarily unreadable, retry rather than move blindly. Crucially
+    // Enter is sent ONLY when the target is confirmed — if it never settles (dropped
+    // keys, an unreadable screen, an unexpected menu), abort without answering so a
+    // wrong option can't be submitted; the terminal below stays as the fallback.
+    let confirmed = false;
+    for (let guard = 0; guard < 10; guard++) {
       await wait(90);
       const now = await readSelected();
-      if (!now || now === to) break;
+      if (now === to) { confirmed = true; break; }
+      if (!now) continue; // transient unreadable screen — retry, don't move blindly
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: [to > now ? 'down' : 'up'] });
+    }
+    if (!confirmed) {
+      btn.classList.remove('ask-opt-sent');
+      showToast('Could not confirm selection', 'The prompt did not settle on the tapped option — use the terminal below to answer.');
+      return; // do NOT press Enter on an unverified option
     }
     await wait(60);
     await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: ['enter'] });
