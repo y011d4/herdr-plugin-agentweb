@@ -80,12 +80,13 @@ export function parsePrompt(text: string): ParsedPrompt | null {
   let sawForeign = false;
   for (let i = best.last + 1; i < lines.length; i++) {
     const t = lines[i];
-    if (MENU_HINT.test(t)) { if (sawForeign) return null; break; } // own adjacent hint → keep
+    if (MENU_HINT.test(t)) break; // the menu's own hint (nothing foreign preceded it) — end of the menu
     if (/[─━]{4,}/.test(raw[i] ?? '') || /^[☐☑✓]/.test(t.trim())) { sawForeign = true; continue; } // new box/category
     if (!t.trim()) continue; // blank — continuation
     if (/^\s+\S/.test(t)) continue; // indented option description — continuation
     sawForeign = true; // left-aligned content below the options → a different prompt
   }
+  if (sawForeign) return null; // a different prompt sits below this block → it is stale, hint or not
   const isRule = (i: number): boolean => /[─━]{4,}/.test(raw[i] ?? '');
   const qLines: string[] = [];
   let boxed = false;

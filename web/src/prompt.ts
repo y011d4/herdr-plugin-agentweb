@@ -71,23 +71,25 @@ export function parsePrompt(text: string): ParsedPrompt | null {
   if (best.selected === 0) return null;
   // Reject if the active prompt is actually a DIFFERENT one below this block. Walk
   // down from the last option: a real active menu's own hint follows through only
-  // menu-continuation lines (blank, indented option description). A NEW prompt below
-  // starts a fresh box — a ─/━ top rule (in the raw, un-stripped line) or a ☐/☑
-  // category — whose inner text is ALSO indented after border stripping, so we key on
-  // that box boundary, not the indent. Once such foreign content is seen, a menu hint
-  // after it belongs to the lower prompt, so this highlighted block is stale
-  // scrollback and must not be offered as buttons. A real menu has no rule/category
-  // between its last option and its hint; a ❯-only menu with just the composer/status
-  // bar below (no menu hint) is fine. Hints ABOVE are ignored.
+  // menu-continuation lines (blank, indented option description), and when a pane is
+  // blocked on a menu that hint is the bottom of the screen — nothing (no composer or
+  // status bar) is rendered below it. So reaching the menu's own hint ends the scan
+  // cleanly. Anything else below the options is a DIFFERENT prompt: a new box (a ─/━
+  // top rule in the raw line, or a ☐/☑ category — its inner text is indented too, so
+  // key on the box boundary, not the indent) or other left-aligned content. If any
+  // such foreign content is seen, this highlighted block is stale scrollback above a
+  // lower active prompt and must not be offered as buttons — reject it even when that
+  // lower prompt has no navigation hint of its own (EOF). Hints ABOVE are ignored.
   let sawForeign = false;
   for (let i = best.last + 1; i < lines.length; i++) {
     const t = lines[i];
-    if (MENU_HINT.test(t)) { if (sawForeign) return null; break; } // own adjacent hint → keep
+    if (MENU_HINT.test(t)) break; // the menu's own hint (nothing foreign preceded it) — end of the menu
     if (/[─━]{4,}/.test(raw[i] ?? '') || /^[☐☑✓]/.test(t.trim())) { sawForeign = true; continue; } // new box/category
     if (!t.trim()) continue; // blank — continuation
     if (/^\s+\S/.test(t)) continue; // indented option description — continuation
     sawForeign = true; // left-aligned content below the options → a different prompt
   }
+  if (sawForeign) return null; // a different prompt sits below this block → it is stale, hint or not
   // Question: the contiguous lines just above the first option (a long prompt wraps
   // across several lines). Claude renders the prompt inside a box drawn with a
   // horizontal ─ rule on top and a ☐ category line, with a blank padding line

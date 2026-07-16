@@ -121,6 +121,20 @@ describe('parsePrompt — rejects non-menus', () => {
     ].join('\n');
     assert.equal(parsePrompt(staleText), null);
   });
+
+  it('rejects a stale menu above a lower prompt that has NO hint of its own (EOF)', () => {
+    // The lower boxed prompt carries no recognized navigation hint, so the scan runs
+    // to EOF with foreign content seen — the stale upper menu must still be rejected.
+    const stale = [
+      '❯ 1. Yes',
+      '  2. No',
+      '',
+      ' ──────────────────────────── ', // lower prompt's box top rule
+      ' ☐ Provide input',
+      '   Enter a value and press return:', // free-text, no "Enter to select"-style hint
+    ].join('\n');
+    assert.equal(parsePrompt(stale), null);
+  });
 });
 
 describe('parsePrompt — with ANSI', () => {
