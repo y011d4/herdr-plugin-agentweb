@@ -70,7 +70,20 @@ Verified live against herdr 0.7.3 / protocol 16:
 - `session.snapshot` result is nested under `result.snapshot`.
 - **`pane.send_input` wraps text in bracketed paste** when the app enables it,
   and apps discard control sequences inside a paste. Raw bytes (e.g. SGR mouse
-  wheel) must go through `pane.send_text`.
+  wheel) must go through `pane.send_text`. A composed message submits reliably as
+  a single `send_input` carrying both `text` and `keys:["enter"]` (verified live
+  against Claude Code: single-line, multi-line, and large pastes all submit) — the
+  enter is a real keypress, not swallowed by the paste.
+- **Clearing a Claude Code composer before sending (so an agentweb message can't
+  merge with a draft the user typed straight into the pane, which agentweb can't
+  read).** Send raw `Ctrl+U` (0x15) via `pane.send_text`: it kills to the start of
+  the current line, so a multi-line draft needs it repeated — the bridge sends
+  ~30, which walks up any realistic draft and is a no-op once empty (verified
+  live). It's the safe choice: `Ctrl+C` *would* clear the whole composer in one
+  keystroke but a second press exits Claude Code and it interrupts a running
+  agent; `Esc` does not clear at all. Known edge: `Ctrl+U` leaves the after-cursor
+  tail if the cursor sits mid-line in a multi-line draft (unusual — a just-typed
+  draft has the cursor at the end).
 - **Selecting a numbered menu option (e.g. AskUserQuestion) is one atomic
   keystroke: the option's digit sent as a raw byte via `pane.send_text`.** Pressing
   the digit selects AND submits the option — no Enter, no cursor movement (verified
