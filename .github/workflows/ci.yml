@@ -1,0 +1,73 @@
+name: CI
+
+# ── Triggers ────────────────────────────────────────────────────────────────
+# We deliberately use `pull_request`, NOT `pull_request_target`.
+#   - `pull_request` checks out and runs the fork's code with a READ-ONLY
+#     GITHUB_TOKEN and NO access to repository secrets. A malicious fork PR
+#     therefore cannot steal secrets or push to this repo — the worst it can do
+#     is waste its own run's compute.
+#   - `pull_request_target` would run in the BASE-repo context, WITH secrets and
+#     a read-write token. Checking out untrusted fork code under that trigger is
+#     the classic "pwn request" vulnerability. This workflow never uses it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# ── Least privilege ─────────────────────────────────────────────────────────
+# This workflow only reads the repo (to check it out); it publishes nothing and
+# uses no secrets. Grant the GITHUB_TOKEN read-only access at the top level so
+# every job inherits the minimum. A job that ever needs more must opt in with
+# its own `permissions:` block.
+permissions:
+  contents: read
+
+# ── Concurrency ─────────────────────────────────────────────────────────────
+# Cancel superseded runs on the same ref: faster feedback, and a burst of fork
+# PR pushes cannot pile up concurrent jobs to burn Actions minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Node >= 23.6 is required: the suite runs .ts files natively via
+        # `node --test` (unflagged type stripping). 24 = current LTS floor,
+        # 26 = the release line this repo's @types/node targets.
+        node-version: ['24', '26']
+    steps:
+      # Pinned to a full commit SHA — a moved/retagged release cannot silently
+      # swap the action out from under us. `persist-credentials: false` scrubs
+      # the token from .git/config so later `run:` steps cannot reuse it.
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      # No `${{ github.event.* }}` (PR title, branch name, commit message, …)
+      # is interpolated into any run step, so there is no shell-injection
+      # surface. All commands below are static.
+      # --ignore-scripts: a fork PR's dependency lifecycle scripts (pre/post
+      # install) never execute in the runner. This repo needs none (ws +
+      # typescript + @types/* ship no build step). Drop this flag if you ever
+      # add a dependency that legitimately requires a postinstall.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build (tsc x3)
+        run: npm run build
+
+      - name: Test
+        run: npm test
