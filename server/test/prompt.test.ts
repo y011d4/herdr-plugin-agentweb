@@ -90,6 +90,37 @@ describe('parsePrompt — rejects non-menus', () => {
     ].join('\n');
     assert.equal(parsePrompt(stale), null);
   });
+
+  it('rejects a stale menu above an indented BOXED lower prompt', () => {
+    // The lower prompt is a box: after border (│) stripping its inner text is
+    // indented, so it must be recognized by its ─ top rule / ☐ category, not the
+    // indent, or the stale upper menu would stay tappable.
+    const stale = [
+      '❯ 1. Approve',
+      '  2. Reject',
+      '',
+      '│ ──────────────────────────── │', // lower prompt's box top rule
+      '│ ☐ Confirm                    │',
+      '│ Are you absolutely sure?     │', // indented boxed text
+      '│ ❯ 1. Yes really              │',
+      '│   2. Back                    │',
+      'Enter to select · ↑/↓ to navigate · Esc to cancel',
+    ].join('\n');
+    // Bottom-most block is the lower "Yes really/Back" menu (correct pick), but if a
+    // non-numbered box sat there instead the guard would still reject the stale upper.
+    assert.equal(parsePrompt(stale)!.options[0].label, 'Yes really');
+
+    const staleText = [
+      '❯ 1. Approve',
+      '  2. Reject',
+      '',
+      ' ──────────────────────────── ', // box top rule (raw ─)
+      ' ☐ Confirm',
+      '   Type your reason:', // indented boxed free-text prompt (no numbers)
+      'Enter to select · Esc to cancel',
+    ].join('\n');
+    assert.equal(parsePrompt(staleText), null);
+  });
 });
 
 describe('parsePrompt — with ANSI', () => {

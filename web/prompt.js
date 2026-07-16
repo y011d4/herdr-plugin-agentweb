@@ -85,11 +85,14 @@ export function parsePrompt(text) {
         return null;
     // Reject if the active prompt is actually a DIFFERENT one below this block. Walk
     // down from the last option: a real active menu's own hint follows through only
-    // menu-continuation lines (blank, stripped rule, indented option description). If a
-    // left-aligned non-continuation line appears first (a new prompt's text), any menu
-    // hint after it belongs to that lower prompt — this highlighted block is stale
-    // scrollback and must not be offered as buttons. A ❯-only menu with just the
-    // composer/status bar below (no menu hint) is fine. Hints ABOVE are ignored.
+    // menu-continuation lines (blank, indented option description). A NEW prompt below
+    // starts a fresh box — a ─/━ top rule (in the raw, un-stripped line) or a ☐/☑
+    // category — whose inner text is ALSO indented after border stripping, so we key on
+    // that box boundary, not the indent. Once such foreign content is seen, a menu hint
+    // after it belongs to the lower prompt, so this highlighted block is stale
+    // scrollback and must not be offered as buttons. A real menu has no rule/category
+    // between its last option and its hint; a ❯-only menu with just the composer/status
+    // bar below (no menu hint) is fine. Hints ABOVE are ignored.
     let sawForeign = false;
     for (let i = best.last + 1; i < lines.length; i++) {
         const t = lines[i];
@@ -98,8 +101,12 @@ export function parsePrompt(text) {
                 return null;
             break;
         } // own adjacent hint → keep
+        if (/[─━]{4,}/.test(raw[i] ?? '') || /^[☐☑✓]/.test(t.trim())) {
+            sawForeign = true;
+            continue;
+        } // new box/category
         if (!t.trim())
-            continue; // blank / stripped rule — continuation
+            continue; // blank — continuation
         if (/^\s+\S/.test(t))
             continue; // indented option description — continuation
         sawForeign = true; // left-aligned content below the options → a different prompt
