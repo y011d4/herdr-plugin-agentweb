@@ -54,6 +54,24 @@ describe('promptIdentity', () => {
     assert.ok(promptIdentity(A).includes('Deploy the app to PRODUCTION now?'));
   });
 
+  it('excludes the status bar for a ❯-only menu with no navigation hint', () => {
+    // No recognized hint line — the bottom edge must fall back to the last option, or
+    // the ticking status bar would churn the identity and 409 every tap.
+    const base = ['● Keep going?', '❯ 1. Yes', '  2. No'].join('\n');
+    const t1 = base + '\n' + '  [OMC] 17:20 (0h39m) ctx 12%';
+    const t2 = base + '\n' + '  [OMC] 17:26 (0h45m) ctx 34%';
+    assert.equal(promptIdentity(t1), promptIdentity(t2));
+    assert.ok(promptIdentity(t1).includes('Keep going?'));
+  });
+
+  it('recognizes the same hint variants parsePrompt accepts (Tab/Space to …)', () => {
+    const base = ['● Choose an action', '❯ 1. Commit', '  2. Amend'].join('\n');
+    const withHint = base + '\n' + 'Tab to expand · Space to toggle' + '\n' + '  [OMC] volatile 0h39m';
+    // The hint is recognized, so the volatile status line after it is excluded.
+    const churned = base + '\n' + 'Tab to expand · Space to toggle' + '\n' + '  [OMC] volatile 9h99m';
+    assert.equal(promptIdentity(withHint), promptIdentity(churned));
+  });
+
   it('keys off the bottom-most (active) prompt when an older hint is scrolled above', () => {
     // An older, answered prompt with its own nav hint remains visible above the active
     // one. The identity must reflect the ACTIVE prompt at the bottom (which parsePrompt

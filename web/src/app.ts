@@ -18,7 +18,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v69';
+const BUILD = 'v70';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -1564,13 +1564,17 @@ function endAnswerCooldown(): void {
 // don't churn it; the volatile status bar below the hint is excluded.
 function promptIdentity(text: string): string {
   const lines = text.split('\n').map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼❯➤▶►]/g, ' ').replace(/\s+$/, ''));
-  // Truncate at the LAST navigation hint — that belongs to the bottom-most (active)
-  // prompt, the same block parsePrompt() renders buttons for. Stopping at the first
-  // hint would end at an older prompt scrolled above and drop the active one from the
-  // identity. Everything below the active hint is the volatile status bar, excluded.
+  // The active prompt's bottom edge is the LAST of its navigation hint or its last
+  // numbered option (a ❯-only menu has no hint); everything below is the volatile
+  // status bar and must be excluded or the identity churns and every tap 409s. The
+  // hint set MUST match parsePrompt's guard and the option pattern its matcher (with
+  // ❯ markers already stripped above), so the identity always covers exactly the
+  // block parsePrompt renders buttons for — never the status bar, never nothing.
+  const HINT = /(Enter to select|to navigate|to select|Esc to (cancel|close)|↑\/↓|↑ ↓|Tab to|Space to)/i;
+  const OPTION = /^\s*\d+[.)]\s+\S/;
   let end = lines.length;
   for (let i = 0; i < lines.length; i++) {
-    if (/(Enter to select|to navigate|Esc to (cancel|close)|↑\/↓|↑ ↓)/i.test(lines[i])) end = i + 1;
+    if (HINT.test(lines[i]) || OPTION.test(lines[i])) end = i + 1;
   }
   return lines.slice(0, end).join('\n').replace(/\n{2,}/g, '\n').trim();
 }
