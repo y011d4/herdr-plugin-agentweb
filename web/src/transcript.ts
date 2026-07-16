@@ -193,7 +193,15 @@ function renderBlocks(text: string): string {
           break;
         }
       }
-      html += buildList(items, 0, items[0].indent).html;
+      // Emit one list per indentation run, following buildList's returned `next`,
+      // so a leading-indented item that later dedents (e.g. "  - a" then "- b")
+      // doesn't drop the items buildList stops before.
+      let start = 0;
+      while (start < items.length) {
+        const built = buildList(items, start, items[start].indent);
+        html += built.html;
+        start = built.next;
+      }
       continue;
     }
 
