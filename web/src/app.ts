@@ -20,7 +20,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v76';
+const BUILD = 'v77';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -1489,7 +1489,10 @@ function renderPromptPanel(parsed: ParsedPrompt | null, sid: string): void {
     `<span class="ask-opt-label">${escHtml(o.label)}</span></button>`,
   ).join('');
   const term = document.getElementById('chat-prompt-term') as HTMLDetailsElement | null;
-  if (term) term.open = !parsed; // menu parsed → collapse terminal; none → show it
+  // Collapse the terminal only when we have a question to show above the buttons.
+  // If a menu parsed but its question couldn't be extracted, bare "Yes/No" buttons
+  // would have no context — keep the terminal open so the user can read the prompt.
+  if (term) term.open = !parsed?.question;
   // A different prompt is now on screen (its buttons were just rebuilt, so they are
   // NOT the stale answered ones) — end any post-answer cooldown so these fresh buttons
   // are immediately tappable, even if the pane went blocked→blocked without an observed
