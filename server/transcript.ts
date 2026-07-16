@@ -11,7 +11,8 @@
 
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { existsSync, readdirSync, statSync, openSync, readSync, closeSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { execFile } from 'node:child_process';
 import { normalizeLine, type TimelineItem } from './transcript-normalize.ts';
 
 // Default Claude Code config root. Alternate CLAUDE_CONFIG_DIRs (per-org setups
@@ -43,27 +44,37 @@ function projectsRoots(): string[] {
  * Derive a claude process's transcript projects root from its own environment
  * via Linux /proc: CLAUDE_CONFIG_DIR/projects, else HOME/.claude/projects. This
  * follows a claude launched with ANY CLAUDE_CONFIG_DIR (not just the common
- * ~/.config/claude/<name>). Returns null if the process is gone, unreadable, or
+ * ~/.config/claude/<name>). Resolves null if the process is gone, unreadable, or
  * off-host (e.g. an ssh client — its remote claude's env isn't in local /proc).
  *
  * Least-privilege: this is a LAST RESORT (callers try the plain filesystem roots
- * first). It reads the whole environ blob because /proc offers no selective read,
- * but extracts only the two path vars and never retains, logs, or returns the
- * rest — so unrelated secrets in the environment don't leak into the bridge.
+ * first). The read + filter is delegated to a `grep` subprocess, so only the two
+ * path vars ever reach this network-facing process — the rest of the environ
+ * (unrelated secrets) transits grep's short-lived memory and is never held,
+ * logged, or returned here. `pid` comes from herdr (not the client) and is passed
+ * as an execFile arg (no shell), so it can't inject.
  */
-export function projectsRootForPid(pid: number): string | null {
-  if (!Number.isInteger(pid) || pid <= 0) return null;
-  let configDir: string | undefined;
-  let home: string | undefined;
-  try {
-    for (const kv of readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0')) {
-      if (kv.startsWith('CLAUDE_CONFIG_DIR=')) configDir = kv.slice('CLAUDE_CONFIG_DIR='.length);
-      else if (kv.startsWith('HOME=')) home = kv.slice('HOME='.length);
-    }
-  } catch { return null; }
-  if (configDir) return resolve(join(configDir, 'projects'));
-  if (home) return resolve(join(home, '.claude', 'projects'));
-  return null;
+export function projectsRootForPid(pid: number): Promise<string | null> {
+  return new Promise((res) => {
+    if (!Number.isInteger(pid) || pid <= 0) return res(null);
+    execFile(
+      'grep',
+      ['-z', '-a', '-E', '^(CLAUDE_CONFIG_DIR|HOME)=', `/proc/${pid}/environ`],
+      { timeout: 1000, maxBuffer: 64 * 1024, encoding: 'utf8' },
+      (err, stdout) => {
+        if (err || !stdout) return res(null); // no match / unreadable / grep absent
+        let configDir: string | undefined;
+        let home: string | undefined;
+        for (const rec of stdout.split('\0')) {
+          if (rec.startsWith('CLAUDE_CONFIG_DIR=')) configDir = rec.slice('CLAUDE_CONFIG_DIR='.length);
+          else if (rec.startsWith('HOME=')) home = rec.slice('HOME='.length);
+        }
+        if (configDir) return res(resolve(join(configDir, 'projects')));
+        if (home) return res(resolve(join(home, '.claude', 'projects')));
+        res(null);
+      },
+    );
+  });
 }
 
 // A session id must be a bare file-stem (UUID in practice). Reject anything with

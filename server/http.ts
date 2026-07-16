@@ -189,7 +189,7 @@ async function claudeConfigRoots(herdrClient: HerdrClient, paneId: string): Prom
     for (const p of info.process_info?.foreground_processes ?? []) {
       const isClaude = p.name === 'claude' || (Array.isArray(p.argv) && p.argv[0] === 'claude');
       if (isClaude && typeof p.pid === 'number') {
-        const root = projectsRootForPid(p.pid);
+        const root = await projectsRootForPid(p.pid);
         if (root) roots.push(root);
       }
     }
