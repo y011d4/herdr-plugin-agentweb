@@ -10,7 +10,7 @@
  */
 
 import { ansiToHtml } from './ansi.ts';
-import { renderItems, renderAskQuestions } from './transcript.ts';
+import { renderItems } from './transcript.ts';
 import type { TimelineItem, AskQuestion } from './transcript.ts';
 import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 
@@ -58,8 +58,8 @@ let chatProbeSeq = 0; // guards against overlapping availability probes
 // or the live terminal screen for any other prompt (permission, plan, y/n).
 let pendingAsk: AskQuestion[] | null = null;
 let promptPanelKind: 'none' | 'blocked' = 'none';
-let promptAskRef: AskQuestion[] | null = null;
 let promptScreenTimer: ReturnType<typeof setInterval> | null = null;
+let promptOptionsSig = ''; // last-rendered answer options, to avoid re-render churn
 
 /** source toggle: 'visible' | 'recent' */
 
@@ -691,7 +691,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   chatCursor = 0;
   pendingAsk = null;
   promptPanelKind = 'none';
-  promptAskRef = null;
+  promptOptionsSig = '';
   stopPromptScreenPoll();
 
   // Build screen HTML. The terminal holds two sections that are updated
@@ -716,13 +716,12 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   bindPinchZoom(terminalEl);
   bindTerminalScroll(terminalEl);
 
-  // Answer a pending AskUserQuestion: tapping an option sends its number.
+  // Answer a pending prompt: tapping an option sends its menu key.
   document.getElementById('chat-prompt')!.addEventListener('click', (e) => {
     const btn = (e.target as HTMLElement).closest('.ask-opt') as HTMLElement | null;
     if (!btn || !activePaneId) return;
-    const oi = parseInt(btn.dataset.askOi ?? '', 10);
-    if (!Number.isInteger(oi)) return;
-    void sendAskAnswer(oi, btn);
+    const send = btn.dataset.askSend;
+    if (send) void sendAskAnswer(send, btn);
   });
 
   // Send button. Enter in the field inserts a newline — sending happens only
@@ -1424,33 +1423,83 @@ function queuePaneEcho(): void {
 
 const PROMPT_SCREEN_INTERVAL_MS = 1200;
 
+interface PromptOption { send: string; label: string; desc?: string }
+
+// Strip ANSI escapes to plain text for parsing the on-screen prompt.
+function stripAnsi(s: string): string {
+  return s.replace(/\x1b\[[0-9;:?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g, '');
+}
+
+// Parse a numbered selection menu ("❯ 1. Yes\n  2. No …") out of a live TUI
+// prompt (permission / plan / confirm dialogs), which carry no structured
+// transcript data. Requires ≥2 sequentially-numbered options (1,2,…) so ordinary
+// output containing "1." isn't taken for a menu; box-drawing chars are stripped.
+function parsePromptOptions(text: string): PromptOption[] | null {
+  const lines = text.split('\n').map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼]/g, ' ').replace(/\s+$/, ''));
+  let opts: PromptOption[] = [];
+  for (const line of lines) {
+    const m = line.match(/^\s*[❯➤»▶>*]?\s*(\d+)[.)]\s+(\S.*)$/);
+    if (m && Number(m[1]) === opts.length + 1) {
+      opts.push({ send: m[1], label: m[2].trim() });
+    } else if (opts.length && line.trim()) {
+      if (opts.length >= 2) break; // a full menu block ended
+      opts = []; // a stray "1." that wasn't a menu — reset and keep scanning
+    }
+  }
+  return opts.length >= 2 ? opts : null;
+}
+
+// Answer options to show as buttons: prefer AskUserQuestion structured data (nice
+// labels + descriptions), else parse the live prompt screen.
+function promptOptions(screenPlain: string): PromptOption[] | null {
+  if (pendingAsk && pendingAsk.length === 1) {
+    return pendingAsk[0].options.map((o, i) => ({ send: String(i + 1), label: o.label, desc: o.description || undefined }));
+  }
+  return parsePromptOptions(screenPlain);
+}
+
 // When a claude pane is blocked (waiting for input) and chat is active, show an
-// answer panel above the input bar: the live terminal screen (so any prompt —
-// permission, plan, y/n — is visible), plus tappable option buttons when a
-// pending AskUserQuestion is the transcript tail. The existing composer and
-// quick-keys remain the way to send the answer.
+// answer panel above the input bar: tappable option buttons (from AskUserQuestion
+// or parsed from the live prompt), with the raw terminal screen as collapsible
+// context. The composer and quick-keys remain available.
 function updatePromptPanel(): void {
   const panel = document.getElementById('chat-prompt');
   if (!panel) return;
   const status = activePaneId ? findPane(activePaneId)?.pane?.agent?.status : null;
   const blocked = paneViewMode === 'chat' && status === 'blocked';
   if (!blocked) {
-    if (promptPanelKind !== 'none') { panel.style.display = 'none'; panel.innerHTML = ''; promptPanelKind = 'none'; promptAskRef = null; }
+    if (promptPanelKind !== 'none') { panel.style.display = 'none'; panel.innerHTML = ''; promptPanelKind = 'none'; promptOptionsSig = ''; }
     stopPromptScreenPoll();
     return;
   }
-  panel.style.display = '';
-  // Rebuild the static parts (heading + ask buttons) only when newly blocked or
-  // the pending question changed; the screen is refreshed by the poller so it
-  // isn't wiped every state tick.
-  if (promptPanelKind !== 'blocked' || promptAskRef !== pendingAsk) {
-    const head = '<div class="chat-prompt-head">&#9203; Waiting for your input &#183; answer below</div>';
-    const asks = pendingAsk ? renderAskQuestions(pendingAsk, true) : '';
-    panel.innerHTML = head + asks + '<div class="chat-prompt-screen" id="chat-prompt-screen"><span class="loading-spinner"></span></div>';
+  if (promptPanelKind !== 'blocked') {
+    panel.style.display = '';
+    panel.innerHTML =
+      '<div class="chat-prompt-head">&#9203; Waiting for your input</div>' +
+      '<div class="chat-prompt-options" id="chat-prompt-options"></div>' +
+      '<details class="chat-prompt-term" id="chat-prompt-term"><summary>Terminal</summary>' +
+      '<div class="chat-prompt-screen" id="chat-prompt-screen"><span class="loading-spinner"></span></div></details>';
     promptPanelKind = 'blocked';
-    promptAskRef = pendingAsk;
+    promptOptionsSig = '';
   }
   startPromptScreenPoll();
+}
+
+// Render option buttons only when they change, so a poll tick can't wipe a button
+// the moment the user taps it. Collapse the raw terminal when buttons exist.
+function renderPromptOptions(options: PromptOption[] | null): void {
+  const el = document.getElementById('chat-prompt-options');
+  if (!el) return;
+  const sig = options ? options.map((o) => `${o.send}:${o.label}`).join('|') : '';
+  if (sig !== promptOptionsSig) {
+    promptOptionsSig = sig;
+    el.innerHTML = (options ?? []).map((o) =>
+      `<button class="ask-opt" type="button" data-ask-send="${escHtml(o.send)}"><span class="ask-opt-num">${escHtml(o.send)}</span>` +
+      `<span class="ask-opt-label">${escHtml(o.label)}</span>${o.desc ? `<span class="ask-opt-desc">${escHtml(o.desc)}</span>` : ''}</button>`,
+    ).join('');
+  }
+  const term = document.getElementById('chat-prompt-term') as HTMLDetailsElement | null;
+  if (term) term.open = !options; // buttons → collapse terminal; no options → show it
 }
 
 function startPromptScreenPoll(): void {
@@ -1462,8 +1511,10 @@ function startPromptScreenPoll(): void {
     try {
       const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
       if (paneViewMode !== 'chat' || paneId !== activePaneId) return;
+      const ansi = (data.ansi ?? data.text ?? '') as string;
+      renderPromptOptions(promptOptions(stripAnsi(ansi)));
       const screen = document.getElementById('chat-prompt-screen');
-      if (screen) screen.innerHTML = ansiToHtml((data.ansi ?? data.text ?? '') as string);
+      if (screen) screen.innerHTML = ansiToHtml(ansi);
     } catch { /* transient — keep the last screen */ }
   };
   void tick();
@@ -1474,16 +1525,14 @@ function stopPromptScreenPoll(): void {
   if (promptScreenTimer) { clearInterval(promptScreenTimer); promptScreenTimer = null; }
 }
 
-// Answer a pending AskUserQuestion by sending its option number — the same input
-// as the '1'/'2'/'3' quick-keys, so it's proven and low-risk. The live screen
-// shows the result; Enter (quick-key) confirms if the menu needs it, and
-// multi-select is driven from the quick-keys / terminal view.
-async function sendAskAnswer(optionIndex: number, btn: HTMLElement): Promise<void> {
+// Send a tapped option's key (the menu number) to the pane — the same input as
+// the 1/2/3 quick-keys, so it's proven; the live screen reflects the result.
+async function sendAskAnswer(send: string, btn: HTMLElement): Promise<void> {
   if (!activePaneId) return;
   btn.classList.add('ask-opt-sent');
   setTimeout(() => btn.classList.remove('ask-opt-sent'), 1000);
   try {
-    await apiPost(`/api/panes/${encodeURIComponent(activePaneId)}/input`, { text: String(optionIndex + 1) });
+    await apiPost(`/api/panes/${encodeURIComponent(activePaneId)}/input`, { text: send });
   } catch (err) {
     showToast('Send failed', (err as Error).message);
   }

@@ -76,28 +76,19 @@ function renderTodos(todos: TodoEntry[]): string {
   return `<ul class="chat-todos">${rows}</ul>`;
 }
 
-// Render AskUserQuestion questions + options. interactive=true emits tappable
-// buttons (data-ask-* consumed by app.ts) for a pending prompt; false emits a
-// read-only list for transcript history.
-export function renderAskQuestions(ask: AskQuestion[], interactive: boolean): string {
-  // Interactive option buttons only when there is a single question: a tapped
-  // option sends a bare number that the TUI applies to whichever question it is
-  // currently showing, so buttons spanning multiple questions could answer the
-  // wrong one. Multi-question prompts render read-only; the live screen and
-  // quick-keys drive those answers.
-  const asButtons = interactive && ask.length === 1;
+// Render AskUserQuestion questions + options read-only, for transcript history.
+// Interactive answering (buttons) is owned by the prompt panel in app.ts, which
+// unifies AskUserQuestion options and options parsed from a live TUI prompt.
+export function renderAskQuestions(ask: AskQuestion[]): string {
   return ask.map((q) => {
     const header = q.header ? `<span class="ask-q-header">${escapeHtml(q.header)}</span>` : '';
     const opts = q.options.map((op, oi) => {
       const num = `<span class="ask-opt-num">${oi + 1}</span>`;
       const label = `<span class="ask-opt-label">${escapeHtml(op.label)}</span>`;
       const desc = op.description ? `<span class="ask-opt-desc">${escapeHtml(op.description)}</span>` : '';
-      return asButtons
-        ? `<button class="ask-opt" type="button" data-ask-oi="${oi}" data-ask-label="${escapeHtml(op.label)}">${num}${label}${desc}</button>`
-        : `<li class="ask-opt-static">${num}${label}${desc}</li>`;
+      return `<li class="ask-opt-static">${num}${label}${desc}</li>`;
     }).join('');
-    const body = asButtons ? `<div class="ask-opts">${opts}</div>` : `<ul class="ask-opts-static">${opts}</ul>`;
-    return `<div class="ask-q">${header}<div class="ask-q-text">${escapeHtml(q.question)}</div>${body}</div>`;
+    return `<div class="ask-q">${header}<div class="ask-q-text">${escapeHtml(q.question)}</div><ul class="ask-opts-static">${opts}</ul></div>`;
   }).join('');
 }
 
@@ -116,7 +107,7 @@ export function renderItem(item: TimelineItem): string {
       // AskUserQuestion renders as a labelled question card (read-only in
       // history; the pending prompt gets interactive buttons via the prompt panel).
       if (item.name === 'AskUserQuestion' && item.ask && item.ask.length) {
-        return `<div class="chat-item chat-tool chat-ask${sub}"><div class="chat-tool-head"><span class="chat-tool-name">Question</span></div>${renderAskQuestions(item.ask, false)}</div>`;
+        return `<div class="chat-item chat-tool chat-ask${sub}"><div class="chat-tool-head"><span class="chat-tool-name">Question</span></div>${renderAskQuestions(item.ask)}</div>`;
       }
       const todos = item.name === 'TodoWrite' && item.todos ? renderTodos(item.todos) : '';
       const summary = item.summary ? `<span class="chat-tool-summary">${escapeHtml(item.summary)}</span>` : '';

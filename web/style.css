@@ -898,6 +898,8 @@ a {
 }
 /* tappable answer options */
 .ask-opts { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.chat-prompt-options { display: flex; flex-direction: column; gap: 6px; }
+.chat-prompt-options:not(:empty) { margin-bottom: 8px; }
 .ask-opt {
   display: flex;
   gap: 8px;
@@ -917,7 +919,16 @@ a {
 .ask-opt .ask-opt-num { background: var(--color-blocked); color: #fff; }
 .ask-opt-sent { border-color: var(--color-done); opacity: 0.6; }
 .ask-opt .ask-opt-desc { flex: 1; font-size: 12px; }
-/* live terminal screen for a non-AskUserQuestion prompt */
+/* raw terminal screen, collapsible context below the option buttons */
+.chat-prompt-term > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 11px;
+  color: var(--color-text-dim);
+  padding: 2px 0 6px;
+}
+.chat-prompt-term > summary::before { content: '\25B8 '; }
+.chat-prompt-term[open] > summary::before { content: '\25BE '; }
 .chat-prompt-screen {
   font-family: var(--font-mono);
   font-size: 12px;
