@@ -14,6 +14,13 @@ const PANE_WATCH_INTERVAL_MS = 800; // server-side poll rate for watched panes
 const TRANSCRIPT_WATCH_INTERVAL_MS = 1000; // poll rate for a watched chat transcript
 const TRANSCRIPT_RESOLVE_INTERVAL_MS = 5000; // re-resolve session id (pane.get + dir scan) at most this often
 const TRANSCRIPT_INITIAL_ITEMS = 300; // last-N items sent on initial chat load
+// Ctrl+U (0x15) kills to the start of the current composer line; repeating it
+// walks up and wipes a multi-line draft. Sent before a composed message so it
+// submits on its own instead of being concatenated with text the user had
+// already typed straight into the pane (which agentweb can't see). 30 covers any
+// realistic draft; it's a no-op once the composer is empty.
+const COMPOSER_CLEAR_KILLS = 30;
+const COMPOSER_CLEAR_SEQ = String.fromCharCode(0x15).repeat(COMPOSER_CLEAR_KILLS); // 0x15 = Ctrl+U
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -342,6 +349,10 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
           jsonError(res, 400, 'invalid_params', 'enter must be a boolean');
           return;
         }
+        if (body.clear !== undefined && typeof body.clear !== 'boolean') {
+          jsonError(res, 400, 'invalid_params', 'clear must be a boolean');
+          return;
+        }
         // A single digit delivered as a raw keystroke (via pane.send_text, NOT
         // send_input): a numbered menu selects that option directly. It must NOT go
         // through send_input, which wraps text in bracketed paste that the menu then
@@ -396,6 +407,14 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
         if (body.text != null) params.text = body.text;
         if (keys.length > 0) params.keys = keys;
         try {
+          // `clear` wipes the composer (raw Ctrl+U bytes, not a bracketed-paste
+          // send_input) before the text lands, so a message composed in agentweb
+          // submits alone instead of appended to a draft the user left in the
+          // pane. Ordered before send_input over separate connections: the awaited
+          // clear reaches the pty first, and the app consumes pty input in order.
+          if (body.clear === true) {
+            await herdrClient.rpc('pane.send_text', { pane_id: paneId, text: COMPOSER_CLEAR_SEQ });
+          }
           await herdrClient.rpc('pane.send_input', params);
           jsonOk(res, { ok: true });
         } catch (err) {
