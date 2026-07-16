@@ -18,7 +18,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v65';
+const BUILD = 'v66';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -62,7 +62,7 @@ let chatProbeActive = 0; // reqId of the availability probe in flight (0 = none)
 // or the live terminal screen for any other prompt (permission, plan, y/n).
 let promptPanelKind: 'none' | 'blocked' = 'none';
 let promptScreenTimer: ReturnType<typeof setInterval> | null = null;
-let promptOptionsSig = ''; // last-rendered answer options, to avoid re-render churn
+let promptScreenId = ''; // identity of the on-screen prompt whose buttons are rendered (avoids re-render churn; guards stale taps)
 let promptPollSeq = 0; // monotonic request id; bumped on stop to invalidate an in-flight poll
 let promptPollActive = 0; // reqId of the poll currently in flight (0 = none) — prevents overlap
 let promptAnswerInFlight = false; // true while/just after a tapped answer is sent — blocks re-taps
@@ -699,7 +699,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   chatCursor = 0;
   chatProbeActive = 0; // a prior pane's in-flight probe must not block this pane's probe
   promptPanelKind = 'none';
-  promptOptionsSig = '';
+  promptScreenId = '';
   stopPromptScreenPoll();
 
   // Build screen HTML. The terminal holds two sections that are updated
@@ -1514,7 +1514,7 @@ function updatePromptPanel(): void {
   if (!blocked) {
     // Pane is no longer waiting: the answer (if one was just sent) has landed, so
     // end the post-send cooldown that was suppressing re-taps.
-    if (promptPanelKind !== 'none') { panel.style.display = 'none'; panel.innerHTML = ''; promptPanelKind = 'none'; promptOptionsSig = ''; }
+    if (promptPanelKind !== 'none') { panel.style.display = 'none'; panel.innerHTML = ''; promptPanelKind = 'none'; promptScreenId = ''; }
     endAnswerCooldown();
     stopPromptScreenPoll();
     return;
@@ -1533,7 +1533,7 @@ function updatePromptPanel(): void {
       '<details class="chat-prompt-term" id="chat-prompt-term" open><summary>Terminal</summary>' +
       '<div class="chat-prompt-screen" id="chat-prompt-screen"><span class="loading-spinner"></span></div></details>';
     promptPanelKind = 'blocked';
-    promptOptionsSig = '';
+    promptScreenId = '';
   }
   startPromptScreenPoll();
 }
@@ -1547,22 +1547,33 @@ function endAnswerCooldown(): void {
   document.getElementById('chat-prompt')?.classList.remove('chat-prompt-sending');
 }
 
-// Identity of a parsed prompt (its question + option set) — used both to skip
-// needless re-renders and, when answering, to detect that the prompt on screen has
-// changed out from under us (so keystrokes never land on a different prompt).
-function promptSig(p: ParsedPrompt | null): string {
-  return p ? `${p.question ?? ''}||${p.options.map((o) => `${o.send}:${o.label}`).join('|')}` : '';
+// Identity of the on-screen prompt, used to skip needless re-renders and — when
+// answering — to detect that the prompt changed out from under a stale button so a
+// digit never lands on a different prompt. It hashes the visible prompt REGION (the
+// context and menu down through the "Enter to select…" hint) rather than just the
+// parsed question+options: that captures the literal on-screen question text even
+// when parsing yields a null question, so two distinct prompts that share the same
+// parsed signature (e.g. a null question with Yes/No) still get different ids.
+// Box-drawing and ❯ selection markers are stripped so cursor movement and borders
+// don't churn it; the volatile status bar below the hint is excluded.
+function promptIdentity(text: string): string {
+  const lines = text.split('\n').map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼❯➤▶►]/g, ' ').replace(/\s+$/, ''));
+  let end = lines.length;
+  for (let i = 0; i < lines.length; i++) {
+    if (/(Enter to select|to navigate|Esc to (cancel|close)|↑\/↓|↑ ↓)/i.test(lines[i])) { end = i + 1; break; }
+  }
+  return lines.slice(0, end).join('\n').replace(/\n{2,}/g, '\n').trim();
 }
 
-// Render the question + option buttons, and remember the highlighted option so a
-// tap can navigate to its target. Rebuild only when the parsed content changes,
-// so a poll tick can't wipe a button the instant the user taps it.
-function renderPromptPanel(parsed: ParsedPrompt | null): void {
+// Render the question + option buttons. Rebuild only when the prompt identity
+// changes, so a poll tick can't wipe a button the instant the user taps it, and a
+// genuinely new prompt (even one with the same parsed signature) does get fresh
+// buttons. `sid` is the identity of the screen `parsed` came from.
+function renderPromptPanel(parsed: ParsedPrompt | null, sid: string): void {
   const optsEl = document.getElementById('chat-prompt-options');
   if (!optsEl) return;
-  const sig = promptSig(parsed);
-  if (sig === promptOptionsSig) return; // unchanged — don't rebuild (keeps a tap from being wiped)
-  promptOptionsSig = sig;
+  if (sid === promptScreenId) return; // same prompt still on screen — don't rebuild (keeps a tap from being wiped)
+  promptScreenId = sid;
   const qEl = document.getElementById('chat-prompt-q');
   if (qEl) qEl.textContent = parsed?.question ?? '';
   optsEl.innerHTML = (parsed?.options ?? []).map((o) =>
@@ -1571,12 +1582,11 @@ function renderPromptPanel(parsed: ParsedPrompt | null): void {
   ).join('');
   const term = document.getElementById('chat-prompt-term') as HTMLDetailsElement | null;
   if (term) term.open = !parsed; // menu parsed → collapse terminal; none → show it
-  // A real, different prompt is now on screen (its buttons were just rebuilt, so they
-  // are NOT the stale answered ones) — end any post-answer cooldown so these fresh
-  // buttons are immediately tappable, even if the pane went blocked→blocked without an
-  // observed unblock. A same-signature prompt hits the early return above and stays
-  // guarded (can't tell it apart from the answered one); a transient unparsable screen
-  // (parsed === null) is left to the unblock/floor path, not treated as a new prompt.
+  // A different prompt is now on screen (its buttons were just rebuilt, so they are
+  // NOT the stale answered ones) — end any post-answer cooldown so these fresh buttons
+  // are immediately tappable, even if the pane went blocked→blocked without an observed
+  // unblock. A transient unparsable screen (parsed === null) is left to the
+  // unblock/floor path, not treated as a new prompt.
   if (parsed) endAnswerCooldown();
 }
 
@@ -1595,7 +1605,9 @@ function startPromptScreenPoll(): void {
       // session; the in-flight guard means no concurrent tick supersedes this one.
       if (reqId !== promptPollSeq || paneViewMode !== 'chat' || paneId !== activePaneId) return;
       const ansi = (data.ansi ?? data.text ?? '') as string;
-      renderPromptPanel(parsePrompt(stripAnsi(ansi)));
+      const stripped = stripAnsi(ansi);
+      const parsed = parsePrompt(stripped);
+      renderPromptPanel(parsed, parsed ? promptIdentity(stripped) : '');
       const screen = document.getElementById('chat-prompt-screen');
       if (screen) screen.innerHTML = ansiToHtml(ansi);
     } catch { /* transient — keep the last screen */ } finally {
@@ -1612,11 +1624,14 @@ function stopPromptScreenPoll(): void {
   promptPollActive = 0; // let a fresh poll start after re-entering (the old one won't clear this)
 }
 
-// Read + parse the live prompt off the screen (null if it can't be parsed now).
-async function readPromptScreen(paneId: string): Promise<ParsedPrompt | null> {
+// Read the live prompt off the screen: its parsed form and its region identity
+// (null if the read fails). `id` is '' when no prompt/menu is present.
+async function readPromptScreen(paneId: string): Promise<{ parsed: ParsedPrompt | null; id: string } | null> {
   try {
     const d = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
-    return parsePrompt(stripAnsi((d.ansi ?? d.text ?? '') as string));
+    const stripped = stripAnsi((d.ansi ?? d.text ?? '') as string);
+    const parsed = parsePrompt(stripped);
+    return { parsed, id: parsed ? promptIdentity(stripped) : '' };
   } catch { return null; }
 }
 
@@ -1641,8 +1656,8 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   // multi-digit option would submit on its first digit, so refuse it and leave the
   // terminal (always shown below) as the way to answer that out-of-range case.
   if (!Number.isInteger(to) || to < 1 || to > 9) return;
-  const expectedSig = promptOptionsSig; // identity of the prompt these buttons belong to
-  if (!expectedSig) return;
+  const expectedId = promptScreenId; // region identity of the prompt these buttons belong to
+  if (!expectedId) return;
   const paneId = activePaneId;
   const myGen = ++answerGen; // token for THIS answer; a stale POST/timer must not touch a newer one
   promptAnswerInFlight = true;
@@ -1651,15 +1666,18 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   panel?.classList.add('chat-prompt-sending'); // disable the buttons while the answer settles
   btn.classList.add('ask-opt-sent');
   try {
-    // Verify the displayed prompt is still the live one before firing the digit.
+    // Verify the displayed prompt is still the live one before firing the digit: its
+    // on-screen region identity must still match the buttons' (captured at tap). This
+    // catches a prompt that advanced to a different one — even one with the same parsed
+    // question+options — since the region hash includes the literal on-screen text.
     const live = await readPromptScreen(paneId);
     if (myGen !== answerGen || paneId !== activePaneId) return; // superseded / navigated away
-    if (!live || promptSig(live) !== expectedSig) {
+    if (!live || live.id !== expectedId) {
       // The prompt changed under the stale buttons — do NOT send into a different
       // prompt. Refresh the panel to whatever is actually live and let the user retap.
       btn.classList.remove('ask-opt-sent');
       endAnswerCooldown();
-      renderPromptPanel(live);
+      renderPromptPanel(live?.parsed ?? null, live?.id ?? '');
       showToast('Prompt changed', 'The prompt updated before your tap was sent — try again.');
       return;
     }
