@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # Keep the SHA-pinned actions current. Pinning to a commit SHA is safe but
+  # freezes you on that version, so Dependabot opens PRs that bump both the SHA
+  # and its human-readable `# vX.Y.Z` comment when a new release lands — you get
+  # supply-chain safety without going stale on security patches.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # npm dependency + lockfile updates (ws, typescript, @types/*).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
