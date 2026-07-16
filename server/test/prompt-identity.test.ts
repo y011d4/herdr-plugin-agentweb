@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { stripAnsi, promptIdentity } from '../prompt-identity.ts';
+import { stripAnsi, promptIdentity, parsePrompt } from '../prompt-identity.ts';
+import { parsePrompt as clientParsePrompt } from '../../web/src/prompt.ts';
 
 // The bridge's verify-and-send compares the client's `expect_prompt` against a
 // freshly-recomputed identity, so these must behave exactly like the client copy in
@@ -87,5 +88,27 @@ describe('promptIdentity', () => {
     const activeY = ['● Wipe caches now?', '❯ 1. Yes', '  2. No',
       'Enter to select · ↑/↓ to navigate · Esc to cancel', '  [OMC] 0h39m'].join('\n');
     assert.notEqual(promptIdentity(old + '\n' + activeX), promptIdentity(old + '\n' + activeY));
+  });
+});
+
+describe('server parsePrompt matches the client copy (verify gating)', () => {
+  const H = 'Enter to select · ↑/↓ to navigate · Esc to cancel';
+  const screens: Array<[string, string]> = [
+    ['active menu', ['● Pick', '❯ 1. Red', '  2. Green', H].join('\n')],
+    ['unhighlighted prose', ['1. step one', '2. step two', 'done'].join('\n')],
+    ['stale menu above boxed text prompt', ['❯ 1. Yes', '  2. No', '', ' ──────── ', ' ☐ Confirm', '   Type a reason:', H].join('\n')],
+    ['no menu', ['just some output', 'nothing to answer'].join('\n')],
+  ];
+  for (const [name, screen] of screens) {
+    it(`agrees with the client on: ${name}`, () => {
+      // The bridge gates the verify identity on this parsePrompt; if it disagreed with
+      // the client's, a real answer would 409 or a stale one could slip through.
+      assert.deepEqual(parsePrompt(screen), clientParsePrompt(screen));
+    });
+  }
+
+  it('returns null for a stale menu so its identity gate is empty', () => {
+    const stale = ['❯ 1. Yes', '  2. No', '', ' ──────── ', ' ☐ Confirm', '   Type a reason:', H].join('\n');
+    assert.equal(parsePrompt(stale), null);
   });
 });

@@ -6,7 +6,7 @@ import { verifyToken, extractToken } from './auth.ts';
 import { toClientState } from './state.ts';
 import { buildAgentStatusMessage } from './notify.ts';
 import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail, projectsRootForPid } from './transcript.ts';
-import { stripAnsi, promptIdentity } from './prompt-identity.ts';
+import { stripAnsi, parsePrompt, promptIdentity } from './prompt-identity.ts';
 import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
@@ -179,25 +179,24 @@ async function resolvePaneTranscript(
 }
 
 // Ask herdr for the pane's foreground processes, find the local claude, and
-// derive its transcript root from /proc. Best-effort: empty on any failure (the
-// resolver then falls back to the default/discovered roots).
+// derive its transcript root from /proc. A pane.process_info RPC failure THROWS
+// (transient — propagates so the caller retries rather than reporting the
+// transcript definitively absent when the safe roots also missed); per-pid /proc
+// resolution stays best-effort (projectsRootForPid resolves null, never throws), so
+// a pid that can't be read just doesn't contribute a root.
 async function claudeConfigRoots(herdrClient: HerdrClient, paneId: string): Promise<string[]> {
-  try {
-    const info = (await herdrClient.rpc('pane.process_info', { pane_id: paneId })) as {
-      process_info?: { foreground_processes?: Array<{ pid?: number; name?: string; argv?: string[] }> };
-    };
-    const roots: string[] = [];
-    for (const p of info.process_info?.foreground_processes ?? []) {
-      const isClaude = p.name === 'claude' || (Array.isArray(p.argv) && p.argv[0] === 'claude');
-      if (isClaude && typeof p.pid === 'number') {
-        const root = await projectsRootForPid(p.pid);
-        if (root) roots.push(root);
-      }
+  const info = (await herdrClient.rpc('pane.process_info', { pane_id: paneId })) as {
+    process_info?: { foreground_processes?: Array<{ pid?: number; name?: string; argv?: string[] }> };
+  };
+  const roots: string[] = [];
+  for (const p of info.process_info?.foreground_processes ?? []) {
+    const isClaude = p.name === 'claude' || (Array.isArray(p.argv) && p.argv[0] === 'claude');
+    if (isClaude && typeof p.pid === 'number') {
+      const root = await projectsRootForPid(p.pid);
+      if (root) roots.push(root);
     }
-    return roots;
-  } catch {
-    return [];
   }
+  return roots;
 }
 
 // Whether a pane should receive forwarded SGR wheel events: it must run an
@@ -372,7 +371,12 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
             if (typeof body.expect_prompt === 'string') {
               const read = await herdrClient.rpc('pane.read', { pane_id: paneId, source: 'visible', format: 'ansi' }) as Record<string, unknown>;
               const inner = (read.read ?? read) as Record<string, unknown>;
-              const liveId = promptIdentity(stripAnsi((inner.text ?? '') as string));
+              const stripped = stripAnsi((inner.text ?? '') as string);
+              // Gate on parsePrompt exactly like the client: a screen the client would
+              // no longer treat as an active answerable menu (e.g. a stale menu now
+              // sitting above a different active prompt) yields '' here, which can't
+              // match the client's non-empty expect_prompt → the digit is refused.
+              const liveId = parsePrompt(stripped) ? promptIdentity(stripped) : '';
               if (liveId !== body.expect_prompt) {
                 jsonError(res, 409, 'prompt_changed', 'the prompt changed before the answer was sent');
                 return;
