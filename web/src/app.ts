@@ -756,7 +756,10 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     const text = paneInput.value;
     if (!text) return;
     try {
-      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true });
+      // clear:true wipes the pane's composer first so this message submits on its
+      // own — never merged with a half-typed draft the user left in the pane that
+      // agentweb can't see. enter:true then submits it in the same request.
+      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true, clear: true });
       if (paneInput.value === text) clearInput(); // clear on success, but keep text typed mid-send
       queuePaneEcho();
     } catch (err) {
