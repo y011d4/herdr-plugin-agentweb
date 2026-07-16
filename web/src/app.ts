@@ -52,7 +52,8 @@ let paneViewMode: 'terminal' | 'chat' = 'terminal';
 let chatAvailable = false;
 let chatSessionId: string | null = null;
 let chatCursor = 0; // byte offset into the transcript for incremental fetches
-let chatProbeSeq = 0; // guards against overlapping availability probes
+let chatProbeSeq = 0; // monotonic probe id, to invalidate a probe from a prior pane
+let chatProbeActive = 0; // reqId of the availability probe in flight (0 = none) — prevents overlap
 // Pending-prompt panel: when a claude pane is blocked (waiting for input), the
 // chat surfaces an answer UI — tappable options for a pending AskUserQuestion,
 // or the live terminal screen for any other prompt (permission, plan, y/n).
@@ -691,6 +692,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   chatAvailable = false;
   chatSessionId = null;
   chatCursor = 0;
+  chatProbeActive = 0; // a prior pane's in-flight probe must not block this pane's probe
   pendingAsk = null;
   promptPanelKind = 'none';
   promptOptionsSig = '';
@@ -803,19 +805,22 @@ function showViewToggle(visible: boolean): void {
 // One GET decides availability, reveals the toggle, and (when chat is preferred)
 // switches straight in using the payload it just fetched — no second request.
 async function initChatAvailability(paneId: string): Promise<void> {
+  if (chatProbeActive) return; // one probe in flight — don't overlap (so a slow probe still applies)
   const gen = paneViewGen;
   const probeId = ++chatProbeSeq;
+  chatProbeActive = probeId;
   try {
     const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript`) as TranscriptResponse;
-    if (gen !== paneViewGen || paneId !== activePaneId) return;
-    // A newer probe superseded this one — its result is authoritative, so a slow
-    // older available:false must not clobber a fresh available:true.
-    if (probeId !== chatProbeSeq) return;
+    // gen/paneId invalidate a probe from a prior pane; the in-flight guard means
+    // no concurrent re-probe supersedes this one, so a slow probe still applies.
+    if (probeId !== chatProbeSeq || gen !== paneViewGen || paneId !== activePaneId) return;
     chatAvailable = data.available;
     showViewToggle(chatAvailable);
     if (chatAvailable && preferredView() === 'chat') switchToChat(data, false);
   } catch {
     // leave the terminal view; toggle stays hidden
+  } finally {
+    if (chatProbeActive === probeId) chatProbeActive = 0; // only our own probe clears the guard
   }
 }
 
