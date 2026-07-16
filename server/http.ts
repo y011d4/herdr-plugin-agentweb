@@ -5,10 +5,15 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { verifyToken, extractToken } from './auth.ts';
 import { toClientState } from './state.ts';
 import { buildAgentStatusMessage } from './notify.ts';
+import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail, projectsRootForPid } from './transcript.ts';
+import { stripAnsi, parsePrompt, promptIdentity } from './prompt-identity.ts';
 import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
 const PANE_WATCH_INTERVAL_MS = 800; // server-side poll rate for watched panes
+const TRANSCRIPT_WATCH_INTERVAL_MS = 1000; // poll rate for a watched chat transcript
+const TRANSCRIPT_RESOLVE_INTERVAL_MS = 5000; // re-resolve session id (pane.get + dir scan) at most this often
+const TRANSCRIPT_INITIAL_ITEMS = 300; // last-N items sent on initial chat load
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -116,15 +121,82 @@ function serveStatic(webRoot: string, urlPath: string, res: ServerResponse): voi
     return;
   }
   const mime = MIME[extname(abs)] || 'application/octet-stream';
+  const headers: Record<string, string> = { 'Content-Type': mime };
+  // Always revalidate the service worker and the HTML shell so a new build is
+  // detected without a manual cache clear (the SW versions the other assets and
+  // re-caches them on activate). Without this a stale sw.js can pin an old bundle
+  // across reloads, especially in an installed PWA.
+  const base = abs.slice(abs.lastIndexOf('/') + 1);
+  if (base === 'sw.js' || extname(abs) === '.html') {
+    headers['Cache-Control'] = 'no-cache';
+  }
   const stream = createReadStream(abs);
   stream.on('error', () => { res.destroy(); }); // e.g. file removed after stat
-  res.writeHead(200, { 'Content-Type': mime });
+  res.writeHead(200, headers);
   stream.pipe(res);
 }
 
 interface RawPaneInfo {
   agent?: string;
   scroll?: { max_offset_from_bottom?: number; viewport_rows?: number };
+}
+
+// pane.get also returns the claude session identity and cwd, used to locate the
+// pane's transcript on disk for the chat view.
+interface RawPaneFull extends RawPaneInfo {
+  agent_session?: { value?: string; source?: string };
+  cwd?: string;
+  foreground_cwd?: string;
+}
+
+// Locate a pane's Claude Code transcript: fetch its session id + cwd from herdr,
+// then resolve the on-disk JSONL. Returns nulls ONLY on a successful lookup that
+// proves the pane isn't a claude session or its transcript isn't on this host (→
+// chat view unavailable). A transient herdr RPC failure THROWS instead of returning
+// nulls, so callers can retry / keep the current view rather than mistake a flaky
+// pane.get for "no transcript" and drop the user back to the terminal.
+async function resolvePaneTranscript(
+  herdrClient: HerdrClient,
+  paneId: string,
+): Promise<{ sessionId: string | null; file: string | null }> {
+  const info = (await herdrClient.rpc('pane.get', { pane_id: paneId })) as { pane?: RawPaneFull };
+  const sess = info.pane?.agent_session;
+  const sessionId = sess?.source?.startsWith('herdr:claude') && typeof sess.value === 'string' ? sess.value : null;
+  if (!sessionId) return { sessionId: null, file: null };
+  const cwd = info.pane?.foreground_cwd || info.pane?.cwd || null;
+  // First try the safe filesystem roots only (default + ~/.config/claude/*),
+  // which needs no process environment access.
+  let file = resolveTranscriptPath(sessionId, cwd);
+  // Last resort: follow the pane's claude to a non-standard CLAUDE_CONFIG_DIR
+  // via /proc. Only when the safe roots miss, so the common case never reads a
+  // process environment (which would pull in unrelated secrets). claudeConfigRoots
+  // is best-effort (returns [] on its own RPC failure), so it won't mask a miss.
+  if (!file) {
+    const extraRoots = await claudeConfigRoots(herdrClient, paneId);
+    if (extraRoots.length) file = resolveTranscriptPath(sessionId, cwd, extraRoots);
+  }
+  return { sessionId, file };
+}
+
+// Ask herdr for the pane's foreground processes, find the local claude, and
+// derive its transcript root from /proc. A pane.process_info RPC failure THROWS
+// (transient — propagates so the caller retries rather than reporting the
+// transcript definitively absent when the safe roots also missed); per-pid /proc
+// resolution stays best-effort (projectsRootForPid resolves null, never throws), so
+// a pid that can't be read just doesn't contribute a root.
+async function claudeConfigRoots(herdrClient: HerdrClient, paneId: string): Promise<string[]> {
+  const info = (await herdrClient.rpc('pane.process_info', { pane_id: paneId })) as {
+    process_info?: { foreground_processes?: Array<{ pid?: number; name?: string; argv?: string[] }> };
+  };
+  const roots: string[] = [];
+  for (const p of info.process_info?.foreground_processes ?? []) {
+    const isClaude = p.name === 'claude' || (Array.isArray(p.argv) && p.argv[0] === 'claude');
+    if (isClaude && typeof p.pid === 'number') {
+      const root = await projectsRootForPid(p.pid);
+      if (root) roots.push(root);
+    }
+  }
+  return roots;
 }
 
 // Whether a pane should receive forwarded SGR wheel events: it must run an
@@ -270,6 +342,54 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
           jsonError(res, 400, 'invalid_params', 'enter must be a boolean');
           return;
         }
+        // A single digit delivered as a raw keystroke (via pane.send_text, NOT
+        // send_input): a numbered menu selects that option directly. It must NOT go
+        // through send_input, which wraps text in bracketed paste that the menu then
+        // ignores. Scoped to one digit — the only raw-key case the client needs.
+        if (body.press !== undefined) {
+          if (typeof body.press !== 'string' || !/^[0-9]$/.test(body.press)) {
+            jsonError(res, 400, 'invalid_params', 'press must be a single digit');
+            return;
+          }
+          if (body.expect_prompt !== undefined && typeof body.expect_prompt !== 'string') {
+            jsonError(res, 400, 'invalid_params', 'expect_prompt must be a string');
+            return;
+          }
+          try {
+            // Verify-and-send: read the visible screen and confirm its prompt-region
+            // identity still matches what the client last rendered, THEN press — both
+            // over the same socket back-to-back. This collapses the client read->POST
+            // gap where the pane could advance to a different prompt in between and
+            // the digit land on the wrong one. On a mismatch the client refreshes.
+            //
+            // herdr's protocol is one-request-per-connection with no conditional-input
+            // primitive, and herdr is never modified, so read and press are necessarily
+            // two RPCs — an atomic check-and-write inside the key path isn't available.
+            // The residual window is just the local compute between the read response
+            // and the send request (sub-millisecond); a prompt only advances on a
+            // human/agent action, so nothing realistically lands in it.
+            if (typeof body.expect_prompt === 'string') {
+              const read = await herdrClient.rpc('pane.read', { pane_id: paneId, source: 'visible', format: 'ansi' }) as Record<string, unknown>;
+              const inner = (read.read ?? read) as Record<string, unknown>;
+              const stripped = stripAnsi((inner.text ?? '') as string);
+              // Gate on parsePrompt exactly like the client: a screen the client would
+              // no longer treat as an active answerable menu (e.g. a stale menu now
+              // sitting above a different active prompt) yields '' here, which can't
+              // match the client's non-empty expect_prompt → the digit is refused.
+              const liveId = parsePrompt(stripped) ? promptIdentity(stripped) : '';
+              if (liveId !== body.expect_prompt) {
+                jsonError(res, 409, 'prompt_changed', 'the prompt changed before the answer was sent');
+                return;
+              }
+            }
+            await herdrClient.rpc('pane.send_text', { pane_id: paneId, text: body.press });
+            jsonOk(res, { ok: true });
+          } catch (err) {
+            const herdrErr = err as HerdrError;
+            jsonError(res, mapHerdrError(herdrErr), herdrErr.herdrCode || 'error', herdrErr.message);
+          }
+          return;
+        }
         const keys = [...((body.keys as string[] | undefined) ?? [])];
         if (body.enter === true) keys.push('enter'); // strict: a string like "false" must not submit
         const params: Record<string, unknown> = { pane_id: paneId };
@@ -320,6 +440,43 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
         } catch (err) {
           const herdrErr = err as HerdrError;
           jsonError(res, mapHerdrError(herdrErr), herdrErr.herdrCode || 'error', herdrErr.message);
+        }
+        return;
+      }
+
+      // Structured chat view: the pane's Claude Code JSONL transcript as
+      // TimelineItems. `?session=<id>&after=<cursor>` fetches only items past a
+      // byte cursor for the same session (HTTP-fallback polling); otherwise the
+      // recent tail is returned with reset=true. available=false → not a claude
+      // pane, or its transcript isn't on this host (client keeps the terminal).
+      if (action === 'transcript' && method === 'GET') {
+        let sessionId: string | null;
+        let file: string | null;
+        try {
+          ({ sessionId, file } = await resolvePaneTranscript(herdrClient, paneId));
+        } catch (err) {
+          // Transient herdr failure — surface an error, NOT available:false, so the
+          // client retries (its re-probe keeps polling) and keeps its current view
+          // instead of being told definitively that there is no transcript.
+          const herdrErr = err as HerdrError;
+          jsonError(res, mapHerdrError(herdrErr), herdrErr.herdrCode || 'error', herdrErr.message);
+          return;
+        }
+        if (!sessionId || !file) {
+          jsonOk(res, { available: false });
+          return;
+        }
+        const sessionParam = url.searchParams.get('session');
+        const afterParam = url.searchParams.get('after');
+        const after = afterParam !== null ? parseInt(afterParam, 10) : NaN;
+        if (sessionParam === sessionId && Number.isInteger(after) && after >= 0) {
+          // reset=true when `after` is too far behind (readTranscriptFrom bounds
+          // the read and returns a rebuilt tail); the client replaces, not appends.
+          const { items, cursor, reset } = readTranscriptFrom(file, after, TRANSCRIPT_INITIAL_ITEMS);
+          jsonOk(res, { available: true, sessionId, items, cursor, reset });
+        } else {
+          const { items, cursor, truncated } = readTranscriptTail(file, TRANSCRIPT_INITIAL_ITEMS);
+          jsonOk(res, { available: true, sessionId, items, cursor, reset: true, truncated });
         }
         return;
       }
@@ -457,6 +614,77 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
         }
       };
 
+      // Transcript watch: while a client views a claude pane in chat mode, tail
+      // its JSONL transcript and push new TimelineItems. Independent of the pane
+      // watch above (the client runs one or the other per view mode). The session
+      // id is re-resolved (a pane.get RPC + projects-dir scan) only every
+      // TRANSCRIPT_RESOLVE_INTERVAL_MS to catch a mid-session reset (/clear → new
+      // session file); the resolved file is tailed cheaply on every tick.
+      let watchedTranscriptPaneId: string | null = null;
+      let transcriptTimer: ReturnType<typeof setInterval> | null = null;
+      let transcriptSessionId: string | null = null; // '' = last resolved unavailable
+      let transcriptFile: string | null = null;
+      let transcriptCursor = 0;
+      let transcriptResolveAt = 0; // last session-id resolution (Date.now())
+      let transcriptPollInFlight = false;
+
+      const stopTranscriptWatch = (): void => {
+        if (transcriptTimer) clearInterval(transcriptTimer);
+        transcriptTimer = null;
+        watchedTranscriptPaneId = null;
+        transcriptSessionId = null;
+        transcriptFile = null;
+        transcriptCursor = 0;
+        transcriptResolveAt = 0;
+      };
+
+      const pollTranscript = async (): Promise<void> => {
+        if (!watchedTranscriptPaneId || transcriptPollInFlight || ws.readyState !== WebSocket.OPEN) return;
+        transcriptPollInFlight = true;
+        const paneId = watchedTranscriptPaneId;
+        try {
+          // Throttled re-resolution: catches a session switch without a per-tick
+          // herdr RPC + directory scan (transcriptResolveAt starts 0 → first tick
+          // always resolves).
+          if (Date.now() - transcriptResolveAt >= TRANSCRIPT_RESOLVE_INTERVAL_MS) {
+            transcriptResolveAt = Date.now();
+            const { sessionId, file } = await resolvePaneTranscript(herdrClient, paneId);
+            if (paneId !== watchedTranscriptPaneId || ws.readyState !== WebSocket.OPEN) return;
+            if (!sessionId || !file) {
+              // Not a claude pane, or transcript not on this host — tell the
+              // client once so it falls back to the terminal, then keep it flagged.
+              if (transcriptSessionId !== '') {
+                transcriptSessionId = '';
+                transcriptFile = null;
+                ws.send(JSON.stringify({ type: 'transcript_items', paneId, available: false, reset: true, items: [], cursor: 0 }));
+              }
+              return;
+            }
+            if (sessionId !== transcriptSessionId || file !== transcriptFile) {
+              // First resolve for this session (or a mid-session switch): send the tail.
+              transcriptSessionId = sessionId;
+              transcriptFile = file;
+              const { items, cursor } = readTranscriptTail(file, TRANSCRIPT_INITIAL_ITEMS);
+              transcriptCursor = cursor;
+              ws.send(JSON.stringify({ type: 'transcript_items', paneId, available: true, sessionId, items, cursor, reset: true }));
+              return;
+            }
+          }
+          // Cheap incremental tail of the already-resolved file every tick.
+          if (transcriptFile && transcriptSessionId) {
+            const { items, cursor, reset } = readTranscriptFrom(transcriptFile, transcriptCursor, TRANSCRIPT_INITIAL_ITEMS);
+            transcriptCursor = cursor;
+            if (reset || items.length > 0) {
+              ws.send(JSON.stringify({ type: 'transcript_items', paneId, available: true, sessionId: transcriptSessionId, items, cursor, reset }));
+            }
+          }
+        } catch {
+          // transient herdr/file errors — keep watching, retry next tick
+        } finally {
+          transcriptPollInFlight = false;
+        }
+      };
+
       ws.on('message', (data: Buffer) => {
         let msg: Record<string, unknown>;
         try { msg = JSON.parse(data.toString()) as Record<string, unknown>; } catch { return; }
@@ -469,11 +697,18 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
           void pollWatchedPane();
         } else if (msg?.type === 'unwatch_pane') {
           stopWatch();
+        } else if (msg?.type === 'watch_transcript' && typeof msg.paneId === 'string') {
+          stopTranscriptWatch();
+          watchedTranscriptPaneId = msg.paneId;
+          transcriptTimer = setInterval(() => { void pollTranscript(); }, TRANSCRIPT_WATCH_INTERVAL_MS);
+          void pollTranscript();
+        } else if (msg?.type === 'unwatch_transcript') {
+          stopTranscriptWatch();
         }
       });
 
-      ws.on('close', () => { stopWatch(); wsClients.delete(ws); });
-      ws.on('error', () => { stopWatch(); wsClients.delete(ws); });
+      ws.on('close', () => { stopWatch(); stopTranscriptWatch(); wsClients.delete(ws); });
+      ws.on('error', () => { stopWatch(); stopTranscriptWatch(); wsClients.delete(ws); });
     });
   });
 
