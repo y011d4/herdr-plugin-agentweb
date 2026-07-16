@@ -497,8 +497,14 @@ function showSystemNotification(title: string, body: string, paneId: string): vo
         // Re-check the same document.hidden gate so a now-visible pane is never
         // left with a stale OS notification.
         if (!document.hidden) return;
-        if (reg) reg.showNotification(title, { body, tag: paneId });
-        else pageNotification(title, body, paneId);
+        if (!reg) { pageNotification(title, body, paneId); return; }
+        // showNotification() is itself async: the app can become visible between the
+        // check above and when the notification is registered, so a visibilitychange
+        // dismiss can run too early and miss it. Once it provably exists, dismiss it
+        // if the user is now looking at this very pane.
+        return reg.showNotification(title, { body, tag: paneId }).then(() => {
+          if (!document.hidden && activePaneId === paneId) dismissNotificationsForPane(paneId);
+        });
       })
       .catch(() => { if (document.hidden) pageNotification(title, body, paneId); });
   } else {
