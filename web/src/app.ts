@@ -18,7 +18,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v61';
+const BUILD = 'v62';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -65,7 +65,8 @@ let promptScreenTimer: ReturnType<typeof setInterval> | null = null;
 let promptOptionsSig = ''; // last-rendered answer options, to avoid re-render churn
 let promptPollSeq = 0; // monotonic request id; bumped on stop to invalidate an in-flight poll
 let promptPollActive = 0; // reqId of the poll currently in flight (0 = none) — prevents overlap
-let promptAnswerInFlight = false; // true while a tapped answer's key sequence is being sent — blocks re-taps
+let promptAnswerInFlight = false; // true while/just after a tapped answer is sent — blocks re-taps
+let answerCooldownTimer: ReturnType<typeof setTimeout> | null = null; // floors the post-send re-tap block
 
 /** source toggle: 'visible' | 'recent' */
 
@@ -1510,11 +1511,17 @@ function updatePromptPanel(): void {
   const status = activePaneId ? findPane(activePaneId)?.pane?.agent?.status : null;
   const blocked = paneViewMode === 'chat' && status === 'blocked';
   if (!blocked) {
+    // Pane is no longer waiting: the answer (if one was just sent) has landed, so
+    // end the post-send cooldown that was suppressing re-taps.
     if (promptPanelKind !== 'none') { panel.style.display = 'none'; panel.innerHTML = ''; promptPanelKind = 'none'; promptOptionsSig = ''; }
+    endAnswerCooldown();
     stopPromptScreenPoll();
     return;
   }
   if (promptPanelKind !== 'blocked') {
+    // A fresh blocked episode (panel was hidden, now shown): a distinct prompt, so
+    // clear any lingering cooldown from a prior answer before rendering its buttons.
+    endAnswerCooldown();
     panel.style.display = '';
     panel.innerHTML =
       `<div class="chat-prompt-head">&#9203; Waiting for your input <span class="chat-prompt-build">${BUILD}</span></div>` +
@@ -1528,6 +1535,15 @@ function updatePromptPanel(): void {
     promptOptionsSig = '';
   }
   startPromptScreenPoll();
+}
+
+// Clear the "answer just sent" state: re-enable the option buttons and drop the
+// in-flight guard. Called when the pane leaves `blocked` (answer landed) or a fresh
+// prompt appears, and by a timeout floor in case neither is observed.
+function endAnswerCooldown(): void {
+  if (answerCooldownTimer) { clearTimeout(answerCooldownTimer); answerCooldownTimer = null; }
+  promptAnswerInFlight = false;
+  document.getElementById('chat-prompt')?.classList.remove('chat-prompt-sending');
 }
 
 // Identity of a parsed prompt (its question + option set) — used both to skip
@@ -1607,29 +1623,23 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   const paneId = activePaneId;
   promptAnswerInFlight = true;
   const panel = document.getElementById('chat-prompt');
-  panel?.classList.add('chat-prompt-sending'); // disable the buttons while sending
+  panel?.classList.add('chat-prompt-sending'); // disable the buttons while the answer settles
   btn.classList.add('ask-opt-sent');
-  let ok = true;
   try {
     await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { press: String(to) });
-    // The digit already submitted the prompt. Replace the buttons with a sent marker
-    // immediately: the panel may keep showing THIS prompt until the pane's status
-    // refreshes, and a second/double-tap would fire the same digit again — landing on
-    // the next prompt or the terminal. With no button to tap that can't happen; the
-    // normal render flow hides or rebuilds the panel once the pane updates. (The
-    // in-flight guard already blocks a re-tap during the send itself, and this clear
-    // runs before the guard is released, so there is no gap between the two.) Leaving
-    // promptOptionsSig unchanged means a poll still seeing the same menu skips its
-    // re-render and won't restore the buttons.
-    const optsEl = document.getElementById('chat-prompt-options');
-    if (optsEl) optsEl.innerHTML = '<div class="ask-opt-done">&#10003; Answer sent</div>';
+    // The digit already submitted this prompt, but the panel keeps showing it (with
+    // tappable buttons) until the pane's status refreshes. Hold the guard through
+    // that window so a double-tap can't fire the same digit again into the *next*
+    // prompt or the terminal. It's released the moment the pane leaves `blocked` or a
+    // fresh prompt renders (endAnswerCooldown, from updatePromptPanel); this timer is
+    // only a floor. No DOM is mutated here — that would risk clobbering another pane's
+    // panel if the user navigated away during the request.
+    if (answerCooldownTimer) clearTimeout(answerCooldownTimer);
+    answerCooldownTimer = setTimeout(endAnswerCooldown, 1500);
   } catch (err) {
-    ok = false;
     showToast('Send failed', (err as Error).message);
     btn.classList.remove('ask-opt-sent');
-  } finally {
-    promptAnswerInFlight = false;
-    panel?.classList.remove('chat-prompt-sending');
+    endAnswerCooldown();
   }
 }
 
