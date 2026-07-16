@@ -60,7 +60,8 @@ let pendingAsk: AskQuestion[] | null = null;
 let promptPanelKind: 'none' | 'blocked' = 'none';
 let promptScreenTimer: ReturnType<typeof setInterval> | null = null;
 let promptOptionsSig = ''; // last-rendered answer options, to avoid re-render churn
-let promptPollSeq = 0; // request id so a slow/superseded prompt poll can't overwrite a newer one
+let promptPollSeq = 0; // monotonic request id; bumped on stop to invalidate an in-flight poll
+let promptPollActive = 0; // reqId of the poll currently in flight (0 = none) — prevents overlap
 
 /** source toggle: 'visible' | 'recent' */
 
@@ -1516,18 +1517,24 @@ function renderPromptOptions(options: PromptOption[] | null): void {
 function startPromptScreenPoll(): void {
   if (promptScreenTimer) return;
   const tick = async (): Promise<void> => {
+    if (promptPollActive) return; // a poll is in flight — don't overlap (so slow reads aren't all discarded)
     if (paneViewMode !== 'chat' || !activePaneId) { stopPromptScreenPoll(); return; }
     if (findPane(activePaneId)?.pane?.agent?.status !== 'blocked') { updatePromptPanel(); return; }
-    const reqId = ++promptPollSeq; // any newer tick, or stopPromptScreenPoll, supersedes this one
+    const reqId = ++promptPollSeq;
+    promptPollActive = reqId;
     const paneId = activePaneId;
     try {
       const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
-      if (reqId !== promptPollSeq || paneViewMode !== 'chat' || paneId !== activePaneId) return; // superseded in flight
+      // stopPromptScreenPoll bumps promptPollSeq to invalidate a poll from a prior
+      // session; the in-flight guard means no concurrent tick supersedes this one.
+      if (reqId !== promptPollSeq || paneViewMode !== 'chat' || paneId !== activePaneId) return;
       const ansi = (data.ansi ?? data.text ?? '') as string;
       renderPromptOptions(promptOptions(stripAnsi(ansi)));
       const screen = document.getElementById('chat-prompt-screen');
       if (screen) screen.innerHTML = ansiToHtml(ansi);
-    } catch { /* transient — keep the last screen */ }
+    } catch { /* transient — keep the last screen */ } finally {
+      if (promptPollActive === reqId) promptPollActive = 0; // only our own poll clears the guard
+    }
   };
   void tick();
   promptScreenTimer = setInterval(() => { void tick(); }, PROMPT_SCREEN_INTERVAL_MS);
@@ -1535,7 +1542,8 @@ function startPromptScreenPoll(): void {
 
 function stopPromptScreenPoll(): void {
   if (promptScreenTimer) { clearInterval(promptScreenTimer); promptScreenTimer = null; }
-  promptPollSeq++; // invalidate any in-flight poll so its late response can't render
+  promptPollSeq++;      // invalidate any in-flight poll so its late response can't render
+  promptPollActive = 0; // let a fresh poll start after re-entering (the old one won't clear this)
 }
 
 // Send a tapped option's key (the menu number) to the pane — the same input as
