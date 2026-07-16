@@ -53,4 +53,18 @@ describe('promptIdentity', () => {
   it('includes the question text (not just options)', () => {
     assert.ok(promptIdentity(A).includes('Deploy the app to PRODUCTION now?'));
   });
+
+  it('keys off the bottom-most (active) prompt when an older hint is scrolled above', () => {
+    // An older, answered prompt with its own nav hint remains visible above the active
+    // one. The identity must reflect the ACTIVE prompt at the bottom (which parsePrompt
+    // renders buttons for) — two different active prompts under the same old one must
+    // still differ, i.e. truncation stops at the LAST hint, not the first.
+    const old = ['● Old question already answered?', '❯ 1. Yes', '  2. No',
+      'Enter to select · ↑/↓ to navigate · Esc to cancel', ''].join('\n');
+    const activeX = ['● Ship release X now?', '❯ 1. Yes', '  2. No',
+      'Enter to select · ↑/↓ to navigate · Esc to cancel', '  [OMC] 0h39m'].join('\n');
+    const activeY = ['● Wipe caches now?', '❯ 1. Yes', '  2. No',
+      'Enter to select · ↑/↓ to navigate · Esc to cancel', '  [OMC] 0h39m'].join('\n');
+    assert.notEqual(promptIdentity(old + '\n' + activeX), promptIdentity(old + '\n' + activeY));
+  });
 });

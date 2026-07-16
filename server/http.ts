@@ -359,9 +359,16 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
           try {
             // Verify-and-send: read the visible screen and confirm its prompt-region
             // identity still matches what the client last rendered, THEN press — both
-            // over the same socket back-to-back. This closes the client read->POST
+            // over the same socket back-to-back. This collapses the client read->POST
             // gap where the pane could advance to a different prompt in between and
             // the digit land on the wrong one. On a mismatch the client refreshes.
+            //
+            // herdr's protocol is one-request-per-connection with no conditional-input
+            // primitive, and herdr is never modified, so read and press are necessarily
+            // two RPCs — an atomic check-and-write inside the key path isn't available.
+            // The residual window is just the local compute between the read response
+            // and the send request (sub-millisecond); a prompt only advances on a
+            // human/agent action, so nothing realistically lands in it.
             if (typeof body.expect_prompt === 'string') {
               const read = await herdrClient.rpc('pane.read', { pane_id: paneId, source: 'visible', format: 'ansi' }) as Record<string, unknown>;
               const inner = (read.read ?? read) as Record<string, unknown>;

@@ -18,7 +18,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v67';
+const BUILD = 'v68';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -1561,9 +1561,13 @@ function endAnswerCooldown(): void {
 // don't churn it; the volatile status bar below the hint is excluded.
 function promptIdentity(text: string): string {
   const lines = text.split('\n').map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼❯➤▶►]/g, ' ').replace(/\s+$/, ''));
+  // Truncate at the LAST navigation hint — that belongs to the bottom-most (active)
+  // prompt, the same block parsePrompt() renders buttons for. Stopping at the first
+  // hint would end at an older prompt scrolled above and drop the active one from the
+  // identity. Everything below the active hint is the volatile status bar, excluded.
   let end = lines.length;
   for (let i = 0; i < lines.length; i++) {
-    if (/(Enter to select|to navigate|Esc to (cancel|close)|↑\/↓|↑ ↓)/i.test(lines[i])) { end = i + 1; break; }
+    if (/(Enter to select|to navigate|Esc to (cancel|close)|↑\/↓|↑ ↓)/i.test(lines[i])) end = i + 1;
   }
   return lines.slice(0, end).join('\n').replace(/\n{2,}/g, '\n').trim();
 }
