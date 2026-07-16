@@ -1566,14 +1566,24 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   const to = parseInt(target, 10);
   if (!Number.isInteger(to)) return;
   const from = promptSelectedNum || 1;
+  const paneId = activePaneId;
   btn.classList.add('ask-opt-sent');
-  setTimeout(() => btn.classList.remove('ask-opt-sent'), 1500);
-  const delta = to - from;
-  const keys = delta === 0 ? [] : Array(Math.abs(delta)).fill(delta > 0 ? 'down' : 'up');
-  keys.push('enter');
+  setTimeout(() => btn.classList.remove('ask-opt-sent'), 2000);
+  const dir = to >= from ? 'down' : 'up';
+  const steps = Math.abs(to - from);
+  const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
   try {
-    await apiPost(`/api/panes/${encodeURIComponent(activePaneId)}/input`, { keys });
-    promptSelectedNum = to; // reflect the move immediately so a fast re-tap is correct
+    // Each keystroke must be its own event with a beat between: batching an arrow
+    // and Enter in one send loses the arrow, and a number sent as text is wrapped
+    // in bracketed paste and ignored by the menu (both verified live). So step to
+    // the target option with arrow keys, then confirm with Enter.
+    for (let i = 0; i < steps; i++) {
+      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: [dir] });
+      await wait(120);
+    }
+    await wait(60);
+    await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: ['enter'] });
+    promptSelectedNum = to; // reflect the move so a fast re-tap navigates correctly
   } catch (err) {
     btn.classList.remove('ask-opt-sent');
     showToast('Send failed', (err as Error).message);

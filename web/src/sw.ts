@@ -14,7 +14,7 @@ const sw = self as unknown as ServiceWorkerGlobalScope;
 
 // Bump on every release that changes any static asset: cached assets are only
 // refreshed when the service worker itself changes.
-const CACHE_VERSION = 'herdr-agentweb-v53';
+const CACHE_VERSION = 'herdr-agentweb-v54';
 
 const STATIC_ASSETS = [
   '/',
@@ -58,22 +58,24 @@ sw.addEventListener('fetch', (event: FetchEvent) => {
     return; // let browser handle normally
   }
 
-  // Cache-first for static assets
+  // Network-first for static assets: always fetch the latest build when online
+  // and only fall back to the cache offline. Cache-first (the previous strategy)
+  // pinned stale code across reloads when the service worker itself didn't change
+  // — the app then kept running an old bundle even after a new deploy.
   event.respondWith(
-    caches.match(event.request).then((cached) => {
+    fetch(event.request).then((response) => {
+      // Cache successful GET responses for offline use. Never cache a URL that
+      // carries a query string (e.g. /?token=…): the bearer token would be
+      // persisted in Cache Storage and survive "clear token & sign out".
+      if (response.ok && event.request.method === 'GET' && !url.search) {
+        const responseClone = response.clone();
+        caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, responseClone));
+      }
+      return response;
+    }).catch(() => caches.match(event.request).then((cached) => {
       if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        // Cache successful GET responses for static content. Never cache a URL
-        // that carries a query string (e.g. /?token=…): the bearer token would
-        // be persisted in Cache Storage and survive "clear token & sign out".
-        // Old tokenized entries are dropped when CACHE_VERSION bumps (activate).
-        if (response.ok && event.request.method === 'GET' && !url.search) {
-          const responseClone = response.clone();
-          caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, responseClone));
-        }
-        return response;
-      });
-    })
+      throw new Error('offline and not cached');
+    }))
   );
 });
 
