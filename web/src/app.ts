@@ -60,7 +60,7 @@ let pendingAsk: AskQuestion[] | null = null;
 let promptPanelKind: 'none' | 'blocked' = 'none';
 let promptScreenTimer: ReturnType<typeof setInterval> | null = null;
 let promptOptionsSig = ''; // last-rendered answer options, to avoid re-render churn
-let promptPollInFlight = false; // serialize prompt-screen polls so a slow one can't overwrite a newer
+let promptPollSeq = 0; // request id so a slow/superseded prompt poll can't overwrite a newer one
 
 /** source toggle: 'visible' | 'recent' */
 
@@ -1514,21 +1514,18 @@ function renderPromptOptions(options: PromptOption[] | null): void {
 function startPromptScreenPoll(): void {
   if (promptScreenTimer) return;
   const tick = async (): Promise<void> => {
-    if (promptPollInFlight) return; // a poll is still running — don't overlap
     if (paneViewMode !== 'chat' || !activePaneId) { stopPromptScreenPoll(); return; }
     if (findPane(activePaneId)?.pane?.agent?.status !== 'blocked') { updatePromptPanel(); return; }
+    const reqId = ++promptPollSeq; // any newer tick, or stopPromptScreenPoll, supersedes this one
     const paneId = activePaneId;
-    promptPollInFlight = true;
     try {
       const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
-      if (paneViewMode !== 'chat' || paneId !== activePaneId) return;
+      if (reqId !== promptPollSeq || paneViewMode !== 'chat' || paneId !== activePaneId) return; // superseded in flight
       const ansi = (data.ansi ?? data.text ?? '') as string;
       renderPromptOptions(promptOptions(stripAnsi(ansi)));
       const screen = document.getElementById('chat-prompt-screen');
       if (screen) screen.innerHTML = ansiToHtml(ansi);
-    } catch { /* transient — keep the last screen */ } finally {
-      promptPollInFlight = false;
-    }
+    } catch { /* transient — keep the last screen */ }
   };
   void tick();
   promptScreenTimer = setInterval(() => { void tick(); }, PROMPT_SCREEN_INTERVAL_MS);
@@ -1536,7 +1533,7 @@ function startPromptScreenPoll(): void {
 
 function stopPromptScreenPoll(): void {
   if (promptScreenTimer) { clearInterval(promptScreenTimer); promptScreenTimer = null; }
-  promptPollInFlight = false;
+  promptPollSeq++; // invalidate any in-flight poll so its late response can't render
 }
 
 // Send a tapped option's key (the menu number) to the pane — the same input as

@@ -11,7 +11,7 @@
 
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { existsSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, fstatSync, openSync, readSync, closeSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { normalizeLine, type TimelineItem } from './transcript-normalize.ts';
 
@@ -212,41 +212,43 @@ export interface TranscriptTail {
 type TailResult = TranscriptTail & { hadCompleteLine: boolean };
 
 function tailUnsafe(file: string, maxItems: number): TailResult {
-  const size = statSync(file).size;
-  const start = Math.max(0, size - TAIL_MAX_BYTES);
-  const len = size - start;
-  if (len === 0) return { items: [], cursor: size, truncated: false, hadCompleteLine: false };
-  const buf = Buffer.alloc(len);
   const fd = openSync(file, 'r');
-  let read = 0;
-  try { read = readSync(fd, buf, 0, len, start); } finally { closeSync(fd); }
-  if (read === 0) return { items: [], cursor: start, truncated: false, hadCompleteLine: false };
-  // Only reason over the bytes actually read: if the file was truncated/recreated
-  // between statSync and readSync, `len` (from the stale size) over-allocates and
-  // the tail is zero-filled, which would push the cursor past the real EOF.
-  const data = buf.subarray(0, read);
-  // Find newline boundaries in BYTE space (not the decoded string): an incomplete
-  // multi-byte char at EOF decodes to U+FFFD, whose byte length differs from the
-  // raw bytes, so a string-derived cursor could land off the true byte boundary
-  // and replay lines. hadCompleteLine uses the RAW window (any newline at all) so
-  // that a completed line LARGER than the cap still advances the cursor even
-  // though it's dropped below as a leading partial.
-  const NL = 0x0a;
-  const lastNlByte = data.lastIndexOf(NL); // byte index within the read bytes, or -1
-  const hadCompleteLine = lastNlByte !== -1;
-  const cursor = hadCompleteLine ? start + lastNlByte + 1 : start; // just past the last newline
-  // For PARSING, also drop a leading partial line (its start was cut off when we
-  // began mid-file), then decode only the complete-line byte range. Both bounds
-  // are newline positions, so the slice never splits a multi-byte character.
-  let bodyStart = 0;
-  if (start > 0) {
-    const firstNlByte = data.indexOf(NL);
-    bodyStart = firstNlByte === -1 ? read : firstNlByte + 1;
+  try {
+    // fstat the open fd (not a separate statSync) so the size and the read see
+    // the same file handle; a truncate after this still yields a short read,
+    // handled below, so the cursor never exceeds bytes confirmed from the file.
+    const size = fstatSync(fd).size;
+    const start = Math.max(0, size - TAIL_MAX_BYTES);
+    const len = size - start;
+    if (len === 0) return { items: [], cursor: size, truncated: false, hadCompleteLine: false };
+    const buf = Buffer.alloc(len);
+    const read = readSync(fd, buf, 0, len, start);
+    // Truncated below `start` since fstat: clamp the cursor to the real current
+    // EOF, not the stale `start`, so a later incremental read isn't stuck past EOF.
+    if (read === 0) return { items: [], cursor: fstatSync(fd).size, truncated: false, hadCompleteLine: false };
+    // Reason only over the bytes actually read (a truncate leaves the tail
+    // zero-filled). Find newline boundaries in BYTE space so an incomplete
+    // multi-byte char at EOF (U+FFFD) can't skew the cursor; hadCompleteLine uses
+    // the whole read window so a completed >cap line still advances the cursor.
+    const data = buf.subarray(0, read);
+    const NL = 0x0a;
+    const lastNlByte = data.lastIndexOf(NL); // byte index within the read bytes, or -1
+    const hadCompleteLine = lastNlByte !== -1;
+    const cursor = hadCompleteLine ? start + lastNlByte + 1 : start; // just past the last newline
+    // For PARSING, drop a leading partial line when we began mid-file, then decode
+    // only the complete-line byte range (both bounds are newlines → no split char).
+    let bodyStart = 0;
+    if (start > 0) {
+      const firstNlByte = data.indexOf(NL);
+      bodyStart = firstNlByte === -1 ? read : firstNlByte + 1;
+    }
+    const usable = hadCompleteLine && bodyStart <= lastNlByte ? data.toString('utf8', bodyStart, lastNlByte + 1) : '';
+    const all = usable.split('\n').filter(Boolean).flatMap(normalizeLine);
+    const truncated = start > 0 || all.length > maxItems;
+    return { items: all.length > maxItems ? all.slice(-maxItems) : all, cursor, truncated, hadCompleteLine };
+  } finally {
+    closeSync(fd);
   }
-  const usable = hadCompleteLine && bodyStart <= lastNlByte ? data.toString('utf8', bodyStart, lastNlByte + 1) : '';
-  const all = usable.split('\n').filter(Boolean).flatMap(normalizeLine);
-  const truncated = start > 0 || all.length > maxItems;
-  return { items: all.length > maxItems ? all.slice(-maxItems) : all, cursor, truncated, hadCompleteLine };
 }
 
 /**
