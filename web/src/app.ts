@@ -18,7 +18,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v64';
+const BUILD = 'v65';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -1612,15 +1612,28 @@ function stopPromptScreenPoll(): void {
   promptPollActive = 0; // let a fresh poll start after re-entering (the old one won't clear this)
 }
 
+// Read + parse the live prompt off the screen (null if it can't be parsed now).
+async function readPromptScreen(paneId: string): Promise<ParsedPrompt | null> {
+  try {
+    const d = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
+    return parsePrompt(stripAnsi((d.ansi ?? d.text ?? '') as string));
+  } catch { return null; }
+}
+
 // Answer by selecting the tapped option. Pressing an option's digit in a numbered
 // menu selects AND submits it in one atomic keystroke — verified live: sending "3"
 // to an AskUserQuestion answered "cherry" with no Enter and no cursor movement. So
-// this just delivers that digit; there is no follow-up read, Enter, or arrow step,
-// which means no keystroke can ever land on a later prompt, and the ❯ cursor's
-// position (which may have moved on the desktop) is irrelevant — selection is by
-// number. The digit must go as a raw keystroke via send_text (`press`): a digit
-// through send_input is bracketed-paste-wrapped and ignored, and keys:[digit] is
-// dropped by herdr (both verified live). An in-flight guard blocks double-taps.
+// once we commit, this just delivers that digit; there is no follow-up read, Enter,
+// or arrow step, and the ❯ cursor's position (which may have moved on the desktop) is
+// irrelevant — selection is by number. The digit goes as a raw keystroke via
+// send_text (`press`): a digit through send_input is bracketed-paste-wrapped and
+// ignored, and keys:[digit] is dropped by herdr (both verified live).
+//
+// The buttons are only re-rendered on the ~1.2s poll, so the prompt on screen may
+// have changed (answered on the desktop, timed out) since they were drawn. Re-read
+// and confirm the SAME prompt is still live immediately before sending, so a tap on a
+// stale button can't fire its digit into a different prompt. An in-flight guard plus
+// a per-answer generation token keep double-taps and stale async work off the guard.
 async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   if (!activePaneId || promptAnswerInFlight) return;
   const to = parseInt(target, 10);
@@ -1628,6 +1641,8 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   // multi-digit option would submit on its first digit, so refuse it and leave the
   // terminal (always shown below) as the way to answer that out-of-range case.
   if (!Number.isInteger(to) || to < 1 || to > 9) return;
+  const expectedSig = promptOptionsSig; // identity of the prompt these buttons belong to
+  if (!expectedSig) return;
   const paneId = activePaneId;
   const myGen = ++answerGen; // token for THIS answer; a stale POST/timer must not touch a newer one
   promptAnswerInFlight = true;
@@ -1636,6 +1651,18 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   panel?.classList.add('chat-prompt-sending'); // disable the buttons while the answer settles
   btn.classList.add('ask-opt-sent');
   try {
+    // Verify the displayed prompt is still the live one before firing the digit.
+    const live = await readPromptScreen(paneId);
+    if (myGen !== answerGen || paneId !== activePaneId) return; // superseded / navigated away
+    if (!live || promptSig(live) !== expectedSig) {
+      // The prompt changed under the stale buttons — do NOT send into a different
+      // prompt. Refresh the panel to whatever is actually live and let the user retap.
+      btn.classList.remove('ask-opt-sent');
+      endAnswerCooldown();
+      renderPromptPanel(live);
+      showToast('Prompt changed', 'The prompt updated before your tap was sent — try again.');
+      return;
+    }
     await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { press: String(to) });
     if (myGen !== answerGen) return; // a newer tap already superseded this — don't touch shared state
     // The digit already submitted this prompt, but the panel keeps showing it (with
