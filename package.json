@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.web.json && tsc -p tsconfig.sw.json",
-    "test": "node --test 'server/test/*.test.ts'",
+    "test": "node --test 'server/test/*.test.ts' 'web/test/*.test.ts'",
     "start": "node server/main.ts"
   },
   "dependencies": {
