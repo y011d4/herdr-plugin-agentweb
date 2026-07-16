@@ -97,6 +97,8 @@ describe('server parsePrompt matches the client copy (verify gating)', () => {
     ['active menu', ['● Pick', '❯ 1. Red', '  2. Green', H].join('\n')],
     ['unhighlighted prose', ['1. step one', '2. step two', 'done'].join('\n')],
     ['stale menu above boxed text prompt', ['❯ 1. Yes', '  2. No', '', ' ──────── ', ' ☐ Confirm', '   Type a reason:', H].join('\n')],
+    ['menu with an indented ✓ description on its last option', ['● Pick one', '❯ 1. Keep', '  2. Replace', '     ✓ recommended', H].join('\n')],
+    ['stale menu above a hint-less boxed prompt', ['❯ 1. Yes', '  2. No', '', ' ────── ', ' ☐ Provide input', '   Enter a value:'].join('\n')],
     ['no menu', ['just some output', 'nothing to answer'].join('\n')],
   ];
   for (const [name, screen] of screens) {
