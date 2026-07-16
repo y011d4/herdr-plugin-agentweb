@@ -6,6 +6,7 @@ import { verifyToken, extractToken } from './auth.ts';
 import { toClientState } from './state.ts';
 import { buildAgentStatusMessage } from './notify.ts';
 import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail, projectsRootForPid } from './transcript.ts';
+import { stripAnsi, promptIdentity } from './prompt-identity.ts';
 import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
@@ -351,7 +352,25 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
             jsonError(res, 400, 'invalid_params', 'press must be a single digit');
             return;
           }
+          if (body.expect_prompt !== undefined && typeof body.expect_prompt !== 'string') {
+            jsonError(res, 400, 'invalid_params', 'expect_prompt must be a string');
+            return;
+          }
           try {
+            // Verify-and-send: read the visible screen and confirm its prompt-region
+            // identity still matches what the client last rendered, THEN press — both
+            // over the same socket back-to-back. This closes the client read->POST
+            // gap where the pane could advance to a different prompt in between and
+            // the digit land on the wrong one. On a mismatch the client refreshes.
+            if (typeof body.expect_prompt === 'string') {
+              const read = await herdrClient.rpc('pane.read', { pane_id: paneId, source: 'visible', format: 'ansi' }) as Record<string, unknown>;
+              const inner = (read.read ?? read) as Record<string, unknown>;
+              const liveId = promptIdentity(stripAnsi((inner.text ?? '') as string));
+              if (liveId !== body.expect_prompt) {
+                jsonError(res, 409, 'prompt_changed', 'the prompt changed before the answer was sent');
+                return;
+              }
+            }
             await herdrClient.rpc('pane.send_text', { pane_id: paneId, text: body.press });
             jsonOk(res, { ok: true });
           } catch (err) {

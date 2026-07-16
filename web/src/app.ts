@@ -18,7 +18,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v66';
+const BUILD = 'v67';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -168,7 +168,10 @@ async function apiPost(path: string, body: Record<string, unknown> = {}): Promis
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({})) as Record<string, unknown>;
     const err = data?.error as Record<string, unknown> | undefined;
-    throw new Error((err?.message as string | undefined) ?? `HTTP ${resp.status}`);
+    const e = new Error((err?.message as string | undefined) ?? `HTTP ${resp.status}`) as Error & { code?: string; status?: number };
+    e.code = err?.code as string | undefined; // e.g. 'prompt_changed' — lets callers branch on the reason
+    e.status = resp.status;
+    throw e;
   }
   return resp.json();
 }
@@ -1637,18 +1640,18 @@ async function readPromptScreen(paneId: string): Promise<{ parsed: ParsedPrompt 
 
 // Answer by selecting the tapped option. Pressing an option's digit in a numbered
 // menu selects AND submits it in one atomic keystroke — verified live: sending "3"
-// to an AskUserQuestion answered "cherry" with no Enter and no cursor movement. So
-// once we commit, this just delivers that digit; there is no follow-up read, Enter,
-// or arrow step, and the ❯ cursor's position (which may have moved on the desktop) is
-// irrelevant — selection is by number. The digit goes as a raw keystroke via
-// send_text (`press`): a digit through send_input is bracketed-paste-wrapped and
-// ignored, and keys:[digit] is dropped by herdr (both verified live).
+// to an AskUserQuestion answered "cherry" with no Enter and no cursor movement. The
+// digit goes as a raw keystroke via send_text (`press`): a digit through send_input
+// is bracketed-paste-wrapped and ignored, and keys:[digit] is dropped by herdr (both
+// verified live). Selection is by number, so the ❯ cursor's position is irrelevant.
 //
 // The buttons are only re-rendered on the ~1.2s poll, so the prompt on screen may
-// have changed (answered on the desktop, timed out) since they were drawn. Re-read
-// and confirm the SAME prompt is still live immediately before sending, so a tap on a
-// stale button can't fire its digit into a different prompt. An in-flight guard plus
-// a per-answer generation token keep double-taps and stale async work off the guard.
+// have changed (answered on the desktop, timed out) since they were drawn. We send
+// the buttons' prompt identity as `expect_prompt`; the bridge re-reads the screen and
+// presses the digit ONLY if it still matches — check and send back-to-back on the
+// server, so nothing can slip in between (a client-side check would leave a round-trip
+// gap). A mismatch returns 409 and we refresh. An in-flight guard and a per-answer
+// generation token keep double-taps and stale async work off the shared guard.
 async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   if (!activePaneId || promptAnswerInFlight) return;
   const to = parseInt(target, 10);
@@ -1666,22 +1669,7 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   panel?.classList.add('chat-prompt-sending'); // disable the buttons while the answer settles
   btn.classList.add('ask-opt-sent');
   try {
-    // Verify the displayed prompt is still the live one before firing the digit: its
-    // on-screen region identity must still match the buttons' (captured at tap). This
-    // catches a prompt that advanced to a different one — even one with the same parsed
-    // question+options — since the region hash includes the literal on-screen text.
-    const live = await readPromptScreen(paneId);
-    if (myGen !== answerGen || paneId !== activePaneId) return; // superseded / navigated away
-    if (!live || live.id !== expectedId) {
-      // The prompt changed under the stale buttons — do NOT send into a different
-      // prompt. Refresh the panel to whatever is actually live and let the user retap.
-      btn.classList.remove('ask-opt-sent');
-      endAnswerCooldown();
-      renderPromptPanel(live?.parsed ?? null, live?.id ?? '');
-      showToast('Prompt changed', 'The prompt updated before your tap was sent — try again.');
-      return;
-    }
-    await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { press: String(to) });
+    await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { press: String(to), expect_prompt: expectedId });
     if (myGen !== answerGen) return; // a newer tap already superseded this — don't touch shared state
     // The digit already submitted this prompt, but the panel keeps showing it (with
     // tappable buttons) until the pane's status refreshes. Hold the guard through
@@ -1693,9 +1681,17 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
     answerCooldownTimer = setTimeout(() => { if (myGen === answerGen) endAnswerCooldown(); }, 1500);
   } catch (err) {
     if (myGen !== answerGen) return; // superseded — the newer answer owns the guard now
-    showToast('Send failed', (err as Error).message);
     btn.classList.remove('ask-opt-sent');
     endAnswerCooldown();
+    if ((err as { code?: string }).code === 'prompt_changed') {
+      // The prompt advanced before the digit landed — refresh to the live prompt and
+      // let the user retap; never send into a different prompt.
+      const live = await readPromptScreen(paneId);
+      if (myGen === answerGen && paneId === activePaneId) renderPromptPanel(live?.parsed ?? null, live?.id ?? '');
+      showToast('Prompt changed', 'The prompt updated before your tap was sent — try again.');
+    } else {
+      showToast('Send failed', (err as Error).message);
+    }
   }
 }
 
