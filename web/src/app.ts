@@ -16,6 +16,9 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 
 // ── App version ──────────────────────────────────────────────────────────────
 const APP_VERSION = '0.1.0';
+// Bumped each deploy and shown in the prompt panel + settings, so a stale cached
+// bundle is immediately visible (the SW cache version tracks this).
+const BUILD = 'v55';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -1466,13 +1469,18 @@ function parsePrompt(text: string): ParsedPrompt | null {
   commit();
   const best = blocks.length ? blocks[blocks.length - 1] : null; // bottom-most block
   if (!best) return null;
-  // Question: nearest non-empty line above the first option that isn't the
-  // navigation hint or a bare checkbox/title glyph.
-  let question: string | null = null;
-  for (let i = best.first - 1; i >= 0 && i >= best.first - 6; i--) {
-    const t = lines[i].trim().replace(/^[☐☑✓•·]+\s*/, '');
-    if (t.length > 3 && !/^(Enter to select|Press|↑|↓|Esc|Tab)/i.test(t)) { question = t; break; }
+  // Question: the contiguous non-empty lines just above the first option (a long
+  // prompt wraps across several lines), stopping at a blank gap, the ☐ title/
+  // category line, or the navigation hint.
+  const qLines: string[] = [];
+  for (let i = best.first - 1; i >= 0 && i >= best.first - 12; i--) {
+    const t = lines[i].trim();
+    if (!t) { if (qLines.length) break; else continue; }
+    if (/^[☐☑✓]/.test(t)) break; // category/title line — not the question itself
+    if (/^(Enter to select|Press|Type something|Chat about this|↑|↓|Esc|Tab)/i.test(t)) continue;
+    qLines.unshift(t.replace(/^[•·]+\s*/, ''));
   }
+  const question = qLines.length ? qLines.join(' ') : null;
   return { question, options: best.options, selected: best.selected };
 }
 
@@ -1493,7 +1501,7 @@ function updatePromptPanel(): void {
   if (promptPanelKind !== 'blocked') {
     panel.style.display = '';
     panel.innerHTML =
-      '<div class="chat-prompt-head">&#9203; Waiting for your input</div>' +
+      `<div class="chat-prompt-head">&#9203; Waiting for your input <span class="chat-prompt-build">${BUILD}</span></div>` +
       '<div class="chat-prompt-q" id="chat-prompt-q"></div>' +
       '<div class="chat-prompt-options" id="chat-prompt-options"></div>' +
       // starts open (no buttons yet, so the terminal is the only UI);
