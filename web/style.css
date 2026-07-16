@@ -585,8 +585,20 @@ a {
   flex-direction: column;
   gap: 8px;
   align-items: flex-end;
-  pointer-events: none;
+  /* auto (not none) so the overflowing stack can be touch-scrolled; with zero
+     toasts the box collapses to 0 height and blocks nothing behind it. */
+  pointer-events: auto;
   width: min(calc(100vw - 24px), 340px);
+  /* cap the stack and scroll older toasts into reach instead of dropping them.
+     leave room for the topbar (56px), safe insets, and the bottom input bar. */
+  max-height: calc(100vh - var(--safe-top) - var(--safe-bottom) - 140px);
+  overflow-y: auto;
+  /* stop a mid-swipe toast (translateX) from spawning a horizontal scrollbar. With
+     overflow-y:auto the x-axis cannot be `visible`/`clip` (the spec forces them to
+     auto/hidden), so `hidden` is the honest value; the swipe-off just clips at the
+     container's right edge (~12px from the screen edge — visually negligible). */
+  overflow-x: hidden;
+  scrollbar-width: thin;
 }
 
 .toast {
