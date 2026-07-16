@@ -585,8 +585,19 @@ function renderAgentsDashboard(): void {
     const { workspaceId, label: wsLabel, tabs = [] } = ws;
     // Carry each pane's tab label so cards can show which tab they belong to —
     // pane.title is usually null, so the tab name is the only distinguishing
-    // label when a workspace runs several agents.
-    const allPanes = tabs.flatMap((t) => (t.panes ?? []).map((pane) => ({ pane, tabLabel: t.label })));
+    // label when a workspace runs several agents. When one tab runs several
+    // agent panes (split panes), also carry a 1-based index among that tab's
+    // agent panes so those otherwise-identical cards stay distinguishable.
+    const allPanes = tabs.flatMap((t) => {
+      const panes = t.panes ?? [];
+      const tabAgentPanes = panes.filter((p) => p.agent);
+      return panes.map((pane) => ({
+        pane,
+        tabLabel: t.label,
+        tabAgentIndex: tabAgentPanes.indexOf(pane) + 1,
+        tabAgentCount: tabAgentPanes.length,
+      }));
+    });
     const agentPanes = allPanes
       .filter((x) => x.pane.agent)
       .sort((a, b) => statusOrder(a.pane.agent!.status) - statusOrder(b.pane.agent!.status));
@@ -601,13 +612,15 @@ function renderAgentsDashboard(): void {
       html += `<div class="inactive-panes-count">${inactivePanes.length} pane${inactivePanes.length !== 1 ? 's' : ''} (no active agents)</div>`;
     }
 
-    for (const { pane, tabLabel } of agentPanes) {
+    for (const { pane, tabLabel, tabAgentIndex, tabAgentCount } of agentPanes) {
       const { paneId, agent, title } = pane;
       const { displayName, name, status, customStatus, message, sinceUnixMs } = agent!;
       const agentKind = displayName || name || 'agent';
       // Tab name is the human-meaningful identifier within a workspace; fall
-      // back to the agent kind if a tab somehow has no label.
-      const cardLabel = tabLabel || agentKind;
+      // back to the agent kind if a tab somehow has no label. When the tab runs
+      // multiple agent panes, suffix a per-tab index so the cards differ.
+      const baseLabel = tabLabel || agentKind;
+      const cardLabel = tabAgentCount > 1 ? `${baseLabel} #${tabAgentIndex}` : baseLabel;
       const statusClass = status || 'unknown';
       const meta = customStatus || message || '';
       const relTime = relativeTime(sinceUnixMs);
