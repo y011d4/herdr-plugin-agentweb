@@ -120,9 +120,18 @@ function serveStatic(webRoot: string, urlPath: string, res: ServerResponse): voi
     return;
   }
   const mime = MIME[extname(abs)] || 'application/octet-stream';
+  const headers: Record<string, string> = { 'Content-Type': mime };
+  // Always revalidate the service worker and the HTML shell so a new build is
+  // detected without a manual cache clear (the SW versions the other assets and
+  // re-caches them on activate). Without this a stale sw.js can pin an old bundle
+  // across reloads, especially in an installed PWA.
+  const base = abs.slice(abs.lastIndexOf('/') + 1);
+  if (base === 'sw.js' || extname(abs) === '.html') {
+    headers['Cache-Control'] = 'no-cache';
+  }
   const stream = createReadStream(abs);
   stream.on('error', () => { res.destroy(); }); // e.g. file removed after stat
-  res.writeHead(200, { 'Content-Type': mime });
+  res.writeHead(200, headers);
   stream.pipe(res);
 }
 
