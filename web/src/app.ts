@@ -11,7 +11,7 @@
 
 import { ansiToHtml } from './ansi.ts';
 import { renderItems } from './transcript.ts';
-import type { TimelineItem, AskQuestion } from './transcript.ts';
+import type { TimelineItem } from './transcript.ts';
 import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 
 // ── App version ──────────────────────────────────────────────────────────────
@@ -57,7 +57,7 @@ let chatProbeActive = 0; // reqId of the availability probe in flight (0 = none)
 // Pending-prompt panel: when a claude pane is blocked (waiting for input), the
 // chat surfaces an answer UI — tappable options for a pending AskUserQuestion,
 // or the live terminal screen for any other prompt (permission, plan, y/n).
-let pendingAsk: AskQuestion[] | null = null;
+let promptSelectedNum = 0; // 1-based index of the menu option the TUI currently highlights (❯)
 let promptPanelKind: 'none' | 'blocked' = 'none';
 let promptScreenTimer: ReturnType<typeof setInterval> | null = null;
 let promptOptionsSig = ''; // last-rendered answer options, to avoid re-render churn
@@ -693,7 +693,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   chatSessionId = null;
   chatCursor = 0;
   chatProbeActive = 0; // a prior pane's in-flight probe must not block this pane's probe
-  pendingAsk = null;
+  promptSelectedNum = 0;
   promptPanelKind = 'none';
   promptOptionsSig = '';
   stopPromptScreenPoll();
@@ -890,17 +890,6 @@ function renderChatReset(items: TimelineItem[], preserveScroll = false): void {
   chat.scrollTop = preserveScroll
     ? (prevFromBottom < 40 ? chat.scrollHeight : prevTop)
     : chat.scrollHeight;
-  pendingAsk = derivePendingAsk(items);
-  updatePromptPanel();
-}
-
-// A pending AskUserQuestion is the tail item being an AskUserQuestion tool_use
-// with no following tool_result (any answer would appear as a later item).
-function derivePendingAsk(items: TimelineItem[]): AskQuestion[] | null {
-  const last = items[items.length - 1];
-  return last && last.kind === 'tool_use' && last.name === 'AskUserQuestion' && last.ask && last.ask.length
-    ? last.ask
-    : null;
 }
 
 function appendChatItems(items: TimelineItem[]): void {
@@ -912,8 +901,6 @@ function appendChatItems(items: TimelineItem[]): void {
   chat.querySelector('.chat-empty')?.remove();
   chat.insertAdjacentHTML('beforeend', renderItems(items));
   if (atBottom) chat.scrollTop = chat.scrollHeight;
-  pendingAsk = derivePendingAsk(items); // the appended batch's last item is the new tail
-  updatePromptPanel();
 }
 
 function onTranscriptItems(msg: WsTranscriptItemsMessage): void {
@@ -1430,7 +1417,7 @@ function queuePaneEcho(): void {
 
 const PROMPT_SCREEN_INTERVAL_MS = 1200;
 
-interface PromptOption { send: string; label: string; desc?: string }
+interface PromptOption { send: string; label: string }
 
 // Strip ANSI escapes to plain text for parsing the on-screen prompt.
 function stripAnsi(s: string): string {
@@ -1441,41 +1428,57 @@ function stripAnsi(s: string): string {
 // prompt (permission / plan / confirm dialogs), which carry no structured
 // transcript data. Requires ≥2 sequentially-numbered options (1,2,…) so ordinary
 // output containing "1." isn't taken for a menu; box-drawing chars are stripped.
-function parsePromptOptions(text: string): PromptOption[] | null {
-  const lines = text.split('\n').map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼]/g, ' ').replace(/\s+$/, ''));
-  // Bottom-most sequential 1,2,3… block (the active prompt is at the foot of the
-  // screen). Non-option lines — each option's OWN description, dividers, blanks —
-  // sit between options in Claude Code's menus, so they're skipped without ending
-  // the block; only a long run of unrelated lines (gap > 4) ends it, and a fresh
-  // "1." restarts it. (Verified against a real captured AskUserQuestion screen.)
-  let best: PromptOption[] | null = null;
-  let cur: PromptOption[] = [];
-  let gap = 0;
-  const flush = (): void => { if (cur.length >= 2) best = cur; cur = []; gap = 0; };
-  for (const line of lines) {
-    const m = line.match(/^\s*[❯➤»▶>*]?\s*(\d+)[.)]\s+(\S.*)$/);
-    if (!m) { if (cur.length && ++gap > 4) flush(); continue; }
-    gap = 0;
-    const num = Number(m[1]);
-    if (num === cur.length + 1) cur.push({ send: m[1], label: m[2].trim() });
-    else { flush(); if (num === 1) cur = [{ send: '1', label: m[2].trim() }]; }
-  }
-  flush();
-  return best;
-}
+interface ParsedPrompt { question: string | null; options: PromptOption[]; selected: number }
 
-// Answer options to show as buttons: prefer AskUserQuestion structured data (nice
-// labels + descriptions), else parse the live prompt screen.
-function promptOptions(screenPlain: string): PromptOption[] | null {
-  if (pendingAsk && pendingAsk.length === 1) {
-    return pendingAsk[0].options.map((o, i) => ({ send: String(i + 1), label: o.label, desc: o.description || undefined }));
+// Parse a numbered selection menu out of a live TUI prompt: the question text,
+// the options (bottom-most sequential 1,2,3… block), and which option is
+// currently highlighted (the ❯ marker, 1-based). Non-option lines — each option's
+// own description, dividers, blanks — sit between options in Claude Code's menus,
+// so they're skipped without ending the block; a long run of unrelated lines
+// (gap > 4) ends it and a fresh "1." restarts it. Requires >= 2 options so
+// ordinary numbered output isn't mistaken for a menu. (Verified against a real
+// captured AskUserQuestion screen.)
+function parsePrompt(text: string): ParsedPrompt | null {
+  const lines = text.split('\n').map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼]/g, ' ').replace(/\s+$/, ''));
+  const blocks: Array<{ options: PromptOption[]; selected: number; first: number }> = [];
+  let cur: PromptOption[] = [];
+  let sel = 0;
+  let first = -1;
+  let gap = 0;
+  const commit = (): void => {
+    if (cur.length >= 2) blocks.push({ options: cur, selected: sel || 1, first });
+    cur = []; sel = 0; first = -1; gap = 0;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^\s*([❯➤»▶>])?\s*(\d+)[.)]\s+(\S.*)$/);
+    if (!m) { if (cur.length && ++gap > 4) commit(); continue; }
+    gap = 0;
+    const num = Number(m[2]);
+    if (num === cur.length + 1) {
+      if (first < 0) first = i;
+      if (m[1]) sel = num;
+      cur.push({ send: m[2], label: m[3].trim() });
+    } else {
+      commit();
+      if (num === 1) { cur = [{ send: '1', label: m[3].trim() }]; first = i; if (m[1]) sel = 1; }
+    }
   }
-  return parsePromptOptions(screenPlain);
+  commit();
+  const best = blocks.length ? blocks[blocks.length - 1] : null; // bottom-most block
+  if (!best) return null;
+  // Question: nearest non-empty line above the first option that isn't the
+  // navigation hint or a bare checkbox/title glyph.
+  let question: string | null = null;
+  for (let i = best.first - 1; i >= 0 && i >= best.first - 6; i--) {
+    const t = lines[i].trim().replace(/^[☐☑✓•·]+\s*/, '');
+    if (t.length > 3 && !/^(Enter to select|Press|↑|↓|Esc|Tab)/i.test(t)) { question = t; break; }
+  }
+  return { question, options: best.options, selected: best.selected };
 }
 
 // When a claude pane is blocked (waiting for input) and chat is active, show an
-// answer panel above the input bar: tappable option buttons (from AskUserQuestion
-// or parsed from the live prompt), with the raw terminal screen as collapsible
+// answer panel above the input bar: the question and tappable option buttons
+// parsed from the live prompt, with the raw terminal screen as collapsible
 // context. The composer and quick-keys remain available.
 function updatePromptPanel(): void {
   const panel = document.getElementById('chat-prompt');
@@ -1491,9 +1494,10 @@ function updatePromptPanel(): void {
     panel.style.display = '';
     panel.innerHTML =
       '<div class="chat-prompt-head">&#9203; Waiting for your input</div>' +
+      '<div class="chat-prompt-q" id="chat-prompt-q"></div>' +
       '<div class="chat-prompt-options" id="chat-prompt-options"></div>' +
-      // starts open (no buttons yet, so the terminal is the only UI); renderPrompt-
-      // Options collapses it once options are parsed.
+      // starts open (no buttons yet, so the terminal is the only UI);
+      // renderPromptPanel collapses it once a menu is parsed.
       '<details class="chat-prompt-term" id="chat-prompt-term" open><summary>Terminal</summary>' +
       '<div class="chat-prompt-screen" id="chat-prompt-screen"><span class="loading-spinner"></span></div></details>';
     promptPanelKind = 'blocked';
@@ -1502,22 +1506,24 @@ function updatePromptPanel(): void {
   startPromptScreenPoll();
 }
 
-// Render option buttons only when they change, so a poll tick can't wipe a button
-// the moment the user taps it. Collapse the raw terminal when buttons exist.
-function renderPromptOptions(options: PromptOption[] | null): void {
-  const el = document.getElementById('chat-prompt-options');
-  if (!el) return;
-  const sig = options ? options.map((o) => `${o.send}:${o.label}`).join('|') : '';
-  if (sig === promptOptionsSig) return; // unchanged — don't touch buttons or the user's terminal toggle
+// Render the question + option buttons, and remember the highlighted option so a
+// tap can navigate to its target. Rebuild only when the parsed content changes,
+// so a poll tick can't wipe a button the instant the user taps it.
+function renderPromptPanel(parsed: ParsedPrompt | null): void {
+  const optsEl = document.getElementById('chat-prompt-options');
+  if (!optsEl) return;
+  promptSelectedNum = parsed?.selected ?? 0; // current ❯ option, for arrow-nav on tap
+  const sig = parsed ? `${parsed.question ?? ''}||${parsed.options.map((o) => `${o.send}:${o.label}`).join('|')}` : '';
+  if (sig === promptOptionsSig) return; // unchanged — don't rebuild (keeps a tap from being wiped)
   promptOptionsSig = sig;
-  el.innerHTML = (options ?? []).map((o) =>
+  const qEl = document.getElementById('chat-prompt-q');
+  if (qEl) qEl.textContent = parsed?.question ?? '';
+  optsEl.innerHTML = (parsed?.options ?? []).map((o) =>
     `<button class="ask-opt" type="button" data-ask-send="${escHtml(o.send)}"><span class="ask-opt-num">${escHtml(o.send)}</span>` +
-    `<span class="ask-opt-label">${escHtml(o.label)}</span>${o.desc ? `<span class="ask-opt-desc">${escHtml(o.desc)}</span>` : ''}</button>`,
+    `<span class="ask-opt-label">${escHtml(o.label)}</span></button>`,
   ).join('');
-  // Collapse the terminal when options appear, open it when there are none — only
-  // on change, so a manual toggle between polls isn't reverted.
   const term = document.getElementById('chat-prompt-term') as HTMLDetailsElement | null;
-  if (term) term.open = !options;
+  if (term) term.open = !parsed; // menu parsed → collapse terminal; none → show it
 }
 
 function startPromptScreenPoll(): void {
@@ -1535,7 +1541,7 @@ function startPromptScreenPoll(): void {
       // session; the in-flight guard means no concurrent tick supersedes this one.
       if (reqId !== promptPollSeq || paneViewMode !== 'chat' || paneId !== activePaneId) return;
       const ansi = (data.ansi ?? data.text ?? '') as string;
-      renderPromptOptions(promptOptions(stripAnsi(ansi)));
+      renderPromptPanel(parsePrompt(stripAnsi(ansi)));
       const screen = document.getElementById('chat-prompt-screen');
       if (screen) screen.innerHTML = ansiToHtml(ansi);
     } catch { /* transient — keep the last screen */ } finally {
@@ -1552,15 +1558,24 @@ function stopPromptScreenPoll(): void {
   promptPollActive = 0; // let a fresh poll start after re-entering (the old one won't clear this)
 }
 
-// Send a tapped option's key (the menu number) to the pane — the same input as
-// the 1/2/3 quick-keys, so it's proven; the live screen reflects the result.
-async function sendAskAnswer(send: string, btn: HTMLElement): Promise<void> {
+// Answer by selecting the tapped option. These menus navigate with ↑/↓ and
+// confirm with Enter (number keys do NOT select — verified live), so move from
+// the currently-highlighted option to the target with arrow keys, then Enter.
+async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   if (!activePaneId) return;
+  const to = parseInt(target, 10);
+  if (!Number.isInteger(to)) return;
+  const from = promptSelectedNum || 1;
   btn.classList.add('ask-opt-sent');
-  setTimeout(() => btn.classList.remove('ask-opt-sent'), 1000);
+  setTimeout(() => btn.classList.remove('ask-opt-sent'), 1500);
+  const delta = to - from;
+  const keys = delta === 0 ? [] : Array(Math.abs(delta)).fill(delta > 0 ? 'down' : 'up');
+  keys.push('enter');
   try {
-    await apiPost(`/api/panes/${encodeURIComponent(activePaneId)}/input`, { text: send });
+    await apiPost(`/api/panes/${encodeURIComponent(activePaneId)}/input`, { keys });
+    promptSelectedNum = to; // reflect the move immediately so a fast re-tap is correct
   } catch (err) {
+    btn.classList.remove('ask-opt-sent');
     showToast('Send failed', (err as Error).message);
   }
 }
