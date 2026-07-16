@@ -18,7 +18,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v68';
+const BUILD = 'v69';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -1448,14 +1448,15 @@ interface ParsedPrompt { question: string | null; options: PromptOption[]; selec
 function parsePrompt(text: string): ParsedPrompt | null {
   const raw = text.split('\n'); // kept un-stripped so the menu box border (│) is visible
   const lines = raw.map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼]/g, ' ').replace(/\s+$/, ''));
-  const blocks: Array<{ options: PromptOption[]; selected: number; first: number }> = [];
+  const blocks: Array<{ options: PromptOption[]; selected: number; first: number; last: number }> = [];
   let cur: PromptOption[] = [];
   let sel = 0;
   let first = -1;
+  let last = -1;
   let gap = 0;
   const commit = (): void => {
-    if (cur.length >= 2) blocks.push({ options: cur, selected: sel, first });
-    cur = []; sel = 0; first = -1; gap = 0;
+    if (cur.length >= 2) blocks.push({ options: cur, selected: sel, first, last });
+    cur = []; sel = 0; first = -1; last = -1; gap = 0;
   };
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^\s*([❯➤▶►])?\s*(\d+)[.)]\s+(\S.*)$/);
@@ -1464,22 +1465,24 @@ function parsePrompt(text: string): ParsedPrompt | null {
     const num = Number(m[2]);
     if (num === cur.length + 1) {
       if (first < 0) first = i;
+      last = i;
       if (m[1]) sel = num;
       cur.push({ send: m[2], label: m[3].trim() });
     } else {
       commit();
-      if (num === 1) { cur = [{ send: '1', label: m[3].trim() }]; first = i; if (m[1]) sel = 1; }
+      if (num === 1) { cur = [{ send: '1', label: m[3].trim() }]; first = i; last = i; if (m[1]) sel = 1; }
     }
   }
   commit();
   const best = blocks.length ? blocks[blocks.length - 1] : null; // bottom-most block
   if (!best) return null;
   // Guard against ordinary numbered prose: a real interactive menu is either
-  // highlighted (❯, best.selected > 0) or carries a navigation hint below it.
-  // Without either signal, treat the numbered lines as plain terminal output —
-  // otherwise a blocked screen listing "1. …" then "2. …" would collapse behind
-  // bogus answer buttons.
-  const navHint = lines.some((l, i) => i >= best.first &&
+  // highlighted (❯, best.selected > 0) or carries a navigation hint DIRECTLY below
+  // its options. The hint must sit within a few lines of the last option (its own
+  // description + a blank/rule) — a hint anywhere below could belong to a different
+  // prompt beneath unrelated numbered prose, which must NOT turn that prose into
+  // answer buttons. Without either signal, it's plain terminal output.
+  const navHint = lines.some((l, i) => i > best.last && i <= best.last + 4 &&
     /(Enter to select|to navigate|to select|Esc to (cancel|close)|↑\/↓|↑ ↓|Tab to|Space to)/i.test(l));
   if (best.selected === 0 && !navHint) return null;
   // Question: the contiguous lines just above the first option (a long prompt wraps
