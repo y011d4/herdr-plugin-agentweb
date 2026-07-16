@@ -1485,7 +1485,9 @@ function updatePromptPanel(): void {
     panel.innerHTML =
       '<div class="chat-prompt-head">&#9203; Waiting for your input</div>' +
       '<div class="chat-prompt-options" id="chat-prompt-options"></div>' +
-      '<details class="chat-prompt-term" id="chat-prompt-term"><summary>Terminal</summary>' +
+      // starts open (no buttons yet, so the terminal is the only UI); renderPrompt-
+      // Options collapses it once options are parsed.
+      '<details class="chat-prompt-term" id="chat-prompt-term" open><summary>Terminal</summary>' +
       '<div class="chat-prompt-screen" id="chat-prompt-screen"><span class="loading-spinner"></span></div></details>';
     promptPanelKind = 'blocked';
     promptOptionsSig = '';
