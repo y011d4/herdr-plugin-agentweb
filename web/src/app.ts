@@ -1437,17 +1437,24 @@ function stripAnsi(s: string): string {
 // output containing "1." isn't taken for a menu; box-drawing chars are stripped.
 function parsePromptOptions(text: string): PromptOption[] | null {
   const lines = text.split('\n').map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼]/g, ' ').replace(/\s+$/, ''));
-  let opts: PromptOption[] = [];
+  // Keep the BOTTOM-most complete block: the active prompt is at the foot of the
+  // screen, so numbered prose above it must not win.
+  let best: PromptOption[] | null = null;
+  let cur: PromptOption[] = [];
+  const flush = (): void => { if (cur.length >= 2) best = cur; cur = []; };
   for (const line of lines) {
     const m = line.match(/^\s*[❯➤»▶>*]?\s*(\d+)[.)]\s+(\S.*)$/);
-    if (m && Number(m[1]) === opts.length + 1) {
-      opts.push({ send: m[1], label: m[2].trim() });
-    } else if (opts.length && line.trim()) {
-      if (opts.length >= 2) break; // a full menu block ended
-      opts = []; // a stray "1." that wasn't a menu — reset and keep scanning
+    if (m && Number(m[1]) === cur.length + 1) {
+      cur.push({ send: m[1], label: m[2].trim() });
+    } else if (m && m[1] === '1') {
+      flush(); // a new block starting at 1
+      cur = [{ send: '1', label: m[2].trim() }];
+    } else if (line.trim()) {
+      flush(); // a non-option, non-blank line ends the current block
     }
   }
-  return opts.length >= 2 ? opts : null;
+  flush();
+  return best;
 }
 
 // Answer options to show as buttons: prefer AskUserQuestion structured data (nice
@@ -1492,15 +1499,16 @@ function renderPromptOptions(options: PromptOption[] | null): void {
   const el = document.getElementById('chat-prompt-options');
   if (!el) return;
   const sig = options ? options.map((o) => `${o.send}:${o.label}`).join('|') : '';
-  if (sig !== promptOptionsSig) {
-    promptOptionsSig = sig;
-    el.innerHTML = (options ?? []).map((o) =>
-      `<button class="ask-opt" type="button" data-ask-send="${escHtml(o.send)}"><span class="ask-opt-num">${escHtml(o.send)}</span>` +
-      `<span class="ask-opt-label">${escHtml(o.label)}</span>${o.desc ? `<span class="ask-opt-desc">${escHtml(o.desc)}</span>` : ''}</button>`,
-    ).join('');
-  }
+  if (sig === promptOptionsSig) return; // unchanged — don't touch buttons or the user's terminal toggle
+  promptOptionsSig = sig;
+  el.innerHTML = (options ?? []).map((o) =>
+    `<button class="ask-opt" type="button" data-ask-send="${escHtml(o.send)}"><span class="ask-opt-num">${escHtml(o.send)}</span>` +
+    `<span class="ask-opt-label">${escHtml(o.label)}</span>${o.desc ? `<span class="ask-opt-desc">${escHtml(o.desc)}</span>` : ''}</button>`,
+  ).join('');
+  // Collapse the terminal when options appear, open it when there are none — only
+  // on change, so a manual toggle between polls isn't reverted.
   const term = document.getElementById('chat-prompt-term') as HTMLDetailsElement | null;
-  if (term) term.open = !options; // buttons → collapse terminal; no options → show it
+  if (term) term.open = !options;
 }
 
 function startPromptScreenPoll(): void {
