@@ -18,7 +18,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v55';
+const BUILD = 'v56';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -66,6 +66,7 @@ let promptScreenTimer: ReturnType<typeof setInterval> | null = null;
 let promptOptionsSig = ''; // last-rendered answer options, to avoid re-render churn
 let promptPollSeq = 0; // monotonic request id; bumped on stop to invalidate an in-flight poll
 let promptPollActive = 0; // reqId of the poll currently in flight (0 = none) — prevents overlap
+let promptAnswerInFlight = false; // true while a tapped answer's key sequence is being sent — blocks re-taps
 
 /** source toggle: 'visible' | 'recent' */
 
@@ -1442,18 +1443,19 @@ interface ParsedPrompt { question: string | null; options: PromptOption[]; selec
 // ordinary numbered output isn't mistaken for a menu. (Verified against a real
 // captured AskUserQuestion screen.)
 function parsePrompt(text: string): ParsedPrompt | null {
-  const lines = text.split('\n').map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼]/g, ' ').replace(/\s+$/, ''));
+  const raw = text.split('\n'); // kept un-stripped so the menu box border (│) is visible
+  const lines = raw.map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼]/g, ' ').replace(/\s+$/, ''));
   const blocks: Array<{ options: PromptOption[]; selected: number; first: number }> = [];
   let cur: PromptOption[] = [];
   let sel = 0;
   let first = -1;
   let gap = 0;
   const commit = (): void => {
-    if (cur.length >= 2) blocks.push({ options: cur, selected: sel || 1, first });
+    if (cur.length >= 2) blocks.push({ options: cur, selected: sel, first });
     cur = []; sel = 0; first = -1; gap = 0;
   };
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/^\s*([❯➤»▶>])?\s*(\d+)[.)]\s+(\S.*)$/);
+    const m = lines[i].match(/^\s*([❯➤▶►])?\s*(\d+)[.)]\s+(\S.*)$/);
     if (!m) { if (cur.length && ++gap > 4) commit(); continue; }
     gap = 0;
     const num = Number(m[2]);
@@ -1469,18 +1471,34 @@ function parsePrompt(text: string): ParsedPrompt | null {
   commit();
   const best = blocks.length ? blocks[blocks.length - 1] : null; // bottom-most block
   if (!best) return null;
-  // Question: the contiguous non-empty lines just above the first option (a long
-  // prompt wraps across several lines), stopping at a blank gap, the ☐ title/
-  // category line, or the navigation hint.
+  // Guard against ordinary numbered prose: a real interactive menu is either
+  // highlighted (❯, best.selected > 0) or carries a navigation hint below it.
+  // Without either signal, treat the numbered lines as plain terminal output —
+  // otherwise a blocked screen listing "1. …" then "2. …" would collapse behind
+  // bogus answer buttons.
+  const navHint = lines.some((l, i) => i >= best.first &&
+    /(Enter to select|to navigate|to select|Esc to (cancel|close)|↑\/↓|↑ ↓|Tab to|Space to)/i.test(l));
+  if (best.selected === 0 && !navHint) return null;
+  // Question: the contiguous lines just above the first option (a long prompt wraps
+  // across several lines). Claude renders the prompt inside a box drawn with a
+  // horizontal ─ rule on top and a ☐ category line, with a blank padding line
+  // between the question and the options — so a naive "stop at the first blank"
+  // loses the question. Walk up, skipping padding blanks and collecting text, until
+  // the box's top edge (a ─/━ rule or the ☐/☑ category line). Only accept the text
+  // if that edge was actually reached: unrelated terminal output above a bare menu
+  // has no such boundary, so it is left out instead of shown as a bogus question.
+  const isRule = (i: number): boolean => /[─━]{4,}/.test(raw[i] ?? '');
   const qLines: string[] = [];
+  let boxed = false;
   for (let i = best.first - 1; i >= 0 && i >= best.first - 12; i--) {
     const t = lines[i].trim();
-    if (!t) { if (qLines.length) break; else continue; }
-    if (/^[☐☑✓]/.test(t)) break; // category/title line — not the question itself
+    if (isRule(i)) { boxed = true; break; } // box top rule — edge reached
+    if (/^[☐☑✓]/.test(t)) { boxed = true; break; } // category/title line — edge reached
+    if (!t) continue; // padding blank — keep looking for the box edge
     if (/^(Enter to select|Press|Type something|Chat about this|↑|↓|Esc|Tab)/i.test(t)) continue;
     qLines.unshift(t.replace(/^[•·]+\s*/, ''));
   }
-  const question = qLines.length ? qLines.join(' ') : null;
+  const question = boxed && qLines.length ? qLines.join(' ') : null;
   return { question, options: best.options, selected: best.selected };
 }
 
@@ -1567,34 +1585,57 @@ function stopPromptScreenPoll(): void {
 }
 
 // Answer by selecting the tapped option. These menus navigate with ↑/↓ and
-// confirm with Enter (number keys do NOT select — verified live), so move from
-// the currently-highlighted option to the target with arrow keys, then Enter.
+// confirm with Enter (number keys do NOT select — a digit is wrapped in bracketed
+// paste and ignored; verified live). The target is the option NUMBER, which is
+// stable; the ❯ cursor is not — it may sit anywhere (moved on the desktop, or a
+// poll snapshot went stale). So read the LIVE cursor position from the screen,
+// step toward the target, then re-read to verify and nudge before Enter, instead
+// of trusting a possibly-stale index. An in-flight guard blocks re-taps mid-send.
 async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
-  if (!activePaneId) return;
+  if (!activePaneId || promptAnswerInFlight) return;
   const to = parseInt(target, 10);
   if (!Number.isInteger(to)) return;
-  const from = promptSelectedNum || 1;
   const paneId = activePaneId;
-  btn.classList.add('ask-opt-sent');
-  setTimeout(() => btn.classList.remove('ask-opt-sent'), 2000);
-  const dir = to >= from ? 'down' : 'up';
-  const steps = Math.abs(to - from);
   const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+  // The option currently highlighted by ❯ on the live screen (0 = couldn't tell).
+  const readSelected = async (): Promise<number> => {
+    try {
+      const d = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
+      const p = parsePrompt(stripAnsi((d.ansi ?? d.text ?? '') as string));
+      return p && p.selected > 0 ? p.selected : 0;
+    } catch { return 0; }
+  };
+  promptAnswerInFlight = true;
+  const panel = document.getElementById('chat-prompt');
+  panel?.classList.add('chat-prompt-sending'); // disable the buttons while sending
+  btn.classList.add('ask-opt-sent');
   try {
-    // Each keystroke must be its own event with a beat between: batching an arrow
-    // and Enter in one send loses the arrow, and a number sent as text is wrapped
-    // in bracketed paste and ignored by the menu (both verified live). So step to
-    // the target option with arrow keys, then confirm with Enter.
-    for (let i = 0; i < steps; i++) {
-      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: [dir] });
+    // Each keystroke is its own event with a beat between: batching an arrow and
+    // Enter in one send loses the arrow (verified live). Jump from the live cursor
+    // toward the target…
+    let cur = (await readSelected()) || promptSelectedNum || 1;
+    for (let i = 0; i < Math.abs(to - cur) && i < 16; i++) {
+      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: [to > cur ? 'down' : 'up'] });
       await wait(120);
+    }
+    // …then verify: if a keystroke dropped or the cursor moved again, converge on
+    // the target before confirming. Give up correcting only if the screen becomes
+    // unreadable (readSelected → 0), never sending Enter on the wrong option.
+    for (let guard = 0; guard < 8; guard++) {
+      await wait(90);
+      const now = await readSelected();
+      if (!now || now === to) break;
+      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: [to > now ? 'down' : 'up'] });
     }
     await wait(60);
     await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { keys: ['enter'] });
-    promptSelectedNum = to; // reflect the move so a fast re-tap navigates correctly
+    promptSelectedNum = to; // reflect the move so a later tap starts from the right place
   } catch (err) {
-    btn.classList.remove('ask-opt-sent');
     showToast('Send failed', (err as Error).message);
+  } finally {
+    promptAnswerInFlight = false;
+    panel?.classList.remove('chat-prompt-sending');
+    setTimeout(() => btn.classList.remove('ask-opt-sent'), 2000);
   }
 }
 
@@ -1699,7 +1740,7 @@ function renderSettingsScreen(): void {
         <div class="settings-section-title">About</div>
         <div class="settings-row">
           <span class="settings-row-label">App version</span>
-          <span class="settings-row-value">${escHtml(APP_VERSION)}</span>
+          <span class="settings-row-value">${escHtml(APP_VERSION)} (${escHtml(BUILD)})</span>
         </div>
       </div>
     </div>
