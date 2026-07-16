@@ -70,6 +70,12 @@ describe('renderMarkdown — blocks', () => {
     assert.match(h, /<li>b<\/li>/);
   });
 
+  it('does not drop list items when a leading-indented item later dedents', () => {
+    const h = renderMarkdown('  - a\n- b');
+    assert.match(h, /<li>a<\/li>/);
+    assert.match(h, /<li>b<\/li>/); // must not be swallowed when buildList stops early
+  });
+
   it('renders blockquotes (recursively) and horizontal rules', () => {
     assert.match(renderMarkdown('> quoted **b**'), /<blockquote class="chat-quote"><p class="chat-p">quoted <strong>b<\/strong><\/p><\/blockquote>/);
     assert.match(renderMarkdown('---'), /<hr class="chat-hr">/);
