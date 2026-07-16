@@ -20,7 +20,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v80';
+const BUILD = 'v81';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -346,7 +346,7 @@ function onAgentStatus(msg: WsAgentStatusMessage): void {
       showToast(
         `${agent ?? 'Agent'}: ${from} → ${to}`,
         `${workspaceLabel ?? ''} / ${tabLabel ?? ''}`,
-        { sticky: true, onclick: jumpToPane }
+        { sticky: true, onclick: jumpToPane, paneId }
       );
     }
     return;
@@ -357,7 +357,7 @@ function onAgentStatus(msg: WsAgentStatusMessage): void {
 
   // In-app toast (skip for the pane currently being viewed)
   if (activePaneId !== paneId) {
-    showToast(title, body, { sticky: true, onclick: jumpToPane });
+    showToast(title, body, { sticky: true, onclick: jumpToPane, paneId });
   }
 
   // System notification when page is hidden
@@ -367,11 +367,7 @@ function onAgentStatus(msg: WsAgentStatusMessage): void {
     typeof Notification !== 'undefined' &&
     Notification.permission === 'granted'
   ) {
-    const n = new Notification(title, { body, tag: paneId });
-    n.onclick = () => {
-      window.focus();
-      navigate(`#/pane/${encodeURIComponent(paneId)}`);
-    };
+    showSystemNotification(title, body, paneId);
   }
 
   // Refresh pane detail if it's the active one
@@ -386,9 +382,11 @@ interface ToastOptions {
   onclick?: () => void;
   /** sticky toasts stay until the user dismisses them */
   sticky?: boolean;
+  /** associates the toast with a pane so opening that pane auto-dismisses it */
+  paneId?: string;
 }
 
-const TOAST_MAX = 4;
+const TOAST_MAX = 10;
 
 function showToast(title: string, body: string, opts: ToastOptions = {}): void {
   if (!elToastContainer) return;
@@ -400,6 +398,8 @@ function showToast(title: string, body: string, opts: ToastOptions = {}): void {
 
   const el = document.createElement('div');
   el.className = 'toast';
+  // tag so navigating to this pane can auto-dismiss its toasts (see dismissToastsForPane)
+  if (opts.paneId) el.dataset.paneId = opts.paneId;
   el.innerHTML =
     `<div class="toast-main">` +
     `<div class="toast-header">${escHtml(title)}</div>` +
@@ -464,6 +464,63 @@ function showToast(title: string, body: string, opts: ToastOptions = {}): void {
   }
 }
 
+/** Fade out and remove every toast associated with a pane (called on pane open). */
+function dismissToastsForPane(paneId: string): void {
+  if (!elToastContainer) return;
+  for (const el of Array.from(elToastContainer.children) as HTMLElement[]) {
+    if (el.dataset.paneId === paneId) {
+      el.classList.add('fading');
+      setTimeout(() => el.remove(), 300);
+    }
+  }
+}
+
+// ── System (OS) notifications ─────────────────────────────────────────────────
+
+// Notifications are shown through the service-worker registration rather than the
+// page `new Notification()` constructor: the constructor throws on mobile (Android
+// requires SW notifications), and only SW-shown notifications are reachable via
+// getNotifications() for later auto-dismissal. Desktop without an active
+// registration falls back to the page constructor.
+//
+// tag === paneId is intentional: successive status pings for one pane coalesce to a
+// single OS entry (latest status wins) instead of stacking stale ones, and it is the
+// key dismissNotificationsForPane() matches on. The in-app toast stack keeps history.
+
+function showSystemNotification(title: string, body: string, paneId: string): void {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistration()
+      .then((reg) => {
+        if (reg) reg.showNotification(title, { body, tag: paneId });
+        else pageNotification(title, body, paneId);
+      })
+      .catch(() => pageNotification(title, body, paneId));
+  } else {
+    pageNotification(title, body, paneId);
+  }
+}
+
+function pageNotification(title: string, body: string, paneId: string): void {
+  try {
+    const n = new Notification(title, { body, tag: paneId });
+    n.onclick = () => {
+      window.focus();
+      navigate(`#/pane/${encodeURIComponent(paneId)}`);
+    };
+  } catch {
+    // `new Notification()` is an illegal constructor on some platforms — ignore
+  }
+}
+
+/** Close any OS notifications for a pane once its page is opened. */
+function dismissNotificationsForPane(paneId: string): void {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.getRegistration()
+    .then((reg) => reg?.getNotifications({ tag: paneId }).then((ns) => ns.forEach((n) => n.close())))
+    .catch(() => {});
+}
+
 // ── Routing ───────────────────────────────────────────────────────────────────
 
 function navigate(hash: string): void {
@@ -493,6 +550,9 @@ function handleRoute(): void {
       return;
     }
     activePaneId = paneId;
+    // opening a pane clears its pending notifications (in-app toasts + OS)
+    dismissToastsForPane(paneId);
+    dismissNotificationsForPane(paneId);
     renderPaneDetail(paneId);
   } else if (hash === '#/settings') {
     renderSettingsScreen();
