@@ -18,7 +18,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v60';
+const BUILD = 'v61';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -1612,14 +1612,24 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   let ok = true;
   try {
     await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { press: String(to) });
+    // The digit already submitted the prompt. Replace the buttons with a sent marker
+    // immediately: the panel may keep showing THIS prompt until the pane's status
+    // refreshes, and a second/double-tap would fire the same digit again — landing on
+    // the next prompt or the terminal. With no button to tap that can't happen; the
+    // normal render flow hides or rebuilds the panel once the pane updates. (The
+    // in-flight guard already blocks a re-tap during the send itself, and this clear
+    // runs before the guard is released, so there is no gap between the two.) Leaving
+    // promptOptionsSig unchanged means a poll still seeing the same menu skips its
+    // re-render and won't restore the buttons.
+    const optsEl = document.getElementById('chat-prompt-options');
+    if (optsEl) optsEl.innerHTML = '<div class="ask-opt-done">&#10003; Answer sent</div>';
   } catch (err) {
     ok = false;
     showToast('Send failed', (err as Error).message);
+    btn.classList.remove('ask-opt-sent');
   } finally {
     promptAnswerInFlight = false;
     panel?.classList.remove('chat-prompt-sending');
-    if (ok) setTimeout(() => btn.classList.remove('ask-opt-sent'), 2000);
-    else btn.classList.remove('ask-opt-sent');
   }
 }
 

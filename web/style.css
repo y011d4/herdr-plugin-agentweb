@@ -932,9 +932,11 @@ a {
 .ask-opt:active { background: var(--color-border); }
 .ask-opt .ask-opt-num { background: var(--color-blocked); color: #fff; }
 .ask-opt-sent { border-color: var(--color-done); opacity: 0.6; }
-/* while an answer's key sequence is in flight, ignore further taps so a second
-   option can't interleave arrows into the first one's navigation */
+/* while the answer digit is in flight, ignore further taps on the buttons */
 .chat-prompt-sending .ask-opt { pointer-events: none; opacity: 0.55; }
+/* replaces the buttons the instant a digit is sent, so a double-tap has nothing
+   to hit (the digit already submitted the prompt) */
+.ask-opt-done { color: var(--color-done); font-weight: 600; font-size: 13px; padding: 6px 2px; }
 .ask-opt .ask-opt-desc { flex: 1; font-size: 12px; }
 /* raw terminal screen, collapsible context below the option buttons */
 .chat-prompt-term > summary {
