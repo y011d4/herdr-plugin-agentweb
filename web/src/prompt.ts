@@ -71,22 +71,25 @@ export function parsePrompt(text: string): ParsedPrompt | null {
   if (best.selected === 0) return null;
   // Reject if the active prompt is actually a DIFFERENT one below this block. Walk
   // down from the last option: a real active menu's own hint follows through only
-  // menu-continuation lines (blank, indented option description), and when a pane is
-  // blocked on a menu that hint is the bottom of the screen — nothing (no composer or
-  // status bar) is rendered below it. So reaching the menu's own hint ends the scan
-  // cleanly. Anything else below the options is a DIFFERENT prompt: a new box (a ─/━
-  // top rule in the raw line, or a ☐/☑ category — its inner text is indented too, so
-  // key on the box boundary, not the indent) or other left-aligned content. If any
-  // such foreign content is seen, this highlighted block is stale scrollback above a
-  // lower active prompt and must not be offered as buttons — reject it even when that
-  // lower prompt has no navigation hint of its own (EOF). Hints ABOVE are ignored.
+  // menu-continuation lines (blank, or an indented option description like
+  // "     ✓ recommended"), and when a pane is blocked on a menu that hint is the
+  // bottom of the screen — nothing (no composer or status bar) is rendered below it.
+  // So reaching the menu's own hint ends the scan cleanly. Anything else below the
+  // options is a DIFFERENT prompt: a new box (its ─/━ top rule in the raw line) or
+  // left-aligned content. (We key on the box's rule, NOT its ☐/☑ category line — a
+  // category is indistinguishable from an indented "✓"/"☐" option description, so
+  // matching it here would reject a valid described menu; the box's rule flags the new
+  // prompt anyway.) If any such foreign content is seen, this highlighted block is
+  // stale scrollback above a lower active prompt and must not be offered as buttons —
+  // reject it even when that lower prompt has no navigation hint of its own (EOF).
+  // Hints ABOVE are ignored.
   let sawForeign = false;
   for (let i = best.last + 1; i < lines.length; i++) {
     const t = lines[i];
     if (MENU_HINT.test(t)) break; // the menu's own hint (nothing foreign preceded it) — end of the menu
-    if (/[─━]{4,}/.test(raw[i] ?? '') || /^[☐☑✓]/.test(t.trim())) { sawForeign = true; continue; } // new box/category
+    if (/[─━]{4,}/.test(raw[i] ?? '')) { sawForeign = true; continue; } // a new box's top rule below = a different prompt
     if (!t.trim()) continue; // blank — continuation
-    if (/^\s+\S/.test(t)) continue; // indented option description — continuation
+    if (/^\s+\S/.test(t)) continue; // indented option description — continuation (e.g. "     ✓ recommended")
     sawForeign = true; // left-aligned content below the options → a different prompt
   }
   if (sawForeign) return null; // a different prompt sits below this block → it is stale, hint or not

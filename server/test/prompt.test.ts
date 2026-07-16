@@ -32,6 +32,16 @@ describe('parsePrompt — real menus', () => {
     const p = parsePrompt(['● Proceed?', '  1. Yes', '❯ 2. No', HINT].join('\n'));
     assert.equal(p!.selected, 2);
   });
+
+  it('accepts a menu whose final option has an indented ✓/☐ description', () => {
+    // An indented description below the last option that starts with ✓ (or ☐/☑) is
+    // menu continuation, NOT a new box/category — it must not be mistaken for a lower
+    // prompt and hide the buttons.
+    const p = parsePrompt(['● Pick one', '❯ 1. Keep', '  2. Replace', '     ✓ recommended', HINT].join('\n'));
+    assert.ok(p, 'should still parse');
+    assert.equal(p!.options.length, 2);
+    assert.equal(p!.selected, 1);
+  });
 });
 
 describe('parsePrompt — rejects non-menus', () => {
