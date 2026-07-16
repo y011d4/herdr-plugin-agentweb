@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { verifyToken, extractToken } from './auth.ts';
 import { toClientState } from './state.ts';
 import { buildAgentStatusMessage } from './notify.ts';
-import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail } from './transcript.ts';
+import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail, projectsRootForPid } from './transcript.ts';
 import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
@@ -159,10 +159,43 @@ async function resolvePaneTranscript(
     const info = (await herdrClient.rpc('pane.get', { pane_id: paneId })) as { pane?: RawPaneFull };
     const sess = info.pane?.agent_session;
     const sessionId = sess?.source?.startsWith('herdr:claude') && typeof sess.value === 'string' ? sess.value : null;
+    if (!sessionId) return { sessionId: null, file: null };
     const cwd = info.pane?.foreground_cwd || info.pane?.cwd || null;
-    return { sessionId, file: sessionId ? resolveTranscriptPath(sessionId, cwd) : null };
+    // First try the safe filesystem roots only (default + ~/.config/claude/*),
+    // which needs no process environment access.
+    let file = resolveTranscriptPath(sessionId, cwd);
+    // Last resort: follow the pane's claude to a non-standard CLAUDE_CONFIG_DIR
+    // via /proc. Only when the safe roots miss, so the common case never reads a
+    // process environment (which would pull in unrelated secrets).
+    if (!file) {
+      const extraRoots = await claudeConfigRoots(herdrClient, paneId);
+      if (extraRoots.length) file = resolveTranscriptPath(sessionId, cwd, extraRoots);
+    }
+    return { sessionId, file };
   } catch {
     return { sessionId: null, file: null };
+  }
+}
+
+// Ask herdr for the pane's foreground processes, find the local claude, and
+// derive its transcript root from /proc. Best-effort: empty on any failure (the
+// resolver then falls back to the default/discovered roots).
+async function claudeConfigRoots(herdrClient: HerdrClient, paneId: string): Promise<string[]> {
+  try {
+    const info = (await herdrClient.rpc('pane.process_info', { pane_id: paneId })) as {
+      process_info?: { foreground_processes?: Array<{ pid?: number; name?: string; argv?: string[] }> };
+    };
+    const roots: string[] = [];
+    for (const p of info.process_info?.foreground_processes ?? []) {
+      const isClaude = p.name === 'claude' || (Array.isArray(p.argv) && p.argv[0] === 'claude');
+      if (isClaude && typeof p.pid === 'number') {
+        const root = projectsRootForPid(p.pid);
+        if (root) roots.push(root);
+      }
+    }
+    return roots;
+  } catch {
+    return [];
   }
 }
 

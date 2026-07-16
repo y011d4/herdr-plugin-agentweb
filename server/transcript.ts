@@ -11,7 +11,7 @@
 
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { existsSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, openSync, readSync, closeSync, readFileSync } from 'node:fs';
 import { normalizeLine, type TimelineItem } from './transcript-normalize.ts';
 
 // Default Claude Code config root. Alternate CLAUDE_CONFIG_DIRs (per-org setups
@@ -39,6 +39,33 @@ function projectsRoots(): string[] {
   return roots;
 }
 
+/**
+ * Derive a claude process's transcript projects root from its own environment
+ * via Linux /proc: CLAUDE_CONFIG_DIR/projects, else HOME/.claude/projects. This
+ * follows a claude launched with ANY CLAUDE_CONFIG_DIR (not just the common
+ * ~/.config/claude/<name>). Returns null if the process is gone, unreadable, or
+ * off-host (e.g. an ssh client — its remote claude's env isn't in local /proc).
+ *
+ * Least-privilege: this is a LAST RESORT (callers try the plain filesystem roots
+ * first). It reads the whole environ blob because /proc offers no selective read,
+ * but extracts only the two path vars and never retains, logs, or returns the
+ * rest — so unrelated secrets in the environment don't leak into the bridge.
+ */
+export function projectsRootForPid(pid: number): string | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  let configDir: string | undefined;
+  let home: string | undefined;
+  try {
+    for (const kv of readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0')) {
+      if (kv.startsWith('CLAUDE_CONFIG_DIR=')) configDir = kv.slice('CLAUDE_CONFIG_DIR='.length);
+      else if (kv.startsWith('HOME=')) home = kv.slice('HOME='.length);
+    }
+  } catch { return null; }
+  if (configDir) return resolve(join(configDir, 'projects'));
+  if (home) return resolve(join(home, '.claude', 'projects'));
+  return null;
+}
+
 // A session id must be a bare file-stem (UUID in practice). Reject anything with
 // path separators or dots so it can't escape a project directory.
 const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
@@ -62,10 +89,13 @@ function containedIn(p: string, root: string): string | null {
  * under one of the projects roots, or null if this session's transcript is not
  * on this host (e.g. a remote/containerized claude).
  */
-export function resolveTranscriptPath(sessionId: string | null | undefined, cwd: string | null): string | null {
+export function resolveTranscriptPath(sessionId: string | null | undefined, cwd: string | null, extraRoots: string[] = []): string | null {
   if (!sessionId || !SESSION_ID_RE.test(sessionId)) return null;
   const fileName = `${sessionId}.jsonl`;
-  const roots = projectsRoots();
+  // extraRoots (a process-derived CLAUDE_CONFIG_DIR) take priority, then the
+  // discovered defaults; dedupe so a shared root isn't scanned twice.
+  const seen = new Set<string>();
+  const roots = [...extraRoots.map((r) => resolve(r)), ...projectsRoots()].filter((r) => (seen.has(r) ? false : (seen.add(r), true)));
 
   // Fast path: the pane's current cwd slug under each root. Correct when claude
   // was launched in the directory the pane still reports.
