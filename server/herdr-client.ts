@@ -2,6 +2,7 @@ import { createConnection } from 'node:net';
 import type { Socket } from 'node:net';
 import { createSplitter, serialize } from './ndjson.ts';
 import { createState, applyEvent, getPaneIds, PANE_SET_CHANGING_EVENTS } from './state.ts';
+import { enrichStateWorktrees } from './worktree-resolve.ts';
 import type { HerdrClientCallbacks, HerdrClient, NormalizedState, RpcResponse, EventPush } from './types.ts';
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -137,6 +138,10 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
       const nowMs = Date.now();
       const prev = currentState;
       currentState = createState(snap as Parameters<typeof createState>[0], nowMs, currentState);
+      // Add git context herdr omits (branch, and worktree info for untagged
+      // checkouts), derived from each workspace's cwd. I/O lives here in the
+      // client, keeping state.ts pure.
+      currentState = enrichStateWorktrees(currentState);
       if (replayMissed && prev) {
         for (const [paneId, pane] of currentState._paneById) {
           if (!pane.agent || coverage.has(paneId)) continue;
