@@ -5,30 +5,25 @@
  * `--git-common-dir`, matching herdr's own repoKey, and isLinkedWorktree is
  * derived (git-dir differs from the common dir for a linked worktree).
  *
- * This is the I/O layer's job, not state.ts's: state.ts stays pure. Enrichment
- * runs on the createState result (herdr-client) before the state is delivered.
+ * Resolution is asynchronous and cached so it never blocks the server event
+ * loop: the snapshot path only READS the cache (`enrichStateWorktrees`), while
+ * `refreshWorktrees` runs `git` off the hot path (bounded concurrency) and
+ * invokes a callback when anything changed so the state can be re-broadcast.
+ * A short TTL lets a `git checkout` surface on the next refresh. state.ts stays
+ * pure — this all lives in the client I/O layer.
  */
 
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { dirname, basename } from 'node:path';
 import type { NormalizedState, WorkspaceNode, WorktreeInfo } from './types.ts';
 
-export type RepoResolver = (cwd: string) => WorktreeInfo | null;
-
-// cwd → git info, cached with a short TTL so a `git checkout` (branch change
-// without a cwd change) is picked up on the next snapshot within the window,
-// while a burst of snapshots still costs at most one `git` per cwd per window.
 const TTL_MS = 30_000;
+const MAX_CONCURRENCY = 4;
 const cache = new Map<string, { at: number; info: WorktreeInfo | null }>();
+const inflight = new Set<string>();
 
-function gitResolve(cwd: string): WorktreeInfo | null {
-  const res = spawnSync(
-    'git',
-    ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--git-dir', '--show-toplevel', '--abbrev-ref', 'HEAD'],
-    { encoding: 'utf8', timeout: 2000 },
-  );
-  if (res.error || res.status !== 0 || !res.stdout) return null;
-  const lines = res.stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+function parseGit(stdout: string): WorktreeInfo | null {
+  const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
   if (lines.length < 4) return null;
   const [commonDir, gitDir, toplevel, branchRaw] = lines;
   // repoKey is the shared common .git dir — identical for a main checkout and
@@ -48,36 +43,71 @@ function gitResolve(cwd: string): WorktreeInfo | null {
   };
 }
 
-/** Resolve a workspace's git context from its cwd (cached). Returns null when
- *  the cwd is not inside a git repo, or git is unavailable. */
-export function resolveRepoFromCwd(cwd: string): WorktreeInfo | null {
-  const now = Date.now();
-  const hit = cache.get(cwd);
-  if (hit && now - hit.at < TTL_MS) return hit.info;
-  const info = gitResolve(cwd);
-  cache.set(cwd, { at: now, info });
-  return info;
+// Resolve one cwd with `git rev-parse` off the event loop, update the cache, and
+// resolve to true when the cached info changed. Never rejects.
+function resolveCwd(cwd: string): Promise<boolean> {
+  if (inflight.has(cwd)) return Promise.resolve(false);
+  inflight.add(cwd);
+  return new Promise((done) => {
+    execFile(
+      'git',
+      ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--git-dir', '--show-toplevel', '--abbrev-ref', 'HEAD'],
+      { timeout: 2000 },
+      (err, stdout) => {
+        inflight.delete(cwd);
+        const info = err ? null : parseGit(stdout);
+        const prev = cache.get(cwd);
+        cache.set(cwd, { at: Date.now(), info });
+        done(!prev || JSON.stringify(prev.info) !== JSON.stringify(info));
+      },
+    );
+  });
+}
+
+/** Synchronous cache read for a workspace cwd (null until a refresh has run). */
+export function worktreeForCwd(cwd: string): WorktreeInfo | null {
+  return cache.get(cwd)?.info ?? null;
 }
 
 /**
- * Return a state where every workspace with a cwd carries git-derived worktree
- * info (adding the branch herdr omits, and filling worktree info for checkouts
- * herdr didn't tag). git is authoritative and consistent with herdr's fields;
- * a workspace keeps herdr's worktree (branch-less) when git can't resolve it.
- * Input state is not mutated. The resolver is injectable for tests.
+ * Return a state where every workspace with a cwd carries its cached git
+ * worktree info. Reads only the cache — never spawns git — so it is safe on the
+ * snapshot hot path. Input state is not mutated. `lookup` is injectable for tests.
  */
 export function enrichStateWorktrees(
   state: NormalizedState,
-  resolve: RepoResolver = resolveRepoFromCwd,
+  lookup: (cwd: string) => WorktreeInfo | null = worktreeForCwd,
 ): NormalizedState {
   let changed = false;
   const workspaces = state.workspaces.map((ws): WorkspaceNode => {
     if (!ws.cwd) return ws;
-    const derived = resolve(ws.cwd);
-    if (!derived) return ws;
+    const info = lookup(ws.cwd);
+    if (!info) return ws;
     changed = true;
-    return { ...ws, worktree: derived };
+    return { ...ws, worktree: info };
   });
   if (!changed) return state;
   return { ...state, workspaces };
+}
+
+/**
+ * Resolve git info for the given cwds that are missing or past their TTL, off
+ * the event loop with bounded concurrency, updating the cache. Calls onChange()
+ * once if any cached entry changed (so the caller can re-enrich + re-broadcast).
+ */
+export async function refreshWorktrees(cwds: string[], onChange: () => void): Promise<void> {
+  const now = Date.now();
+  const stale = [...new Set(cwds)].filter((cwd) => {
+    if (inflight.has(cwd)) return false;
+    const hit = cache.get(cwd);
+    return !hit || now - hit.at >= TTL_MS;
+  });
+  if (stale.length === 0) return;
+
+  let anyChanged = false;
+  for (let i = 0; i < stale.length; i += MAX_CONCURRENCY) {
+    const results = await Promise.all(stale.slice(i, i + MAX_CONCURRENCY).map(resolveCwd));
+    if (results.some(Boolean)) anyChanged = true;
+  }
+  if (anyChanged) onChange();
 }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { enrichStateWorktrees, resolveRepoFromCwd } from '../worktree-resolve.ts';
+import { enrichStateWorktrees, refreshWorktrees, worktreeForCwd } from '../worktree-resolve.ts';
 import type { NormalizedState, WorkspaceNode, WorktreeInfo } from '../types.ts';
 
 function mkState(workspaces: WorkspaceNode[]): NormalizedState {
@@ -82,19 +82,29 @@ describe('enrichStateWorktrees', () => {
   });
 });
 
-describe('resolveRepoFromCwd (real git)', () => {
+describe('refreshWorktrees + worktreeForCwd (real git)', () => {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
-  it('resolves this repo: non-linked, .git repoKey, and the actual branch', () => {
-    const info = resolveRepoFromCwd(repoRoot);
-    assert.ok(info, 'expected a resolved worktree for the repo root');
+  it('resolves this repo into the cache (branch, non-linked, .git repoKey) and fires onChange', async () => {
+    let changed = false;
+    await refreshWorktrees([repoRoot], () => { changed = true; });
+    assert.equal(changed, true);
+    const info = worktreeForCwd(repoRoot);
+    assert.ok(info, 'expected cached worktree info after refresh');
     assert.equal(info!.isLinkedWorktree, false);
     assert.ok(info!.repoKey.endsWith('.git'), `repoKey should end with .git, got ${info!.repoKey}`);
     const raw = spawnSync('git', ['-C', repoRoot, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
     assert.equal(info!.branch, raw === 'HEAD' ? null : raw);
   });
 
-  it('returns null for a path outside any repo', () => {
-    assert.equal(resolveRepoFromCwd('/'), null);
+  it('does not re-resolve or fire onChange within the TTL (cached from the prior test)', async () => {
+    let changed = false;
+    await refreshWorktrees([repoRoot], () => { changed = true; });
+    assert.equal(changed, false);
+  });
+
+  it('caches null for a path outside any repo', async () => {
+    await refreshWorktrees(['/'], () => {});
+    assert.equal(worktreeForCwd('/'), null);
   });
 });
