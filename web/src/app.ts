@@ -644,6 +644,75 @@ function renderTokenScreen(message?: string): void {
 
 // ── Agents dashboard ──────────────────────────────────────────────────────────
 
+// Render a workspace's agent-pane cards (plus an inactive-panes note when the
+// workspace has panes but none are active). Returns totalPanes so the caller can
+// skip a workspace with no panes at all. Each card's title is `tab / branch`
+// (branch omitted for non-git workspaces), plus a `worktree` chip when the
+// workspace is a linked git worktree.
+function renderWorkspaceCards(ws: WorkspaceNode): { html: string; totalPanes: number } {
+  const tabs = ws.tabs ?? [];
+  const branch = ws.worktree?.branch || null;
+  const isWorktree = ws.worktree?.isLinkedWorktree ?? false;
+  // Carry each pane's tab label so cards can show which tab they belong to —
+  // pane.title is usually null, so the tab name is the only distinguishing label
+  // when a workspace runs several agents. When one tab runs several agent panes
+  // (split panes), also carry a 1-based index among that tab's agent panes so
+  // those otherwise-identical cards stay distinguishable.
+  const allPanes = tabs.flatMap((t) => {
+    const panes = t.panes ?? [];
+    const tabAgentPanes = panes.filter((p) => p.agent);
+    return panes.map((pane) => ({
+      pane,
+      tabLabel: t.label,
+      tabAgentIndex: tabAgentPanes.indexOf(pane) + 1,
+      tabAgentCount: tabAgentPanes.length,
+    }));
+  });
+  const agentPanes = allPanes
+    .filter((x) => x.pane.agent)
+    .sort((a, b) => statusOrder(a.pane.agent!.status) - statusOrder(b.pane.agent!.status));
+  const inactivePanes = allPanes.filter((x) => !x.pane.agent);
+
+  let html = '';
+  if (agentPanes.length === 0) {
+    html += `<div class="inactive-panes-count">${inactivePanes.length} pane${inactivePanes.length !== 1 ? 's' : ''} (no active agents)</div>`;
+  }
+
+  for (const { pane, tabLabel, tabAgentIndex, tabAgentCount } of agentPanes) {
+    const { paneId, agent, title } = pane;
+    const { displayName, name, status, customStatus, message, sinceUnixMs } = agent!;
+    // The chip shows the stable agent kind, so prefer `name` (raw pane.agent,
+    // e.g. "claude"/"codex") over displayName, which can be a richer label.
+    const agentKind = name || displayName || 'agent';
+    // Tab name is the human-meaningful identifier within a workspace; fall back
+    // to the agent kind if a tab somehow has no label. When the tab runs multiple
+    // agent panes, suffix a per-tab index so the cards differ.
+    const baseLabel = tabLabel || agentKind;
+    const cardLabel = tabAgentCount > 1 ? `${baseLabel} #${tabAgentIndex}` : baseLabel;
+    const statusClass = status || 'unknown';
+    const meta = customStatus || message || '';
+    const relTime = relativeTime(sinceUnixMs);
+
+    html += `
+      <div class="agent-card" data-pane-id="${escHtml(paneId)}" role="button" tabindex="0">
+        <div class="agent-card-header">
+          <span class="agent-name">${escHtml(cardLabel)}</span>
+          ${branch ? `<span class="card-branch">${escHtml(branch)}</span>` : ''}
+          <span class="status-badge ${escHtml(statusClass)}">${escHtml(statusClass)}</span>
+        </div>
+        ${meta ? `<div class="agent-custom-status">${escHtml(meta)}</div>` : ''}
+        <div class="agent-card-meta">
+          <span class="agent-kind">${escHtml(agentKind)}</span>
+          ${isWorktree ? '<span class="card-worktree">worktree</span>' : ''}
+          ${title ? `<span class="pane-title">${escHtml(title)}</span>` : ''}
+          ${relTime ? `<span>${escHtml(relTime)}</span>` : ''}
+        </div>
+      </div>`;
+  }
+
+  return { html, totalPanes: allPanes.length };
+}
+
 function renderAgentsDashboard(): void {
   const topbar = document.getElementById('topbar');
   if (topbar) {
@@ -662,79 +731,62 @@ function renderAgentsDashboard(): void {
 
   const { workspaces = [] } = appState;
 
-  // Collect all panes with agents, grouped by workspace
   let html = '<div id="screen-agents">';
 
   if (workspaces.length === 0) {
     html += '<div class="empty-state">No workspaces found.</div>';
   }
 
-  const sortedWorkspaces = [...workspaces].sort(
-    (a, b) => workspaceUrgency(a) - workspaceUrgency(b)
-  );
+  // A linked worktree is shown inside its main checkout's list (matched by
+  // repoKey) tagged "worktree"; the repo is implied by the enclosing group. A
+  // worktree whose main isn't open — and every other workspace — renders flat;
+  // an orphan worktree keeps a repo-qualified badge so its repo stays clear.
+  const mainByRepo = new Map<string, WorkspaceNode>();
+  for (const ws of workspaces) {
+    const wt = ws.worktree;
+    if (wt && !wt.isLinkedWorktree && wt.repoKey) mainByRepo.set(wt.repoKey, ws);
+  }
+  const worktreesOfMain = new Map<string, WorkspaceNode[]>();
+  const absorbed = new Set<string>();
+  for (const ws of workspaces) {
+    const wt = ws.worktree;
+    if (!wt?.isLinkedWorktree || !wt.repoKey) continue;
+    const main = mainByRepo.get(wt.repoKey);
+    if (!main || main.workspaceId === ws.workspaceId) continue;
+    const arr = worktreesOfMain.get(main.workspaceId);
+    if (arr) arr.push(ws);
+    else worktreesOfMain.set(main.workspaceId, [ws]);
+    absorbed.add(ws.workspaceId);
+  }
 
-  for (const ws of sortedWorkspaces) {
-    const { workspaceId, label: wsLabel, tabs = [] } = ws;
-    // Carry each pane's tab label so cards can show which tab they belong to —
-    // pane.title is usually null, so the tab name is the only distinguishing
-    // label when a workspace runs several agents. When one tab runs several
-    // agent panes (split panes), also carry a 1-based index among that tab's
-    // agent panes so those otherwise-identical cards stay distinguishable.
-    const allPanes = tabs.flatMap((t) => {
-      const panes = t.panes ?? [];
-      const tabAgentPanes = panes.filter((p) => p.agent);
-      return panes.map((pane) => ({
-        pane,
-        tabLabel: t.label,
-        tabAgentIndex: tabAgentPanes.indexOf(pane) + 1,
-        tabAgentCount: tabAgentPanes.length,
-      }));
-    });
-    const agentPanes = allPanes
-      .filter((x) => x.pane.agent)
-      .sort((a, b) => statusOrder(a.pane.agent!.status) - statusOrder(b.pane.agent!.status));
-    const inactivePanes = allPanes.filter((x) => !x.pane.agent);
+  const entryUrgency = (ws: WorkspaceNode): number => {
+    const wts = worktreesOfMain.get(ws.workspaceId) ?? [];
+    return Math.min(workspaceUrgency(ws), ...wts.map(workspaceUrgency));
+  };
+  const topLevel = workspaces
+    .filter((ws) => !absorbed.has(ws.workspaceId))
+    .sort((a, b) => entryUrgency(a) - entryUrgency(b));
 
-    if (allPanes.length === 0) continue;
+  for (const ws of topLevel) {
+    const { html: cards, totalPanes } = renderWorkspaceCards(ws);
 
-    html += `<div class="workspace-group" data-ws="${escHtml(workspaceId)}">
-      <div class="workspace-label">${escHtml(wsLabel || workspaceId)}</div>`;
-
-    if (agentPanes.length === 0) {
-      html += `<div class="inactive-panes-count">${inactivePanes.length} pane${inactivePanes.length !== 1 ? 's' : ''} (no active agents)</div>`;
+    // This main's linked worktrees: their cards join the same group (each card
+    // shows its own branch and a `worktree` chip), so a worktree reads as part
+    // of the repo rather than a repo of its own.
+    let wtCards = '';
+    for (const wt of worktreesOfMain.get(ws.workspaceId) ?? []) {
+      const { html: cardsHtml, totalPanes: wtPanes } = renderWorkspaceCards(wt);
+      if (wtPanes > 0) wtCards += cardsHtml;
     }
+    if (totalPanes === 0 && !wtCards) continue;
 
-    for (const { pane, tabLabel, tabAgentIndex, tabAgentCount } of agentPanes) {
-      const { paneId, agent, title } = pane;
-      const { displayName, name, status, customStatus, message, sinceUnixMs } = agent!;
-      // The chip shows the stable agent kind, so prefer `name` (raw pane.agent,
-      // e.g. "claude"/"codex") over displayName, which can be a richer label.
-      const agentKind = name || displayName || 'agent';
-      // Tab name is the human-meaningful identifier within a workspace; fall
-      // back to the agent kind if a tab somehow has no label. When the tab runs
-      // multiple agent panes, suffix a per-tab index so the cards differ.
-      const baseLabel = tabLabel || agentKind;
-      const cardLabel = tabAgentCount > 1 ? `${baseLabel} #${tabAgentIndex}` : baseLabel;
-      const statusClass = status || 'unknown';
-      const meta = customStatus || message || '';
-      const relTime = relativeTime(sinceUnixMs);
-
-      html += `
-        <div class="agent-card" data-pane-id="${escHtml(paneId)}" role="button" tabindex="0">
-          <div class="agent-card-header">
-            <span class="agent-name">${escHtml(cardLabel)}</span>
-            <span class="status-badge ${escHtml(statusClass)}">${escHtml(statusClass)}</span>
-          </div>
-          ${meta ? `<div class="agent-custom-status">${escHtml(meta)}</div>` : ''}
-          <div class="agent-card-meta">
-            <span class="agent-kind">${escHtml(agentKind)}</span>
-            ${title ? `<span class="pane-title">${escHtml(title)}</span>` : ''}
-            ${relTime ? `<span>${escHtml(relTime)}</span>` : ''}
-          </div>
-        </div>`;
-    }
-
-    html += '</div>'; // workspace-group
+    // An orphan worktree (its main isn't open) keeps a repo-qualified badge.
+    const wt = ws.worktree;
+    const badge = wt?.isLinkedWorktree
+      ? `<span class="worktree-badge">${escHtml(wt.repoName || 'repo')} · worktree</span>`
+      : '';
+    html += `<div class="workspace-group" data-ws="${escHtml(ws.workspaceId)}">
+      <div class="workspace-label"><span class="workspace-name">${escHtml(ws.label || ws.workspaceId)}</span>${badge}</div>${cards}${wtCards}</div>`;
   }
 
   html += '</div>'; // screen-agents

@@ -106,6 +106,66 @@ describe('createState', () => {
   });
 });
 
+describe('createState - worktree', () => {
+  const WT_MAIN = {
+    repo_key: '/home/u/repo/.git',
+    repo_name: 'repo',
+    repo_root: '/home/u/repo',
+    checkout_path: '/home/u/repo',
+    is_linked_worktree: false,
+  };
+
+  it('maps the worktree object into normalized WorkspaceNode.worktree', () => {
+    const snap = makeSnapshot({
+      workspaces: [{ workspace_id: 'w0', label: 'repo', active_tab_id: 'w0:t1', worktree: WT_MAIN }],
+    });
+    const state = createState(snap);
+    assert.deepEqual(state.workspaces[0].worktree, {
+      repoKey: '/home/u/repo/.git',
+      repoName: 'repo',
+      repoRoot: '/home/u/repo',
+      checkoutPath: '/home/u/repo',
+      isLinkedWorktree: false,
+      branch: null,
+    });
+  });
+
+  it('flags a linked worktree', () => {
+    const snap = makeSnapshot({
+      workspaces: [{
+        workspace_id: 'w0', label: 'feat-x', active_tab_id: 'w0:t1',
+        worktree: { ...WT_MAIN, checkout_path: '/home/u/.herdr/worktrees/repo/feat-x', is_linked_worktree: true },
+      }],
+    });
+    const state = createState(snap);
+    assert.equal(state.workspaces[0].worktree!.isLinkedWorktree, true);
+    assert.equal(state.workspaces[0].worktree!.repoKey, '/home/u/repo/.git');
+  });
+
+  it('sets worktree=null when the workspace has no worktree field', () => {
+    const state = createState(makeSnapshot());
+    assert.equal(state.workspaces[0].worktree, null);
+  });
+
+  it('sets worktree=null when worktree is present but repo_key is missing', () => {
+    const snap = makeSnapshot({
+      workspaces: [{ workspace_id: 'w0', label: 'repo', active_tab_id: 'w0:t1', worktree: { repo_name: 'repo' } }],
+    });
+    const state = createState(snap);
+    assert.equal(state.workspaces[0].worktree, null);
+  });
+
+  it('preserves worktree across workspace_renamed', () => {
+    const snap = makeSnapshot({
+      workspaces: [{ workspace_id: 'w0', label: 'repo', active_tab_id: 'w0:t1', worktree: WT_MAIN }],
+    });
+    const state = createState(snap);
+    const { state: next } = applyEvent(state, 'workspace_renamed', { workspace_id: 'w0', label: 'renamed' });
+    assert.equal(next.workspaces[0].label, 'renamed');
+    assert.equal(next.workspaces[0].worktree!.repoKey, '/home/u/repo/.git');
+  });
+});
+
 describe('applyEvent - pane_agent_status_changed', () => {
   it('updates agent status and returns a change record', () => {
     const state = createState(makeSnapshot(), 1000);

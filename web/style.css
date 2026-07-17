@@ -282,11 +282,45 @@ a {
 }
 
 .workspace-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--color-text-dim);
   margin-bottom: 10px;
+}
+
+.workspace-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Badge marking a linked git worktree (`worktree`, or `<repo> · worktree` when
+   the worktree renders top-level without its main checkout open). */
+.worktree-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-working);
+  background: var(--color-surface-2);
+  padding: 1px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* In-card chip marking a card whose workspace is a linked git worktree. */
+.card-worktree {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-working);
+  background: var(--color-surface-2);
+  padding: 1px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .agent-card {
@@ -313,7 +347,19 @@ a {
 .agent-name {
   font-weight: 600;
   font-size: 15px;
-  flex: 1;
+  flex-shrink: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Git branch of the card's workspace, shown next to the tab name (secondary). */
+.card-branch {
+  font-size: 13px;
+  color: var(--color-text-dim);
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -328,6 +374,7 @@ a {
   font-weight: 600;
   text-transform: lowercase;
   flex-shrink: 0;
+  margin-left: auto;
 }
 .status-badge.idle    { background: var(--color-idle);    color: var(--color-idle-fg); }
 .status-badge.working { background: var(--color-working); color: var(--color-working-fg); }
