@@ -130,6 +130,17 @@ describe('parseGit', () => {
     assert.equal(info!.branch, 'feat/x');
   });
 
+  it('names a linked worktree of a submodule by the submodule, not "modules"', () => {
+    const info = parseGit([
+      '/super/.git/modules/sub',              // git-common-dir (submodule)
+      '/super/.git/modules/sub/worktrees/wt', // git-dir (differs → linked worktree)
+      '/home/u/.wt/sub-wt',                   // show-toplevel
+      'feat/y',
+    ].join('\n'));
+    assert.equal(info!.isLinkedWorktree, true);
+    assert.equal(info!.repoName, 'sub');
+  });
+
   it('names a main checkout by its working-tree dir', () => {
     const info = parseGit(['/home/u/repo/.git', '/home/u/repo/.git', '/home/u/repo', 'main'].join('\n'));
     assert.equal(info!.isLinkedWorktree, false);
