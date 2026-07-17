@@ -95,28 +95,42 @@ export function resolveOutcome(
   return prevInfo;
 }
 
-// Resolve one cwd (already reserved in `inflight` by the caller) with `git
-// rev-parse` off the event loop, update the cache, and clear the reservation.
-// Resolves to true when the effective value changed. Never rejects.
-async function resolveCwd(cwd: string): Promise<boolean> {
-  await acquire();
-  return new Promise((done) => {
+// The one-cwd git call, isolated behind a seam so tests can drive resolution
+// (e.g. to assert the concurrency cap) without spawning real git.
+type GitResult = { code: string | number | undefined; stdout: string; stderr: string };
+const defaultRunGit = (cwd: string): Promise<GitResult> =>
+  new Promise((res) => {
     execFile(
       'git',
       ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--git-dir', '--show-toplevel', '--abbrev-ref', 'HEAD'],
       // LC_ALL=C so a "not a git repository" failure is reported in English.
       { timeout: 2000, env: { ...process.env, LC_ALL: 'C' } },
-      (err, stdout, stderr) => {
-        release();
-        inflight.delete(cwd);
-        const prevInfo = cache.get(cwd)?.info;
-        const info = resolveOutcome(prevInfo, !!err, err ? null : parseGit(stdout), !!err && isNotARepo(err.code, stderr));
-        // `at` records the attempt (even a failed one) so transient failures back off.
-        cache.set(cwd, { at: Date.now(), info });
-        done(JSON.stringify(prevInfo) !== JSON.stringify(info));
-      },
+      (err, stdout, stderr) => res({ code: err ? (err.code ?? -1) : 0, stdout, stderr }),
     );
   });
+let runGit = defaultRunGit;
+/** Test seam: override the git runner (pass null to restore the default). */
+export function _setGitRunForTest(fn: ((cwd: string) => Promise<GitResult>) | null): void {
+  runGit = fn ?? defaultRunGit;
+}
+
+// Resolve one cwd (already reserved in `inflight` by the caller) off the event
+// loop under the process-wide semaphore, update the cache, and clear the
+// reservation. Resolves to true when the effective value changed. Never rejects.
+async function resolveCwd(cwd: string): Promise<boolean> {
+  await acquire();
+  try {
+    const { code, stdout, stderr } = await runGit(cwd);
+    const failed = code !== 0;
+    const prevInfo = cache.get(cwd)?.info;
+    const info = resolveOutcome(prevInfo, failed, failed ? null : parseGit(stdout), failed && isNotARepo(code, stderr));
+    // `at` records the attempt (even a failed one) so transient failures back off.
+    cache.set(cwd, { at: Date.now(), info });
+    return JSON.stringify(prevInfo) !== JSON.stringify(info);
+  } finally {
+    release();
+    inflight.delete(cwd);
+  }
 }
 
 // Synchronous cache read for a workspace cwd. undefined = not resolved (cache

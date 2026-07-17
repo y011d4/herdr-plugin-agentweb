@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
-import { enrichStateWorktrees, refreshWorktrees, worktreeForCwd, isNotARepo, resolveOutcome, parseGit } from '../worktree-resolve.ts';
+import { enrichStateWorktrees, refreshWorktrees, worktreeForCwd, isNotARepo, resolveOutcome, parseGit, _setGitRunForTest } from '../worktree-resolve.ts';
 import type { NormalizedState, WorkspaceNode, WorktreeInfo } from '../types.ts';
 
 function mkState(workspaces: WorkspaceNode[]): NormalizedState {
@@ -170,6 +170,30 @@ describe('isNotARepo (git failure classification)', () => {
     assert.equal(isNotARepo('ENOENT', ''), false); // git binary not found
     assert.equal(isNotARepo(undefined, ''), false); // killed by timeout
     assert.equal(isNotARepo(1, 'some error'), false); // other non-zero exit
+  });
+});
+
+describe('git concurrency limit (process-wide MAX_CONCURRENCY)', () => {
+  it('caps simultaneous resolutions across overlapping refreshes of disjoint cwds', async () => {
+    let active = 0;
+    let peak = 0;
+    _setGitRunForTest((_cwd) => new Promise((res) => {
+      active++;
+      peak = Math.max(peak, active);
+      setTimeout(() => {
+        active--;
+        res({ code: 0, stdout: '/r/.git\n/r/.git\n/r\nmain\n', stderr: '' });
+      }, 15);
+    }));
+    try {
+      const setA = ['a', 'b', 'c', 'd', 'e'].map((x) => `/conc/${x}`);
+      const setB = ['f', 'g', 'h', 'i', 'j'].map((x) => `/conc/${x}`); // disjoint from setA
+      await Promise.all([refreshWorktrees(setA, () => {}), refreshWorktrees(setB, () => {})]);
+      assert.ok(peak > 0, 'expected the stub runner to be exercised');
+      assert.ok(peak <= 4, `peak concurrency ${peak} exceeded MAX_CONCURRENCY (4)`);
+    } finally {
+      _setGitRunForTest(null);
+    }
   });
 });
 
