@@ -2,7 +2,7 @@ import { createConnection } from 'node:net';
 import type { Socket } from 'node:net';
 import { createSplitter, serialize } from './ndjson.ts';
 import { createState, applyEvent, getPaneIds, PANE_SET_CHANGING_EVENTS } from './state.ts';
-import { enrichStateWorktrees, refreshWorktrees } from './worktree-resolve.ts';
+import { enrichStateWorktrees, refreshWorktrees, resolveCwdFor } from './worktree-resolve.ts';
 import type { HerdrClientCallbacks, HerdrClient, NormalizedState, RpcResponse, EventPush } from './types.ts';
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -429,7 +429,13 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   function refreshWorktreesSoon(): void {
     if (destroyed || !currentState) return;
     const cwds: string[] = [];
-    for (const ws of currentState.workspaces) if (ws.cwd) cwds.push(ws.cwd);
+    // Resolve from each workspace's stable path (checkout path when herdr tagged
+    // it, else the pane cwd) so the cache is keyed exactly as enrichStateWorktrees
+    // looks it up.
+    for (const ws of currentState.workspaces) {
+      const cwd = resolveCwdFor(ws);
+      if (cwd) cwds.push(cwd);
+    }
     void refreshWorktrees(cwds, () => {
       if (destroyed || !currentState) return;
       currentState = enrichStateWorktrees(currentState);

@@ -37,11 +37,13 @@ describe('enrichStateWorktrees', () => {
     assert.deepEqual(next.workspaces[0].worktree, DERIVED);
   });
 
-  it('overrides herdr\'s branch-less worktree with the git-derived one (adds branch)', () => {
-    const herdrWt: WorktreeInfo = { ...DERIVED, branch: null };
+  it('fills a herdr-tagged worktree\'s branch from git while preserving its identity', () => {
+    // herdr's identity fields win; git only supplies the branch it never carries.
+    const herdrWt: WorktreeInfo = { ...DERIVED, repoName: 'herdr-name', branch: null };
     const state = mkState([ws('w1', '/home/u/repo', herdrWt)]);
-    const next = enrichStateWorktrees(state, () => DERIVED);
-    assert.equal(next.workspaces[0].worktree!.branch, 'main');
+    const next = enrichStateWorktrees(state, () => ({ ...DERIVED, repoName: 'git-name', branch: 'main' }));
+    assert.equal(next.workspaces[0].worktree!.branch, 'main'); // branch from git
+    assert.equal(next.workspaces[0].worktree!.repoName, 'herdr-name'); // identity from herdr
   });
 
   it('keeps worktree null when the workspace has no cwd', () => {
@@ -59,12 +61,48 @@ describe('enrichStateWorktrees', () => {
     assert.equal(next.workspaces[0].worktree, herdrWt);
   });
 
-  it('clears the worktree when the cwd resolves as not a repo (null, not a miss)', () => {
-    // Regression: a repo that stops resolving must drop its stale branch/grouping.
+  it('clears a tagged worktree\'s branch on detached HEAD (git null branch is authoritative)', () => {
+    // git resolved the checkout but HEAD is detached — the branch must go null,
+    // not fall back to the previously-shown branch.
+    const herdrWt: WorktreeInfo = { ...DERIVED, branch: 'main' };
+    const state = mkState([ws('w1', '/home/u/repo', herdrWt)]);
+    const next = enrichStateWorktrees(state, () => ({ ...DERIVED, branch: null }));
+    assert.equal(next.workspaces[0].worktree!.branch, null);
+    assert.equal(next.workspaces[0].worktree!.repoKey, DERIVED.repoKey); // identity kept
+  });
+
+  it('keeps a herdr-tagged worktree when git can no longer resolve it (identity is authoritative)', () => {
+    // finding-1 guard: an agent cd-ing the pane out of the checkout (git → null)
+    // must NOT drop herdr's repo identity/grouping — only the branch comes from git.
     const state = mkState([ws('w1', '/home/u/repo', DERIVED)]);
     const next = enrichStateWorktrees(state, () => null);
+    assert.deepEqual(next.workspaces[0].worktree, DERIVED);
+  });
+
+  it('clears an untagged workspace when git resolves it as not a repo (null)', () => {
+    // No herdr identity to protect, so git stays authoritative for untagged cwds.
+    const state = mkState([ws('w1', '/home/u/plain', null)]);
+    const next = enrichStateWorktrees(state, () => null);
     assert.equal(next.workspaces[0].worktree, null);
-    assert.equal(state.workspaces[0].worktree, DERIVED); // input not mutated
+  });
+
+  it('resolves a tagged workspace from its checkout path, not the moved pane cwd', () => {
+    // finding-1: the pane cwd has wandered into another repo. Resolution must use
+    // the stable checkoutPath so the branch comes from the real worktree and the
+    // other repo cannot repoint this workspace's grouping.
+    const herdrWt: WorktreeInfo = { ...DERIVED, branch: null };
+    const state = mkState([ws('w1', '/somewhere/else', herdrWt)]);
+    const seen: string[] = [];
+    const next = enrichStateWorktrees(state, (cwd) => {
+      seen.push(cwd);
+      return cwd === herdrWt.checkoutPath
+        ? DERIVED
+        : { ...DERIVED, repoKey: '/other/.git', repoName: 'other', branch: 'wrong' };
+    });
+    assert.deepEqual(seen, [herdrWt.checkoutPath]); // looked up the stable path only
+    assert.equal(next.workspaces[0].worktree!.repoKey, DERIVED.repoKey); // not repointed
+    assert.equal(next.workspaces[0].worktree!.branch, 'main'); // branch from the real worktree
+    assert.equal(state.workspaces[0].worktree, herdrWt); // input not mutated
   });
 
   it('gives two same-repo workspaces an identical repoKey (grouping enabler)', () => {
@@ -200,16 +238,22 @@ describe('git concurrency limit (process-wide MAX_CONCURRENCY)', () => {
 describe('refreshWorktrees + worktreeForCwd (real git)', () => {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
-  it('resolves this repo into the cache (branch, non-linked, .git repoKey) and fires onChange', async () => {
+  it('resolves this repo into the cache (branch, linked-ness, repoKey) matching git, and fires onChange', async () => {
     let changed = false;
     await refreshWorktrees([repoRoot], () => { changed = true; });
     assert.equal(changed, true);
     const info = worktreeForCwd(repoRoot);
     assert.ok(info, 'expected cached worktree info after refresh');
-    assert.equal(info!.isLinkedWorktree, false);
-    assert.ok(info!.repoKey.endsWith('.git'), `repoKey should end with .git, got ${info!.repoKey}`);
-    const raw = spawnSync('git', ['-C', repoRoot, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
-    assert.equal(info!.branch, raw === 'HEAD' ? null : raw);
+    // Derive expectations from git rather than hard-coding: the suite may run
+    // from a `git worktree` checkout (isLinkedWorktree true) or a submodule
+    // (repoKey under .git/modules), where a hard-coded non-linked/.git would fail.
+    const [commonDir, gitDir, rawBranch] = spawnSync(
+      'git', ['-C', repoRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--git-dir', '--abbrev-ref', 'HEAD'],
+      { encoding: 'utf8' },
+    ).stdout.trim().split('\n');
+    assert.equal(info!.isLinkedWorktree, gitDir !== commonDir);
+    assert.equal(info!.repoKey, commonDir);
+    assert.equal(info!.branch, rawBranch.trim() === 'HEAD' ? null : rawBranch.trim());
   });
 
   it('does not re-resolve or fire onChange within the TTL', async () => {
