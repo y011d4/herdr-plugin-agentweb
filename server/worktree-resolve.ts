@@ -80,8 +80,11 @@ async function resolveCwd(cwd: string): Promise<boolean> {
 }
 
 /** Synchronous cache read for a workspace cwd (null until a refresh has run). */
-export function worktreeForCwd(cwd: string): WorktreeInfo | null {
-  return cache.get(cwd)?.info ?? null;
+// undefined = not resolved yet (cache miss); null = git resolved it as not a
+// repo; WorktreeInfo = a resolved git checkout.
+export function worktreeForCwd(cwd: string): WorktreeInfo | null | undefined {
+  const hit = cache.get(cwd);
+  return hit ? hit.info : undefined;
 }
 
 /**
@@ -91,13 +94,17 @@ export function worktreeForCwd(cwd: string): WorktreeInfo | null {
  */
 export function enrichStateWorktrees(
   state: NormalizedState,
-  lookup: (cwd: string) => WorktreeInfo | null = worktreeForCwd,
+  lookup: (cwd: string) => WorktreeInfo | null | undefined = worktreeForCwd,
 ): NormalizedState {
   let changed = false;
   const workspaces = state.workspaces.map((ws): WorkspaceNode => {
     if (!ws.cwd) return ws;
     const info = lookup(ws.cwd);
-    if (!info) return ws;
+    // Cache miss (undefined): not resolved yet — keep whatever baseline the
+    // snapshot carried. Resolved (WorktreeInfo or null): apply it, which also
+    // clears a previously-shown worktree when the cwd is no longer a git repo.
+    if (info === undefined) return ws;
+    if (JSON.stringify(ws.worktree ?? null) === JSON.stringify(info)) return ws;
     changed = true;
     return { ...ws, worktree: info };
   });
