@@ -22,6 +22,20 @@ const MAX_CONCURRENCY = 4;
 const cache = new Map<string, { at: number; info: WorktreeInfo | null }>();
 const inflight = new Set<string>();
 
+// Process-wide concurrency limit for git: a counting semaphore shared by every
+// refreshWorktrees call, so overlapping refreshes can't collectively exceed it.
+let running = 0;
+const waiters: Array<() => void> = [];
+function acquire(): Promise<void> {
+  if (running < MAX_CONCURRENCY) { running++; return Promise.resolve(); }
+  return new Promise((res) => waiters.push(res));
+}
+function release(): void {
+  const next = waiters.shift();
+  if (next) next(); // hand the slot straight to a waiter; running stays put
+  else running--;
+}
+
 function parseGit(stdout: string): WorktreeInfo | null {
   const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
   if (lines.length < 4) return null;
@@ -46,13 +60,15 @@ function parseGit(stdout: string): WorktreeInfo | null {
 // Resolve one cwd (already reserved in `inflight` by the caller) with `git
 // rev-parse` off the event loop, update the cache, and clear the reservation.
 // Resolves to true when the cached info changed. Never rejects.
-function resolveCwd(cwd: string): Promise<boolean> {
+async function resolveCwd(cwd: string): Promise<boolean> {
+  await acquire();
   return new Promise((done) => {
     execFile(
       'git',
       ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--git-dir', '--show-toplevel', '--abbrev-ref', 'HEAD'],
       { timeout: 2000 },
       (err, stdout) => {
+        release();
         inflight.delete(cwd);
         const info = err ? null : parseGit(stdout);
         const prev = cache.get(cwd);
@@ -103,14 +119,10 @@ export async function refreshWorktrees(cwds: string[], onChange: () => void): Pr
   });
   if (stale.length === 0) return;
   // Reserve every selected cwd globally *before* awaiting, so a concurrent
-  // refresh (snapshot + interval) filters these out instead of re-selecting and
-  // re-spawning git for them — keeps total git concurrency bounded across callers.
+  // refresh (snapshot + interval) filters these out instead of re-selecting the
+  // same cwds. Actual git concurrency is bounded process-wide by the semaphore in
+  // resolveCwd, so all stale cwds can be launched at once here.
   for (const cwd of stale) inflight.add(cwd);
-
-  let anyChanged = false;
-  for (let i = 0; i < stale.length; i += MAX_CONCURRENCY) {
-    const results = await Promise.all(stale.slice(i, i + MAX_CONCURRENCY).map(resolveCwd));
-    if (results.some(Boolean)) anyChanged = true;
-  }
-  if (anyChanged) onChange();
+  const results = await Promise.all(stale.map(resolveCwd));
+  if (results.some(Boolean)) onChange();
 }

@@ -644,41 +644,43 @@ function renderTokenScreen(message?: string): void {
 
 // ── Agents dashboard ──────────────────────────────────────────────────────────
 
-// Render a workspace's agent-pane cards (plus an inactive-panes note when the
-// workspace has panes but none are active). Returns totalPanes so the caller can
-// skip a workspace with no panes at all. Each card's title is `tab / branch`
-// (branch omitted for non-git workspaces), plus a `worktree` chip when the
-// workspace is a linked git worktree.
-function renderWorkspaceCards(ws: WorkspaceNode): { html: string; totalPanes: number } {
-  const tabs = ws.tabs ?? [];
-  const branch = ws.worktree?.branch || null;
-  const isWorktree = ws.worktree?.isLinkedWorktree ?? false;
-  // Carry each pane's tab label so cards can show which tab they belong to —
-  // pane.title is usually null, so the tab name is the only distinguishing label
-  // when a workspace runs several agents. When one tab runs several agent panes
-  // (split panes), also carry a 1-based index among that tab's agent panes so
-  // those otherwise-identical cards stay distinguishable.
-  const allPanes = tabs.flatMap((t) => {
-    const panes = t.panes ?? [];
-    const tabAgentPanes = panes.filter((p) => p.agent);
-    return panes.map((pane) => ({
-      pane,
-      tabLabel: t.label,
-      tabAgentIndex: tabAgentPanes.indexOf(pane) + 1,
-      tabAgentCount: tabAgentPanes.length,
-    }));
+// Render agent-pane cards for a repo group — a main checkout plus any linked
+// worktrees — as a single status-sorted list, so an urgent worktree agent isn't
+// stuck below idle main-checkout agents. A flat workspace is a one-member group.
+// Each card's `branch` and `worktree` chip come from its own workspace. Returns
+// totalPanes so the caller can skip an empty group.
+function renderGroupCards(workspaces: WorkspaceNode[]): { html: string; totalPanes: number } {
+  // Flatten every pane across the group, carrying its workspace's git context
+  // and its tab label — pane.title is usually null, so the tab name is the only
+  // distinguishing label when a workspace runs several agents; a per-tab index
+  // keeps split-pane cards distinct.
+  const items = workspaces.flatMap((ws) => {
+    const branch = ws.worktree?.branch || null;
+    const isWorktree = ws.worktree?.isLinkedWorktree ?? false;
+    return (ws.tabs ?? []).flatMap((t) => {
+      const panes = t.panes ?? [];
+      const tabAgentPanes = panes.filter((p) => p.agent);
+      return panes.map((pane) => ({
+        pane,
+        branch,
+        isWorktree,
+        tabLabel: t.label,
+        tabAgentIndex: tabAgentPanes.indexOf(pane) + 1,
+        tabAgentCount: tabAgentPanes.length,
+      }));
+    });
   });
-  const agentPanes = allPanes
+  const agentItems = items
     .filter((x) => x.pane.agent)
     .sort((a, b) => statusOrder(a.pane.agent!.status) - statusOrder(b.pane.agent!.status));
-  const inactivePanes = allPanes.filter((x) => !x.pane.agent);
+  const inactiveCount = items.length - agentItems.length;
 
   let html = '';
-  if (agentPanes.length === 0) {
-    html += `<div class="inactive-panes-count">${inactivePanes.length} pane${inactivePanes.length !== 1 ? 's' : ''} (no active agents)</div>`;
+  if (agentItems.length === 0) {
+    html += `<div class="inactive-panes-count">${inactiveCount} pane${inactiveCount !== 1 ? 's' : ''} (no active agents)</div>`;
   }
 
-  for (const { pane, tabLabel, tabAgentIndex, tabAgentCount } of agentPanes) {
+  for (const { pane, branch, isWorktree, tabLabel, tabAgentIndex, tabAgentCount } of agentItems) {
     const { paneId, agent, title } = pane;
     const { displayName, name, status, customStatus, message, sinceUnixMs } = agent!;
     // The chip shows the stable agent kind, so prefer `name` (raw pane.agent,
@@ -710,7 +712,7 @@ function renderWorkspaceCards(ws: WorkspaceNode): { html: string; totalPanes: nu
       </div>`;
   }
 
-  return { html, totalPanes: allPanes.length };
+  return { html, totalPanes: items.length };
 }
 
 function renderAgentsDashboard(): void {
@@ -768,17 +770,12 @@ function renderAgentsDashboard(): void {
     .sort((a, b) => entryUrgency(a) - entryUrgency(b));
 
   for (const ws of topLevel) {
-    const { html: cards, totalPanes } = renderWorkspaceCards(ws);
-
-    // This main's linked worktrees: their cards join the same group (each card
-    // shows its own branch and a `worktree` chip), so a worktree reads as part
-    // of the repo rather than a repo of its own.
-    let wtCards = '';
-    for (const wt of worktreesOfMain.get(ws.workspaceId) ?? []) {
-      const { html: cardsHtml, totalPanes: wtPanes } = renderWorkspaceCards(wt);
-      if (wtPanes > 0) wtCards += cardsHtml;
-    }
-    if (totalPanes === 0 && !wtCards) continue;
+    // Main checkout + its linked worktrees render as one status-sorted group, so
+    // each worktree's cards (with their own branch + `worktree` chip) read as
+    // part of the repo rather than a repo of their own.
+    const members = [ws, ...(worktreesOfMain.get(ws.workspaceId) ?? [])];
+    const { html: cards, totalPanes } = renderGroupCards(members);
+    if (totalPanes === 0) continue;
 
     // An orphan worktree (its main isn't open) keeps a repo-qualified badge.
     const wt = ws.worktree;
@@ -786,7 +783,7 @@ function renderAgentsDashboard(): void {
       ? `<span class="worktree-badge">${escHtml(wt.repoName || 'repo')} · worktree</span>`
       : '';
     html += `<div class="workspace-group" data-ws="${escHtml(ws.workspaceId)}">
-      <div class="workspace-label"><span class="workspace-name">${escHtml(ws.label || ws.workspaceId)}</span>${badge}</div>${cards}${wtCards}</div>`;
+      <div class="workspace-label"><span class="workspace-name">${escHtml(ws.label || ws.workspaceId)}</span>${badge}</div>${cards}</div>`;
   }
 
   html += '</div>'; // screen-agents
