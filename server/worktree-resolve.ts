@@ -60,12 +60,14 @@ function parseGit(stdout: string): WorktreeInfo | null {
   };
 }
 
-// Classify a `git rev-parse` failure. Only exit 128 authoritatively means "not a
-// git repository" (the cwd is outside any work tree); a missing git binary
-// (string code like ENOENT), a timeout (killed, code null), or a permission error
-// are tooling failures that must NOT erase herdr-provided worktree data.
-export function isNotARepo(code: string | number | undefined): boolean {
-  return code === 128;
+// Classify a `git rev-parse` failure. git exits 128 for many fatal conditions
+// (dubious ownership, permission errors, a deleted cwd, ...), so only the actual
+// "not a git repository" message is an authoritative negative that should clear
+// worktree data. A missing git binary (string code like ENOENT), a timeout
+// (killed, code null), and every other 128 are tooling failures that must NOT
+// erase herdr-provided worktree data. Requires LC_ALL=C so the message is English.
+export function isNotARepo(code: string | number | undefined, stderr: string): boolean {
+  return code === 128 && /not a git repository/i.test(stderr);
 }
 
 // Resolve one cwd (already reserved in `inflight` by the caller) with `git
@@ -78,8 +80,9 @@ async function resolveCwd(cwd: string): Promise<boolean> {
     execFile(
       'git',
       ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--git-dir', '--show-toplevel', '--abbrev-ref', 'HEAD'],
-      { timeout: 2000 },
-      (err, stdout) => {
+      // LC_ALL=C so a "not a git repository" failure is reported in English.
+      { timeout: 2000, env: { ...process.env, LC_ALL: 'C' } },
+      (err, stdout, stderr) => {
         release();
         inflight.delete(cwd);
         const prev = cache.get(cwd);
@@ -89,7 +92,7 @@ async function resolveCwd(cwd: string): Promise<boolean> {
           // unresolved rather than "not a repo", so a baseline is preserved.
           const info = parseGit(stdout);
           cache.set(cwd, info ? { at, info } : { at, info: null, transient: true });
-        } else if (isNotARepo(err.code)) {
+        } else if (isNotARepo(err.code, stderr)) {
           cache.set(cwd, { at, info: null });
         } else {
           cache.set(cwd, { at, info: null, transient: true });
