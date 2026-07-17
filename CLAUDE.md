@@ -162,6 +162,14 @@ vendor-neutrality is preserved.
   the in-progress scroll gesture. Renders defer via `pendingAnsi` while
   `terminalTouchActive` or scrolled above the bottom, and flush on touchend /
   return-to-bottom.
+- **The agents dashboard has the same hazard.** `#screen-agents` is the scroll
+  container; state pushes (agent_status_changed etc.) arrive constantly, so
+  `renderAgentsDashboard` must keep that element **stable** and replace only its
+  inner content (`data-ready` marks the real container; the loading spinner
+  lacks it). Rebuilding the whole `#screen` subtree recreates `#screen-agents`,
+  which snaps `scrollTop` to 0 (the "scroll jumps to top" bug) and cancels an
+  in-progress drag. Like the terminal, rebuilds also defer while a finger is
+  down (`agentsTouchActive`/`agentsRenderPending`) and flush on touchend.
 - Async fetches capture `paneViewGen` + pane id and bail if the user navigated
   away; stale responses must not poison the next pane's view.
 - Double-tap detection requires two *stationary* taps (movement > 10px within
