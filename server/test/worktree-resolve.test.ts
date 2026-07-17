@@ -52,11 +52,19 @@ describe('enrichStateWorktrees', () => {
     assert.equal(next.workspaces[0].worktree, null);
   });
 
-  it('keeps the existing worktree when git can\'t resolve the cwd', () => {
+  it('keeps the existing worktree on a cache miss (undefined = not resolved yet)', () => {
     const herdrWt: WorktreeInfo = { ...DERIVED, branch: null };
-    const state = mkState([ws('w1', '/tmp/not-a-repo', herdrWt)]);
-    const next = enrichStateWorktrees(state, () => null);
+    const state = mkState([ws('w1', '/home/u/repo', herdrWt)]);
+    const next = enrichStateWorktrees(state, () => undefined);
     assert.equal(next.workspaces[0].worktree, herdrWt);
+  });
+
+  it('clears the worktree when the cwd resolves as not a repo (null, not a miss)', () => {
+    // Regression: a repo that stops resolving must drop its stale branch/grouping.
+    const state = mkState([ws('w1', '/home/u/repo', DERIVED)]);
+    const next = enrichStateWorktrees(state, () => null);
+    assert.equal(next.workspaces[0].worktree, null);
+    assert.equal(state.workspaces[0].worktree, DERIVED); // input not mutated
   });
 
   it('gives two same-repo workspaces an identical repoKey (grouping enabler)', () => {
@@ -68,9 +76,9 @@ describe('enrichStateWorktrees', () => {
     assert.equal(next.workspaces[0].worktree!.repoKey, next.workspaces[1].worktree!.repoKey);
   });
 
-  it('returns the same state reference when nothing resolved', () => {
-    const state = mkState([ws('w1', null, null)]);
-    assert.equal(enrichStateWorktrees(state, () => null), state);
+  it('returns the same state reference on a cache miss (nothing changed)', () => {
+    const state = mkState([ws('w1', '/home/u/repo', null)]);
+    assert.equal(enrichStateWorktrees(state, () => undefined), state);
   });
 
   it('does not mutate the input state', () => {
