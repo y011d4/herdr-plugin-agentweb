@@ -49,13 +49,16 @@ export function parseGit(stdout: string): WorktreeInfo | null {
   const repoRoot = dirname(commonDir);
   // linked worktrees have a per-worktree gitDir under <common>/worktrees/*.
   const isLinkedWorktree = gitDir !== commonDir;
+  // Repo name: a linked worktree's own checkout dir isn't the repo, so name it
+  // from the shared common dir — `<repo>/.git` → its parent (the repo), or a
+  // submodule's `<super>/.git/modules/<name>` → its last segment. A main checkout
+  // or a submodule main uses its working-tree dir.
+  const repoName = isLinkedWorktree
+    ? (basename(commonDir) === '.git' ? basename(repoRoot) : basename(commonDir))
+    : basename(toplevel);
   return {
     repoKey: commonDir,
-    // Repo name: a linked worktree's own checkout dir isn't the repo, so name it
-    // from the main repo root (dirname of the shared .git). A main checkout or a
-    // submodule uses its working-tree dir — a submodule's repoRoot would be the
-    // meaningless ".../modules".
-    repoName: isLinkedWorktree ? basename(repoRoot) : basename(toplevel),
+    repoName,
     repoRoot,
     checkoutPath: toplevel,
     isLinkedWorktree,
