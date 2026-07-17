@@ -91,14 +91,19 @@ describe('enrichStateWorktrees', () => {
 });
 
 describe('isNotARepo (git failure classification)', () => {
-  it('treats git exit 128 as an authoritative "not a git repository"', () => {
-    assert.equal(isNotARepo(128), true);
+  it('is authoritative only for exit 128 with the "not a git repository" message', () => {
+    assert.equal(isNotARepo(128, 'fatal: not a git repository (or any parent up to /)'), true);
   });
 
-  it('treats a missing git, a timeout, or any other failure as transient (not authoritative)', () => {
-    assert.equal(isNotARepo('ENOENT'), false); // git binary not found
-    assert.equal(isNotARepo(undefined), false); // killed by timeout
-    assert.equal(isNotARepo(1), false); // some other non-zero exit
+  it('treats other exit-128 fatals (dubious ownership, permissions) as transient', () => {
+    assert.equal(isNotARepo(128, 'fatal: detected dubious ownership in repository at ...'), false);
+    assert.equal(isNotARepo(128, 'fatal: could not read Permission denied'), false);
+  });
+
+  it('treats a missing git, a timeout, or any other failure as transient', () => {
+    assert.equal(isNotARepo('ENOENT', ''), false); // git binary not found
+    assert.equal(isNotARepo(undefined, ''), false); // killed by timeout
+    assert.equal(isNotARepo(1, 'some error'), false); // other non-zero exit
   });
 });
 
