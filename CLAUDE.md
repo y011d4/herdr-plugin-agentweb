@@ -109,8 +109,12 @@ Verified live against herdr 0.7.3 / protocol 16:
   to workspaces it opened via its worktree flow — including linked worktrees — but
   plain checkouts often arrive with no `worktree` field, and it **never carries the
   branch** (verified live: `worktree` has repo_key/paths/is_linked_worktree only). So
-  `server/worktree-resolve.ts` resolves each workspace's cwd with `git rev-parse` to
-  fill in the branch (and worktree info for untagged checkouts); `repo_key` uses git's
+  `server/worktree-resolve.ts` resolves git with `git rev-parse` to fill in the branch.
+  For a herdr-tagged worktree it resolves the **stable `checkout_path`** (not the pane's
+  mutable `foreground_cwd`, which an agent `cd` can move) and layers only the branch onto
+  herdr's authoritative identity — so a wandering pane can't repoint or clear the repo; an
+  untagged checkout has no herdr identity, so it derives its full worktree info from the
+  pane cwd (and clears when that stops resolving). `repo_key` uses git's
   shared `--git-common-dir`, matching herdr's own repoKey. In the UI each card shows its
   tab name and (dim, beside it) its git branch; a linked worktree's cards are listed
   inside its main checkout's group (matched by `repo_key`) with a `worktree` chip, and
@@ -162,6 +166,14 @@ vendor-neutrality is preserved.
   the in-progress scroll gesture. Renders defer via `pendingAnsi` while
   `terminalTouchActive` or scrolled above the bottom, and flush on touchend /
   return-to-bottom.
+- **The agents dashboard has the same hazard.** `#screen-agents` is the scroll
+  container; state pushes (agent_status_changed etc.) arrive constantly, so
+  `renderAgentsDashboard` must keep that element **stable** and replace only its
+  inner content (`data-ready` marks the real container; the loading spinner
+  lacks it). Rebuilding the whole `#screen` subtree recreates `#screen-agents`,
+  which snaps `scrollTop` to 0 (the "scroll jumps to top" bug) and cancels an
+  in-progress drag. Like the terminal, rebuilds also defer while a finger is
+  down (`agentsTouchActive`/`agentsRenderPending`) and flush on touchend.
 - Async fetches capture `paneViewGen` + pane id and bail if the user navigated
   away; stale responses must not poison the next pane's view.
 - Double-tap detection requires two *stationary* taps (movement > 10px within
