@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
-import { enrichStateWorktrees, refreshWorktrees, worktreeForCwd, isNotARepo, resolveOutcome } from '../worktree-resolve.ts';
+import { enrichStateWorktrees, refreshWorktrees, worktreeForCwd, isNotARepo, resolveOutcome, parseGit } from '../worktree-resolve.ts';
 import type { NormalizedState, WorkspaceNode, WorktreeInfo } from '../types.ts';
 
 function mkState(workspaces: WorkspaceNode[]): NormalizedState {
@@ -115,9 +115,39 @@ describe('resolveOutcome (what to cache from a git outcome)', () => {
   });
 });
 
+describe('parseGit', () => {
+  it('names a linked worktree by its main repo, not its checkout dir', () => {
+    const info = parseGit([
+      '/home/u/repo/.git',                  // git-common-dir
+      '/home/u/repo/.git/worktrees/feat-x', // git-dir (differs → linked worktree)
+      '/home/u/.wt/repo/feat-x',            // show-toplevel (worktree checkout dir)
+      'feat/x',                             // branch
+    ].join('\n'));
+    assert.ok(info);
+    assert.equal(info!.isLinkedWorktree, true);
+    assert.equal(info!.repoName, 'repo'); // the repo, not "feat-x"
+    assert.equal(info!.repoKey, '/home/u/repo/.git');
+    assert.equal(info!.branch, 'feat/x');
+  });
+
+  it('names a main checkout by its working-tree dir', () => {
+    const info = parseGit(['/home/u/repo/.git', '/home/u/repo/.git', '/home/u/repo', 'main'].join('\n'));
+    assert.equal(info!.isLinkedWorktree, false);
+    assert.equal(info!.repoName, 'repo');
+  });
+
+  it('returns null for malformed (too-few-lines) output', () => {
+    assert.equal(parseGit('/home/u/repo/.git\n'), null);
+  });
+});
+
 describe('isNotARepo (git failure classification)', () => {
-  it('is authoritative only for exit 128 with the "not a git repository" message', () => {
+  it('is authoritative only for exit 128 with git\'s "fatal: not a git repository" line', () => {
     assert.equal(isNotARepo(128, 'fatal: not a git repository (or any parent up to /)'), true);
+  });
+
+  it('does not match the phrase mid-line (e.g. inside a path)', () => {
+    assert.equal(isNotARepo(128, "fatal: cannot open '/tmp/not a git repository/x'"), false);
   });
 
   it('treats other exit-128 fatals (dubious ownership, permissions) as transient', () => {

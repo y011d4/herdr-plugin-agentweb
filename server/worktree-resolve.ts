@@ -40,22 +40,25 @@ function release(): void {
   else running--;
 }
 
-function parseGit(stdout: string): WorktreeInfo | null {
+export function parseGit(stdout: string): WorktreeInfo | null {
   const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
   if (lines.length < 4) return null;
   const [commonDir, gitDir, toplevel, branchRaw] = lines;
   // repoKey is the shared common .git dir — identical for a main checkout and
   // all its linked worktrees, and byte-identical to herdr's own repoKey.
   const repoRoot = dirname(commonDir);
+  // linked worktrees have a per-worktree gitDir under <common>/worktrees/*.
+  const isLinkedWorktree = gitDir !== commonDir;
   return {
     repoKey: commonDir,
-    // Name from the working tree (--show-toplevel): a submodule's common dir is
-    // <super>/.git/modules/<name>, whose parent basename is a meaningless "modules".
-    repoName: basename(toplevel),
+    // Repo name: a linked worktree's own checkout dir isn't the repo, so name it
+    // from the main repo root (dirname of the shared .git). A main checkout or a
+    // submodule uses its working-tree dir — a submodule's repoRoot would be the
+    // meaningless ".../modules".
+    repoName: isLinkedWorktree ? basename(repoRoot) : basename(toplevel),
     repoRoot,
     checkoutPath: toplevel,
-    // linked worktrees have a per-worktree gitDir under <common>/worktrees/*.
-    isLinkedWorktree: gitDir !== commonDir,
+    isLinkedWorktree,
     // `--abbrev-ref HEAD` yields "HEAD" on a detached checkout.
     branch: branchRaw && branchRaw !== 'HEAD' ? branchRaw : null,
   };
@@ -68,7 +71,9 @@ function parseGit(stdout: string): WorktreeInfo | null {
 // (killed, code null), and every other 128 are tooling failures that must NOT
 // erase herdr-provided worktree data. Requires LC_ALL=C so the message is English.
 export function isNotARepo(code: string | number | undefined, stderr: string): boolean {
-  return code === 128 && /not a git repository/i.test(stderr);
+  // Anchor to git's actual diagnostic line so an unrelated 128 whose path/detail
+  // merely contains the phrase isn't misread as authoritative.
+  return code === 128 && /^fatal: not a git repository/m.test(stderr);
 }
 
 // Decide the value to cache from a git outcome, given the last known value:
