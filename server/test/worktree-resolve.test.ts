@@ -177,9 +177,11 @@ describe('refreshWorktrees + worktreeForCwd (real git)', () => {
     assert.equal(info!.branch, raw === 'HEAD' ? null : raw);
   });
 
-  it('does not re-resolve or fire onChange within the TTL (cached from the prior test)', async () => {
+  it('does not re-resolve or fire onChange within the TTL', async () => {
+    const cwd = join(repoRoot, 'bin'); // self-contained: primed within this test
+    await refreshWorktrees([cwd], () => {}); // first resolve populates the cache
     let changed = false;
-    await refreshWorktrees([repoRoot], () => { changed = true; });
+    await refreshWorktrees([cwd], () => { changed = true; }); // still fresh → no-op
     assert.equal(changed, false);
   });
 
