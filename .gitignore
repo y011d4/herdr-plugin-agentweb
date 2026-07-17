@@ -3,6 +3,7 @@ node_modules/
 dist/
 web/app.js
 web/ansi.js
+web/dashboard-group.js
 web/prompt.js
 web/sw.js
 web/transcript.js

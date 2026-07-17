@@ -1,7 +1,10 @@
 /**
  * Fills in git context herdr's session.snapshot omits — most importantly the
- * current branch, which the snapshot never carries — by resolving each
- * workspace's cwd with `git rev-parse`. repoKey uses git's shared
+ * current branch, which the snapshot never carries — by resolving a workspace's
+ * path with `git rev-parse`. A herdr-tagged worktree is resolved from its stable
+ * checkout path (not the mutable pane cwd) and only has its branch layered in;
+ * an untagged checkout derives its full worktree info from the pane cwd. repoKey
+ * uses git's shared
  * `--git-common-dir`, matching herdr's own repoKey, and isLinkedWorktree is
  * derived (git-dir differs from the common dir for a linked worktree).
  *
@@ -143,9 +146,28 @@ export function worktreeForCwd(cwd: string): WorktreeInfo | null | undefined {
 }
 
 /**
- * Return a state where every workspace with a cwd carries its cached git
- * worktree info. Reads only the cache — never spawns git — so it is safe on the
- * snapshot hot path. Input state is not mutated. `lookup` is injectable for tests.
+ * The cwd to resolve git from for a workspace. When herdr already tagged the
+ * workspace with a worktree, resolve from its stable checkout path so an agent
+ * that `cd`s the pane out of the checkout (changing foreground_cwd) can't
+ * repoint the workspace to another repo or clear its grouping. Only an untagged
+ * checkout — which carries no herdr repo identity — falls back to the
+ * (pane-derived) workspace cwd.
+ */
+export function resolveCwdFor(ws: Pick<WorkspaceNode, 'cwd' | 'worktree'>): string | null {
+  return ws.worktree?.checkoutPath || ws.cwd;
+}
+
+/**
+ * Return a state where every workspace carries its cached git worktree info.
+ * Reads only the cache — never spawns git — so it is safe on the snapshot hot
+ * path. Input state is not mutated. `lookup` is injectable for tests.
+ *
+ * When herdr tagged the workspace with a worktree, its repo identity
+ * (repoKey/paths/isLinkedWorktree) is authoritative: only the git-resolved
+ * branch is layered in, so a moved pane cwd or a git hiccup can neither repoint
+ * the workspace to another repo nor drop its grouping. An untagged checkout has
+ * no herdr identity, so the git result is authoritative for it — including
+ * clearing it (null) once its cwd no longer resolves as a git repo.
  */
 export function enrichStateWorktrees(
   state: NormalizedState,
@@ -153,15 +175,22 @@ export function enrichStateWorktrees(
 ): NormalizedState {
   let changed = false;
   const workspaces = state.workspaces.map((ws): WorkspaceNode => {
-    if (!ws.cwd) return ws;
-    const info = lookup(ws.cwd);
+    const cwd = resolveCwdFor(ws);
+    if (!cwd) return ws;
+    const info = lookup(cwd);
     // Cache miss (undefined): not resolved yet — keep whatever baseline the
-    // snapshot carried. Resolved (WorktreeInfo or null): apply it, which also
-    // clears a previously-shown worktree when the cwd is no longer a git repo.
+    // snapshot carried.
     if (info === undefined) return ws;
-    if (JSON.stringify(ws.worktree ?? null) === JSON.stringify(info)) return ws;
+    // A resolved WorktreeInfo is authoritative for the branch — including a null
+    // branch (detached HEAD), which must replace a previously-shown one. Only a
+    // null info (checkout path no longer a repo) falls back to herdr's last-known
+    // branch, so the tagged identity/grouping survives rather than being cleared.
+    const merged: WorktreeInfo | null = ws.worktree
+      ? { ...ws.worktree, branch: info ? info.branch : ws.worktree.branch }
+      : info;
+    if (JSON.stringify(ws.worktree ?? null) === JSON.stringify(merged)) return ws;
     changed = true;
-    return { ...ws, worktree: info };
+    return { ...ws, worktree: merged };
   });
   if (!changed) return state;
   return { ...state, workspaces };
