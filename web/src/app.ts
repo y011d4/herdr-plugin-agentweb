@@ -20,7 +20,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v90';
+const BUILD = 'v91';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -715,6 +715,25 @@ function renderGroupCards(workspaces: WorkspaceNode[]): { html: string; totalPan
   return { html, totalPanes: items.length };
 }
 
+// State pushes (agent_status_changed and friends) arrive continuously while the
+// user reads the list. Rebuilding the whole #screen subtree on each one used to
+// recreate #screen-agents — the scroll container — snapping scrollTop back to
+// the top and, mid-drag, cancelling the in-progress touch scroll. So the
+// container is kept stable (only its inner groups are replaced, which preserves
+// scrollTop and iOS momentum) and rebuilds are deferred while a finger is down,
+// flushing when it lifts (mirrors the terminal view's touch handling).
+let agentsTouchActive = false;
+let agentsRenderPending = false;
+
+function onAgentsTouchEnd(e: TouchEvent): void {
+  if (e.touches.length > 0) return; // other fingers still down
+  agentsTouchActive = false;
+  if (agentsRenderPending) {
+    agentsRenderPending = false;
+    renderAgentsDashboard();
+  }
+}
+
 function renderAgentsDashboard(): void {
   const topbar = document.getElementById('topbar');
   if (topbar) {
@@ -731,12 +750,21 @@ function renderAgentsDashboard(): void {
     return;
   }
 
+  // A scroll gesture is in progress on the list — rebuilding now would cancel it
+  // and reset the scroll position. Defer until the finger lifts (onAgentsTouchEnd).
+  // An absent container means we're re-entering the route; fall through to rebuild
+  // it (which also clears any stale gesture flag) rather than deferring forever.
+  if (agentsTouchActive && document.getElementById('screen-agents')) {
+    agentsRenderPending = true;
+    return;
+  }
+
   const { workspaces = [] } = appState;
 
-  let html = '<div id="screen-agents">';
+  let inner = '';
 
   if (workspaces.length === 0) {
-    html += '<div class="empty-state">No workspaces found.</div>';
+    inner += '<div class="empty-state">No workspaces found.</div>';
   }
 
   // A linked worktree is shown inside its main checkout's list (matched by
@@ -782,15 +810,29 @@ function renderAgentsDashboard(): void {
     const badge = wt?.isLinkedWorktree
       ? `<span class="worktree-badge">${escHtml(wt.repoName || 'repo')} · worktree</span>`
       : '';
-    html += `<div class="workspace-group" data-ws="${escHtml(ws.workspaceId)}">
+    inner += `<div class="workspace-group" data-ws="${escHtml(ws.workspaceId)}">
       <div class="workspace-label"><span class="workspace-name">${escHtml(ws.label || ws.workspaceId)}</span>${badge}</div>${cards}</div>`;
   }
 
-  html += '</div>'; // screen-agents
-  elScreen!.innerHTML = html;
+  // Keep the #screen-agents scroll container stable across state-push rebuilds:
+  // replacing only its inner content preserves scrollTop and iOS momentum, while
+  // the touch-defer above keeps an active drag from being cancelled. The container
+  // is (re)created only when absent (first paint, or after leaving and returning
+  // to the route) — the loading-spinner placeholder lacks data-ready.
+  let scroller = document.getElementById('screen-agents') as HTMLElement | null;
+  if (!scroller || !scroller.dataset.ready) {
+    elScreen!.innerHTML = '<div id="screen-agents" data-ready="1"></div>';
+    scroller = document.getElementById('screen-agents') as HTMLElement;
+    agentsTouchActive = false;
+    agentsRenderPending = false;
+    scroller.addEventListener('touchstart', () => { agentsTouchActive = true; }, { passive: true });
+    scroller.addEventListener('touchend', onAgentsTouchEnd, { passive: true });
+    scroller.addEventListener('touchcancel', onAgentsTouchEnd, { passive: true });
+  }
+  scroller.innerHTML = inner;
 
   // Attach tap handlers
-  elScreen!.querySelectorAll('.agent-card').forEach((card) => {
+  scroller.querySelectorAll('.agent-card').forEach((card) => {
     const el = card as HTMLElement;
     const paneId = el.dataset.paneId!;
     const activate = () => navigate(`#/pane/${encodeURIComponent(paneId)}`);
