@@ -19,7 +19,10 @@ import type { NormalizedState, WorkspaceNode, WorktreeInfo } from './types.ts';
 
 const TTL_MS = 30_000;
 const MAX_CONCURRENCY = 4;
-const cache = new Map<string, { at: number; info: WorktreeInfo | null }>();
+// info: resolved (WorktreeInfo) or a confirmed non-repo (null). transient marks a
+// resolver failure (timeout, missing git, permissions) — kept only to back off
+// re-spawns; it is reported to callers as "unresolved", never as "not a repo".
+const cache = new Map<string, { at: number; info: WorktreeInfo | null; transient?: boolean }>();
 const inflight = new Set<string>();
 
 // Process-wide concurrency limit for git: a counting semaphore shared by every
@@ -57,9 +60,18 @@ function parseGit(stdout: string): WorktreeInfo | null {
   };
 }
 
+// Classify a `git rev-parse` failure. Only exit 128 authoritatively means "not a
+// git repository" (the cwd is outside any work tree); a missing git binary
+// (string code like ENOENT), a timeout (killed, code null), or a permission error
+// are tooling failures that must NOT erase herdr-provided worktree data.
+export function isNotARepo(code: string | number | undefined): boolean {
+  return code === 128;
+}
+
 // Resolve one cwd (already reserved in `inflight` by the caller) with `git
 // rev-parse` off the event loop, update the cache, and clear the reservation.
-// Resolves to true when the cached info changed. Never rejects.
+// Resolves to true when the resolved value (repo info / not-a-repo) changed.
+// Never rejects.
 async function resolveCwd(cwd: string): Promise<boolean> {
   await acquire();
   return new Promise((done) => {
@@ -70,10 +82,24 @@ async function resolveCwd(cwd: string): Promise<boolean> {
       (err, stdout) => {
         release();
         inflight.delete(cwd);
-        const info = err ? null : parseGit(stdout);
         const prev = cache.get(cwd);
-        cache.set(cwd, { at: Date.now(), info });
-        done(!prev || JSON.stringify(prev.info) !== JSON.stringify(info));
+        const at = Date.now();
+        if (!err) {
+          // git succeeded; malformed output (bare repo etc.) is treated as
+          // unresolved rather than "not a repo", so a baseline is preserved.
+          const info = parseGit(stdout);
+          cache.set(cwd, info ? { at, info } : { at, info: null, transient: true });
+        } else if (isNotARepo(err.code)) {
+          cache.set(cwd, { at, info: null });
+        } else {
+          cache.set(cwd, { at, info: null, transient: true });
+        }
+        const next = cache.get(cwd)!;
+        // A transient failure keeps whatever was shown before, so it isn't a
+        // change worth re-broadcasting; otherwise compare the effective value.
+        if (next.transient) { done(false); return; }
+        const prevInfo = prev && !prev.transient ? prev.info : undefined;
+        done(JSON.stringify(prevInfo) !== JSON.stringify(next.info));
       },
     );
   });
@@ -84,7 +110,8 @@ async function resolveCwd(cwd: string): Promise<boolean> {
 // repo; WorktreeInfo = a resolved git checkout.
 export function worktreeForCwd(cwd: string): WorktreeInfo | null | undefined {
   const hit = cache.get(cwd);
-  return hit ? hit.info : undefined;
+  if (!hit || hit.transient) return undefined; // unresolved (or tooling failure)
+  return hit.info;
 }
 
 /**

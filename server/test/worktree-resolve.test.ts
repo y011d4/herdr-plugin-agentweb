@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
-import { enrichStateWorktrees, refreshWorktrees, worktreeForCwd } from '../worktree-resolve.ts';
+import { enrichStateWorktrees, refreshWorktrees, worktreeForCwd, isNotARepo } from '../worktree-resolve.ts';
 import type { NormalizedState, WorkspaceNode, WorktreeInfo } from '../types.ts';
 
 function mkState(workspaces: WorkspaceNode[]): NormalizedState {
@@ -87,6 +87,18 @@ describe('enrichStateWorktrees', () => {
     enrichStateWorktrees(state, () => DERIVED);
     assert.equal(JSON.stringify(state.workspaces), before);
     assert.equal(state.workspaces[0].worktree, null);
+  });
+});
+
+describe('isNotARepo (git failure classification)', () => {
+  it('treats git exit 128 as an authoritative "not a git repository"', () => {
+    assert.equal(isNotARepo(128), true);
+  });
+
+  it('treats a missing git, a timeout, or any other failure as transient (not authoritative)', () => {
+    assert.equal(isNotARepo('ENOENT'), false); // git binary not found
+    assert.equal(isNotARepo(undefined), false); // killed by timeout
+    assert.equal(isNotARepo(1), false); // some other non-zero exit
   });
 });
 
