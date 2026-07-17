@@ -14,13 +14,14 @@ import { renderItems } from './transcript.ts';
 import type { TimelineItem } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt.ts';
 import type { PromptOption, ParsedPrompt } from './prompt.ts';
+import { statusOrder, groupWorkspacesForDashboard } from './dashboard-group.ts';
 import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 
 // ── App version ──────────────────────────────────────────────────────────────
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v93';
+const BUILD = 'v94';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -97,19 +98,6 @@ function relativeTime(ms: number): string {
   if (diff < 60_000) return `${Math.floor(diff / 1_000)}s ago`;
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
   return `${Math.floor(diff / 3_600_000)}h ago`;
-}
-
-function statusOrder(status: string): number {
-  return ({ blocked: 0, working: 1, done: 2, idle: 3, unknown: 4 } as Record<string, number>)[status] ?? 5;
-}
-
-// Most urgent agent status in a workspace; workspaces without agents sort last.
-function workspaceUrgency(ws: WorkspaceNode): number {
-  const ranks = (ws.tabs ?? [])
-    .flatMap((t) => t.panes ?? [])
-    .filter((p) => p.agent)
-    .map((p) => statusOrder(p.agent!.status));
-  return ranks.length ? Math.min(...ranks) : 6;
 }
 
 // ── Token handling ────────────────────────────────────────────────────────────
@@ -775,41 +763,14 @@ function renderAgentsDashboard(): void {
     inner += '<div class="empty-state">No workspaces found.</div>';
   }
 
-  // A linked worktree is shown inside its main checkout's list (matched by
-  // repoKey) tagged "worktree"; the repo is implied by the enclosing group. A
-  // worktree whose main isn't open — and every other workspace — renders flat;
-  // an orphan worktree keeps a repo-qualified badge so its repo stays clear.
-  const mainByRepo = new Map<string, WorkspaceNode>();
-  for (const ws of workspaces) {
-    const wt = ws.worktree;
-    if (wt && !wt.isLinkedWorktree && wt.repoKey) mainByRepo.set(wt.repoKey, ws);
-  }
-  const worktreesOfMain = new Map<string, WorkspaceNode[]>();
-  const absorbed = new Set<string>();
-  for (const ws of workspaces) {
-    const wt = ws.worktree;
-    if (!wt?.isLinkedWorktree || !wt.repoKey) continue;
-    const main = mainByRepo.get(wt.repoKey);
-    if (!main || main.workspaceId === ws.workspaceId) continue;
-    const arr = worktreesOfMain.get(main.workspaceId);
-    if (arr) arr.push(ws);
-    else worktreesOfMain.set(main.workspaceId, [ws]);
-    absorbed.add(ws.workspaceId);
-  }
-
-  const entryUrgency = (ws: WorkspaceNode): number => {
-    const wts = worktreesOfMain.get(ws.workspaceId) ?? [];
-    return Math.min(workspaceUrgency(ws), ...wts.map(workspaceUrgency));
-  };
-  const topLevel = workspaces
-    .filter((ws) => !absorbed.has(ws.workspaceId))
-    .sort((a, b) => entryUrgency(a) - entryUrgency(b));
-
-  for (const ws of topLevel) {
+  // Linked worktrees are grouped under their main checkout (matched by repoKey)
+  // and the top-level entries are status-ordered; a worktree whose main isn't
+  // open — and every other workspace — stays top-level. Grouping/sorting is a
+  // pure helper (unit-tested in dashboard-group.test.ts).
+  for (const { entry: ws, members } of groupWorkspacesForDashboard(workspaces)) {
     // Main checkout + its linked worktrees render as one status-sorted group, so
     // each worktree's cards (with their own branch + `worktree` chip) read as
     // part of the repo rather than a repo of their own.
-    const members = [ws, ...(worktreesOfMain.get(ws.workspaceId) ?? [])];
     const { html: cards, totalPanes } = renderGroupCards(members);
     if (totalPanes === 0) continue;
 
