@@ -20,7 +20,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v91';
+const BUILD = 'v93';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -728,10 +728,18 @@ let agentsRenderPending = false;
 function onAgentsTouchEnd(e: TouchEvent): void {
   if (e.touches.length > 0) return; // other fingers still down
   agentsTouchActive = false;
-  if (agentsRenderPending) {
-    agentsRenderPending = false;
-    renderAgentsDashboard();
-  }
+  if (!agentsRenderPending) return;
+  agentsRenderPending = false;
+  // Rebuild on the next macrotask, not synchronously: a stationary tap synthesizes
+  // a `click` on the tapped card right after touchend, and replacing the card here
+  // would drop that tap (navigation lost). Deferring lets the click — and any
+  // resulting navigation — land first. Only rebuild if the dashboard is still the
+  // mounted view (its container survives only while shown) and the session is
+  // still authenticated, so a tap-away, a 401 that swapped in the token screen, or
+  // any other navigation isn't overwritten with stale agent data.
+  setTimeout(() => {
+    if (token && document.getElementById('screen-agents')) renderAgentsDashboard();
+  }, 0);
 }
 
 function renderAgentsDashboard(): void {
