@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, join } from 'node:path';
 import { enrichStateWorktrees, refreshWorktrees, worktreeForCwd } from '../worktree-resolve.ts';
 import type { NormalizedState, WorkspaceNode, WorktreeInfo } from '../types.ts';
 
@@ -106,5 +106,19 @@ describe('refreshWorktrees + worktreeForCwd (real git)', () => {
   it('caches null for a path outside any repo', async () => {
     await refreshWorktrees(['/'], () => {});
     assert.equal(worktreeForCwd('/'), null);
+  });
+
+  it('coalesces concurrent refreshes of the same uncached cwd (reserved before await)', async () => {
+    // A fresh cache key (a real subdir of this repo, not resolved by earlier tests).
+    const cwd = join(repoRoot, 'server');
+    let fires = 0;
+    await Promise.all([
+      refreshWorktrees([cwd], () => { fires++; }),
+      refreshWorktrees([cwd], () => { fires++; }),
+    ]);
+    // The first call reserves the cwd synchronously before awaiting, so the
+    // second sees it in-flight and does nothing — only one resolution/onChange.
+    assert.equal(fires, 1);
+    assert.ok(worktreeForCwd(cwd));
   });
 });

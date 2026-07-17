@@ -43,11 +43,10 @@ function parseGit(stdout: string): WorktreeInfo | null {
   };
 }
 
-// Resolve one cwd with `git rev-parse` off the event loop, update the cache, and
-// resolve to true when the cached info changed. Never rejects.
+// Resolve one cwd (already reserved in `inflight` by the caller) with `git
+// rev-parse` off the event loop, update the cache, and clear the reservation.
+// Resolves to true when the cached info changed. Never rejects.
 function resolveCwd(cwd: string): Promise<boolean> {
-  if (inflight.has(cwd)) return Promise.resolve(false);
-  inflight.add(cwd);
   return new Promise((done) => {
     execFile(
       'git',
@@ -103,6 +102,10 @@ export async function refreshWorktrees(cwds: string[], onChange: () => void): Pr
     return !hit || now - hit.at >= TTL_MS;
   });
   if (stale.length === 0) return;
+  // Reserve every selected cwd globally *before* awaiting, so a concurrent
+  // refresh (snapshot + interval) filters these out instead of re-selecting and
+  // re-spawning git for them — keeps total git concurrency bounded across callers.
+  for (const cwd of stale) inflight.add(cwd);
 
   let anyChanged = false;
   for (let i = 0; i < stale.length; i += MAX_CONCURRENCY) {
