@@ -31,10 +31,24 @@ export interface TabNode {
   panes: PaneNode[];
 }
 
+export interface WorktreeInfo {
+  /** stable repo identity (path to the shared .git); workspaces sharing this belong to one repo */
+  repoKey: string;
+  repoName: string;
+  repoRoot: string;
+  checkoutPath: string;
+  /** false = the repo's main checkout; true = a linked git worktree (a branch) */
+  isLinkedWorktree: boolean;
+  /** current branch (null when detached, or when only herdr's branch-less data is available) */
+  branch: string | null;
+}
+
 export interface WorkspaceNode {
   workspaceId: string;
   label: string;
   cwd: string | null;
+  /** git repo/worktree context, when herdr resolved one for this workspace; else null */
+  worktree: WorktreeInfo | null;
   tabs: TabNode[];
 }
 
@@ -119,10 +133,20 @@ export interface RawTab {
   [key: string]: unknown;
 }
 
+export interface RawWorktree {
+  repo_key?: string;
+  repo_name?: string;
+  repo_root?: string;
+  checkout_path?: string;
+  is_linked_worktree?: boolean;
+  [key: string]: unknown;
+}
+
 export interface RawWorkspace {
   workspace_id: string;
   label?: string;
   active_tab_id?: string;
+  worktree?: RawWorktree;
   [key: string]: unknown;
 }
 

@@ -17,6 +17,9 @@ herdr server
 
 - `server/herdr-client.ts` — socket RPC + persistent event subscription + reconnect
 - `server/state.ts` — pure snapshot/event → normalized State (unit-tested; keep it I/O-free)
+- `server/worktree-resolve.ts` — git context herdr omits (esp. the branch), resolved
+  from a workspace's cwd via `git rev-parse` (I/O + TTL cache; runs in herdr-client
+  after createState so state.ts stays pure)
 - `server/transcript-normalize.ts` — pure JSONL line → chat TimelineItem[] (unit-tested; I/O-free)
 - `server/transcript.ts` — resolve + tail a claude pane's transcript file (I/O)
 - `server/http.ts` — REST routes, WS (state pushes, per-client pane + transcript watch), static files
@@ -101,6 +104,18 @@ Verified live against herdr 0.7.3 / protocol 16:
   without a response** (surfaces as opaque "connection closed"). The bridge
   validates enums in REST routes and returns a clear 400 instead.
 - `recent` reads cap at 1000 lines regardless of the requested count.
+- **A workspace's `worktree` object is only sometimes present.** herdr attaches
+  `worktree = { repo_key, repo_name, repo_root, checkout_path, is_linked_worktree }`
+  to workspaces it opened via its worktree flow — including linked worktrees — but
+  plain checkouts often arrive with no `worktree` field, and it **never carries the
+  branch** (verified live: `worktree` has repo_key/paths/is_linked_worktree only). So
+  `server/worktree-resolve.ts` resolves each workspace's cwd with `git rev-parse` to
+  fill in the branch (and worktree info for untagged checkouts); `repo_key` uses git's
+  shared `--git-common-dir`, matching herdr's own repoKey. In the UI each card shows its
+  tab name and (dim, beside it) its git branch; a linked worktree's cards are listed
+  inside its main checkout's group (matched by `repo_key`) with a `worktree` chip, and
+  a worktree whose main isn't open renders top-level with a `<repo> · worktree` badge. A cwd git can't
+  resolve just renders plain (graceful degradation).
 
 ## The two scrolling mechanisms (phone pane view)
 
