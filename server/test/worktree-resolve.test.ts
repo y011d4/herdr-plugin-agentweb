@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
-import { enrichStateWorktrees, refreshWorktrees, worktreeForCwd, isNotARepo } from '../worktree-resolve.ts';
+import { enrichStateWorktrees, refreshWorktrees, worktreeForCwd, isNotARepo, resolveOutcome } from '../worktree-resolve.ts';
 import type { NormalizedState, WorkspaceNode, WorktreeInfo } from '../types.ts';
 
 function mkState(workspaces: WorkspaceNode[]): NormalizedState {
@@ -87,6 +87,31 @@ describe('enrichStateWorktrees', () => {
     enrichStateWorktrees(state, () => DERIVED);
     assert.equal(JSON.stringify(state.workspaces), before);
     assert.equal(state.workspaces[0].worktree, null);
+  });
+});
+
+describe('resolveOutcome (what to cache from a git outcome)', () => {
+  const A: WorktreeInfo = { ...DERIVED, branch: 'a' };
+  const B: WorktreeInfo = { ...DERIVED, branch: 'b' };
+
+  it('uses the parsed info on success', () => {
+    assert.equal(resolveOutcome(A, false, B, false), B);
+  });
+
+  it('keeps the last known value on success with malformed output', () => {
+    assert.equal(resolveOutcome(A, false, null, false), A);
+  });
+
+  it('resolves to null for an authoritative not-a-repo', () => {
+    assert.equal(resolveOutcome(A, true, null, true), null);
+  });
+
+  it('keeps the last resolved value on a transient failure (branch survives a hiccup)', () => {
+    assert.equal(resolveOutcome(A, true, null, false), A);
+  });
+
+  it('stays undefined on a transient failure with nothing resolved yet', () => {
+    assert.equal(resolveOutcome(undefined, true, null, false), undefined);
   });
 });
 
