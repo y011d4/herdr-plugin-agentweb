@@ -7,7 +7,9 @@ phone. A herdr plugin that runs a small local bridge server (Node.js) and serves
 mobile-first PWA:
 
 - Dashboard of all agents across all workspaces with live status
-  (idle / working / **blocked** / done), blocked agents sorted to the top
+  (idle / working / **blocked** / done), blocked agents sorted to the top;
+  each card shows its git branch, and a linked worktree's agents appear inside their
+  main checkout, chipped as a worktree
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
   scrollback by swiping down, multiline input, and quick keys
   (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …)

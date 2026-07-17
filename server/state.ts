@@ -10,14 +10,16 @@
  *   connected: bool,
  *   herdr: { version, protocol },
  *   focused: { workspaceId, tabId, paneId },
- *   workspaces: [{ workspaceId, label, cwd, tabs: [{ tabId, label, panes: [{
+ *   workspaces: [{ workspaceId, label, cwd,
+ *     worktree: { repoKey, repoName, repoRoot, checkoutPath, isLinkedWorktree } | null,
+ *     tabs: [{ tabId, label, panes: [{
  *     paneId, focused, cwd, title, agent: { name, displayName, status,
  *       customStatus, message, sinceUnixMs } | null
  *   }] }] }]
  * }
  */
 
-import type { NormalizedState, PaneNode, TabNode, WorkspaceNode, AgentInfo, StatusChange, RawSnapshot, RawPane } from './types.ts';
+import type { NormalizedState, PaneNode, TabNode, WorkspaceNode, WorktreeInfo, AgentInfo, StatusChange, RawSnapshot, RawPane, RawWorkspace } from './types.ts';
 
 // Events that change the workspace/tab/pane structure. The client reacts by
 // re-fetching session.snapshot and re-subscribing (per-pane status
@@ -60,6 +62,23 @@ function normalizeAgent(pane: RawPane, nowMs: number): AgentInfo | null {
     // snapshots don't carry a message field; populated only via events when present
     message: pane.agent_message || null,
     sinceUnixMs: nowMs,
+  };
+}
+
+function normalizeWorktree(ws: RawWorkspace): WorktreeInfo | null {
+  const wt = ws.worktree;
+  // A workspace carries worktree context only when herdr resolved a repo for it;
+  // repo_key is the grouping identity, so treat its absence as "no worktree info".
+  if (!wt || !wt.repo_key) return null;
+  return {
+    repoKey: wt.repo_key,
+    repoName: wt.repo_name || '',
+    repoRoot: wt.repo_root || '',
+    checkoutPath: wt.checkout_path || '',
+    isLinkedWorktree: wt.is_linked_worktree ?? false,
+    // herdr's snapshot carries no branch; the branch is filled in later from git
+    // (worktree-resolve, in the client I/O layer) so state.ts stays pure.
+    branch: null,
   };
 }
 
@@ -139,6 +158,7 @@ export function createState(snapshot: RawSnapshot, nowMs = Date.now(), prevState
       workspaceId: ws.workspace_id,
       label: ws.label || ws.workspace_id,
       cwd,
+      worktree: normalizeWorktree(ws),
       tabs: wsTabs,
     };
   });
