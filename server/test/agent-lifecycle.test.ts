@@ -151,6 +151,30 @@ test('startAgent: rejects malformed cwd/task/workspace/name types with a 400', a
   }
 });
 
+test('startAgent: a worktree spec creates the worktree first, then launches the agent inside it', async () => {
+  const { rpc, calls } = fakeRpc({
+    ...worktreeCreateResponse('/wt/new', 'wNEW', 'feat/x', 'wNEW:p1'),
+    'agent.start': (p: Record<string, unknown>) => ({ type: 'agent_started', agent: { pane_id: 'wNEW:p2', name: p.name, agent: 'claude' }, argv: p.argv }),
+  });
+  const out = await startAgent(rpc, PROFILES, { profile: 'claude', name: 'a', worktree: { repo: '/proj', branch: 'feat/x' } });
+  const wtIdx = calls.findIndex((c) => c.method === 'worktree.create');
+  const startIdx = calls.findIndex((c) => c.method === 'agent.start');
+  assert.ok(wtIdx >= 0 && wtIdx < startIdx, 'worktree.create runs before agent.start');
+  assert.equal(calls[startIdx].params.cwd, '/wt/new');       // launched in the new checkout
+  assert.equal(calls[startIdx].params.workspace_id, 'wNEW'); // and in the new worktree's workspace
+  assert.equal(out.paneId, 'wNEW:p2');
+  assert.equal(calls.some((c) => c.method === 'worktree.remove'), false); // success → no rollback
+});
+
+test('startAgent: a failed agent start rolls the just-created worktree back', async () => {
+  const { rpc, calls } = fakeRpc({
+    ...worktreeCreateResponse('/wt/new', 'wNEW'),
+    'agent.start': new Error('boom'),
+  });
+  await assert.rejects(() => startAgent(rpc, PROFILES, { profile: 'claude', worktree: { repo: '/proj' } }), /boom/);
+  assert.deepEqual(calls.find((c) => c.method === 'worktree.remove')?.params, { workspace_id: 'wNEW', force: true });
+});
+
 // ── stopAgent ────────────────────────────────────────────────────────────────
 
 test('stopAgent: closes the pane', async () => {

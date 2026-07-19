@@ -21,7 +21,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v98';
+const BUILD = 'v99';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -681,8 +681,8 @@ function confirmModal(title: string, message: string, confirmLabel: string, dang
 // Directories to launch an agent in: one per open workspace/worktree, so on a
 // phone you pick an existing repo/worktree from a list instead of typing a path.
 // Prefer a herdr worktree's stable checkout path over the (mutable) pane cwd.
-function agentStartDirs(): Array<{ path: string; label: string }> {
-  const dirs: Array<{ path: string; label: string }> = [];
+function agentStartDirs(): Array<{ path: string; label: string; workspaceId: string }> {
+  const dirs: Array<{ path: string; label: string; workspaceId: string }> = [];
   const seen = new Set<string>();
   for (const ws of appState?.workspaces ?? []) {
     const path = ws.worktree?.checkoutPath || ws.cwd;
@@ -690,7 +690,7 @@ function agentStartDirs(): Array<{ path: string; label: string }> {
     seen.add(path);
     const branch = ws.worktree?.branch ? ` · ${ws.worktree.branch}` : '';
     const wt = ws.worktree?.isLinkedWorktree ? ' (worktree)' : '';
-    dirs.push({ path, label: `${ws.label || ws.workspaceId}${branch}${wt}` });
+    dirs.push({ path, label: `${ws.label || ws.workspaceId}${branch}${wt}`, workspaceId: ws.workspaceId });
   }
   return dirs;
 }
@@ -765,17 +765,21 @@ async function openNewAgentModal(): Promise<void> {
     errBox.textContent = '';
     try {
       if (dirSel.value === '__worktree__') {
-        // Create the worktree first, then launch the agent inside its checkout.
-        const wt = (await apiPost('/api/worktrees', {
-          cwd: val('#na-wt-repo'),
+        // One atomic request: the bridge creates the worktree, launches the agent
+        // in it, and rolls the worktree back if the agent fails to start.
+        body.worktree = {
+          repo: val('#na-wt-repo'),
           ...(val('#na-wt-branch') ? { branch: val('#na-wt-branch') } : {}),
           ...(val('#na-wt-base') ? { base: val('#na-wt-base') } : {}),
-        })) as { checkoutPath?: string; workspaceId?: string };
-        if (wt.checkoutPath) body.cwd = wt.checkoutPath;
-        if (wt.workspaceId) body.workspace = wt.workspaceId;
+        };
+      } else if (dirSel.value === '__custom__') {
+        const cwd = val('#na-cwd'); if (cwd) body.cwd = cwd;
       } else {
-        const cwd = dirSel.value === '__custom__' ? val('#na-cwd') : dirSel.value;
-        if (cwd) body.cwd = cwd;
+        // Pin the agent to the selected workspace (not the focused one) so it lands
+        // under the right group, not just at a matching cwd.
+        body.cwd = dirSel.value;
+        const wsId = dirs.find((d) => d.path === dirSel.value)?.workspaceId;
+        if (wsId) body.workspace = wsId;
       }
       const res = (await apiPost('/api/agents', body)) as { paneId?: string; name?: string };
       close();

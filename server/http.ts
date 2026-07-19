@@ -317,8 +317,12 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
         return;
       }
       try {
+        // A `worktree` object means: create a worktree first, then start the agent
+        // in it (atomic, with rollback) — one request instead of the client doing two.
+        const worktree = body.worktree && typeof body.worktree === 'object' && !Array.isArray(body.worktree)
+          ? body.worktree as Record<string, unknown> : undefined;
         const out = await startAgent(rpc, config.launchProfiles, {
-          profile: body.profile, cwd: body.cwd, name: body.name, workspace: body.workspace, task: body.task,
+          profile: body.profile, cwd: body.cwd, name: body.name, workspace: body.workspace, task: body.task, worktree,
         });
         if (typeof body.profile === 'string') startedProfiles.set(out.paneId, body.profile);
         jsonOk(res, { ok: true, ...out });
