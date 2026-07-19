@@ -141,15 +141,28 @@ a {
   font-size: 16px;
 }
 
+/* Right cluster holds one or more actions in a row (e.g. new-agent + settings,
+   view-toggle + agent menu). Without flex the block-level buttons would stack
+   vertically and overflow the 52px bar. */
+#topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .topbar-action {
   display: flex;
   align-items: center;
   justify-content: center;
   min-width: var(--touch-min);
   min-height: var(--touch-min);
-  margin-right: -8px;
+  margin-right: -8px; /* only the outermost button is pulled to the padding edge */
   color: var(--color-text-dim);
   font-size: 20px;
+}
+/* inner buttons keep the row gap instead of pulling their neighbour in */
+#topbar-right .topbar-action:not(:last-child) {
+  margin-right: 0;
 }
 
 .topbar-action:hover, .topbar-back:hover {
