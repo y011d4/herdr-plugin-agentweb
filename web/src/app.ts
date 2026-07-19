@@ -21,7 +21,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v94';
+const BUILD = 'v95';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -1939,9 +1939,28 @@ function registerServiceWorker(): void {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
+// Keep the app shell exactly as tall as the *visible* area. When the soft
+// keyboard opens the visual viewport shrinks; without this the body would stay
+// full-height, be taller than the visible area, and the browser would keep
+// re-scrolling it to keep the caret in view — the "screen jitters up and down
+// while typing" bug. Pinning #app to visualViewport.height means nothing
+// overflows, so there's nothing for the browser to scroll. Android also gets
+// interactive-widget=resizes-content (index.html); this covers iOS, where that
+// hint is ignored, and is the fallback everywhere visualViewport exists.
+function bindViewportHeight(): void {
+  const vv = window.visualViewport;
+  if (!vv) return; // older browsers keep the height:100% fallback
+  const apply = (): void => {
+    document.documentElement.style.setProperty('--app-height', `${vv.height}px`);
+  };
+  apply();
+  vv.addEventListener('resize', apply);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   elApp = document.getElementById('app');
   elScreen = document.getElementById('screen');
+  bindViewportHeight();
   elConnDot = document.getElementById('conn-dot');
   elReconnectBanner = document.getElementById('reconnect-banner');
   elToastContainer = document.getElementById('toast-container');

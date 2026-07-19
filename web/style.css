@@ -62,6 +62,13 @@ html, body {
   overscroll-behavior-y: none;
   -webkit-text-size-adjust: 100%;
   overscroll-behavior: none;
+  /* The shell never scrolls as a whole — every scrollable region is an inner
+     container. Pinning the body kills the "page jitters up and down while
+     typing" bug: when the soft keyboard (and its suggestion bar) toggles, the
+     body must not be taller than the visible area, or the browser keeps
+     re-scrolling it to chase the caret. #app is sized to the visual viewport
+     (see --app-height) so nothing overflows the keyboard-shrunk area. */
+  overflow: hidden;
 }
 
 button {
@@ -88,7 +95,10 @@ a {
 #app {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* --app-height tracks window.visualViewport.height (set in app.ts) so the
+     shell exactly fills the space above the soft keyboard; falls back to 100%
+     before JS runs or where visualViewport is unavailable. */
+  height: var(--app-height, 100%);
   padding-top: var(--safe-top);
 }
 
