@@ -21,7 +21,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v97';
+const BUILD = 'v98';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -716,15 +716,24 @@ async function openNewAgentModal(): Promise<void> {
   const dirs = agentStartDirs();
   const focusedWs = appState?.workspaces.find((w) => w.workspaceId === appState?.focused.workspaceId);
   const focusedPath = focusedWs ? (focusedWs.worktree?.checkoutPath || focusedWs.cwd) : null;
-  const dirOptions = dirs
+  const dirRowOptions = dirs
     .map((d) => `<option value="${escHtml(d.path)}"${d.path === focusedPath ? ' selected' : ''}>${escHtml(d.label)}</option>`)
-    .join('') + `<option value="__custom__">Custom path…</option>`;
+    .join('');
+  // "＋ New worktree…" only makes sense with a repo to branch from.
+  const dirOptions = dirRowOptions
+    + (dirs.length ? `<option value="__worktree__">＋ New worktree…</option>` : '')
+    + `<option value="__custom__">Custom path…</option>`;
 
   const { overlay, close } = openModal(`
     <div class="modal-title">New agent</div>
     <label class="modal-field"><span>Profile</span><select id="na-profile">${options}</select></label>
     <label class="modal-field"><span>Working directory</span><select id="na-dir">${dirOptions}</select></label>
     <label class="modal-field" id="na-cwd-wrap" style="display:none;"><span>Custom path</span><input id="na-cwd" type="text" placeholder="/path/to/repo" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
+    <div id="na-wt-wrap" style="display:none;">
+      <label class="modal-field"><span>New worktree — repo</span><select id="na-wt-repo">${dirRowOptions}</select></label>
+      <label class="modal-field"><span>New branch <em>(optional)</em></span><input id="na-wt-branch" type="text" placeholder="auto (worktree/…)" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
+      <label class="modal-field"><span>Base <em>(optional)</em></span><input id="na-wt-base" type="text" placeholder="e.g. origin/main" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
+    </div>
     <label class="modal-field"><span>Name <em>(optional)</em></span><input id="na-name" type="text" placeholder="auto" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
     <label class="modal-field"><span>First task <em>(optional)</em></span><textarea id="na-task" rows="2" placeholder="e.g. review the diff"></textarea></label>
     <div class="modal-error" id="na-error"></div>
@@ -732,32 +741,49 @@ async function openNewAgentModal(): Promise<void> {
       <button class="btn-secondary" id="na-cancel">Cancel</button>
       <button class="btn-primary" id="na-start" style="width:auto;">Start</button>
     </div>`);
-  // Reveal the free-text path only when "Custom path…" is chosen (also the default
-  // when there are no open workspaces to pick from).
+  // Reveal the extra field(s) for the chosen directory mode: a free-text path for
+  // "Custom path…", or repo/branch/base for "＋ New worktree…".
   const dirSel = overlay.querySelector('#na-dir') as HTMLSelectElement;
   const cwdWrap = overlay.querySelector('#na-cwd-wrap') as HTMLElement;
-  const syncCustom = (): void => { cwdWrap.style.display = dirSel.value === '__custom__' ? '' : 'none'; };
-  dirSel.addEventListener('change', syncCustom);
-  syncCustom();
+  const wtWrap = overlay.querySelector('#na-wt-wrap') as HTMLElement;
+  const syncMode = (): void => {
+    cwdWrap.style.display = dirSel.value === '__custom__' ? '' : 'none';
+    wtWrap.style.display = dirSel.value === '__worktree__' ? '' : 'none';
+  };
+  dirSel.addEventListener('change', syncMode);
+  syncMode();
 
   overlay.querySelector('#na-cancel')!.addEventListener('click', () => close());
   const startBtn = overlay.querySelector('#na-start') as HTMLButtonElement;
+  const errBox = overlay.querySelector('#na-error') as HTMLElement;
   startBtn.addEventListener('click', async () => {
     const val = (id: string): string => (overlay.querySelector(id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value.trim();
     const body: Record<string, unknown> = { profile: val('#na-profile') };
-    const cwd = dirSel.value === '__custom__' ? val('#na-cwd') : dirSel.value;
-    if (cwd) body.cwd = cwd;
     const name = val('#na-name'); if (name) body.name = name;
     const task = val('#na-task'); if (task) body.task = task;
     startBtn.disabled = true;
+    errBox.textContent = '';
     try {
+      if (dirSel.value === '__worktree__') {
+        // Create the worktree first, then launch the agent inside its checkout.
+        const wt = (await apiPost('/api/worktrees', {
+          cwd: val('#na-wt-repo'),
+          ...(val('#na-wt-branch') ? { branch: val('#na-wt-branch') } : {}),
+          ...(val('#na-wt-base') ? { base: val('#na-wt-base') } : {}),
+        })) as { checkoutPath?: string; workspaceId?: string };
+        if (wt.checkoutPath) body.cwd = wt.checkoutPath;
+        if (wt.workspaceId) body.workspace = wt.workspaceId;
+      } else {
+        const cwd = dirSel.value === '__custom__' ? val('#na-cwd') : dirSel.value;
+        if (cwd) body.cwd = cwd;
+      }
       const res = (await apiPost('/api/agents', body)) as { paneId?: string; name?: string };
       close();
       showToast('Agent started', res.name ? `Started ${res.name}` : 'Agent started');
       if (res.paneId) navigate(`#/pane/${encodeURIComponent(res.paneId)}`);
     } catch (err) {
       startBtn.disabled = false;
-      (overlay.querySelector('#na-error') as HTMLElement).textContent = (err as Error).message;
+      errBox.textContent = (err as Error).message;
     }
   });
 }

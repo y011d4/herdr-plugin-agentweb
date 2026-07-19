@@ -5,6 +5,7 @@ import {
   stopAgent,
   renameAgent,
   clearAgent,
+  createWorktree,
   parseLaunchProfiles,
   DEFAULT_LAUNCH_PROFILES,
   LifecycleError,
@@ -257,4 +258,43 @@ test('clearAgent: looks up the profile + reports oldPaneId by the RESOLVED pane 
   assert.equal(out.oldPaneId, 'resolved:pane');
   assert.deepEqual(calls.find((c) => c.method === 'agent.start')?.params.argv, ['claude', '--danger']);
   assert.deepEqual(calls.find((c) => c.method === 'pane.close')?.params, { pane_id: 'resolved:pane' });
+});
+
+// ── createWorktree ────────────────────────────────────────────────────────────
+
+function worktreeCreateResponse(checkoutPath = '/home/u/.herdr/wt/x', wsId = 'w9', branch = 'feat/x', paneId = 'w9:p1') {
+  // Mirrors herdr's real worktree_created shape (checkout dir is worktree.path).
+  return { 'worktree.create': {
+    type: 'worktree_created',
+    worktree: { path: checkoutPath, branch, open_workspace_id: wsId },
+    workspace: { workspace_id: wsId, worktree: { checkout_path: checkoutPath } },
+    root_pane: { pane_id: paneId },
+  } };
+}
+
+test('createWorktree: requires a repo (cwd) or workspace, else 400', async () => {
+  const { rpc, calls } = fakeRpc(worktreeCreateResponse());
+  await assert.rejects(() => createWorktree(rpc, {}), (e: unknown) => e instanceof LifecycleError && (e as LifecycleError).status === 400);
+  await assert.rejects(() => createWorktree(rpc, { repo: 5 }), (e: unknown) => e instanceof LifecycleError && (e as LifecycleError).status === 400);
+  await assert.rejects(() => createWorktree(rpc, { repo: '/r', branch: 5 }), (e: unknown) => e instanceof LifecycleError && (e as LifecycleError).status === 400);
+  assert.equal(calls.length, 0);
+});
+
+test('createWorktree: builds worktree.create with cwd/branch/base and returns the new worktree', async () => {
+  const { rpc, calls } = fakeRpc(worktreeCreateResponse('/home/u/.herdr/wt/feat', 'wNEW', 'feat/task', 'wNEW:p1'));
+  const out = await createWorktree(rpc, { repo: '/home/u/proj', branch: '  feat/task  ', base: 'origin/main' });
+  assert.equal(calls[0].method, 'worktree.create');
+  assert.deepEqual(calls[0].params, { focus: false, cwd: '/home/u/proj', branch: 'feat/task', base: 'origin/main' });
+  assert.deepEqual(out, { workspaceId: 'wNEW', checkoutPath: '/home/u/.herdr/wt/feat', branch: 'feat/task', paneId: 'wNEW:p1' });
+});
+
+test('createWorktree: a blank branch/base is omitted (herdr auto-generates)', async () => {
+  const { rpc, calls } = fakeRpc(worktreeCreateResponse());
+  await createWorktree(rpc, { workspace: 'w7', branch: '   ', base: '' });
+  assert.deepEqual(calls[0].params, { focus: false, workspace_id: 'w7' });
+});
+
+test('createWorktree: a missing checkout path is a 502', async () => {
+  const { rpc } = fakeRpc({ 'worktree.create': { type: 'worktree_created', worktree: {}, workspace: { workspace_id: 'w9' } } });
+  await assert.rejects(() => createWorktree(rpc, { repo: '/r' }), (e: unknown) => e instanceof LifecycleError && (e as LifecycleError).status === 502);
 });

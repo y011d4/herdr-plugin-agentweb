@@ -7,7 +7,7 @@ import { toClientState } from './state.ts';
 import { buildAgentStatusMessage } from './notify.ts';
 import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail, projectsRootForPid } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt-identity.ts';
-import { startAgent, stopAgent, renameAgent, clearAgent, LifecycleError } from './agent-lifecycle.ts';
+import { startAgent, stopAgent, renameAgent, clearAgent, createWorktree, LifecycleError } from './agent-lifecycle.ts';
 import { createPaneProfileStore } from './pane-profile-store.ts';
 import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
 
@@ -321,6 +321,26 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
           profile: body.profile, cwd: body.cwd, name: body.name, workspace: body.workspace, task: body.task,
         });
         if (typeof body.profile === 'string') startedProfiles.set(out.paneId, body.profile);
+        jsonOk(res, { ok: true, ...out });
+      } catch (err) {
+        sendError(res, err);
+      }
+      return;
+    }
+
+    // Create a git worktree (herdr worktree.create over the socket) and return the
+    // new checkout path + workspace so a caller can then start an agent in it.
+    if (pathname === '/api/worktrees' && method === 'POST') {
+      let body: Record<string, unknown>;
+      try { body = await readBody(req); } catch (err) {
+        const herdrErr = err as HerdrError;
+        jsonError(res, herdrErr.status || 400, 'bad_request', herdrErr.message);
+        return;
+      }
+      try {
+        const out = await createWorktree(rpc, {
+          repo: body.cwd, workspace: body.workspace, branch: body.branch, base: body.base,
+        });
         jsonOk(res, { ok: true, ...out });
       } catch (err) {
         sendError(res, err);
