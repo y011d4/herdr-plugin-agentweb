@@ -21,7 +21,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v99';
+const BUILD = 'v100';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -716,21 +716,21 @@ async function openNewAgentModal(): Promise<void> {
   const dirs = agentStartDirs();
   const focusedWs = appState?.workspaces.find((w) => w.workspaceId === appState?.focused.workspaceId);
   const focusedPath = focusedWs ? (focusedWs.worktree?.checkoutPath || focusedWs.cwd) : null;
-  const dirRowOptions = dirs
+  const dirOptions = dirs
     .map((d) => `<option value="${escHtml(d.path)}"${d.path === focusedPath ? ' selected' : ''}>${escHtml(d.label)}</option>`)
-    .join('');
-  // "＋ New worktree…" only makes sense with a repo to branch from.
-  const dirOptions = dirRowOptions
-    + (dirs.length ? `<option value="__worktree__">＋ New worktree…</option>` : '')
-    + `<option value="__custom__">Custom path…</option>`;
+    .join('') + `<option value="__custom__">Custom path…</option>`;
 
   const { overlay, close } = openModal(`
     <div class="modal-title">New agent</div>
     <label class="modal-field"><span>Profile</span><select id="na-profile">${options}</select></label>
     <label class="modal-field"><span>Working directory</span><select id="na-dir">${dirOptions}</select></label>
     <label class="modal-field" id="na-cwd-wrap" style="display:none;"><span>Custom path</span><input id="na-cwd" type="text" placeholder="/path/to/repo" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
+    <div class="modal-field modal-toggle-row">
+      <span>Create a new worktree</span>
+      <label class="toggle"><input type="checkbox" id="na-wt-toggle" /><span class="toggle-track"></span></label>
+    </div>
     <div id="na-wt-wrap" style="display:none;">
-      <label class="modal-field"><span>New worktree — repo</span><select id="na-wt-repo">${dirRowOptions}</select></label>
+      <div class="modal-hint">A new branch is checked out from the working directory above, and the agent runs there.</div>
       <label class="modal-field"><span>New branch <em>(optional)</em></span><input id="na-wt-branch" type="text" placeholder="auto (worktree/…)" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
       <label class="modal-field"><span>Base <em>(optional)</em></span><input id="na-wt-base" type="text" placeholder="e.g. origin/main" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
     </div>
@@ -741,16 +741,17 @@ async function openNewAgentModal(): Promise<void> {
       <button class="btn-secondary" id="na-cancel">Cancel</button>
       <button class="btn-primary" id="na-start" style="width:auto;">Start</button>
     </div>`);
-  // Reveal the extra field(s) for the chosen directory mode: a free-text path for
-  // "Custom path…", or repo/branch/base for "＋ New worktree…".
+  // "Custom path…" reveals a free-text field; the worktree toggle reveals branch/base.
   const dirSel = overlay.querySelector('#na-dir') as HTMLSelectElement;
   const cwdWrap = overlay.querySelector('#na-cwd-wrap') as HTMLElement;
+  const wtToggle = overlay.querySelector('#na-wt-toggle') as HTMLInputElement;
   const wtWrap = overlay.querySelector('#na-wt-wrap') as HTMLElement;
   const syncMode = (): void => {
     cwdWrap.style.display = dirSel.value === '__custom__' ? '' : 'none';
-    wtWrap.style.display = dirSel.value === '__worktree__' ? '' : 'none';
+    wtWrap.style.display = wtToggle.checked ? '' : 'none';
   };
   dirSel.addEventListener('change', syncMode);
+  wtToggle.addEventListener('change', syncMode);
   syncMode();
 
   overlay.querySelector('#na-cancel')!.addEventListener('click', () => close());
@@ -763,23 +764,31 @@ async function openNewAgentModal(): Promise<void> {
     const task = val('#na-task'); if (task) body.task = task;
     startBtn.disabled = true;
     errBox.textContent = '';
+    // The working directory the user chose: a picked workspace/worktree, or the custom path.
+    const chosenDir = dirSel.value === '__custom__' ? val('#na-cwd') : dirSel.value;
     try {
-      if (dirSel.value === '__worktree__') {
-        // One atomic request: the bridge creates the worktree, launches the agent
-        // in it, and rolls the worktree back if the agent fails to start.
+      if (wtToggle.checked) {
+        // Branch a new worktree from the chosen directory's repo and launch the agent
+        // in it — one atomic request (the bridge rolls the worktree back if the agent
+        // fails to start).
+        if (!chosenDir) {
+          errBox.textContent = 'Pick a working directory (or a custom path) to branch the worktree from.';
+          startBtn.disabled = false;
+          return;
+        }
         body.worktree = {
-          repo: val('#na-wt-repo'),
+          repo: chosenDir,
           ...(val('#na-wt-branch') ? { branch: val('#na-wt-branch') } : {}),
           ...(val('#na-wt-base') ? { base: val('#na-wt-base') } : {}),
         };
-      } else if (dirSel.value === '__custom__') {
-        const cwd = val('#na-cwd'); if (cwd) body.cwd = cwd;
-      } else {
-        // Pin the agent to the selected workspace (not the focused one) so it lands
-        // under the right group, not just at a matching cwd.
-        body.cwd = dirSel.value;
-        const wsId = dirs.find((d) => d.path === dirSel.value)?.workspaceId;
-        if (wsId) body.workspace = wsId;
+      } else if (chosenDir) {
+        body.cwd = chosenDir;
+        // Pin a picked selection to its workspace (not the focused one) so the agent
+        // lands under the right group, not just at a matching cwd.
+        if (dirSel.value !== '__custom__') {
+          const wsId = dirs.find((d) => d.path === dirSel.value)?.workspaceId;
+          if (wsId) body.workspace = wsId;
+        }
       }
       const res = (await apiPost('/api/agents', body)) as { paneId?: string; name?: string };
       close();
