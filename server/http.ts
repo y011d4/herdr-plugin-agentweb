@@ -8,6 +8,7 @@ import { buildAgentStatusMessage } from './notify.ts';
 import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail, projectsRootForPid } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt-identity.ts';
 import { startAgent, stopAgent, renameAgent, clearAgent, LifecycleError } from './agent-lifecycle.ts';
+import { createPaneProfileStore } from './pane-profile-store.ts';
 import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
@@ -253,9 +254,10 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
 
   // Remember which launch profile started each pane so `clear` can relaunch the
   // exact variant — herdr's detected agent type can't distinguish "claude" from a
-  // custom "claude-yolo", so inference alone would drop the variant's argv. Bounded
-  // by the agents started through the bridge this run; entries are dropped on stop/clear.
-  const startedProfiles = new Map<string, string>();
+  // custom "claude-yolo", so inference alone would drop the variant's argv. Durable
+  // (survives a bridge restart, since herdr keeps the panes); entries are dropped on
+  // stop/clear.
+  const startedProfiles = createPaneProfileStore(join(config.stateDir, 'pane-profiles.json'));
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -631,7 +633,9 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
       if (action === 'clear' && method === 'POST') {
         try {
           const out = await clearAgent(rpc, config.launchProfiles, target, startedProfiles.get(target));
-          startedProfiles.delete(target);
+          // Only drop the old mapping once the old pane is actually gone; if the
+          // close failed it still exists and must keep its recorded profile.
+          if (out.closedOld) startedProfiles.delete(target);
           startedProfiles.set(out.paneId, out.profile);
           jsonOk(res, { ok: true, ...out });
         } catch (err) {
