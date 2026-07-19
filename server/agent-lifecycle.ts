@@ -113,6 +113,9 @@ export interface StartAgentInput {
   name?: unknown;
   workspace?: unknown;
   task?: unknown;
+  /** create a worktree first and launch the agent inside it (atomic — rolled back
+   *  if the agent fails to start, so the client never sees a dangling worktree) */
+  worktree?: CreateWorktreeInput;
 }
 
 export interface StartAgentResult {
@@ -141,15 +144,38 @@ export async function startAgent(
 
   const name = compactName(input.name) ?? `${input.profile}-${Date.now().toString(36)}`;
 
+  // Resolve where the agent runs. A `worktree` spec creates a fresh worktree first
+  // and launches the agent inside its checkout; if the agent then fails to start we
+  // remove that worktree (best-effort rollback) so the caller never has to clean up
+  // a dangling worktree or hit "branch already exists" on retry.
+  let cwd = typeof input.cwd === 'string' ? input.cwd : undefined;
+  let workspaceId = typeof input.workspace === 'string' ? input.workspace : undefined;
+  let rollbackWorkspaceId: string | null = null;
+  if (input.worktree !== undefined) {
+    const wt = await createWorktree(rpc, input.worktree);
+    cwd = wt.checkoutPath;
+    workspaceId = wt.workspaceId ?? undefined;
+    rollbackWorkspaceId = wt.workspaceId;
+  }
+
   const params: Record<string, unknown> = { name, argv: profile.argv, focus: false };
-  if (typeof input.cwd === 'string') params.cwd = input.cwd;
-  if (typeof input.workspace === 'string') params.workspace_id = input.workspace;
+  if (cwd) params.cwd = cwd;
+  if (workspaceId) params.workspace_id = workspaceId;
 
-  const started = agentFromResult(await rpc('agent.start', params));
+  let started: RawAgentInfo | null;
+  try {
+    started = agentFromResult(await rpc('agent.start', params));
+  } catch (err) {
+    await rollbackWorktree(rpc, rollbackWorkspaceId);
+    throw err;
+  }
   const paneId = started?.pane_id;
-  if (!paneId) throw new LifecycleError(502, 'error', 'agent started but herdr returned no pane id');
+  if (!paneId) {
+    await rollbackWorktree(rpc, rollbackWorkspaceId);
+    throw new LifecycleError(502, 'error', 'agent started but herdr returned no pane id');
+  }
 
-  const result: StartAgentResult = { paneId, name, agent: started.agent ?? null };
+  const result: StartAgentResult = { paneId, name, agent: started?.agent ?? null };
 
   // Best-effort initial task. Target the pane id herdr just returned (unambiguous)
   // rather than the name — a name can collide with another agent, and even the
@@ -312,4 +338,15 @@ export async function createWorktree(rpc: Rpc, input: CreateWorktreeInput): Prom
     branch: res.worktree?.branch ?? (branch || null),
     paneId: res.root_pane?.pane_id ?? null,
   };
+}
+
+/** Best-effort removal of a worktree we just created (rollback); never throws. */
+async function rollbackWorktree(rpc: Rpc, workspaceId: string | null): Promise<void> {
+  if (!workspaceId) return;
+  try {
+    await rpc('worktree.remove', { workspace_id: workspaceId, force: true });
+  } catch {
+    /* best-effort: a failed rollback leaves a worktree behind, but must not mask
+       the original agent-start error the caller is about to see */
+  }
 }

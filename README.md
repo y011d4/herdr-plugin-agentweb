@@ -286,12 +286,15 @@ default.
 - `POST /api/agents` `{"profile": "claude", "cwd": "/path", "name": "review", "task": "…", "workspace": "w7"}`
   — start a new agent from a named [launch profile](#configuration) (fixed argv allowlist; a caller
   never supplies a raw command). Only `profile` is required; returns `{"paneId", "name", "agent"}`
-  (plus `"taskDelivered"` when `task` was given). herdr places the new pane per its own default
-  (focus stays put); the new pane appears in `/api/state` a moment later (state rebuild).
+  (plus `"taskDelivered"` when `task` was given). Pass `"workspace"` to place the pane in a specific
+  workspace (not just at a matching `cwd`). Pass a `"worktree": {"repo", "branch", "base"}` object
+  instead of `cwd` to **create a worktree and launch the agent in it atomically** — the worktree is
+  rolled back if the agent fails to start. The new pane appears in `/api/state` a moment later.
 - `POST /api/worktrees` `{"cwd": "/repo", "branch": "feat/x", "base": "origin/main"}` — create a git
   worktree (herdr `worktree.create`; `cwd` is any path in the source repo, `branch`/`base` optional)
-  and return `{"workspaceId", "checkoutPath", "branch", "paneId"}`. The New agent form's
-  "＋ New worktree…" option calls this, then starts the agent in the new checkout.
+  and return `{"workspaceId", "checkoutPath", "branch", "paneId"}`. Standalone (create a worktree
+  without an agent); the New agent form's "＋ New worktree…" option instead uses the atomic
+  `worktree` spec on `POST /api/agents` above.
 - `DELETE /api/panes/:paneId` — stop an agent by closing its pane
 - `POST /api/panes/:paneId/rename` `{"name": "worker-2"}` — rename the agent running in the pane
 - `POST /api/agents/:target/clear` — start a fresh replacement agent (same profile + cwd) and close
