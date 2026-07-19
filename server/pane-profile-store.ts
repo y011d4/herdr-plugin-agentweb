@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 /**
@@ -37,6 +37,9 @@ export function createPaneProfileStore(filePath: string): PaneProfileStore {
     try {
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(filePath, JSON.stringify(map), { mode: 0o600 });
+      // writeFileSync's mode only applies when the file is created; enforce 0600
+      // on every write so an existing looser-permissioned file is tightened too.
+      chmodSync(filePath, 0o600);
     } catch { /* best-effort; losing durability must not fail a request */ }
   }
 

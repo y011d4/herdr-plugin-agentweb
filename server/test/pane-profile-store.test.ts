@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, statSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createPaneProfileStore } from '../pane-profile-store.ts';
@@ -35,11 +35,15 @@ test('persists across instances (survives a bridge restart)', () => {
   assert.equal(c.get('w2:p3'), 'codex');
 });
 
-test('the on-disk file is compact JSON with 0600 perms', () => {
+test('the on-disk file is compact JSON, kept at 0600 even if it already existed looser', () => {
   const file = tempFile();
+  // Pre-create with loose perms; the store must tighten on write, not just on create.
+  writeFileSync(file, '{}');
+  chmodSync(file, 0o644);
   const store = createPaneProfileStore(file);
   store.set('w1:p1', 'claude');
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { 'w1:p1': 'claude' });
+  assert.equal(statSync(file).mode & 0o777, 0o600);
 });
 
 test('a malformed or missing file starts empty rather than throwing', () => {
