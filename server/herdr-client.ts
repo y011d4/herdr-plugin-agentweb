@@ -488,6 +488,13 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
       return request(method, params);
     },
 
+    // Force a snapshot re-fetch and broadcast. fetchSnapshot already updates the
+    // cached state and fires onState, so callers get /api/state + WS clients
+    // refreshed for changes with no subscribed event (e.g. agent.rename).
+    async refresh(): Promise<void> {
+      if (!destroyed) await fetchSnapshot();
+    },
+
     destroy(): void {
       destroyed = true;
       if (rebuildTimer) clearTimeout(rebuildTimer);

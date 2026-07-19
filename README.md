@@ -10,6 +10,10 @@ mobile-first PWA:
   (idle / working / **blocked** / done), blocked agents sorted to the top;
   each card shows its git branch, and a linked worktree's agents appear inside their
   main checkout, chipped as a worktree
+- Start, rename, clear, and stop agents from the phone: **+** on the dashboard launches an
+  agent from a named launch profile — in an existing workspace/worktree you pick, or in a
+  **fresh worktree** it creates for you — and each pane's **⋮** menu renames, clears
+  (fresh session), or stops it
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
   scrollback by swiping down, multiline input, and quick keys
   (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …)
@@ -198,7 +202,12 @@ with defaults, is:
   "host": "127.0.0.1",
   "port": 8390,
   "public_url": null,
-  "notify_url": null
+  "notify_url": null,
+  "launch_profiles": {
+    "claude": { "argv": ["claude"], "label": "Claude Code" },
+    "codex": { "argv": ["codex"], "label": "Codex" },
+    "opencode": { "argv": ["opencode"], "label": "opencode" }
+  }
 }
 ```
 
@@ -214,6 +223,12 @@ with defaults, is:
   auto-detecting Tailscale (serve HTTPS address, else tailnet IP), then to
   `http://127.0.0.1:<port>` — so set it for any transport other than Tailscale. See
   [Exposing the bridge to your phone](#exposing-the-bridge-to-your-phone).
+- `launch_profiles` — named agent launch profiles for `POST /api/agents`. Each entry is
+  `{ "argv": [...], "label": "…" }`; `argv` is the command + fixed flags herdr execs (the whole
+  point of the allowlist is that a phone/script picks a *profile name*, never a raw command). Your
+  entries merge over the built-in defaults shown above (same name overrides its `argv`; a new name is
+  added; a malformed entry is ignored). Use it to add variants, e.g.
+  `"claude-yolo": { "argv": ["claude", "--dangerously-skip-permissions"], "label": "Claude (yolo)" }`.
 - `notify_url` — optional [ntfy](https://ntfy.sh) topic URL for background push
   notifications, e.g. `https://ntfy.example.internal/herdr` for a **self-hosted**
   ntfy instance. When unset (default) the bridge performs no outbound requests at
@@ -266,6 +281,24 @@ default.
   to a draft already typed straight into the pane
 - `POST /api/panes/:paneId/focus`
 - `POST /api/panes/:paneId/scroll` `{"direction": "up", "steps": 3}` — SGR wheel events for full-screen apps
+- `GET /api/profiles` — the configured launch profiles as `{"profiles": [{"name", "label"}]}`
+  (names + labels only, never the argv), for the new-agent picker
+- `POST /api/agents` `{"profile": "claude", "cwd": "/path", "name": "review", "task": "…", "workspace": "w7"}`
+  — start a new agent from a named [launch profile](#configuration) (fixed argv allowlist; a caller
+  never supplies a raw command). Only `profile` is required; returns `{"paneId", "name", "agent"}`
+  (plus `"taskDelivered"` when `task` was given). Pass `"workspace"` to place the pane in a specific
+  workspace (not just at a matching `cwd`). Pass a `"worktree": {"repo", "branch", "base"}` object
+  instead of `cwd` to **create a worktree and launch the agent in it atomically** — the worktree is
+  rolled back if the agent fails to start. The new pane appears in `/api/state` a moment later.
+- `POST /api/worktrees` `{"cwd": "/repo", "branch": "feat/x", "base": "origin/main"}` — create a git
+  worktree (herdr `worktree.create`; `cwd` is any path in the source repo, `branch`/`base` optional)
+  and return `{"workspaceId", "checkoutPath", "branch", "paneId"}`. Standalone (create a worktree
+  without an agent); the New agent form's "＋ New worktree…" option instead uses the atomic
+  `worktree` spec on `POST /api/agents` above.
+- `DELETE /api/panes/:paneId` — stop an agent by closing its pane
+- `POST /api/panes/:paneId/rename` `{"name": "worker-2"}` — rename the agent running in the pane
+- `POST /api/agents/:target/clear` — start a fresh replacement agent (same profile + cwd) and close
+  the old pane; the pane id changes, so the client re-follows the new pane
 - `GET /api/panes/:paneId/transcript` — Claude Code chat view: the pane's JSONL
   session transcript as normalized `items` (`user`/`assistant`/`thinking`/
   `tool_use`/`tool_result`) plus `sessionId` and a byte `cursor`. Returns

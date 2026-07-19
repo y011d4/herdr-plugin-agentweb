@@ -21,7 +21,7 @@ import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTransc
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v95';
+const BUILD = 'v100';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -150,19 +150,26 @@ async function apiGet(path: string): Promise<unknown> {
   return resp.json();
 }
 
+function apiError(data: Record<string, unknown>, status: number): Error & { code?: string; status?: number } {
+  const err = data?.error as Record<string, unknown> | undefined;
+  const e = new Error((err?.message as string | undefined) ?? `HTTP ${status}`) as Error & { code?: string; status?: number };
+  e.code = err?.code as string | undefined; // e.g. 'prompt_changed'/'no_profile' — lets callers branch on the reason
+  e.status = status;
+  return e;
+}
+
 async function apiPost(path: string, body: Record<string, unknown> = {}): Promise<unknown> {
   const resp = await apiFetch(path, {
     method: 'POST',
     body: JSON.stringify(body),
   });
-  if (!resp.ok) {
-    const data = await resp.json().catch(() => ({})) as Record<string, unknown>;
-    const err = data?.error as Record<string, unknown> | undefined;
-    const e = new Error((err?.message as string | undefined) ?? `HTTP ${resp.status}`) as Error & { code?: string; status?: number };
-    e.code = err?.code as string | undefined; // e.g. 'prompt_changed' — lets callers branch on the reason
-    e.status = resp.status;
-    throw e;
-  }
+  if (!resp.ok) throw apiError(await resp.json().catch(() => ({})) as Record<string, unknown>, resp.status);
+  return resp.json();
+}
+
+async function apiDelete(path: string): Promise<unknown> {
+  const resp = await apiFetch(path, { method: 'DELETE' });
+  if (!resp.ok) throw apiError(await resp.json().catch(() => ({})) as Record<string, unknown>, resp.status);
   return resp.json();
 }
 
@@ -630,6 +637,242 @@ function renderTokenScreen(message?: string): void {
   });
 }
 
+// ── Agent lifecycle UI (start / rename / clear / stop) ────────────────────────
+
+// Minimal modal overlay appended to <body>, above everything (toasts are z 1000,
+// modals sit higher). Closes on backdrop tap, the buttons, or Escape; close() is
+// idempotent and fires onClose exactly once (so a confirm can resolve on dismiss).
+function openModal(innerHtml: string, onClose?: () => void): { overlay: HTMLElement; close: () => void } {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${innerHtml}</div>`;
+  let closed = false;
+  const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') close(); };
+  const close = (): void => {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener('keydown', onKey);
+    overlay.remove();
+    onClose?.();
+  };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(overlay);
+  return { overlay, close };
+}
+
+// Yes/no confirm; resolves false on cancel or dismiss. `danger` styles the confirm
+// button as destructive.
+function confirmModal(title: string, message: string, confirmLabel: string, danger: boolean): Promise<boolean> {
+  return new Promise((resolve) => {
+    let result = false;
+    const { overlay, close } = openModal(`
+      <div class="modal-title">${escHtml(title)}</div>
+      <div class="modal-message">${escHtml(message)}</div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="cf-cancel">Cancel</button>
+        <button class="btn-primary${danger ? ' danger' : ''}" id="cf-ok" style="width:auto;">${escHtml(confirmLabel)}</button>
+      </div>`, () => resolve(result));
+    overlay.querySelector('#cf-cancel')!.addEventListener('click', () => close());
+    overlay.querySelector('#cf-ok')!.addEventListener('click', () => { result = true; close(); });
+  });
+}
+
+// Directories to launch an agent in: one per open workspace/worktree, so on a
+// phone you pick an existing repo/worktree from a list instead of typing a path.
+// Prefer a herdr worktree's stable checkout path over the (mutable) pane cwd.
+function agentStartDirs(): Array<{ path: string; label: string; workspaceId: string }> {
+  const dirs: Array<{ path: string; label: string; workspaceId: string }> = [];
+  const seen = new Set<string>();
+  for (const ws of appState?.workspaces ?? []) {
+    const path = ws.worktree?.checkoutPath || ws.cwd;
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    const branch = ws.worktree?.branch ? ` · ${ws.worktree.branch}` : '';
+    const wt = ws.worktree?.isLinkedWorktree ? ' (worktree)' : '';
+    dirs.push({ path, label: `${ws.label || ws.workspaceId}${branch}${wt}`, workspaceId: ws.workspaceId });
+  }
+  return dirs;
+}
+
+// "New agent" — pick a launch profile, a directory (from the open workspaces /
+// worktrees, or a custom path), and optionally a name and first task.
+async function openNewAgentModal(): Promise<void> {
+  let profiles: Array<{ name: string; label: string }>;
+  try {
+    profiles = ((await apiGet('/api/profiles')) as { profiles?: Array<{ name: string; label: string }> }).profiles ?? [];
+  } catch (err) {
+    showToast('Could not load profiles', (err as Error).message);
+    return;
+  }
+  if (profiles.length === 0) {
+    showToast('No launch profiles', 'Configure launch_profiles in the bridge config.');
+    return;
+  }
+  const options = profiles.map((p) => `<option value="${escHtml(p.name)}">${escHtml(p.label)}</option>`).join('');
+
+  // Directory choices come straight from appState — default to the focused
+  // workspace so "another agent in this repo/worktree" is the zero-typing path.
+  const dirs = agentStartDirs();
+  const focusedWs = appState?.workspaces.find((w) => w.workspaceId === appState?.focused.workspaceId);
+  const focusedPath = focusedWs ? (focusedWs.worktree?.checkoutPath || focusedWs.cwd) : null;
+  const dirOptions = dirs
+    .map((d) => `<option value="${escHtml(d.path)}"${d.path === focusedPath ? ' selected' : ''}>${escHtml(d.label)}</option>`)
+    .join('') + `<option value="__custom__">Custom path…</option>`;
+
+  const { overlay, close } = openModal(`
+    <div class="modal-title">New agent</div>
+    <label class="modal-field"><span>Profile</span><select id="na-profile">${options}</select></label>
+    <label class="modal-field"><span>Working directory</span><select id="na-dir">${dirOptions}</select></label>
+    <label class="modal-field" id="na-cwd-wrap" style="display:none;"><span>Custom path</span><input id="na-cwd" type="text" placeholder="/path/to/repo" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
+    <div class="modal-field modal-toggle-row">
+      <span>Create a new worktree</span>
+      <label class="toggle"><input type="checkbox" id="na-wt-toggle" /><span class="toggle-track"></span></label>
+    </div>
+    <div id="na-wt-wrap" style="display:none;">
+      <div class="modal-hint">A new branch is checked out from the working directory above, and the agent runs there.</div>
+      <label class="modal-field"><span>New branch <em>(optional)</em></span><input id="na-wt-branch" type="text" placeholder="auto (worktree/…)" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
+      <label class="modal-field"><span>Base <em>(optional)</em></span><input id="na-wt-base" type="text" placeholder="e.g. origin/main" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
+    </div>
+    <label class="modal-field"><span>Name <em>(optional)</em></span><input id="na-name" type="text" placeholder="auto" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
+    <label class="modal-field"><span>First task <em>(optional)</em></span><textarea id="na-task" rows="2" placeholder="e.g. review the diff"></textarea></label>
+    <div class="modal-error" id="na-error"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="na-cancel">Cancel</button>
+      <button class="btn-primary" id="na-start" style="width:auto;">Start</button>
+    </div>`);
+  // "Custom path…" reveals a free-text field; the worktree toggle reveals branch/base.
+  const dirSel = overlay.querySelector('#na-dir') as HTMLSelectElement;
+  const cwdWrap = overlay.querySelector('#na-cwd-wrap') as HTMLElement;
+  const wtToggle = overlay.querySelector('#na-wt-toggle') as HTMLInputElement;
+  const wtWrap = overlay.querySelector('#na-wt-wrap') as HTMLElement;
+  const syncMode = (): void => {
+    cwdWrap.style.display = dirSel.value === '__custom__' ? '' : 'none';
+    wtWrap.style.display = wtToggle.checked ? '' : 'none';
+  };
+  dirSel.addEventListener('change', syncMode);
+  wtToggle.addEventListener('change', syncMode);
+  syncMode();
+
+  overlay.querySelector('#na-cancel')!.addEventListener('click', () => close());
+  const startBtn = overlay.querySelector('#na-start') as HTMLButtonElement;
+  const errBox = overlay.querySelector('#na-error') as HTMLElement;
+  startBtn.addEventListener('click', async () => {
+    const val = (id: string): string => (overlay.querySelector(id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value.trim();
+    const body: Record<string, unknown> = { profile: val('#na-profile') };
+    const name = val('#na-name'); if (name) body.name = name;
+    const task = val('#na-task'); if (task) body.task = task;
+    startBtn.disabled = true;
+    errBox.textContent = '';
+    // The working directory the user chose: a picked workspace/worktree, or the custom path.
+    const chosenDir = dirSel.value === '__custom__' ? val('#na-cwd') : dirSel.value;
+    try {
+      if (wtToggle.checked) {
+        // Branch a new worktree from the chosen directory's repo and launch the agent
+        // in it — one atomic request (the bridge rolls the worktree back if the agent
+        // fails to start).
+        if (!chosenDir) {
+          errBox.textContent = 'Pick a working directory (or a custom path) to branch the worktree from.';
+          startBtn.disabled = false;
+          return;
+        }
+        body.worktree = {
+          repo: chosenDir,
+          ...(val('#na-wt-branch') ? { branch: val('#na-wt-branch') } : {}),
+          ...(val('#na-wt-base') ? { base: val('#na-wt-base') } : {}),
+        };
+      } else if (chosenDir) {
+        body.cwd = chosenDir;
+        // Pin a picked selection to its workspace (not the focused one) so the agent
+        // lands under the right group, not just at a matching cwd.
+        if (dirSel.value !== '__custom__') {
+          const wsId = dirs.find((d) => d.path === dirSel.value)?.workspaceId;
+          if (wsId) body.workspace = wsId;
+        }
+      }
+      const res = (await apiPost('/api/agents', body)) as { paneId?: string; name?: string };
+      close();
+      showToast('Agent started', res.name ? `Started ${res.name}` : 'Agent started');
+      if (res.paneId) navigate(`#/pane/${encodeURIComponent(res.paneId)}`);
+    } catch (err) {
+      startBtn.disabled = false;
+      errBox.textContent = (err as Error).message;
+    }
+  });
+}
+
+// Actions on the agent in the current pane: rename, clear (fresh session), stop.
+function openAgentMenu(paneId: string): void {
+  const found = findPane(paneId);
+  const current = found?.pane.agent?.displayName || found?.pane.agent?.name || '';
+  const { overlay, close } = openModal(`
+    <div class="modal-title">Agent actions</div>
+    <div class="modal-menu">
+      <button class="modal-menu-item" id="am-rename">Rename…</button>
+      <button class="modal-menu-item" id="am-clear">Clear (fresh session)…</button>
+      <button class="modal-menu-item danger" id="am-stop">Stop agent…</button>
+    </div>
+    <div class="modal-actions"><button class="btn-secondary" id="am-cancel">Cancel</button></div>`);
+  overlay.querySelector('#am-cancel')!.addEventListener('click', () => close());
+  overlay.querySelector('#am-rename')!.addEventListener('click', () => { close(); openRenameModal(paneId, current); });
+  overlay.querySelector('#am-clear')!.addEventListener('click', () => { close(); void clearAgentFlow(paneId); });
+  overlay.querySelector('#am-stop')!.addEventListener('click', () => { close(); void stopAgentFlow(paneId); });
+}
+
+function openRenameModal(paneId: string, current: string): void {
+  const { overlay, close } = openModal(`
+    <div class="modal-title">Rename agent</div>
+    <label class="modal-field"><span>Name</span><input id="rn-name" type="text" value="${escHtml(current)}" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
+    <div class="modal-error" id="rn-error"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="rn-cancel">Cancel</button>
+      <button class="btn-primary" id="rn-save" style="width:auto;">Save</button>
+    </div>`);
+  const input = overlay.querySelector('#rn-name') as HTMLInputElement;
+  input.focus();
+  input.select();
+  overlay.querySelector('#rn-cancel')!.addEventListener('click', () => close());
+  const saveBtn = overlay.querySelector('#rn-save') as HTMLButtonElement;
+  saveBtn.addEventListener('click', async () => {
+    const name = input.value.trim();
+    if (!name) { (overlay.querySelector('#rn-error') as HTMLElement).textContent = 'Name is required.'; return; }
+    saveBtn.disabled = true;
+    try {
+      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/rename`, { name });
+      close();
+      showToast('Renamed', `Agent renamed to ${name}`);
+      updatePaneDetailHeader();
+    } catch (err) {
+      saveBtn.disabled = false;
+      (overlay.querySelector('#rn-error') as HTMLElement).textContent = (err as Error).message;
+    }
+  });
+}
+
+async function clearAgentFlow(paneId: string): Promise<void> {
+  const ok = await confirmModal('Clear agent?', 'Starts a fresh session (same profile & directory) and closes the current one. In-session context is lost.', 'Clear', false);
+  if (!ok) return;
+  try {
+    const res = (await apiPost(`/api/agents/${encodeURIComponent(paneId)}/clear`)) as { paneId?: string };
+    showToast('Cleared', 'Started a fresh session');
+    navigate(res.paneId ? `#/pane/${encodeURIComponent(res.paneId)}` : '#/agents');
+  } catch (err) {
+    showToast('Clear failed', (err as Error).message);
+  }
+}
+
+async function stopAgentFlow(paneId: string): Promise<void> {
+  const ok = await confirmModal('Stop agent?', 'Closes the pane and terminates the agent running in it.', 'Stop', true);
+  if (!ok) return;
+  try {
+    await apiDelete(`/api/panes/${encodeURIComponent(paneId)}`);
+    showToast('Stopped', 'Agent pane closed');
+    navigate('#/agents');
+  } catch (err) {
+    showToast('Stop failed', (err as Error).message);
+  }
+}
+
 // ── Agents dashboard ──────────────────────────────────────────────────────────
 
 // Render agent-pane cards for a repo group — a main checkout plus any linked
@@ -737,7 +980,9 @@ function renderAgentsDashboard(): void {
     document.getElementById('topbar-title')!.textContent = 'Agents';
     document.getElementById('topbar-left')!.innerHTML = '';
     document.getElementById('topbar-right')!.innerHTML =
+      `<button class="topbar-action" id="btn-new-agent" aria-label="New agent">+</button>` +
       `<button class="topbar-action" id="btn-settings" aria-label="Settings">&#9881;</button>`;
+    document.getElementById('btn-new-agent')!.addEventListener('click', () => { void openNewAgentModal(); });
     document.getElementById('btn-settings')!.addEventListener('click', () => navigate('#/settings'));
   }
 
@@ -847,12 +1092,15 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     document.getElementById('topbar-title')!.innerHTML = paneHeaderHtml(found, paneId);
     document.getElementById('topbar-left')!.innerHTML =
       `<button class="topbar-back" aria-label="Back">&#8592; Agents</button>`;
-    // View toggle (terminal ⇄ chat). Hidden until a claude transcript is found.
+    // View toggle (terminal ⇄ chat, hidden until a claude transcript is found) +
+    // the agent-actions kebab (rename / clear / stop).
     document.getElementById('topbar-right')!.innerHTML =
-      `<button class="topbar-action view-toggle" id="btn-view-toggle" style="display:none;">Chat</button>`;
+      `<button class="topbar-action view-toggle" id="btn-view-toggle" style="display:none;">Chat</button>` +
+      `<button class="topbar-action" id="btn-agent-menu" aria-label="Agent actions">&#8942;</button>`;
     document.getElementById('btn-view-toggle')!.addEventListener('click', () => {
       if (paneViewMode === 'chat') switchToTerminal(); else switchToChat();
     });
+    document.getElementById('btn-agent-menu')!.addEventListener('click', () => openAgentMenu(paneId));
     document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate('#/agents'));
   }
 
