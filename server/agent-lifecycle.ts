@@ -195,6 +195,8 @@ export interface ClearAgentResult {
   paneId: string;
   name: string;
   closedOld: boolean;
+  /** the launch profile the replacement was started with (for the bridge to re-record) */
+  profile: string;
 }
 
 /** Find the profile whose command matches a herdr-detected agent type. */
@@ -213,11 +215,18 @@ export async function clearAgent(
   rpc: Rpc,
   profiles: Record<string, LaunchProfile>,
   target: string,
+  preferredProfile?: string,
 ): Promise<ClearAgentResult> {
   const agent = agentFromResult(await rpc('agent.get', { target }));
   if (!agent) throw new LifecycleError(404, 'not_found', 'agent not found');
 
-  const key = profileForAgentType(profiles, agent.agent ?? null);
+  // Prefer the profile this agent was actually started with (the bridge records
+  // it per pane): inferring from herdr's detected type collapses a custom variant
+  // (e.g. "claude-yolo") back onto the base "claude" profile and drops its argv.
+  // Fall back to inference for agents the bridge didn't start.
+  const key = (preferredProfile && Object.hasOwn(profiles, preferredProfile))
+    ? preferredProfile
+    : profileForAgentType(profiles, agent.agent ?? null);
   if (!key) throw new LifecycleError(422, 'no_profile', `no launch profile matches agent type: ${String(agent.agent)}`);
 
   const oldPaneId = agent.pane_id;
@@ -240,5 +249,5 @@ export async function clearAgent(
   } catch {
     closedOld = false;
   }
-  return { paneId, name, closedOld };
+  return { paneId, name, closedOld, profile: key };
 }

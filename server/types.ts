@@ -94,6 +94,9 @@ export interface HerdrClient {
   isConnected(): boolean;
   getState(): NormalizedState | null;
   rpc(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  /** Re-fetch the snapshot now and push it to clients — for state changes herdr
+   *  emits no subscribed event for (e.g. an agent rename). */
+  refresh(): Promise<void>;
   destroy(): void;
 }
 
