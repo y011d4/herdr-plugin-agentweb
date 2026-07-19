@@ -206,8 +206,8 @@ test('renameAgent: an empty or non-string name is a 400', async () => {
 
 // ── clearAgent ───────────────────────────────────────────────────────────────
 
-function agentGetResponse(agent = 'claude', paneId = 'old:pane', cwd = '/home/u/proj') {
-  return { 'agent.get': { agent: { pane_id: paneId, name: 'orig', agent, cwd, foreground_cwd: cwd } } };
+function agentGetResponse(agent = 'claude', paneId = 'old:pane', cwd = '/home/u/proj', wsId = 'wOLD') {
+  return { 'agent.get': { agent: { pane_id: paneId, name: 'orig', agent, cwd, foreground_cwd: cwd, workspace_id: wsId } } };
 }
 
 test('clearAgent: starts a replacement (inferred argv + cwd) then closes the old pane', async () => {
@@ -220,6 +220,7 @@ test('clearAgent: starts a replacement (inferred argv + cwd) then closes the old
   assert.ok(start);
   assert.deepEqual(start.params.argv, ['claude']);
   assert.equal(start.params.cwd, '/home/u/proj');
+  assert.equal(start.params.workspace_id, 'wOLD'); // replacement stays in the old agent's workspace
   const close = calls.find((c) => c.method === 'pane.close');
   assert.deepEqual(close?.params, { pane_id: 'old:pane' });
   // order: get → start → close

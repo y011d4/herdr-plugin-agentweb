@@ -98,6 +98,7 @@ interface RawAgentInfo {
   agent?: string | null;
   cwd?: string | null;
   foreground_cwd?: string | null;
+  workspace_id?: string | null;
 }
 
 function agentFromResult(result: unknown): RawAgentInfo | null {
@@ -264,10 +265,14 @@ export async function clearAgent(
   if (!key) throw new LifecycleError(422, 'no_profile', `no launch profile matches agent type: ${String(agent.agent)}`);
 
   const cwd = agent.foreground_cwd || agent.cwd || null;
+  // Keep the replacement in the old agent's workspace: cwd alone can land the new
+  // pane in the currently focused workspace, moving a cleared agent to the wrong group.
+  const workspaceId = agent.workspace_id ?? null;
 
   const name = `${key}-${Date.now().toString(36)}`;
   const startParams: Record<string, unknown> = { name, argv: profiles[key].argv, focus: false };
   if (cwd) startParams.cwd = cwd;
+  if (workspaceId) startParams.workspace_id = workspaceId;
 
   const started = agentFromResult(await rpc('agent.start', startParams));
   const paneId = started?.pane_id;

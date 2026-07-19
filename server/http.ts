@@ -319,10 +319,15 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
       try {
         // A `worktree` object means: create a worktree first, then start the agent
         // in it (atomic, with rollback) — one request instead of the client doing two.
-        const worktree = body.worktree && typeof body.worktree === 'object' && !Array.isArray(body.worktree)
-          ? body.worktree as Record<string, unknown> : undefined;
+        // Reject a present-but-malformed worktree rather than silently ignoring it and
+        // starting in the default location (surprising for an intended atomic start).
+        if (body.worktree !== undefined && (typeof body.worktree !== 'object' || body.worktree === null || Array.isArray(body.worktree))) {
+          jsonError(res, 400, 'invalid_params', 'worktree must be an object');
+          return;
+        }
         const out = await startAgent(rpc, config.launchProfiles, {
-          profile: body.profile, cwd: body.cwd, name: body.name, workspace: body.workspace, task: body.task, worktree,
+          profile: body.profile, cwd: body.cwd, name: body.name, workspace: body.workspace, task: body.task,
+          worktree: body.worktree as Record<string, unknown> | undefined,
         });
         if (typeof body.profile === 'string') startedProfiles.set(out.paneId, body.profile);
         jsonOk(res, { ok: true, ...out });
