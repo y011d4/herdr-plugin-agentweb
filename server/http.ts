@@ -7,6 +7,7 @@ import { toClientState } from './state.ts';
 import { buildAgentStatusMessage } from './notify.ts';
 import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail, projectsRootForPid } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt-identity.ts';
+import { startAgent, stopAgent, renameAgent, clearAgent, LifecycleError } from './agent-lifecycle.ts';
 import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
@@ -34,6 +35,7 @@ const MIME: Record<string, string> = {
 
 // ── pane routes: id segment is any non-slash text (pane ids contain ':') ──
 const PANE_RE = /^\/api\/panes\/([^/]+)\/(\w+)$/;
+const PANE_ID_RE = /^\/api\/panes\/([^/]+)$/; // bare pane resource (DELETE = stop the agent)
 const AGENT_RE = /^\/api\/agents\/([^/]+)\/(\w+)$/;
 
 interface HerdrError extends Error {
@@ -53,6 +55,18 @@ function mapHerdrError(err: HerdrError): number {
 function jsonError(res: ServerResponse, status: number, code: string, message: string): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: { code, message } }));
+}
+
+// Turn a caught error into an HTTP response: a LifecycleError carries its own
+// status/code (validation, no-profile); anything else is a herdr RPC error
+// mapped through mapHerdrError (not_found → 404, invalid_* → 400, else 502).
+function sendError(res: ServerResponse, err: unknown): void {
+  if (err instanceof LifecycleError) {
+    jsonError(res, err.status, err.code, err.message);
+    return;
+  }
+  const herdrErr = err as HerdrError;
+  jsonError(res, mapHerdrError(herdrErr), herdrErr.herdrCode || 'error', herdrErr.message);
 }
 
 function jsonOk(res: ServerResponse, body: unknown): void {
@@ -226,13 +240,16 @@ export interface HttpServerResult {
   broadcastAgentStatus: (change: StatusChange, state: NormalizedState) => void;
 }
 
-export function createHttpServer({ webRoot, herdrClient, getState, config: _config }: {
+export function createHttpServer({ webRoot, herdrClient, getState, config }: {
   webRoot: string;
   herdrClient: HerdrClient;
   getState: () => NormalizedState | null;
   config: Config;
 }): HttpServerResult {
   const wsClients = new Set<WebSocket>();
+
+  // herdr RPC bound for the lifecycle helpers (they take an injected rpc).
+  const rpc = (m: string, p?: Record<string, unknown>): Promise<unknown> => herdrClient.rpc(m, p);
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -269,6 +286,43 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
         return;
       }
       jsonOk(res, toClientState(state));
+      return;
+    }
+
+    // Start a new agent from a named launch profile (fixed argv allowlist — a
+    // caller never supplies a raw command). Optional cwd/name/workspace/task.
+    if (pathname === '/api/agents' && method === 'POST') {
+      let body: Record<string, unknown>;
+      try { body = await readBody(req); } catch (err) {
+        const herdrErr = err as HerdrError;
+        jsonError(res, herdrErr.status || 400, 'bad_request', herdrErr.message);
+        return;
+      }
+      try {
+        const out = await startAgent(rpc, config.launchProfiles, {
+          profile: body.profile, cwd: body.cwd, name: body.name, workspace: body.workspace, task: body.task,
+        });
+        jsonOk(res, { ok: true, ...out });
+      } catch (err) {
+        sendError(res, err);
+      }
+      return;
+    }
+
+    // Stop an agent by closing its pane.
+    const paneIdMatch = PANE_ID_RE.exec(pathname);
+    if (paneIdMatch && method === 'DELETE') {
+      const paneId = decodePathSegment(paneIdMatch[1]);
+      if (paneId === null) {
+        jsonError(res, 400, 'invalid_params', 'malformed pane id');
+        return;
+      }
+      try {
+        const out = await stopAgent(rpc, paneId);
+        jsonOk(res, { ok: true, ...out });
+      } catch (err) {
+        sendError(res, err);
+      }
       return;
     }
 
@@ -500,6 +554,23 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
         return;
       }
 
+      // Rename the agent running in this pane (herdr agent.rename; target = pane id).
+      if (action === 'rename' && method === 'POST') {
+        let body: Record<string, unknown>;
+        try { body = await readBody(req); } catch (err) {
+          const herdrErr = err as HerdrError;
+          jsonError(res, herdrErr.status || 400, 'bad_request', herdrErr.message);
+          return;
+        }
+        try {
+          const out = await renameAgent(rpc, paneId, body.name);
+          jsonOk(res, { ok: true, ...out });
+        } catch (err) {
+          sendError(res, err);
+        }
+        return;
+      }
+
       jsonError(res, 404, 'not_found', 'unknown pane endpoint');
       return;
     }
@@ -530,6 +601,18 @@ export function createHttpServer({ webRoot, herdrClient, getState, config: _conf
         } catch (err) {
           const herdrErr = err as HerdrError;
           jsonError(res, mapHerdrError(herdrErr), herdrErr.herdrCode || 'error', herdrErr.message);
+        }
+        return;
+      }
+
+      // Clear an agent: launch a fresh replacement (same profile + cwd) and close
+      // the old pane. The pane id changes — the client re-follows the new pane.
+      if (action === 'clear' && method === 'POST') {
+        try {
+          const out = await clearAgent(rpc, config.launchProfiles, target);
+          jsonOk(res, { ok: true, ...out });
+        } catch (err) {
+          sendError(res, err);
         }
         return;
       }
