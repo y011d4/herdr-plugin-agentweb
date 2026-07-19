@@ -10,9 +10,10 @@ mobile-first PWA:
   (idle / working / **blocked** / done), blocked agents sorted to the top;
   each card shows its git branch, and a linked worktree's agents appear inside their
   main checkout, chipped as a worktree
-- Start, rename, clear, and stop agents from the phone: **+** on the dashboard
-  launches an agent from a named launch profile, and each pane's **⋮** menu renames,
-  clears (fresh session), or stops it
+- Start, rename, clear, and stop agents from the phone: **+** on the dashboard launches an
+  agent from a named launch profile — in an existing workspace/worktree you pick, or in a
+  **fresh worktree** it creates for you — and each pane's **⋮** menu renames, clears
+  (fresh session), or stops it
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
   scrollback by swiping down, multiline input, and quick keys
   (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …)
@@ -287,6 +288,10 @@ default.
   never supplies a raw command). Only `profile` is required; returns `{"paneId", "name", "agent"}`
   (plus `"taskDelivered"` when `task` was given). herdr places the new pane per its own default
   (focus stays put); the new pane appears in `/api/state` a moment later (state rebuild).
+- `POST /api/worktrees` `{"cwd": "/repo", "branch": "feat/x", "base": "origin/main"}` — create a git
+  worktree (herdr `worktree.create`; `cwd` is any path in the source repo, `branch`/`base` optional)
+  and return `{"workspaceId", "checkoutPath", "branch", "paneId"}`. The New agent form's
+  "＋ New worktree…" option calls this, then starts the agent in the new checkout.
 - `DELETE /api/panes/:paneId` — stop an agent by closing its pane
 - `POST /api/panes/:paneId/rename` `{"name": "worker-2"}` — rename the agent running in the pane
 - `POST /api/agents/:target/clear` — start a fresh replacement agent (same profile + cwd) and close

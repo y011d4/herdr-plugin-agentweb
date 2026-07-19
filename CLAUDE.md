@@ -23,11 +23,13 @@ herdr server
 - `server/transcript-normalize.ts` — pure JSONL line → chat TimelineItem[] (unit-tested; I/O-free)
 - `server/transcript.ts` — resolve + tail a claude pane's transcript file (I/O)
 - `server/http.ts` — REST routes, WS (state pushes, per-client pane + transcript watch), static files
-- `server/agent-lifecycle.ts` — pure start/stop/rename/clear orchestration over an injected herdr
-  `rpc` (unit-tested, I/O-free like worktree-resolve's injectable git). Uses herdr's own
-  `agent.start`/`pane.close`/`agent.rename`/`agent.get`; agents launch only from a fixed
-  `launch_profiles` allowlist (never a caller-supplied command). http.ts wires the routes
-  (`POST /api/agents`, `DELETE /api/panes/:id`, `POST /api/panes/:id/rename`, `POST /api/agents/:target/clear`).
+- `server/agent-lifecycle.ts` — pure start/stop/rename/clear/create-worktree orchestration over an
+  injected herdr `rpc` (unit-tested, I/O-free like worktree-resolve's injectable git). Uses herdr's own
+  `agent.start`/`pane.close`/`agent.rename`/`agent.get`/`worktree.create`; agents launch only from a
+  fixed `launch_profiles` allowlist (never a caller-supplied command). http.ts wires the routes
+  (`POST /api/agents`, `DELETE /api/panes/:id`, `POST /api/panes/:id/rename`, `POST /api/agents/:target/clear`,
+  `POST /api/worktrees`). The New agent UI's "＋ New worktree…" option creates a worktree, then starts
+  the agent in its checkout.
 - `server/auth.ts` / `notify.ts` / `config.ts` — token, agent-status fanout + optional ntfy, config
   (config also parses `launch_profiles`, merged over built-in defaults)
 - `bin/agentwebctl.ts` — plugin entrypoints: run | start | stop | status | qr

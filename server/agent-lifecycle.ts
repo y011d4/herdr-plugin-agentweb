@@ -257,3 +257,59 @@ export async function clearAgent(
   }
   return { paneId, name, closedOld, profile: key, oldPaneId };
 }
+
+// ── create a git worktree (herdr worktree.create over the socket) ──────────────
+
+export interface CreateWorktreeInput {
+  /** repo to branch from — a cwd inside it (herdr resolves the repo root) */
+  repo?: unknown;
+  /** or an existing workspace in that repo */
+  workspace?: unknown;
+  /** new branch name; herdr auto-generates a `worktree/…` name when blank */
+  branch?: unknown;
+  /** base ref for the new branch (e.g. "origin/main"); herdr's default when blank */
+  base?: unknown;
+}
+
+export interface CreateWorktreeResult {
+  workspaceId: string | null;
+  checkoutPath: string;
+  branch: string | null;
+  /** the worktree's root shell pane */
+  paneId: string | null;
+}
+
+export async function createWorktree(rpc: Rpc, input: CreateWorktreeInput): Promise<CreateWorktreeResult> {
+  if (input.repo !== undefined && typeof input.repo !== 'string') throw badRequest('repo must be a string');
+  if (input.workspace !== undefined && typeof input.workspace !== 'string') throw badRequest('workspace must be a string');
+  if (input.branch !== undefined && typeof input.branch !== 'string') throw badRequest('branch must be a string');
+  if (input.base !== undefined && typeof input.base !== 'string') throw badRequest('base must be a string');
+  const repo = typeof input.repo === 'string' ? input.repo : '';
+  const workspace = typeof input.workspace === 'string' ? input.workspace : '';
+  if (!repo && !workspace) throw badRequest('repo (a cwd in the repo) or workspace is required');
+
+  const params: Record<string, unknown> = { focus: false };
+  if (repo) params.cwd = repo;
+  if (workspace) params.workspace_id = workspace;
+  const branch = typeof input.branch === 'string' ? input.branch.trim() : '';
+  if (branch) params.branch = branch;
+  const base = typeof input.base === 'string' ? input.base.trim() : '';
+  if (base) params.base = base;
+
+  // herdr's worktree_created result carries the git-worktree object as `worktree`
+  // (its checkout dir is `path`, NOT `checkout_path`) and the opened workspace as
+  // `workspace` (whose own `worktree.checkout_path` is the same dir) + a `root_pane`.
+  const res = (await rpc('worktree.create', params)) as {
+    worktree?: { path?: string; branch?: string | null; open_workspace_id?: string };
+    workspace?: { workspace_id?: string; worktree?: { checkout_path?: string } };
+    root_pane?: { pane_id?: string };
+  };
+  const checkoutPath = res.worktree?.path || res.workspace?.worktree?.checkout_path;
+  if (!checkoutPath) throw new LifecycleError(502, 'error', 'worktree created but herdr returned no checkout path');
+  return {
+    workspaceId: res.workspace?.workspace_id ?? res.worktree?.open_workspace_id ?? null,
+    checkoutPath,
+    branch: res.worktree?.branch ?? (branch || null),
+    paneId: res.root_pane?.pane_id ?? null,
+  };
+}
