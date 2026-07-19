@@ -10,6 +10,9 @@ mobile-first PWA:
   (idle / working / **blocked** / done), blocked agents sorted to the top;
   each card shows its git branch, and a linked worktree's agents appear inside their
   main checkout, chipped as a worktree
+- Start, rename, clear, and stop agents from the phone: **+** on the dashboard
+  launches an agent from a named launch profile, and each pane's **⋮** menu renames,
+  clears (fresh session), or stops it
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
   scrollback by swiping down, multiline input, and quick keys
   (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …)
@@ -277,6 +280,8 @@ default.
   to a draft already typed straight into the pane
 - `POST /api/panes/:paneId/focus`
 - `POST /api/panes/:paneId/scroll` `{"direction": "up", "steps": 3}` — SGR wheel events for full-screen apps
+- `GET /api/profiles` — the configured launch profiles as `{"profiles": [{"name", "label"}]}`
+  (names + labels only, never the argv), for the new-agent picker
 - `POST /api/agents` `{"profile": "claude", "cwd": "/path", "name": "review", "task": "…", "workspace": "w7"}`
   — start a new agent from a named [launch profile](#configuration) (fixed argv allowlist; a caller
   never supplies a raw command). Only `profile` is required; returns `{"paneId", "name", "agent"}`

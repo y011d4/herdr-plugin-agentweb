@@ -289,6 +289,16 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
       return;
     }
 
+    // List the configured launch profiles (name + label only, never the argv) so
+    // the UI can offer them in the "new agent" picker.
+    if (pathname === '/api/profiles' && method === 'GET') {
+      const profiles = Object.entries(config.launchProfiles)
+        .map(([name, p]) => ({ name, label: p.label }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      jsonOk(res, { profiles });
+      return;
+    }
+
     // Start a new agent from a named launch profile (fixed argv allowlist — a
     // caller never supplies a raw command). Optional cwd/name/workspace/task.
     if (pathname === '/api/agents' && method === 'POST') {
