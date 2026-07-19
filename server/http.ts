@@ -251,6 +251,12 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
   // herdr RPC bound for the lifecycle helpers (they take an injected rpc).
   const rpc = (m: string, p?: Record<string, unknown>): Promise<unknown> => herdrClient.rpc(m, p);
 
+  // Remember which launch profile started each pane so `clear` can relaunch the
+  // exact variant — herdr's detected agent type can't distinguish "claude" from a
+  // custom "claude-yolo", so inference alone would drop the variant's argv. Bounded
+  // by the agents started through the bridge this run; entries are dropped on stop/clear.
+  const startedProfiles = new Map<string, string>();
+
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const pathname = url.pathname;
@@ -312,6 +318,7 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
         const out = await startAgent(rpc, config.launchProfiles, {
           profile: body.profile, cwd: body.cwd, name: body.name, workspace: body.workspace, task: body.task,
         });
+        if (typeof body.profile === 'string') startedProfiles.set(out.paneId, body.profile);
         jsonOk(res, { ok: true, ...out });
       } catch (err) {
         sendError(res, err);
@@ -329,6 +336,7 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
       }
       try {
         const out = await stopAgent(rpc, paneId);
+        startedProfiles.delete(paneId);
         jsonOk(res, { ok: true, ...out });
       } catch (err) {
         sendError(res, err);
@@ -574,6 +582,9 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
         }
         try {
           const out = await renameAgent(rpc, paneId, body.name);
+          // herdr emits no rename event the bridge subscribes to, so re-snapshot to
+          // push the new name to /api/state + WS clients (best-effort).
+          await herdrClient.refresh().catch(() => {});
           jsonOk(res, { ok: true, ...out });
         } catch (err) {
           sendError(res, err);
@@ -619,7 +630,9 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
       // the old pane. The pane id changes — the client re-follows the new pane.
       if (action === 'clear' && method === 'POST') {
         try {
-          const out = await clearAgent(rpc, config.launchProfiles, target);
+          const out = await clearAgent(rpc, config.launchProfiles, target, startedProfiles.get(target));
+          startedProfiles.delete(target);
+          startedProfiles.set(out.paneId, out.profile);
           jsonOk(res, { ok: true, ...out });
         } catch (err) {
           sendError(res, err);

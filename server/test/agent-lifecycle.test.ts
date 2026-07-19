@@ -219,3 +219,26 @@ test('clearAgent: a failed old-pane close is non-fatal but reported', async () =
   assert.equal(out.paneId, 'new:pane');
   assert.equal(out.closedOld, false);
 });
+
+test('clearAgent: a recorded preferred profile is reused over type inference (keeps a custom variant\'s argv)', async () => {
+  // herdr detects the agent type as "claude", but it was started from a custom
+  // variant — inference would drop the extra flag; the preferred profile must win.
+  const profiles = parseLaunchProfiles({ 'claude-yolo': { argv: ['claude', '--dangerously-skip-permissions'], label: 'yolo' } });
+  const { rpc, calls } = fakeRpc({
+    ...agentGetResponse('claude', 'old:pane', '/home/u/proj'),
+    'agent.start': (p: Record<string, unknown>) => ({ type: 'agent_started', agent: { pane_id: 'new:pane', name: p.name, agent: 'claude' }, argv: p.argv }),
+  });
+  const out = await clearAgent(rpc, profiles, 'old:pane', 'claude-yolo');
+  const start = calls.find((c) => c.method === 'agent.start');
+  assert.deepEqual(start?.params.argv, ['claude', '--dangerously-skip-permissions']);
+  assert.equal(out.profile, 'claude-yolo');
+});
+
+test('clearAgent: an unknown preferred profile falls back to type inference', async () => {
+  const { rpc } = fakeRpc({
+    ...agentGetResponse('claude', 'old:pane'),
+    'agent.start': (p: Record<string, unknown>) => ({ type: 'agent_started', agent: { pane_id: 'new:pane', name: p.name, agent: 'claude' }, argv: p.argv }),
+  });
+  const out = await clearAgent(rpc, PROFILES, 'old:pane', 'ghost-profile');
+  assert.equal(out.profile, 'claude'); // inferred from the detected type
+});
