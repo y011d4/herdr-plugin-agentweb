@@ -2,6 +2,8 @@
  * Shared type definitions for the herdr-agentweb bridge server.
  */
 
+import type { LaunchProfile } from './agent-lifecycle.ts';
+
 // ── Agent status ─────────────────────────────────────────────────────────────
 
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown';
@@ -92,6 +94,9 @@ export interface HerdrClient {
   isConnected(): boolean;
   getState(): NormalizedState | null;
   rpc(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  /** Re-fetch the snapshot now and push it to clients — for state changes herdr
+   *  emits no subscribed event for (e.g. an agent rename). */
+  refresh(): Promise<void>;
   destroy(): void;
 }
 
@@ -105,6 +110,8 @@ export interface Config {
   publicUrl: string | null;
   stateDir: string;
   socketPath: string;
+  /** named launch profiles for starting agents (defaults + config.json launch_profiles) */
+  launchProfiles: Record<string, LaunchProfile>;
 }
 
 // ── Raw herdr wire payloads (loose, index-signed) ─────────────────────────────

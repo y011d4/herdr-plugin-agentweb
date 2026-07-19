@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { Config } from './types.ts';
+import { parseLaunchProfiles } from './agent-lifecycle.ts';
 
 function loadFileConfig(): Record<string, unknown> {
   const configDir = process.env.HERDR_PLUGIN_CONFIG_DIR;
@@ -55,5 +56,6 @@ export function loadConfig(): Config {
     publicUrl,
     stateDir: resolveStateDir(),
     socketPath: resolveSocketPath(),
+    launchProfiles: parseLaunchProfiles(file.launch_profiles),
   };
 }
