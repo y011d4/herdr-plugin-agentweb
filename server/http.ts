@@ -632,10 +632,12 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
       // the old pane. The pane id changes — the client re-follows the new pane.
       if (action === 'clear' && method === 'POST') {
         try {
-          const out = await clearAgent(rpc, config.launchProfiles, target, startedProfiles.get(target));
+          // The store is keyed by pane id, but `target` may be an agent name, so
+          // clearAgent resolves the pane id and looks up / reports it (out.oldPaneId).
+          const out = await clearAgent(rpc, config.launchProfiles, target, (pid) => startedProfiles.get(pid));
           // Only drop the old mapping once the old pane is actually gone; if the
           // close failed it still exists and must keep its recorded profile.
-          if (out.closedOld) startedProfiles.delete(target);
+          if (out.closedOld) startedProfiles.delete(out.oldPaneId);
           startedProfiles.set(out.paneId, out.profile);
           jsonOk(res, { ok: true, ...out });
         } catch (err) {

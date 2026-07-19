@@ -228,10 +228,11 @@ test('clearAgent: a recorded preferred profile is reused over type inference (ke
     ...agentGetResponse('claude', 'old:pane', '/home/u/proj'),
     'agent.start': (p: Record<string, unknown>) => ({ type: 'agent_started', agent: { pane_id: 'new:pane', name: p.name, agent: 'claude' }, argv: p.argv }),
   });
-  const out = await clearAgent(rpc, profiles, 'old:pane', 'claude-yolo');
+  const out = await clearAgent(rpc, profiles, 'old:pane', (pid) => (pid === 'old:pane' ? 'claude-yolo' : undefined));
   const start = calls.find((c) => c.method === 'agent.start');
   assert.deepEqual(start?.params.argv, ['claude', '--dangerously-skip-permissions']);
   assert.equal(out.profile, 'claude-yolo');
+  assert.equal(out.oldPaneId, 'old:pane');
 });
 
 test('clearAgent: an unknown preferred profile falls back to type inference', async () => {
@@ -239,6 +240,21 @@ test('clearAgent: an unknown preferred profile falls back to type inference', as
     ...agentGetResponse('claude', 'old:pane'),
     'agent.start': (p: Record<string, unknown>) => ({ type: 'agent_started', agent: { pane_id: 'new:pane', name: p.name, agent: 'claude' }, argv: p.argv }),
   });
-  const out = await clearAgent(rpc, PROFILES, 'old:pane', 'ghost-profile');
+  const out = await clearAgent(rpc, PROFILES, 'old:pane', () => 'ghost-profile');
   assert.equal(out.profile, 'claude'); // inferred from the detected type
+});
+
+test('clearAgent: looks up the profile + reports oldPaneId by the RESOLVED pane id when target is a name', async () => {
+  const profiles = parseLaunchProfiles({ 'claude-yolo': { argv: ['claude', '--danger'], label: 'y' } });
+  // target is an agent NAME; agent.get resolves it to a different pane id.
+  const { rpc, calls } = fakeRpc({
+    'agent.get': { agent: { pane_id: 'resolved:pane', name: 'myagent', agent: 'claude', cwd: '/w', foreground_cwd: '/w' } },
+    'agent.start': (p: Record<string, unknown>) => ({ type: 'agent_started', agent: { pane_id: 'new:pane', name: p.name, agent: 'claude' }, argv: p.argv }),
+  });
+  const seen: string[] = [];
+  const out = await clearAgent(rpc, profiles, 'myagent', (pid) => { seen.push(pid); return pid === 'resolved:pane' ? 'claude-yolo' : undefined; });
+  assert.deepEqual(seen, ['resolved:pane']); // keyed by the resolved pane id, not the "myagent" target
+  assert.equal(out.oldPaneId, 'resolved:pane');
+  assert.deepEqual(calls.find((c) => c.method === 'agent.start')?.params.argv, ['claude', '--danger']);
+  assert.deepEqual(calls.find((c) => c.method === 'pane.close')?.params, { pane_id: 'resolved:pane' });
 });
