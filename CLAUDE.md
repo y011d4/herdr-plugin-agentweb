@@ -124,10 +124,11 @@ Verified live against herdr 0.7.3 / protocol 16:
   untagged checkout has no herdr identity, so it derives its full worktree info from the
   pane cwd (and clears when that stops resolving). `repo_key` uses git's
   shared `--git-common-dir`, matching herdr's own repoKey. In the UI each card shows its
-  tab name and (dim, beside it) its git branch; a linked worktree's cards are listed
-  inside its main checkout's group (matched by `repo_key`) with a `worktree` chip, and
-  a worktree whose main isn't open renders top-level with a `<repo> · worktree` badge. A cwd git can't
-  resolve just renders plain (graceful degradation).
+  tab name and (dim, beside it) its git branch. The dashboard is one flat list of every
+  agent, most recent status change (`sinceUnixMs`) first, so each card names its own
+  workspace; a linked worktree's card adds a `worktree` chip. `sinceUnixMs` lives only in
+  bridge memory, so a bridge restart resets every card to "just now" (order falls back to
+  workspace order). A cwd git can't resolve just renders plain (graceful degradation).
 
 ## The two scrolling mechanisms (phone pane view)
 
