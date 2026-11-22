@@ -684,8 +684,11 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
 
   // ── WebSocket server ───────────────────────────────────────────────────────
 
-  // the only expected inbound WS message is a small ping — cap payloads
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  // the only expected inbound WS message is a small ping — cap payloads.
+  // permessage-deflate: pane_output resends the whole screen (~9KB) on every
+  // change, and consecutive screens are near-identical, so context-takeover
+  // deflate cuts a busy pane view ~40x (measured ~50MB/h → ~1.2MB/h on mobile data).
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: true });
 
   server.on('upgrade', (req: IncomingMessage, socket, head: Buffer) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
