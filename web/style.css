@@ -299,39 +299,19 @@ a {
   -webkit-overflow-scrolling: touch;
 }
 
-.workspace-group {
-  margin-top: 20px;
+.agent-list {
+  margin-top: 16px;
   padding: 0 16px;
 }
 
-.workspace-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
+/* The card's workspace — the list is flat, so each card names its own. */
+.card-workspace {
   font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--color-text-dim);
-  margin-bottom: 10px;
-}
-
-.workspace-name {
+  color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* Badge marking a linked git worktree (`worktree`, or `<repo> · worktree` when
-   the worktree renders top-level without its main checkout open). */
-.worktree-badge {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-working);
-  background: var(--color-surface-2);
-  padding: 1px 8px;
-  border-radius: 8px;
-  white-space: nowrap;
-  flex-shrink: 0;
+  min-width: 0;
 }
 
 /* In-card chip marking a card whose workspace is a linked git worktree. */
@@ -438,13 +418,6 @@ a {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.inactive-panes-count {
-  font-size: 13px;
-  color: var(--color-text-dim);
-  padding: 8px 0;
-  text-align: center;
 }
 
 /* ── Pane detail ── */
@@ -780,7 +753,7 @@ a {
     padding-left: 0;
     padding-right: 0;
   }
-  .workspace-group {
+  .agent-list {
     padding: 0 24px;
   }
   .terminal-output {
