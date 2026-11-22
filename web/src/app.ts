@@ -14,9 +14,10 @@ import { renderItems } from './transcript.ts';
 import type { TimelineItem } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt.ts';
 import type { PromptOption, ParsedPrompt } from './prompt.ts';
-import { statusOrder, groupWorkspacesForDashboard } from './dashboard-group.ts';
+import { dashboardCards } from './dashboard-group.ts';
+import type { DashboardCard } from './dashboard-group.ts';
 import { watchMessages } from './watch.ts';
-import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
+import type { AppState, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 
 // ── App version ──────────────────────────────────────────────────────────────
 const APP_VERSION = '0.1.0';
@@ -868,75 +869,40 @@ async function stopAgentFlow(paneId: string): Promise<void> {
 
 // ── Agents dashboard ──────────────────────────────────────────────────────────
 
-// Render agent-pane cards for a repo group — a main checkout plus any linked
-// worktrees — as a single status-sorted list, so an urgent worktree agent isn't
-// stuck below idle main-checkout agents. A flat workspace is a one-member group.
-// Each card's `branch` and `worktree` chip come from its own workspace. Returns
-// totalPanes so the caller can skip an empty group.
-function renderGroupCards(workspaces: WorkspaceNode[]): { html: string; totalPanes: number } {
-  // Flatten every pane across the group, carrying its workspace's git context
-  // and its tab label — pane.title is usually null, so the tab name is the only
-  // distinguishing label when a workspace runs several agents; a per-tab index
-  // keeps split-pane cards distinct.
-  const items = workspaces.flatMap((ws) => {
-    const branch = ws.worktree?.branch || null;
-    const isWorktree = ws.worktree?.isLinkedWorktree ?? false;
-    return (ws.tabs ?? []).flatMap((t) => {
-      const panes = t.panes ?? [];
-      const tabAgentPanes = panes.filter((p) => p.agent);
-      return panes.map((pane) => ({
-        pane,
-        branch,
-        isWorktree,
-        tabLabel: t.label,
-        tabAgentIndex: tabAgentPanes.indexOf(pane) + 1,
-        tabAgentCount: tabAgentPanes.length,
-      }));
-    });
-  });
-  const agentItems = items
-    .filter((x) => x.pane.agent)
-    .sort((a, b) => statusOrder(a.pane.agent!.status) - statusOrder(b.pane.agent!.status));
-  const inactiveCount = items.length - agentItems.length;
+// One dashboard card. The list is flat (most recent status change first, see
+// dashboardCards), so each card names its own workspace; `branch` and the
+// `worktree` chip come from that workspace. pane.title is usually null, so the
+// tab name is the card label, with a per-tab index for split-pane agents.
+function renderCard(card: DashboardCard): string {
+  const { pane, workspaceLabel, branch, isWorktree, tabLabel, tabAgentIndex, tabAgentCount } = card;
+  const { paneId, agent, title } = pane;
+  const { displayName, name, status, customStatus, message, sinceUnixMs } = agent!;
+  // The chip shows the stable agent kind, so prefer `name` (raw pane.agent,
+  // e.g. "claude"/"codex") over displayName, which can be a richer label.
+  const agentKind = name || displayName || 'agent';
+  // Fall back to the agent kind if a tab somehow has no label.
+  const baseLabel = tabLabel || agentKind;
+  const cardLabel = tabAgentCount > 1 ? `${baseLabel} #${tabAgentIndex}` : baseLabel;
+  const statusClass = status || 'unknown';
+  const meta = customStatus || message || '';
+  const relTime = relativeTime(sinceUnixMs);
 
-  let html = '';
-  if (agentItems.length === 0) {
-    html += `<div class="inactive-panes-count">${inactiveCount} pane${inactiveCount !== 1 ? 's' : ''} (no active agents)</div>`;
-  }
-
-  for (const { pane, branch, isWorktree, tabLabel, tabAgentIndex, tabAgentCount } of agentItems) {
-    const { paneId, agent, title } = pane;
-    const { displayName, name, status, customStatus, message, sinceUnixMs } = agent!;
-    // The chip shows the stable agent kind, so prefer `name` (raw pane.agent,
-    // e.g. "claude"/"codex") over displayName, which can be a richer label.
-    const agentKind = name || displayName || 'agent';
-    // Tab name is the human-meaningful identifier within a workspace; fall back
-    // to the agent kind if a tab somehow has no label. When the tab runs multiple
-    // agent panes, suffix a per-tab index so the cards differ.
-    const baseLabel = tabLabel || agentKind;
-    const cardLabel = tabAgentCount > 1 ? `${baseLabel} #${tabAgentIndex}` : baseLabel;
-    const statusClass = status || 'unknown';
-    const meta = customStatus || message || '';
-    const relTime = relativeTime(sinceUnixMs);
-
-    html += `
-      <div class="agent-card" data-pane-id="${escHtml(paneId)}" role="button" tabindex="0">
-        <div class="agent-card-header">
-          <span class="agent-name">${escHtml(cardLabel)}</span>
-          ${branch ? `<span class="card-branch">${escHtml(branch)}</span>` : ''}
-          <span class="status-badge ${escHtml(statusClass)}">${escHtml(statusClass)}</span>
-        </div>
-        ${meta ? `<div class="agent-custom-status">${escHtml(meta)}</div>` : ''}
-        <div class="agent-card-meta">
-          <span class="agent-kind">${escHtml(agentKind)}</span>
-          ${isWorktree ? '<span class="card-worktree">worktree</span>' : ''}
-          ${title ? `<span class="pane-title">${escHtml(title)}</span>` : ''}
-          ${relTime ? `<span>${escHtml(relTime)}</span>` : ''}
-        </div>
-      </div>`;
-  }
-
-  return { html, totalPanes: items.length };
+  return `
+    <div class="agent-card" data-pane-id="${escHtml(paneId)}" role="button" tabindex="0">
+      <div class="agent-card-header">
+        <span class="agent-name">${escHtml(cardLabel)}</span>
+        ${branch ? `<span class="card-branch">${escHtml(branch)}</span>` : ''}
+        <span class="status-badge ${escHtml(statusClass)}">${escHtml(statusClass)}</span>
+      </div>
+      ${meta ? `<div class="agent-custom-status">${escHtml(meta)}</div>` : ''}
+      <div class="agent-card-meta">
+        <span class="card-workspace">${escHtml(workspaceLabel)}</span>
+        <span class="agent-kind">${escHtml(agentKind)}</span>
+        ${isWorktree ? '<span class="card-worktree">worktree</span>' : ''}
+        ${title ? `<span class="pane-title">${escHtml(title)}</span>` : ''}
+        ${relTime ? `<span>${escHtml(relTime)}</span>` : ''}
+      </div>
+    </div>`;
 }
 
 // State pushes (agent_status_changed and friends) arrive continuously while the
@@ -995,31 +961,12 @@ function renderAgentsDashboard(): void {
 
   const { workspaces = [] } = appState;
 
-  let inner = '';
-
-  if (workspaces.length === 0) {
-    inner += '<div class="empty-state">No workspaces found.</div>';
-  }
-
-  // Linked worktrees are grouped under their main checkout (matched by repoKey)
-  // and the top-level entries are status-ordered; a worktree whose main isn't
-  // open — and every other workspace — stays top-level. Grouping/sorting is a
-  // pure helper (unit-tested in dashboard-group.test.ts).
-  for (const { entry: ws, members } of groupWorkspacesForDashboard(workspaces)) {
-    // Main checkout + its linked worktrees render as one status-sorted group, so
-    // each worktree's cards (with their own branch + `worktree` chip) read as
-    // part of the repo rather than a repo of their own.
-    const { html: cards, totalPanes } = renderGroupCards(members);
-    if (totalPanes === 0) continue;
-
-    // An orphan worktree (its main isn't open) keeps a repo-qualified badge.
-    const wt = ws.worktree;
-    const badge = wt?.isLinkedWorktree
-      ? `<span class="worktree-badge">${escHtml(wt.repoName || 'repo')} · worktree</span>`
-      : '';
-    inner += `<div class="workspace-group" data-ws="${escHtml(ws.workspaceId)}">
-      <div class="workspace-label"><span class="workspace-name">${escHtml(ws.label || ws.workspaceId)}</span>${badge}</div>${cards}</div>`;
-  }
+  // One flat list of every agent, most recent status change first (pure helper,
+  // unit-tested in dashboard-group.test.ts).
+  const cards = dashboardCards(workspaces);
+  const inner = workspaces.length === 0 ? '<div class="empty-state">No workspaces found.</div>'
+    : cards.length === 0 ? '<div class="empty-state">No active agents.</div>'
+    : `<div class="agent-list">${cards.map(renderCard).join('')}</div>`;
 
   // Keep the #screen-agents scroll container stable across state-push rebuilds:
   // replacing only its inner content preserves scrollTop and iOS momentum, while
