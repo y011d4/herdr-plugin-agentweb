@@ -8,3 +8,4 @@ web/prompt.js
 web/sw.js
 web/transcript.js
 web/types.js
+web/watch.js
