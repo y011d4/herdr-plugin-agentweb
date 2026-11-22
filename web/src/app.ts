@@ -15,6 +15,7 @@ import type { TimelineItem } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt.ts';
 import type { PromptOption, ParsedPrompt } from './prompt.ts';
 import { statusOrder, groupWorkspacesForDashboard } from './dashboard-group.ts';
+import { watchMessages } from './watch.ts';
 import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 
 // ── App version ──────────────────────────────────────────────────────────────
@@ -259,16 +260,7 @@ function handleWsMessage(msg: WsMessage): void {
 // so the unused one is always cancelled. Re-sent on reconnect and mode switches.
 function wsSendWatch(): void {
   if (!wsSocket || wsSocket.readyState !== WebSocket.OPEN) return;
-  if (activePaneId && paneViewMode === 'chat') {
-    wsSocket.send(JSON.stringify({ type: 'unwatch_pane' }));
-    wsSocket.send(JSON.stringify({ type: 'watch_transcript', paneId: activePaneId }));
-  } else if (activePaneId) {
-    wsSocket.send(JSON.stringify({ type: 'unwatch_transcript' }));
-    wsSocket.send(JSON.stringify({ type: 'watch_pane', paneId: activePaneId }));
-  } else {
-    wsSocket.send(JSON.stringify({ type: 'unwatch_pane' }));
-    wsSocket.send(JSON.stringify({ type: 'unwatch_transcript' }));
-  }
+  for (const m of watchMessages(activePaneId, paneViewMode, document.hidden)) wsSocket.send(JSON.stringify(m));
 }
 
 // The badge reflects end-to-end connectivity: the WebSocket to the bridge AND
@@ -365,8 +357,9 @@ function onAgentStatus(msg: WsAgentStatusMessage): void {
     showSystemNotification(title, body, paneId);
   }
 
-  // Refresh pane detail if it's the active one
-  if (activePaneId === paneId) {
+  // Refresh pane detail if it's the active one (not while hidden — the
+  // visibilitychange handler re-reads the screen on return)
+  if (activePaneId === paneId && !document.hidden) {
     refreshPaneOutput();
   }
 }
@@ -1931,6 +1924,7 @@ function startPromptScreenPoll(): void {
   const tick = async (): Promise<void> => {
     if (promptPollActive) return; // a poll is in flight — don't overlap (so slow reads aren't all discarded)
     if (paneViewMode !== 'chat' || !activePaneId) { stopPromptScreenPoll(); return; }
+    if (document.hidden) return; // a full screen read every 1.2s — skip while nobody can see it
     if (findPane(activePaneId)?.pane?.agent?.status !== 'blocked') { updatePromptPanel(); return; }
     const reqId = ++promptPollSeq;
     promptPollActive = reqId;
@@ -2243,6 +2237,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Stop pane polling when tab is hidden, resume when visible
   document.addEventListener('visibilitychange', () => {
+    if (paneViewMode !== 'chat') wsSendWatch(); // pause/resume the pane watch
     if (document.hidden || !activePaneId) return;
     // Returning to a pane that's already open (app switch, no route change) won't
     // fire handleRoute, so clear any OS notification raised for it while hidden.
