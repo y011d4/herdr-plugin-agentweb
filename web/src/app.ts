@@ -15,6 +15,7 @@ import type { TimelineItem } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt.ts';
 import type { PromptOption, ParsedPrompt } from './prompt.ts';
 import { statusOrder, groupWorkspacesForDashboard } from './dashboard-group.ts';
+import { watchMessages } from './watch.ts';
 import type { AppState, WorkspaceNode, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 
 // ── App version ──────────────────────────────────────────────────────────────
@@ -259,21 +260,7 @@ function handleWsMessage(msg: WsMessage): void {
 // so the unused one is always cancelled. Re-sent on reconnect and mode switches.
 function wsSendWatch(): void {
   if (!wsSocket || wsSocket.readyState !== WebSocket.OPEN) return;
-  if (activePaneId && paneViewMode === 'chat') {
-    wsSocket.send(JSON.stringify({ type: 'unwatch_pane' }));
-    wsSocket.send(JSON.stringify({ type: 'watch_transcript', paneId: activePaneId }));
-  } else if (activePaneId) {
-    wsSocket.send(JSON.stringify({ type: 'unwatch_transcript' }));
-    // A hidden page still gets a full screen per change (~1/s while an agent
-    // works) — pause the pane watch until visible. The transcript watch above
-    // stays on: it only sends new items, and restarting it resends the whole tail.
-    wsSocket.send(JSON.stringify(document.hidden
-      ? { type: 'unwatch_pane' }
-      : { type: 'watch_pane', paneId: activePaneId }));
-  } else {
-    wsSocket.send(JSON.stringify({ type: 'unwatch_pane' }));
-    wsSocket.send(JSON.stringify({ type: 'unwatch_transcript' }));
-  }
+  for (const m of watchMessages(activePaneId, paneViewMode, document.hidden)) wsSocket.send(JSON.stringify(m));
 }
 
 // The badge reflects end-to-end connectivity: the WebSocket to the bridge AND
