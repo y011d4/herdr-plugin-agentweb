@@ -452,12 +452,13 @@ async function agentStart(args: string[]): Promise<number> {
   const places = [dir];
   if (opt.worktree) {
     // next to the repo, so an .envrc above it (e.g. one per org dir) sets the checkout's account too
-    input.worktree = await placeWorktreeNextToRepo({ repo: dir, branch: opt.worktree, base: opt.base });
-    if (typeof input.worktree.path !== 'string') {
-      console.error(`${dir}: not in a git repository`);
+    try {
+      input.worktree = await placeWorktreeNextToRepo({ repo: dir, branch: opt.worktree, base: opt.base });
+    } catch (e) {
+      console.error((e as Error).message);
       return 1;
     }
-    places.push(path.dirname(input.worktree.path));
+    places.push(path.dirname(input.worktree.path as string));
   }
   const own = await ownAccount();
   for (const p of places) {

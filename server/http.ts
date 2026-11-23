@@ -9,7 +9,7 @@ import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail, projects
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt-identity.ts';
 import { startAgent, stopAgent, renameAgent, clearAgent, createWorktree, LifecycleError } from './agent-lifecycle.ts';
 import { createPaneProfileStore } from './pane-profile-store.ts';
-import { placeWorktreeNextToRepo } from './worktree-resolve.ts';
+import { placeWorktreeNextToRepo, resolveCwdFor } from './worktree-resolve.ts';
 import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
@@ -360,9 +360,12 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
         return;
       }
       try {
-        const out = await createWorktree(rpc, await placeWorktreeNextToRepo({
-          repo: body.cwd, workspace: body.workspace, branch: body.branch, base: body.base,
-        }));
+        // a workspace alone names the repo too: place the worktree from its dir (herdr
+        // takes a cwd or a workspace, not both)
+        const ws = body.cwd === undefined && typeof body.workspace === 'string'
+          ? getState()?.workspaces.find((w) => w.workspaceId === body.workspace) : undefined;
+        const source = ws ? { repo: resolveCwdFor(ws) ?? undefined } : { repo: body.cwd, workspace: body.workspace };
+        const out = await createWorktree(rpc, await placeWorktreeNextToRepo({ ...source, branch: body.branch, base: body.base }));
         jsonOk(res, { ok: true, ...out });
       } catch (err) {
         sendError(res, err);
