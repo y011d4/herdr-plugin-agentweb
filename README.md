@@ -281,7 +281,8 @@ Anything whose account differs, or can't be told, is hidden or refused:
   workspace), or in a new worktree of the repo there. The worktree goes next to the repo
   (`<repo>-wt-<branch>`), not into herdr's worktrees dir, so an `.envrc` above the repo (one per
   org dir, say) sets its account too. `dir`'s account is checked before anything is created and the
-  started agent's after; a mismatch closes it again.
+  started agent's after; a mismatch stops it again (a new worktree is then kept, since the agent
+  may already have written to it).
 - `worktree remove <checkout path>` — removes a finished worker's linked worktree and its branch,
   only when no agent is left in it, it has no uncommitted or untracked files, and the branch is
   merged (an ancestor of `origin/HEAD`, or the head of a merged PR per `gh`, for squash merges).

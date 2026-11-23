@@ -209,8 +209,8 @@ export interface StartAgentInput {
 }
 
 export interface StartAgentOptions {
-  /** runs once the agent is up; throwing rolls the start back (pane/worktree) and rethrows
-   *  (by then the agent has run, so a worktree with changes is kept, not forced away) */
+  /** runs once the agent is up; throwing stops it (closes its pane) and rethrows. A new
+   *  worktree is kept then: the agent may already have written to it. */
   verify?: (paneId: string) => Promise<void>;
 }
 
@@ -255,11 +255,14 @@ export async function startAgent(
     const wt = await createWorktree(rpc, input.worktree);
     paneId = wt.paneId ?? undefined;
     rollback = async (launched) => {
-      // A launched agent (failed verify) may already have written files: remove only a
-      // clean worktree, else just stop the agent and keep the checkout.
-      if (await rollbackWorktree(rpc, wt.workspaceId, !launched) || !launched) return null;
+      if (!launched) {
+        await rollbackWorktree(rpc, wt.workspaceId);
+        return null;
+      }
+      // a failed verify: the agent has run and may have written files (it could still be
+      // writing during any cleanliness check), so stop it and keep the checkout
       await closeQuietly(rpc, paneId);
-      return `${wt.checkoutPath} has changes, so it was kept`;
+      return `its worktree ${wt.checkoutPath} was kept`;
     };
   } else {
     const params: Record<string, unknown> = { label: name, focus: false };
@@ -464,16 +467,25 @@ export async function createWorktree(rpc: Rpc, input: CreateWorktreeInput): Prom
   };
 }
 
-/** Best-effort removal of a worktree we just created (rollback); never throws. Without
- *  `force`, herdr refuses a worktree with changes. Reports whether it was removed. */
-async function rollbackWorktree(rpc: Rpc, workspaceId: string | null, force = true): Promise<boolean> {
-  if (!workspaceId) return false;
+/** Best-effort removal of a worktree we just created (rollback); never throws. */
+async function rollbackWorktree(rpc: Rpc, workspaceId: string | null): Promise<void> {
+  if (!workspaceId) return;
   try {
-    await rpc('worktree.remove', { workspace_id: workspaceId, force });
-    return true;
+    await rpc('worktree.remove', { workspace_id: workspaceId, force: true });
   } catch {
     /* best-effort: a failed rollback leaves a worktree behind, but must not mask
        the original agent-start error the caller is about to see */
-    return false;
   }
+}
+
+/** Whether an agent works in a checkout: one in its workspace, or one launched in or
+ *  moved into `dir` from any other workspace. Removing the checkout would pull its
+ *  working directory away. */
+export function checkoutInUse(
+  panes: Array<{ workspace_id?: string; agent?: string | null; cwd?: string; foreground_cwd?: string }>,
+  workspaceId: string,
+  dir: string,
+): boolean {
+  const inDir = (c?: string) => !!c && (c === dir || c.startsWith(dir + '/'));
+  return panes.some((p) => !!p.agent && (p.workspace_id === workspaceId || inDir(p.cwd) || inDir(p.foreground_cwd)));
 }
