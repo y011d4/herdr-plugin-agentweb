@@ -262,11 +262,31 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
   // stop/clear.
   const startedProfiles = createPaneProfileStore(join(config.stateDir, 'pane-profiles.json'));
 
+  // Each agent pane's Claude account, so an orchestrator's agents list can show just
+  // its own account's agents. Looked up once per agent (its account is fixed while it
+  // runs) and forgotten when the pane loses its agent; a finished lookup re-pushes.
+  const paneAccounts = new Map<string, string | null>();
+  const accountLookups = new Set<string>();
+  function refreshPaneAccounts(state: NormalizedState): void {
+    for (const id of paneAccounts.keys()) {
+      if (!state._paneById.get(id)?.agent) paneAccounts.delete(id);
+    }
+    for (const [id, pane] of state._paneById) {
+      if (!pane.agent || paneAccounts.has(id) || accountLookups.has(id)) continue;
+      accountLookups.add(id);
+      void paneAccount(rpc, id).then((account) => {
+        paneAccounts.set(id, account);
+        const now = getState();
+        if (now) broadcastState(now);
+      }, () => { /* herdr didn't answer: the next push retries */ }).finally(() => accountLookups.delete(id));
+    }
+  }
+
   // The JSON state sent to clients (REST + WS): the normalized tree plus which pane
   // runs each orchestrator (the phone opens on their chats). orchestratorPaneId (the
   // first running one) stays for clients of the single-orchestrator contract.
   const clientState = (state: NormalizedState) => {
-    const orchestrators = findOrchestrators(state, config.orchestrators);
+    const orchestrators = findOrchestrators(state, config.orchestrators, paneAccounts);
     return {
       ...toClientState(state),
       orchestrators,
@@ -940,7 +960,8 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
   let lastStateMsg: string | null = null;
 
   function broadcastState(state: NormalizedState): void {
-    const msg = JSON.stringify({ type: 'state', state: clientState(state) });
+    refreshPaneAccounts(state);
+    const msg =JSON.stringify({ type: 'state', state: clientState(state) });
     // focus churn in the TUI produces frequent no-op state updates; skip resends.
     // The dedupe baseline is updated even with no clients connected, so a client
     // that connects during a lull isn't left stale when state later returns to a

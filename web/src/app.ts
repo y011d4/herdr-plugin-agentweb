@@ -3,6 +3,7 @@
  *
  * Single-page application with hash routing:
  *   #/agents    — dashboard (default)
+ *   #/agents/:name — the dashboard of one orchestrator's Claude account (from its Home)
  *   #/home/:name — an orchestrator's chat (Home); #/home opens the last one used
  *   #/pane/:id  — pane terminal detail
  *   #/settings  — settings
@@ -25,7 +26,7 @@ import type { AppState, OrchestratorView, WsMessage, WsAgentStatusMessage, WsTra
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v102';
+const BUILD = 'v103';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -274,7 +275,7 @@ function handleWsMessage(msg: WsMessage): void {
       holdHomeForReplacement(); // the orchestrator may be mid-replacement; state decides
     } else if (msg.paneId === activePaneId) {
       showToast('Pane closed', 'This pane no longer exists.');
-      navigate('#/agents');
+      navigate(paneGoneRoute());
     }
   } else if (msg.type === 'transcript_items') {
     if (msg.paneId === activePaneId) onTranscriptItems(msg);
@@ -336,20 +337,20 @@ function onStateUpdate(): void {
   const started = startingHome ? orchestrators().find((o) => o.name === startingHome && o.paneId) : undefined;
   if (started) {
     startingHome = null;
-    if (location.hash === '#/agents') { navigate(homeHash(started.name)); return; }
+    if (isAgentsRoute(location.hash)) { navigate(homeHash(started.name)); return; }
   }
   // Nothing rendered yet (startup), or the token was just (re-)entered and the
   // login screen is still up: render the current route.
   if (!routeRendered || document.getElementById('screen-login')) { handleRoute(); return; }
   const hash = location.hash || '#/agents';
-  if (hash === '#/agents') {
+  if (isAgentsRoute(hash)) {
     renderAgentsDashboard();
   } else if (hash.startsWith('#/pane/')) {
     // If the pane vanished (e.g. seen via /api/state polling while the WS is
     // down, so the pane_gone push can't fire), leave the now-stale view.
     if (activePaneId && !findPane(activePaneId)) {
       showToast('Pane closed', 'This pane no longer exists.');
-      navigate('#/agents');
+      navigate(paneGoneRoute());
       return;
     }
     markActivePaneSeen(); // it may have just finished while on screen
@@ -618,12 +619,15 @@ const orchestrators = (): OrchestratorView[] => appState?.orchestrators ?? [];
 const orchestratorOfPane = (paneId: string | null): OrchestratorView | undefined =>
   paneId === null ? undefined : orchestrators().find((o) => o.paneId === paneId);
 const homeHash = (name: string): string => `#/home/${encodeURIComponent(name)}`;
+// From a Home (#/home/<name>), the agents list is #/agents/<name>: just that orchestrator's account's agents.
+const homeAgentsHash = (): string => location.hash.replace(/^#\/home\//, '#/agents/');
+const isAgentsRoute = (hash: string): boolean => hash === '#/agents' || hash.startsWith('#/agents/');
 
-/** The orchestrator a #/home/<name> route names. */
+/** The orchestrator a #/home/<name> or #/agents/<name> route names. */
 function homeOf(hash: string): OrchestratorView | undefined {
   let name: string;
   try {
-    name = decodeURIComponent(hash.slice('#/home/'.length));
+    name = decodeURIComponent(hash.replace(/^#\/(?:home|agents)\//, ''));
   } catch {
     return undefined;
   }
@@ -649,8 +653,10 @@ let routeRendered = false;
 let homeMode = false;
 let homeActivity: string | null = null; // latest tool call since the orchestrator last spoke
 let homeStatusHtml = ''; // last rendered status bar, to skip no-op DOM writes
-// Where a pane's Back goes: Home when it was opened from there, else the list.
+// Where a pane's Back goes: Home or an account's list when it was opened from there, else the list.
 let paneBackRoute = '#/agents';
+// Where to go when the open pane goes away: the list it came from (an account's included).
+const paneGoneRoute = (): string => (!homeMode && paneBackRoute.startsWith('#/agents/') ? paneBackRoute : '#/agents');
 
 // A cleared or restarted orchestrator leaves a gap: its old pane is gone before the
 // replacement is detected as an agent. Home holds through that gap instead of
@@ -684,7 +690,7 @@ async function startOrchestratorFlow(name: string): Promise<void> {
   } catch (err) {
     startingHome = null;
     showToast('Could not start the orchestrator', (err as Error).message);
-    if (location.hash === '#/agents') renderAgentsDashboard();
+    if (isAgentsRoute(location.hash)) renderAgentsDashboard();
   }
 }
 
@@ -733,7 +739,7 @@ function handleRoute(e?: Event): void {
       markActivePaneSeen();
       renderPaneDetail(id);
     }
-  } else if (hash === '#/agents' || hash === '#/') {
+  } else if (isAgentsRoute(hash) || hash === '#/') {
     renderAgentsDashboard();
   } else if (hash.startsWith('#/pane/')) {
     const encoded = hash.slice('#/pane/'.length);
@@ -751,7 +757,7 @@ function handleRoute(e?: Event): void {
       return;
     }
     activePaneId = paneId;
-    if (fromHash?.startsWith('#/home/')) paneBackRoute = fromHash;
+    if (fromHash?.startsWith('#/home/') || fromHash?.startsWith('#/agents/')) paneBackRoute = fromHash;
     else if (!fromHash?.startsWith('#/pane/')) paneBackRoute = '#/agents'; // pane→pane keeps it
     // opening a pane clears its pending notifications (in-app toasts + OS)
     dismissToastsForPane(paneId);
@@ -1056,7 +1062,7 @@ async function stopAgentFlow(paneId: string): Promise<void> {
   try {
     await apiDelete(`/api/panes/${encodeURIComponent(paneId)}`);
     showToast('Stopped', 'Agent pane closed');
-    navigate('#/agents');
+    navigate(paneGoneRoute());
   } catch (err) {
     showToast('Stop failed', (err as Error).message);
   }
@@ -1088,7 +1094,7 @@ function renderCard(card: DashboardCard): string {
   const relTime = relativeTime(sinceUnixMs);
 
   return `
-    <div class="agent-card${orchestratorOfPane(paneId) ? ' orchestrator' : ''}" data-pane-id="${escHtml(paneId)}" role="button" tabindex="0">
+    <div class="agent-card" data-pane-id="${escHtml(paneId)}" role="button" tabindex="0">
       <div class="agent-card-header">
         <span class="agent-name">${escHtml(cardLabel)}</span>
         ${branch ? `<span class="card-branch">${escHtml(branch)}</span>` : ''}
@@ -1133,11 +1139,15 @@ function onAgentsTouchEnd(e: TouchEvent): void {
 }
 
 function renderAgentsDashboard(): void {
+  // #/agents/<name> (opened from that orchestrator's Home): its account's agents, with a Back to its Home
+  const scope = location.hash.startsWith('#/agents/') ? homeOf(location.hash) : undefined;
   const topbar = document.getElementById('topbar');
   if (topbar) {
     topbar.style.display = '';
-    document.getElementById('topbar-title')!.textContent = 'Agents';
-    document.getElementById('topbar-left')!.innerHTML = '';
+    document.getElementById('topbar-title')!.innerHTML = 'Agents' +
+      (scope ? `<span class="topbar-subtitle">&#183; ${escHtml(orchestratorLabel(scope))}</span>` : '');
+    document.getElementById('topbar-left')!.innerHTML = scope ? '<button class="topbar-back" aria-label="Back">&#8592; Home</button>' : '';
+    if (scope) document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate(homeHash(scope.name)));
     document.getElementById('topbar-right')!.innerHTML =
       `<button class="topbar-action" id="btn-new-agent" aria-label="New agent">+</button>` +
       `<button class="topbar-action" id="btn-settings" aria-label="Settings">&#9881;</button>`;
@@ -1163,7 +1173,8 @@ function renderAgentsDashboard(): void {
 
   // One flat list of every agent, most recent status change first (pure helper,
   // unit-tested in dashboard-group.test.ts).
-  const cards = dashboardCards(workspaces, orchestrators().map((o) => o.paneId));
+  const cards = dashboardCards(workspaces, orchestrators().map((o) => o.paneId))
+    .filter((c) => !scope?.agents || scope.agents.includes(c.pane.paneId)); // account unknown: all
   // configured orchestrators that aren't running get a Start button atop the list
   const stopped = orchestrators().filter((o) => !o.paneId);
   const starts = stopped.length === 0 ? '' : '<div class="orch-start"><span class="orch-start-label">Start</span>' +
@@ -1295,7 +1306,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       // terminal ⇄ chat, as on any pane (Esc / Ctrl+C / arrows live in the terminal's keys)
       `<button class="topbar-action view-toggle home-view-toggle" id="btn-view-toggle" style="display:none;" aria-label="Toggle terminal">&gt;_</button>` +
       `<button class="topbar-action" id="btn-agent-menu" aria-label="Agent actions">&#8942;</button>`;
-    document.getElementById('btn-home-agents')!.addEventListener('click', () => navigate('#/agents'));
+    document.getElementById('btn-home-agents')!.addEventListener('click', () => navigate(homeAgentsHash()));
     document.getElementById('btn-view-toggle')!.addEventListener('click', () => {
       if (paneViewMode === 'chat') switchToTerminal(false); else switchToChat(undefined, false);
     });
@@ -1366,7 +1377,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       const t = e.target as HTMLElement;
       const chip = t.closest('[data-pane-id]') as HTMLElement | null;
       if (chip) navigate(paneRoute(chip.dataset.paneId!));
-      else if (t.closest('[data-go="agents"]')) navigate('#/agents');
+      else if (t.closest('[data-go="agents"]')) navigate(homeAgentsHash());
     });
     renderHomeStatus();
   }

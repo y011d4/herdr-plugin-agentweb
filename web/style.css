@@ -339,10 +339,6 @@ a {
 .agent-card:active {
   background: var(--color-surface-2);
 }
-/* The orchestrator (the agent the user talks to): pinned first, accent edge. */
-.agent-card.orchestrator {
-  border-color: var(--color-accent);
-}
 
 .agent-card-header {
   display: flex;

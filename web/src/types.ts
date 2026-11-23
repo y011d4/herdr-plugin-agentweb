@@ -78,6 +78,8 @@ export interface OrchestratorView {
   /** '' = use the workspace label */
   label: string;
   paneId: string | null;
+  /** the agent panes of its Claude account (itself included); null when that isn't known */
+  agents: string[] | null;
 }
 
 export interface WsStateMessage {
