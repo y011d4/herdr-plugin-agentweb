@@ -1261,3 +1261,30 @@ a {
 .topbar-subtitle.home-state.working { color: var(--color-working); }
 .topbar-subtitle.home-state.blocked { color: var(--color-blocked); }
 .topbar-action.home-agents-btn { font-size: 15px; font-weight: 600; color: var(--color-accent); }
+/* Start buttons for configured orchestrators that aren't running (atop the agents list) */
+.orch-start {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px 0;
+}
+.orch-start-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  margin-right: 2px;
+}
+.orch-start-btn {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-accent);
+  background: transparent;
+  border: 1px solid var(--color-accent);
+  border-radius: 14px;
+  padding: 4px 12px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.orch-start-btn:disabled { opacity: 0.6; cursor: default; }

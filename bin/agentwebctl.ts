@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Plugin entrypoint: run | start | stop | status | qr | overview | agent
+// Plugin entrypoint: run | start | stop | status | qr | overview | agent | worktree | orchestrator
 // Invoked by herdr plugin actions/panes with cwd = plugin root, or manually.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -10,9 +10,11 @@ import { fileURLToPath } from 'node:url';
 import { createSplitter, serialize } from '../server/ndjson.ts';
 import { formatOverview, orderAgents, isTaskTurn, type AgentDetail, type RawAgent, type RawSnapshot } from '../server/overview.ts';
 import { readTranscriptTail, resolveTranscriptPath, findLastItem } from '../server/transcript.ts';
-import { dirAccount, ownAccount, paneAccount } from '../server/account.ts';
-import { checkoutInUse, parseLaunchProfiles, startAgent, type Rpc, type StartAgentInput } from '../server/agent-lifecycle.ts';
 import { placeWorktreeNextToRepo } from '../server/worktree-resolve.ts';
+import { accountEnv, dirAccount, ownAccount, paneAccount } from '../server/account.ts';
+import { parseOrchestrators } from '../server/config.ts';
+import { startOrchestrator } from '../server/orchestrator.ts';
+import { checkoutInUse, parseLaunchProfiles, startAgent, waitForDetectedAgent, type Rpc, type StartAgentInput } from '../server/agent-lifecycle.ts';
 
 // Walk up from the script's directory until a directory containing package.json
 // is found. This is necessary because this file runs from dist/bin/agentwebctl.js,
@@ -460,10 +462,15 @@ async function agentStart(args: string[]): Promise<number> {
     }
     places.push(path.dirname(input.worktree.path as string));
   }
+  // A new tab/workspace is started with the caller's account (CLAUDE_CONFIG_DIR), so it
+  // needs no direnv; it is refused only where direnv says another account applies. A
+  // worktree gets no env from herdr, so its account must come from the dir itself.
   const own = await ownAccount();
+  if (!input.worktree) input.env = accountEnv(own);
   for (const p of places) {
-    if (own === null || (await dirAccount(p)) !== own) {
-      console.error(`refused: ${p} is not under this Claude account (its direnv CLAUDE_CONFIG_DIR differs, or can't be read)`);
+    const theirs = await dirAccount(p);
+    if (own === null || (theirs !== own && (theirs !== null || input.worktree))) {
+      console.error(`refused: ${p} is not under this Claude account (its direnv CLAUDE_CONFIG_DIR differs${input.worktree ? ', or can\'t be read' : ''})`);
       return 1;
     }
   }
@@ -484,12 +491,7 @@ async function agentStart(args: string[]): Promise<number> {
   try {
     const out = await startAgent(rpc, parseLaunchProfiles(readConfig().launch_profiles), input, {
       verify: async (paneId) => {
-        // agent.start answers once the command is typed into the shell; until herdr
-        // detects the agent, the pane's foreground is still the shell (or its fork)
-        for (const end = Date.now() + 30_000; ; await new Promise((r) => setTimeout(r, 250))) {
-          if (((await rpc('agent.get', { target: paneId }).catch(() => null)) as { agent?: { agent?: string } } | null)?.agent?.agent) break;
-          if (Date.now() > end) throw new Error('the agent did not come up within 30s');
-        }
+        await waitForDetectedAgent(rpc, paneId);
         if ((await paneAccount(rpc, paneId)) !== own) throw new Error('the agent came up under another Claude account');
       },
     });
@@ -547,11 +549,35 @@ async function worktree(): Promise<number> {
   return 0;
 }
 
+// Start a configured orchestrator (config.json `orchestrators`) the way the phone's Start
+// button does: write its dir, then start it in a new workspace with its env.
+async function orchestrator(): Promise<number> {
+  const [sub, name] = process.argv.slice(3);
+  if (sub !== 'start' || !name) {
+    console.error('usage: agentwebctl.js orchestrator start <name>');
+    return 2;
+  }
+  const cfg = readConfig();
+  const def = parseOrchestrators(cfg.orchestrators, cfg.orchestrator_dir).find((o) => o.name === name);
+  if (!def) {
+    console.error(`no orchestrator named ${name} in config.json`);
+    return 1;
+  }
+  try {
+    const out = await startOrchestrator((method, params) => herdrRpc(method, params, 60_000), def);
+    console.log(`started orchestrator ${name} (pane ${out.paneId}) in ${def.dir}`);
+    return 0;
+  } catch (e) {
+    console.error(`start failed: ${(e as Error).message}`);
+    return 1;
+  }
+}
+
 const command = process.argv[2];
-const handlers: Record<string, () => number | Promise<number>> = { run, start, stop, status, qr, overview, agent, worktree };
+const handlers: Record<string, () => number | Promise<number>> = { run, start, stop, status, qr, overview, agent, worktree, orchestrator };
 const handler = handlers[command];
 if (!handler) {
-  console.error('usage: agentwebctl.js <run|start|stop|status|qr|overview|agent|worktree>');
+  console.error('usage: agentwebctl.js <run|start|stop|status|qr|overview|agent|worktree|orchestrator>');
   process.exit(2);
 }
 process.exit(await handler());

@@ -37,7 +37,10 @@ herdr server
   (config also parses `launch_profiles`, merged over built-in defaults)
 - `bin/agentwebctl.ts` — plugin entrypoints: run | start | stop | status | qr, plus the
   orchestrator's commands: `overview` (read-only text summary of the other agents; pure part in
-  `server/overview.ts`), `agent get|read|prompt|wait|start` and `worktree remove`. All of them are
+  `server/overview.ts`), `agent get|read|prompt|wait|start` and `worktree remove` (plus
+  `orchestrator start <name>` for people; an orchestrator's allowlist doesn't include it). `agent
+  start` gives the new tab the caller's account as env (`accountEnv`), so workers need no direnv;
+  it refuses only where direnv positively reports another account. All of them are
   confined to the caller's Claude account (`server/account.ts`: an account = the agent process's
   `CLAUDE_CONFIG_DIR`/projects, read from /proc of the pane's foreground process group leader; the
   caller's = its nearest `claude` ancestor's; a dir's = `direnv exec` with our own account/direnv
@@ -48,9 +51,20 @@ herdr server
   checking the started agent's account.
 - `web/src/app.ts` — SPA (hash routing), `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker
-- **Orchestrator homes**: config `orchestrators: [{name,label,dir}]` (else the legacy single
-  `orchestrator_dir`, default `~/.local/share/herdr-agentweb/dispatcher`, as one named `default`) —
-  the agent running in each `dir` is that orchestrator, identified by the pane shell's cwd
+- **Orchestrator homes**: config `orchestrators: [{name,label,env}]` — each is *managed*:
+  `server/orchestrator.ts` writes `<data>/orchestrators/<name>/` (data = `$XDG_DATA_HOME` or
+  `~/.local/share`, + `herdr-agentweb`) at bridge start and before each start: CLAUDE.md
+  (imports rules.md, then the user's local.md, which is created once and never overwritten),
+  rules.md (the bundled `orchestrator/rules.md` with the real agentwebctl command filled in) and
+  `.claude/settings.json` (dontAsk allowlist). It starts (phone Start button →
+  `POST /api/orchestrators/:name/start`, or `agentwebctl orchestrator start <name>`) in a new
+  workspace whose shell gets the entry's `env` (herdr `workspace.create`/`tab.create`/`pane.split`
+  take `env`; `worktree.create` does not), and the started agent's account is checked against it.
+  Clear relaunches with the old agent's account (`accountEnv` → `clearAgent`'s `envFor`). Without
+  `orchestrators`, the legacy single `orchestrator_dir`, else the old default dir
+  `<data>/dispatcher` when it exists, is one *unmanaged* orchestrator named `default` (the plugin
+  never writes there); with neither, a managed `default`.
+  The agent running in each dir is that orchestrator, identified by the pane shell's cwd
   (`launchCwd`, not the mutable foreground cwd; nested dirs: the deepest wins), since herdr's
   snapshot has no agent names (`findOrchestrators`, sent as state `orchestrators[]`, plus
   `orchestratorPaneId` = the first running one for older clients). Typically one per Claude account. Status events carry no cwd, so an

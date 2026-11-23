@@ -13,12 +13,19 @@
 import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { projectsRootForPid } from './transcript.ts';
 import type { Rpc } from './agent-lifecycle.ts';
 
 export function accountForConfigDir(configDir: string | undefined, home: string = process.env.HOME || homedir()): string {
   return resolve(configDir ? join(configDir, 'projects') : join(home, '.claude', 'projects'));
+}
+
+/** The environment that starts a claude under `account`: CLAUDE_CONFIG_DIR for any but
+ *  the default account, which is left unset as it was (set, even to ~/.claude, Claude
+ *  Code keeps its state elsewhere). undefined for the default or an unknown account. */
+export function accountEnv(account: string | null, home: string = process.env.HOME || homedir()): Record<string, string> | undefined {
+  return account && account !== accountForConfigDir(undefined, home) ? { CLAUDE_CONFIG_DIR: dirname(account) } : undefined;
 }
 
 /** `comm` and parent pid out of /proc/<pid>/stat ("pid (comm) state ppid …"; comm may hold spaces or parens). */

@@ -127,8 +127,13 @@ export interface OrchestratorDef {
   name: string;
   /** shown as the Home title; '' = fall back to the workspace label */
   label: string;
-  /** absolute dir, no trailing slash */
+  /** absolute dir, no trailing slash: <data>/orchestrators/<name>, or a legacy orchestrator_dir */
   dir: string;
+  /** environment it is started with (e.g. CLAUDE_CONFIG_DIR, which picks its Claude account) */
+  env: Record<string, string>;
+  /** the plugin writes its dir (CLAUDE.md, rules, settings); false for a legacy orchestrator_dir,
+   *  which holds the user's own files */
+  managed: boolean;
 }
 
 /** An orchestrator as sent to clients: which pane (if any) runs it now. */

@@ -1,4 +1,5 @@
 import { loadConfig } from './config.ts';
+import { ensureOrchestratorDir } from './orchestrator.ts';
 import { initAuth } from './auth.ts';
 import { createHerdrClient } from './herdr-client.ts';
 import { createHttpServer } from './http.ts';
@@ -18,6 +19,17 @@ const WEB_ROOT = existsSync(join(_webOne, 'index.html'))
   : resolve(join(__dirname, '..', '..', 'web'));
 
 const config = loadConfig();
+
+// Managed orchestrators' dirs exist from the start, so their local.md can be edited
+// before the first start (each start writes them again).
+for (const def of config.orchestrators) {
+  if (!def.managed) continue;
+  try {
+    ensureOrchestratorDir(def);
+  } catch (err) {
+    console.error(`orchestrator ${def.name}: could not write ${def.dir}: ${(err as Error).message}`);
+  }
+}
 const token = initAuth(config.stateDir);
 
 let currentState: NormalizedState | null = null;
