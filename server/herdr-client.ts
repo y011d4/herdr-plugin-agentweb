@@ -29,6 +29,9 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   let broadcastTimer: ReturnType<typeof setTimeout> | null = null;
   let worktreeTimer: ReturnType<typeof setInterval> | null = null;
   let completionTimer: ReturnType<typeof setTimeout> | null = null;
+  // Bumped whenever live event coverage is lost: an agent.list reply to a request
+  // sent before then may predate transitions the bridge never saw.
+  let coverageEpoch = 0;
   // pane IDs covered by the currently acknowledged subscription; snapshot status
   // replays skip these (live events deliver their changes) and cover the rest.
   let subscribedPaneIds = new Set<string>();
@@ -281,6 +284,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
       if (conn === subscribeConn) {
         subscribeConn = null;
         subscribedPaneIds = new Set(); // no live coverage until we resubscribe
+        coverageEpoch++;
         setConnected(false);
         // Reflect the drop in the cached state so /api/state and WS clients stop
         // showing stale data as connected; the next snapshot restores connected.
@@ -410,6 +414,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
           oldConn.once('close', () => {
             if (!oldDropped && !newAcked && !destroyed) {
               subscribedPaneIds = new Set();
+              coverageEpoch++;
               scheduleReconnect();
             }
           });
@@ -466,8 +471,10 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
       completionTimer = null;
       try {
         const requestedAtMs = Date.now();
+        const epoch = coverageEpoch;
         const result = await request('agent.list') as { agents?: Parameters<typeof applyCompletionSeqs>[1] };
-        if (destroyed || !currentState) return;
+        // coverage lost meanwhile: the reconnect snapshot schedules a fresh fetch
+        if (destroyed || !currentState?.connected || epoch !== coverageEpoch) return;
         const next = applyCompletionSeqs(currentState, result.agents ?? [], requestedAtMs);
         if (next === currentState) return;
         currentState = next;
