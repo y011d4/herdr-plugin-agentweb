@@ -346,10 +346,26 @@ describe('findOrchestrators', () => {
       { name: 'off', label: '', dir: '/off' },
     ]);
     assert.deepEqual(views, [
-      { name: 'home', label: 'Home', paneId: 'w0:p2' },
-      { name: 'work', label: 'Work', paneId: 'w0:p1' },
-      { name: 'off', label: '', paneId: null },
+      { name: 'home', label: 'Home', paneId: 'w0:p2', agents: null },
+      { name: 'work', label: 'Work', paneId: 'w0:p1', agents: null },
+      { name: 'off', label: '', paneId: null, agents: null },
     ]);
+  });
+
+  it("lists the agents of each orchestrator's account; none when its account isn't known", () => {
+    const pane = (id: string, cwd: string, agent?: string) =>
+      ({ pane_id: id, workspace_id: 'w0', tab_id: 'w0:t1', focused: false, agent, agent_status: 'idle', cwd });
+    const state = createState(makeSnapshot({
+      panes: [pane('w0:p1', '/o/a', 'claude'), pane('w0:p2', '/o/b', 'claude'), pane('w0:p3', '/r', 'claude'),
+        pane('w0:p4', '/r', 'codex'), pane('w0:p5', '/r'), pane('w0:p6', '/r', 'claude')],
+    }));
+    const accounts = new Map([['w0:p1', 'A'], ['w0:p2', 'B'], ['w0:p3', 'A'], ['w0:p4', 'B'], ['w0:p5', 'A'], ['w0:p6', null]]);
+    const views = findOrchestrators(state, [
+      { name: 'a', label: '', dir: '/o/a' },
+      { name: 'b', label: '', dir: '/o/b' },
+    ], accounts);
+    assert.deepEqual(views.map((v) => v.agents), [['w0:p1', 'w0:p3'], ['w0:p2', 'w0:p4']]); // p5 has no agent
+    assert.equal(findOrchestrators(state, [{ name: 'a', label: '', dir: '/o/a' }], new Map())[0].agents, null);
   });
 
   it('goes by the launch (shell) cwd, not the foreground cwd', () => {
@@ -471,7 +487,7 @@ describe('applyCompletionSeqs (herdr agent.list completion_seq)', () => {
   const doneSnap = (): RawSnapshot => makeSnapshot({
     panes: [{ pane_id: 'w0:p1', workspace_id: 'w0', tab_id: 'w0:t1', focused: true, agent: 'claude', agent_status: 'done' }],
   });
-  const reply = (seq: number, status = 'done') => [{ pane_id: 'w0:p1', agent_status: status, completion_seq: seq }];
+  const reply = (seq: number, status = 'done') => [{ pane_id: 'w0:p1', agent_status: status, completion_seq: seq, state_change_seq: seq + 1 }];
   const LATER = 2000; // agent.list was requested after the pane's last status change (at 1000)
 
   it('fills completionSeq where herdr reports the same status, without mutating the input', () => {
@@ -480,6 +496,7 @@ describe('applyCompletionSeqs (herdr agent.list completion_seq)', () => {
     const s1 = applyCompletionSeqs(s0, reply(42), LATER);
     assert.equal(s1._paneById.get('w0:p1')!.agent!.completionSeq, 42);
     assert.equal(s1.workspaces[0].tabs[0].panes[0].agent!.completionSeq, 42);
+    assert.equal(s1._paneById.get('w0:p1')!.agent!.stateChangeSeq, 43);
     assert.equal(s0._paneById.get('w0:p1')!.agent!.completionSeq, null);
   });
 
@@ -498,7 +515,9 @@ describe('applyCompletionSeqs (herdr agent.list completion_seq)', () => {
   it('survives a re-snapshot with the same status and clears on a status change', () => {
     const s1 = applyCompletionSeqs(createState(doneSnap(), 1000), reply(42), LATER);
     assert.equal(createState(doneSnap(), 3000, s1)._paneById.get('w0:p1')!.agent!.completionSeq, 42);
+    assert.equal(createState(doneSnap(), 3000, s1)._paneById.get('w0:p1')!.agent!.stateChangeSeq, 43);
     const { state } = applyEvent(s1, 'pane_agent_status_changed', { pane_id: 'w0:p1', agent_status: 'working' });
     assert.equal(state._paneById.get('w0:p1')!.agent!.completionSeq, null);
+    assert.equal(state._paneById.get('w0:p1')!.agent!.stateChangeSeq, null);
   });
 });
