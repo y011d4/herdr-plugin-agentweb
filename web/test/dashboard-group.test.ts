@@ -63,28 +63,46 @@ describe('homeSummary', () => {
 
   it('counts a done agent the phone has opened as idle', () => {
     const ws = [wsNode('A', [agentPane('d1', 10, 'done', 5), agentPane('d2', 10, 'done', 6)])];
-    const s = homeSummary(ws, null, markSeen({}, ws, 'd1'));
+    const s = homeSummary(ws, null, markSeen({}, ws, { d1: 10 }).seen);
     assert.deepEqual([s.done, s.idle], [1, 1]);
   });
 });
 
 describe('phone-seen done', () => {
-  // completionSeq is herdr's completion_seq: which completion this is (stable across bridge restarts)
+  // completionSeq is herdr's completion_seq: which completion this is (stable across bridge
+  // restarts); sinceUnixMs changes on every status change, so it ties a view to one done
   const done = (id: string, seq: number | null, since = 1): PaneNode => agentPane(id, since, 'done', seq);
+  const ws1 = (...panes: PaneNode[]) => [wsNode('A', panes)];
 
   it('shows a done pane the phone has opened as idle, until its next completion', () => {
-    const seen = markSeen({}, [wsNode('A', [done('a1', 10)])], 'a1');
+    const { seen } = markSeen({}, ws1(done('a1', 10)), { a1: 1 });
     assert.equal(shownStatus(done('a1', 10), seen), 'idle');
     assert.equal(shownStatus(done('a1', 10, 999), seen), 'idle'); // bridge restart: new sinceUnixMs, same completion
     assert.equal(shownStatus(done('a1', 20), seen), 'done'); // a new completion
     assert.equal(shownStatus(done('b1', 10), seen), 'done'); // another pane
   });
 
-  it('only records done panes with a known completion and drops entries that went stale', () => {
-    assert.deepEqual(markSeen({}, [wsNode('A', [agentPane('w', 1, 'idle', 3)])], 'w'), {}); // not done
-    assert.deepEqual(markSeen({}, [wsNode('A', [done('n', null)])], 'n'), {}); // seq not fetched yet
-    let seen = markSeen({}, [wsNode('A', [done('a1', 10), done('a2', 11)])], 'a1');
-    seen = markSeen(seen, [wsNode('A', [done('a1', 30), done('a2', 11)])], 'a2');
+  it('only records done panes and drops entries that went stale', () => {
+    assert.deepEqual(markSeen({}, ws1(agentPane('w', 1, 'idle', 3)), { w: 1 }), { seen: {}, pending: {} }); // not done
+    let { seen } = markSeen({}, ws1(done('a1', 10), done('a2', 11)), { a1: 1 });
+    ({ seen } = markSeen(seen, ws1(done('a1', 30), done('a2', 11)), { a2: 1 }));
     assert.deepEqual(seen, { a2: 11 }); // a1 completed again since it was seen
+  });
+
+  it('keeps a view made before the completionSeq arrived pending, then records it', () => {
+    const first = markSeen({}, ws1(done('a1', null, 5)), { a1: 5 });
+    assert.deepEqual(first, { seen: {}, pending: { a1: 5 } });
+    assert.deepEqual(markSeen(first.seen, ws1(done('a1', 42, 5)), first.pending), { seen: { a1: 42 }, pending: {} });
+  });
+
+  it('drops a pending view once the pane has moved on, even through a missed done -> working -> done', () => {
+    const { pending } = markSeen({}, ws1(done('a1', null, 5)), { a1: 5 });
+    assert.deepEqual(markSeen({}, ws1(done('a1', 43, 9)), pending), { seen: {}, pending: {} }); // a later done
+    assert.deepEqual(markSeen({}, ws1(agentPane('a1', 9, 'working')), pending), { seen: {}, pending: {} });
+  });
+
+  it("keeps a done pane's record while its completionSeq is being refetched (bridge restart)", () => {
+    const { seen } = markSeen({ a1: 42 }, ws1(done('a1', null, 7), done('b1', 3, 7)), { b1: 7 });
+    assert.deepEqual(seen, { a1: 42, b1: 3 });
   });
 });

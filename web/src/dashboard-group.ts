@@ -75,19 +75,35 @@ export function homeSummary(workspaces: WorkspaceNode[], orchestratorPaneId: str
  */
 export type SeenDone = Record<string, number>;
 
-/** Record `paneId` as seen if it is done; drop entries whose done status has since changed. */
-export function markSeen(seen: SeenDone, workspaces: WorkspaceNode[], paneId: string): SeenDone {
+/** Views to record: paneId -> the sinceUnixMs of the done status the phone saw (ties a view to that one done). */
+export type SeenViews = Record<string, number>;
+
+/**
+ * Record viewed done panes as seen and prune stale entries. A view counts only for
+ * the done it saw (same sinceUnixMs), so a missed done -> working -> done can't
+ * mark the newer completion. A viewed done whose completionSeq hasn't arrived yet
+ * comes back in `pending`, to pass in again with a later state; a pane whose seq
+ * is being (re)fetched keeps its existing record.
+ */
+export function markSeen(seen: SeenDone, workspaces: WorkspaceNode[], views: SeenViews): { seen: SeenDone; pending: SeenViews } {
   const next: SeenDone = {};
+  const pending: SeenViews = {};
   for (const ws of workspaces) {
     for (const t of ws.tabs ?? []) {
       for (const p of t.panes ?? []) {
-        const seq = p.agent?.status === 'done' ? p.agent.completionSeq : null;
-        if (seq == null) continue; // not done, or its completion not known yet
-        if (p.paneId === paneId || seen[p.paneId] === seq) next[p.paneId] = seq;
+        const a = p.agent;
+        if (a?.status !== 'done') continue;
+        const viewed = views[p.paneId] === a.sinceUnixMs;
+        if (a.completionSeq == null) {
+          if (viewed) pending[p.paneId] = a.sinceUnixMs;
+          if (p.paneId in seen) next[p.paneId] = seen[p.paneId];
+        } else if (viewed || seen[p.paneId] === a.completionSeq) {
+          next[p.paneId] = a.completionSeq;
+        }
       }
     }
   }
-  return next;
+  return { seen: next, pending };
 }
 
 /** The status to show for an agent pane: a done the phone has seen reads as idle. */
