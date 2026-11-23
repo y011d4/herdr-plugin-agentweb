@@ -284,7 +284,8 @@ default.
 ## API surface (for scripting)
 
 - `GET /api/state` — normalized workspaces/tabs/panes/agents tree, plus `orchestratorPaneId`
-  (the agent running in `orchestrator_dir`, or `null`)
+  (the agent running in `orchestrator_dir`, or `null`). Each agent's `completionSeq` is herdr's
+  `completion_seq` (which completion its idle/done status is; `null` until fetched)
 - `GET /api/panes/:paneId/read?source=visible|recent&lines=N&format=text|ansi`
 - `POST /api/panes/:paneId/input` `{"text": "ls", "enter": true}` or `{"keys": ["ctrl+c"]}`
   — add `"clear": true` to wipe the pane's composer (repeated Ctrl+U) before the

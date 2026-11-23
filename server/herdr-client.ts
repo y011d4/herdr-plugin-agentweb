@@ -1,7 +1,7 @@
 import { createConnection } from 'node:net';
 import type { Socket } from 'node:net';
 import { createSplitter, serialize } from './ndjson.ts';
-import { createState, applyEvent, getPaneIds, PANE_SET_CHANGING_EVENTS } from './state.ts';
+import { createState, applyEvent, applyCompletionSeqs, getPaneIds, PANE_SET_CHANGING_EVENTS } from './state.ts';
 import { enrichStateWorktrees, refreshWorktrees, resolveCwdFor } from './worktree-resolve.ts';
 import type { HerdrClientCallbacks, HerdrClient, NormalizedState, RpcResponse, EventPush } from './types.ts';
 
@@ -10,6 +10,7 @@ const BACKOFF_INITIAL_MS = 1_000;
 const BACKOFF_MAX_MS = 30_000;
 const PANE_REBUILD_DEBOUNCE_MS = 250;
 const STATE_BROADCAST_DEBOUNCE_MS = 250;
+const COMPLETION_SEQ_DEBOUNCE_MS = 250;
 
 // Extend Error to carry a herdrCode property from RPC responses
 interface HerdrError extends Error {
@@ -25,6 +26,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   let rebuildTimer: ReturnType<typeof setTimeout> | null = null;
   let broadcastTimer: ReturnType<typeof setTimeout> | null = null;
   let worktreeTimer: ReturnType<typeof setInterval> | null = null;
+  let completionTimer: ReturnType<typeof setTimeout> | null = null;
   // pane IDs covered by the currently acknowledged subscription; snapshot status
   // replays skip these (live events deliver their changes) and cover the rest.
   let subscribedPaneIds = new Set<string>();
@@ -160,6 +162,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
       // Kick off git branch/worktree resolution off the hot path; it re-pushes
       // once resolved (the enrich above only read the cache, which may be cold).
       refreshWorktreesSoon();
+      refreshCompletionSeqsSoon();
       return currentState;
     } finally {
       if (--snapshotDepth === 0) { drainEvents(); preBufferStatus = null; replayedPanes = null; }
@@ -360,6 +363,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
     for (const change of changes) {
       onAgentStatus?.(change, currentState);
     }
+    if (changes.some(c => c.to === 'done')) refreshCompletionSeqsSoon();
 
     // Focus events are applied to the model but do not trigger WS pushes: herdr
     // emits them ~10/s during desktop activity, and phone clients don't track
@@ -446,6 +450,28 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
     });
   }
 
+  // ── completion seq (agent.list, off the hot path) ─────────────────────────────
+
+  // herdr's completion_seq is only in agent.list, so fetch it after each snapshot
+  // and each transition to done (coalesced) and push when it changes. Best-effort:
+  // without it (older herdr, a failed call) the phone just keeps showing done.
+  function refreshCompletionSeqsSoon(): void {
+    if (destroyed || completionTimer) return;
+    completionTimer = setTimeout(async () => {
+      completionTimer = null;
+      try {
+        const result = await request('agent.list') as { agents?: Parameters<typeof applyCompletionSeqs>[1] };
+        if (destroyed || !currentState) return;
+        const next = applyCompletionSeqs(currentState, result.agents ?? []);
+        if (next === currentState) return;
+        currentState = next;
+        onState?.(currentState);
+      } catch {
+        // best-effort (see above)
+      }
+    }, COMPLETION_SEQ_DEBOUNCE_MS);
+  }
+
   // ── reconnect backoff ───────────────────────────────────────────────────────
 
   function scheduleReconnect(): void {
@@ -503,6 +529,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
       if (rebuildTimer) clearTimeout(rebuildTimer);
       if (broadcastTimer) clearTimeout(broadcastTimer);
       if (worktreeTimer) clearInterval(worktreeTimer);
+      if (completionTimer) clearTimeout(completionTimer);
       if (subscribeConn) subscribeConn.destroy();
     },
   };

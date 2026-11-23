@@ -66,12 +66,12 @@ export function homeSummary(workspaces: WorkspaceNode[], orchestratorPaneId: str
 }
 
 /**
- * Done panes this phone has already looked at: paneId -> the sinceUnixMs of the
- * done status it saw. herdr's server-side "seen" flag (what turns done into idle)
- * can only be set by focusing the pane, which would switch the PC's screen, so the
+ * Done panes this phone has already looked at: paneId -> herdr's completion_seq of
+ * the done it saw. herdr's server-side "seen" flag (what turns done into idle) can
+ * only be set by focusing the pane, which would switch the PC's screen, so the
  * phone keeps its own record, the way each herdr TUI client tracks the completions
- * it has viewed. sinceUnixMs changes on every status change, so the next completion
- * shows as done again.
+ * it has viewed. completion_seq identifies the completion (unlike sinceUnixMs it
+ * survives a bridge restart), so the next completion shows as done again.
  */
 export type SeenDone = Record<string, number>;
 
@@ -81,9 +81,9 @@ export function markSeen(seen: SeenDone, workspaces: WorkspaceNode[], paneId: st
   for (const ws of workspaces) {
     for (const t of ws.tabs ?? []) {
       for (const p of t.panes ?? []) {
-        if (p.agent?.status !== 'done') continue;
-        const since = p.agent.sinceUnixMs;
-        if (p.paneId === paneId || seen[p.paneId] === since) next[p.paneId] = since;
+        const seq = p.agent?.status === 'done' ? p.agent.completionSeq : null;
+        if (seq == null) continue; // not done, or its completion not known yet
+        if (p.paneId === paneId || seen[p.paneId] === seq) next[p.paneId] = seq;
       }
     }
   }
@@ -92,6 +92,6 @@ export function markSeen(seen: SeenDone, workspaces: WorkspaceNode[], paneId: st
 
 /** The status to show for an agent pane: a done the phone has seen reads as idle. */
 export function shownStatus(pane: PaneNode, seen: SeenDone): AgentStatus {
-  const { status, sinceUnixMs } = pane.agent!;
-  return status === 'done' && seen[pane.paneId] === sinceUnixMs ? 'idle' : status;
+  const { status, completionSeq } = pane.agent!;
+  return status === 'done' && completionSeq != null && seen[pane.paneId] === completionSeq ? 'idle' : status;
 }

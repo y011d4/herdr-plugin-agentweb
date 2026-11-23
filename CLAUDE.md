@@ -130,6 +130,10 @@ Verified live against herdr 0.7.3 / protocol 16:
   would switch the PC's screen, so the PWA keeps its own "seen done" record
   (`markSeen`/`shownStatus` in `web/src/dashboard-group.ts`, localStorage) and leaves
   herdr's state alone. herdr's TUI clients likewise track viewed completions per client.
+  The record is keyed on herdr's `completion_seq` (which completion it is), which is
+  **only in `agent.list`/`agent.get`** — not in snapshots or `pane.agent_status_changed` —
+  so the bridge fetches `agent.list` after each snapshot and each transition to done
+  (`applyCompletionSeqs` → `completionSeq`). Not `sinceUnixMs`: that resets on a bridge restart.
   Don't fake it with `pane.report_agent`: that hijacks the agent's hook lifecycle authority.
 - Invalid enum values in request params make herdr **drop the connection
   without a response** (surfaces as opaque "connection closed"). The bridge
