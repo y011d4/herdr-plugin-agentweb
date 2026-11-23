@@ -11,7 +11,7 @@ import { createSplitter, serialize } from '../server/ndjson.ts';
 import { formatOverview, orderAgents, isTaskTurn, type AgentDetail, type RawAgent, type RawSnapshot } from '../server/overview.ts';
 import { readTranscriptTail, resolveTranscriptPath, findLastItem } from '../server/transcript.ts';
 import { dirAccount, ownAccount, paneAccount } from '../server/account.ts';
-import { parseLaunchProfiles, startAgent, type Rpc, type StartAgentInput } from '../server/agent-lifecycle.ts';
+import { checkoutInUse, parseLaunchProfiles, startAgent, type Rpc, type StartAgentInput } from '../server/agent-lifecycle.ts';
 
 // Walk up from the script's directory until a directory containing package.json
 // is found. This is necessary because this file runs from dist/bin/agentwebctl.js,
@@ -524,11 +524,7 @@ async function worktree(): Promise<number> {
   if (!ws?.worktree?.repo_root) return refuse('not a linked worktree open in herdr');
   const own = await ownAccount();
   if (own === null || (await dirAccount(dir)) !== own) return refuse('it is not under this Claude account');
-  // in its workspace, or working in the checkout from any other
-  const inDir = (c?: string) => !!c && (c === dir || c.startsWith(dir + '/'));
-  if (snap.panes?.some((p) => p.agent && (p.workspace_id === ws.workspace_id || inDir(p.cwd) || inDir(p.foreground_cwd)))) {
-    return refuse('an agent still runs in it (end it with /exit first)');
-  }
+  if (checkoutInUse(snap.panes ?? [], ws.workspace_id, dir)) return refuse('an agent still runs in it (end it with /exit first)');
 
   const git = (...args: string[]) => spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', timeout: 60_000 });
   const branch = git('symbolic-ref', '--short', 'HEAD').stdout?.trim();

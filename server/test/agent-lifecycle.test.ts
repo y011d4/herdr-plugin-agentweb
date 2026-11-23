@@ -6,6 +6,7 @@ import {
   renameAgent,
   clearAgent,
   createWorktree,
+  checkoutInUse,
   parseLaunchProfiles,
   agentName,
   DEFAULT_LAUNCH_PROFILES,
@@ -269,17 +270,13 @@ test('startAgent: a failing verify rolls the started agent back (its tab, or its
   await assert.rejects(() => startAgent(tab.rpc, PROFILES, { profile: 'claude', cwd: '/p' }, { verify }), /wrong account: P:new/);
   assert.deepEqual(tab.calls.find((c) => c.method === 'pane.close')?.params, { pane_id: 'P:new' });
 
-  // the agent has run by then: its worktree goes only if clean (no force)…
+  // the agent has run by then and may have written to its worktree: it is stopped, the
+  // checkout kept (never removed, forced or not), and the error says where
   const wt = fakeRpc({ ...startResponse(), ...worktreeCreateResponse('/wt/new', 'wNEW', 'feat/x', 'wNEW:p1') });
-  await assert.rejects(() => startAgent(wt.rpc, PROFILES, { profile: 'claude', worktree: { repo: '/proj' } }, { verify }), /wrong account/);
-  assert.deepEqual(wt.calls.find((c) => c.method === 'worktree.remove')?.params, { workspace_id: 'wNEW', force: false });
-  assert.equal(wt.calls.some((c) => c.method === 'pane.close'), false);
-
-  // …else the agent is stopped and the checkout kept, and the error says so
-  const dirty = fakeRpc({ ...startResponse(), ...worktreeCreateResponse('/wt/new', 'wNEW', 'feat/x', 'wNEW:p1'), 'worktree.remove': herdrError('dirty_worktree_requires_force') });
-  await assert.rejects(() => startAgent(dirty.rpc, PROFILES, { profile: 'claude', worktree: { repo: '/proj' } }, { verify }),
-    (e: unknown) => e instanceof LifecycleError && e.status === 409 && /wrong account.*\/wt\/new has changes, so it was kept/.test(e.message));
-  assert.deepEqual(dirty.calls.find((c) => c.method === 'pane.close')?.params, { pane_id: 'wNEW:p1' });
+  await assert.rejects(() => startAgent(wt.rpc, PROFILES, { profile: 'claude', worktree: { repo: '/proj' } }, { verify }),
+    (e: unknown) => e instanceof LifecycleError && e.status === 409 && /wrong account.*its worktree \/wt\/new was kept/.test(e.message));
+  assert.deepEqual(wt.calls.find((c) => c.method === 'pane.close')?.params, { pane_id: 'wNEW:p1' });
+  assert.equal(wt.calls.some((c) => c.method === 'worktree.remove'), false);
 
   const ok = fakeRpc(startResponse('P:ok'));
   let checked = '';
@@ -432,6 +429,16 @@ test('createWorktree: builds worktree.create with cwd/branch/base and returns th
   assert.equal(calls[0].method, 'worktree.create');
   assert.deepEqual(calls[0].params, { focus: false, cwd: '/home/u/proj', branch: 'feat/task', base: 'origin/main' });
   assert.deepEqual(out, { workspaceId: 'wNEW', checkoutPath: '/home/u/.herdr/wt/feat', branch: 'feat/task', paneId: 'wNEW:p1' });
+});
+
+test('checkoutInUse: an agent in the worktree\'s workspace, or in its checkout from another workspace', () => {
+  const dir = '/src/repo-wt-x';
+  const pane = (workspace_id: string, cwd: string, agent: string | null = 'claude', foreground_cwd?: string) => ({ workspace_id, cwd, agent, foreground_cwd });
+  assert.equal(checkoutInUse([pane('wWT', '/elsewhere')], 'wWT', dir), true); // its own workspace, whatever the cwd
+  assert.equal(checkoutInUse([pane('wO', dir)], 'wWT', dir), true); // launched in it from another workspace
+  assert.equal(checkoutInUse([pane('wO', '/src/repo', 'claude', `${dir}/sub`)], 'wWT', dir), true); // wandered into it
+  assert.equal(checkoutInUse([pane('wO', dir, null), pane('wWT', dir, null)], 'wWT', dir), false); // shells only
+  assert.equal(checkoutInUse([pane('wO', '/src/repo-wt-xy'), pane('wO', '/src/repo')], 'wWT', dir), false); // a sibling sharing the prefix, the main checkout
 });
 
 test('createWorktree: passes a checkout path through, and rejects a blank one', async () => {
