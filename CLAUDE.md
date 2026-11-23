@@ -30,7 +30,9 @@ herdr server
   fixed `launch_profiles` allowlist (never a caller-supplied command). http.ts wires the routes
   (`POST /api/agents`, `DELETE /api/panes/:id`, `POST /api/panes/:id/rename`, `POST /api/agents/:target/clear`,
   `POST /api/worktrees`). The New agent UI's "＋ New worktree…" option creates a worktree, then starts
-  the agent in its checkout.
+  the agent in its checkout. Every new worktree (phone, API, `agentwebctl agent start --worktree`) goes
+  next to its repo as `<repo>-wt-<branch>` (`placeWorktreeNextToRepo` in worktree-resolve.ts), so a
+  parent-dir `.envrc` (e.g. the Claude account per org dir) covers it; herdr's own default dir wouldn't.
 - `server/auth.ts` / `notify.ts` / `config.ts` — token, agent-status fanout + optional ntfy, config
   (config also parses `launch_profiles`, merged over built-in defaults)
 - `bin/agentwebctl.ts` — plugin entrypoints: run | start | stop | status | qr, plus the

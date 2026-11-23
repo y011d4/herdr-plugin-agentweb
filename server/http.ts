@@ -7,8 +7,9 @@ import { toClientState, findOrchestrators } from './state.ts';
 import { buildAgentStatusMessage } from './notify.ts';
 import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail, projectsRootForPid } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt-identity.ts';
-import { startAgent, stopAgent, renameAgent, clearAgent, createWorktree, LifecycleError } from './agent-lifecycle.ts';
+import { startAgent, stopAgent, renameAgent, clearAgent, createWorktree, LifecycleError, type CreateWorktreeInput } from './agent-lifecycle.ts';
 import { createPaneProfileStore } from './pane-profile-store.ts';
+import { placeWorktreeNextToRepo } from './worktree-resolve.ts';
 import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
@@ -339,7 +340,7 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
         }
         const out = await startAgent(rpc, config.launchProfiles, {
           profile: body.profile, cwd: body.cwd, name: body.name, workspace: body.workspace, task: body.task,
-          worktree: body.worktree as Record<string, unknown> | undefined,
+          worktree: body.worktree === undefined ? undefined : await placeWorktreeNextToRepo(body.worktree as CreateWorktreeInput, getState()?.workspaces),
         });
         if (typeof body.profile === 'string') startedProfiles.set(out.paneId, body.profile);
         jsonOk(res, { ok: true, ...out });
@@ -359,9 +360,9 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
         return;
       }
       try {
-        const out = await createWorktree(rpc, {
+        const out = await createWorktree(rpc, await placeWorktreeNextToRepo({
           repo: body.cwd, workspace: body.workspace, branch: body.branch, base: body.base,
-        });
+        }, getState()?.workspaces));
         jsonOk(res, { ok: true, ...out });
       } catch (err) {
         sendError(res, err);
