@@ -204,6 +204,13 @@ export interface StartAgentInput {
   /** create a worktree first and launch the agent inside it (atomic — rolled back
    *  if the agent fails to start, so the client never sees a dangling worktree) */
   worktree?: CreateWorktreeInput;
+  /** open a new workspace at cwd instead of a tab in `workspace` (or the focused one) */
+  newWorkspace?: boolean;
+}
+
+export interface StartAgentOptions {
+  /** runs once the agent is up; throwing rolls the start back (pane/worktree) and rethrows */
+  verify?: (paneId: string) => Promise<void>;
 }
 
 export interface StartAgentResult {
@@ -217,6 +224,7 @@ export async function startAgent(
   rpc: Rpc,
   profiles: Record<string, LaunchProfile>,
   input: StartAgentInput,
+  opts: StartAgentOptions = {},
 ): Promise<StartAgentResult> {
   // Object.hasOwn, not `in`: `in` also matches inherited names ("toString",
   // "__proto__", …), which would wrongly accept them as profiles from POST input.
@@ -249,7 +257,10 @@ export async function startAgent(
     const params: Record<string, unknown> = { label: name, focus: false };
     if (typeof input.cwd === 'string') params.cwd = input.cwd;
     let opened: { root_pane?: { pane_id?: string } } | null;
-    if (typeof input.workspace === 'string' && input.workspace) {
+    if (input.newWorkspace === true) {
+      // herdr labels a new workspace after its dir
+      opened = (await rpc('workspace.create', { cwd: params.cwd, focus: false })) as typeof opened;
+    } else if (typeof input.workspace === 'string' && input.workspace) {
       opened = (await rpc('tab.create', { ...params, workspace_id: input.workspace })) as typeof opened;
     } else {
       try {
@@ -269,6 +280,7 @@ export async function startAgent(
   try {
     if (!paneId) throw new LifecycleError(502, 'error', 'herdr returned no pane to start the agent in');
     started = await launchInPane(rpc, paneId, profile, name);
+    await opts.verify?.(paneId);
   } catch (err) {
     await rollback();
     throw err;
@@ -392,6 +404,8 @@ export interface CreateWorktreeInput {
   branch?: unknown;
   /** base ref for the new branch (e.g. "origin/main"); herdr's default when blank */
   base?: unknown;
+  /** checkout dir for the worktree; herdr's worktrees dir when absent */
+  path?: unknown;
 }
 
 export interface CreateWorktreeResult {
@@ -407,6 +421,7 @@ export async function createWorktree(rpc: Rpc, input: CreateWorktreeInput): Prom
   if (input.workspace !== undefined && typeof input.workspace !== 'string') throw badRequest('workspace must be a string');
   if (input.branch !== undefined && typeof input.branch !== 'string') throw badRequest('branch must be a string');
   if (input.base !== undefined && typeof input.base !== 'string') throw badRequest('base must be a string');
+  if (input.path !== undefined && (typeof input.path !== 'string' || input.path === '')) throw badRequest('path must be a non-empty string');
   const repo = typeof input.repo === 'string' ? input.repo : '';
   const workspace = typeof input.workspace === 'string' ? input.workspace : '';
   if (!repo && !workspace) throw badRequest('repo (a cwd in the repo) or workspace is required');
@@ -418,6 +433,7 @@ export async function createWorktree(rpc: Rpc, input: CreateWorktreeInput): Prom
   if (branch) params.branch = branch;
   const base = typeof input.base === 'string' ? input.base.trim() : '';
   if (base) params.base = base;
+  if (typeof input.path === 'string') params.path = input.path;
 
   // herdr's worktree_created result carries the git-worktree object as `worktree`
   // (its checkout dir is `path`, NOT `checkout_path`) and the opened workspace as

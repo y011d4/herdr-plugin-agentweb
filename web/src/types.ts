@@ -68,8 +68,16 @@ export interface AppState {
     paneId: string | null;
   };
   workspaces: WorkspaceNode[];
-  /** the orchestrator agent (running in the bridge's orchestrator_dir): the app opens on its chat */
-  orchestratorPaneId: string | null;
+  /** the configured orchestrators (config orchestrators / orchestrator_dir), in order: the
+   *  agent running in each one's dir (paneId) is shown as a Home (#/home/<name>) */
+  orchestrators: OrchestratorView[];
+}
+
+export interface OrchestratorView {
+  name: string;
+  /** '' = use the workspace label */
+  label: string;
+  paneId: string | null;
 }
 
 export interface WsStateMessage {

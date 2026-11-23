@@ -41,6 +41,10 @@ describe('formatOverview', () => {
     assert.equal(run([agent('p2', 'idle')]), 'p2  idle  repo › fix-auth  (pane p2)');
   });
 
+  it('names the launch dir', () => {
+    assert.equal(run([agent('p2', 'idle', { cwd: '/src/repo' })]), 'p2  idle  repo › fix-auth  (pane p2 in /src/repo)');
+  });
+
   it('picks the last real user task and last main-thread assistant text', () => {
     const out = run([agent('p', 'idle')], { p: { items: [
       user('the real task'), asst('older reply'), asst('main reply'),

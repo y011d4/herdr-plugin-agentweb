@@ -204,7 +204,9 @@ with defaults, is:
   "port": 8390,
   "public_url": null,
   "notify_url": null,
-  "orchestrator_dir": "~/.local/share/herdr-agentweb/dispatcher",
+  "orchestrators": [
+    { "name": "default", "label": "", "dir": "~/.local/share/herdr-agentweb/dispatcher" }
+  ],
   "launch_profiles": {
     "claude": { "argv": ["claude"], "label": "Claude Code" },
     "codex": { "argv": ["codex"], "label": "Codex" },
@@ -232,14 +234,18 @@ with defaults, is:
   entries merge over the built-in defaults shown above (same name overrides its `argv`; a new name is
   added; a malformed entry is ignored). Use it to add variants, e.g.
   `"claude-yolo": { "argv": ["claude", "--dangerously-skip-permissions"], "label": "Claude (yolo)" }`.
-- `orchestrator_dir` — an agent running in this directory is your **orchestrator**: the agent
-  you talk to, which starts and coordinates the others (e.g. a Claude Code whose `CLAUDE.md` there
-  tells it to delegate to herdr agents via the `herdr agent` CLI). Opening the app lands on **Home**:
-  its chat with only the dialogue (tool calls hidden), a status bar of the agents that need you and
-  counts of the rest, and a "doing now" line while it works. Its card is pinned atop the agents list.
-  With no agent there, the app opens on the list as before. To let it see what every other agent is
-  doing, allow it to run `node <plugin dir>/dist/bin/agentwebctl.js overview` — a read-only text
-  summary of every other agent (location, status, last request, last reply, current tool call).
+- `orchestrators` — your **orchestrators**: the agents you talk to, which start and coordinate
+  the others (e.g. a Claude Code whose `CLAUDE.md` tells it to delegate to herdr agents). Each entry
+  is `{ "name", "label", "dir" }`; the agent running in `dir` is that orchestrator. Opening the app
+  lands on its **Home**: its chat with only the dialogue (tool calls hidden), a status bar of the
+  agents that need you and counts of the rest, and a "doing now" line while it works. Its card is
+  pinned atop the agents list. With several running, Home shows a switcher (`label`s, with their
+  status) and reopens the one used last (`#/home/<name>`); with none, the app opens on the list.
+  The usual reason for several is one per Claude account (e.g. work and personal, each dir with a
+  direnv `.envrc` exporting its `CLAUDE_CONFIG_DIR`) — see
+  [Orchestrators per Claude account](#orchestrators-per-claude-account). The older single
+  `"orchestrator_dir": "<dir>"` still works when `orchestrators` is absent (one orchestrator named
+  `default`, titled by its workspace).
 - `notify_url` — optional [ntfy](https://ntfy.sh) topic URL for background push
   notifications, e.g. `https://ntfy.example.internal/herdr` for a **self-hosted**
   ntfy instance. When unset (default) the bridge performs no outbound requests at
@@ -258,6 +264,48 @@ default.
 > `config.json` is only read if `HERDR_PLUGIN_CONFIG_DIR` points at the config dir.
 > herdr sets that automatically for plugin actions and panes, so it "just works"
 > when launched through herdr.
+
+### Orchestrators per Claude account
+
+An orchestrator drives its workers with `agentwebctl.js` (`node <plugin dir>/dist/bin/agentwebctl.js …`),
+which only ever touches agents of the orchestrator's own Claude account — the account being the
+agent process's `CLAUDE_CONFIG_DIR` (default `~/.claude`), which a direnv `.envrc` per directory sets.
+Anything whose account differs, or can't be told, is hidden or refused:
+
+- `overview` — a read-only text summary of the other agents of this account (location, launch dir,
+  status, last request, last reply, current tool call).
+- `agent get|read|prompt|wait <target> [flags]` — `herdr agent …` on that agent, refused for
+  another account's. Output and flags are herdr's.
+- `agent start <name> --cwd <dir> [--profile <launch profile>] [--worktree <branch> [--base <ref>]]` —
+  starts a `launch_profiles` agent in a new tab of the workspace already at `dir` (else a new
+  workspace), or in a new worktree of the repo there. The worktree goes next to the repo
+  (`<repo>-wt-<branch>`), not into herdr's worktrees dir, so an `.envrc` above the repo (one per
+  org dir, say) sets its account too. `dir`'s account is checked before anything is created and the
+  started agent's after; a mismatch closes it again.
+- `worktree remove <checkout path>` — removes a finished worker's linked worktree and its branch,
+  only when no agent is left in it, it has no uncommitted or untracked files, and the branch is
+  merged (an ancestor of `origin/HEAD`, or the head of a merged PR per `gh`, for squash merges).
+
+These hold only if the orchestrator can't reach herdr another way, so give it `agentwebctl.js`
+alone: in its `.claude/settings.json`, `"defaultMode": "dontAsk"` (anything not allowed is denied),
+allow just those commands, and deny the herdr CLI and other accounts' transcripts:
+
+```json
+{
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "Bash(node <plugin dir>/dist/bin/agentwebctl.js overview)",
+      "Bash(node <plugin dir>/dist/bin/agentwebctl.js agent *)",
+      "Bash(node <plugin dir>/dist/bin/agentwebctl.js worktree remove *)"
+    ],
+    "deny": ["Edit", "Write", "NotebookEdit", "Bash(herdr *)", "Read(~/.config/claude/**)", "Read(~/.claude/projects/**)"]
+  }
+}
+```
+
+Workers themselves are ordinary agents under your own permission prompts; this boundary is
+about what each orchestrator (and so each account) sees.
 
 ## Security model
 
@@ -284,8 +332,9 @@ default.
 
 ## API surface (for scripting)
 
-- `GET /api/state` — normalized workspaces/tabs/panes/agents tree, plus `orchestratorPaneId`
-  (the agent running in `orchestrator_dir`, or `null`). Each agent's `completionSeq` is herdr's
+- `GET /api/state` — normalized workspaces/tabs/panes/agents tree, plus `orchestrators`
+  (`[{ name, label, paneId }]` in config order; `paneId` is the agent running in its dir, or `null`)
+  and `orchestratorPaneId` (the first running one's, or `null`). Each agent's `completionSeq` is herdr's
   `completion_seq` (which completion its idle/done status is; `null` until fetched)
 - `GET /api/panes/:paneId/read?source=visible|recent&lines=N&format=text|ansi`
 - `POST /api/panes/:paneId/input` `{"text": "ls", "enter": true}` or `{"keys": ["ctrl+c"]}`

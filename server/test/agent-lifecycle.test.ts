@@ -255,6 +255,31 @@ test('startAgent: a failed agent start rolls the just-created worktree back', as
   assert.equal(calls.some((c) => c.method === 'pane.close'), false);
 });
 
+test('startAgent: newWorkspace opens a workspace at cwd (herdr names it), not a tab', async () => {
+  const { rpc, calls } = fakeRpc({ ...startResponse(), 'workspace.create': { root_pane: { pane_id: 'wN:p1' } } });
+  const out = await startAgent(rpc, PROFILES, { profile: 'claude', name: 'a', cwd: '/p', newWorkspace: true });
+  assert.deepEqual(calls.map((c) => c.method), ['workspace.create', 'agent.start']);
+  assert.deepEqual(calls[0].params, { cwd: '/p', focus: false });
+  assert.equal(out.paneId, 'wN:p1');
+});
+
+test('startAgent: a failing verify rolls the started agent back (its tab, or its worktree) and rethrows', async () => {
+  const tab = fakeRpc(startResponse('P:new'));
+  const verify = async (paneId: string) => { throw new Error(`wrong account: ${paneId}`); };
+  await assert.rejects(() => startAgent(tab.rpc, PROFILES, { profile: 'claude', cwd: '/p' }, { verify }), /wrong account: P:new/);
+  assert.deepEqual(tab.calls.find((c) => c.method === 'pane.close')?.params, { pane_id: 'P:new' });
+
+  const wt = fakeRpc({ ...startResponse(), ...worktreeCreateResponse('/wt/new', 'wNEW') });
+  await assert.rejects(() => startAgent(wt.rpc, PROFILES, { profile: 'claude', worktree: { repo: '/proj' } }, { verify }), /wrong account/);
+  assert.deepEqual(wt.calls.find((c) => c.method === 'worktree.remove')?.params, { workspace_id: 'wNEW', force: true });
+
+  const ok = fakeRpc(startResponse('P:ok'));
+  let checked = '';
+  await startAgent(ok.rpc, PROFILES, { profile: 'claude' }, { verify: async (id) => { checked = id; } });
+  assert.equal(checked, 'P:ok');
+  assert.equal(ok.calls.some((c) => c.method === 'pane.close'), false);
+});
+
 // ── stopAgent ────────────────────────────────────────────────────────────────
 
 test('stopAgent: closes the pane', async () => {
@@ -399,6 +424,13 @@ test('createWorktree: builds worktree.create with cwd/branch/base and returns th
   assert.equal(calls[0].method, 'worktree.create');
   assert.deepEqual(calls[0].params, { focus: false, cwd: '/home/u/proj', branch: 'feat/task', base: 'origin/main' });
   assert.deepEqual(out, { workspaceId: 'wNEW', checkoutPath: '/home/u/.herdr/wt/feat', branch: 'feat/task', paneId: 'wNEW:p1' });
+});
+
+test('createWorktree: passes a checkout path through, and rejects a blank one', async () => {
+  const { rpc, calls } = fakeRpc(worktreeCreateResponse());
+  await createWorktree(rpc, { repo: '/src/org/repo', branch: 'feat/x', path: '/src/org/repo-wt-feat-x' });
+  assert.equal(calls[0].params.path, '/src/org/repo-wt-feat-x');
+  await assert.rejects(() => createWorktree(rpc, { repo: '/r', path: '' }), (e: unknown) => e instanceof LifecycleError && (e as LifecycleError).status === 400);
 });
 
 test('createWorktree: a blank branch/base is omitted (herdr auto-generates)', async () => {

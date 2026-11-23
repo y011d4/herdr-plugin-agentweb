@@ -88,7 +88,8 @@ export function formatOverview(
     const main = items.filter((i) => !i.sidechain);
     const newestTs = items.findLast((i) => i.ts !== null)?.ts ?? null;
     const where = [wsLabel.get(a.workspace_id ?? ''), tabLabel.get(a.tab_id ?? '')].filter(Boolean).join(' › ');
-    const meta = [`pane ${a.pane_id}`, newestTs !== null ? `last activity ${ago(now - newestTs)}` : null].filter(Boolean).join(', ');
+    // the launch dir tells the orchestrator where to start more work on the same repo
+    const meta = [`pane ${a.pane_id}${a.cwd ? ` in ${a.cwd}` : ''}`, newestTs !== null ? `last activity ${ago(now - newestTs)}` : null].filter(Boolean).join(', ');
     const lines = [[a.name || a.pane_id, status, where, `(${meta})`].filter(Boolean).join('  ')];
 
     const task = main.findLast(isTaskTurn);

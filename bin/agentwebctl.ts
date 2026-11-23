@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Plugin entrypoint: run | start | stop | status | qr | overview
+// Plugin entrypoint: run | start | stop | status | qr | overview | agent
 // Invoked by herdr plugin actions/panes with cwd = plugin root, or manually.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { createSplitter, serialize } from '../server/ndjson.ts';
 import { formatOverview, orderAgents, isTaskTurn, type AgentDetail, type RawAgent, type RawSnapshot } from '../server/overview.ts';
 import { readTranscriptTail, resolveTranscriptPath, findLastItem } from '../server/transcript.ts';
+import { dirAccount, ownAccount, paneAccount } from '../server/account.ts';
+import { parseLaunchProfiles, startAgent, type Rpc, type StartAgentInput } from '../server/agent-lifecycle.ts';
 
 // Walk up from the script's directory until a directory containing package.json
 // is found. This is necessary because this file runs from dist/bin/agentwebctl.js,
@@ -39,7 +41,10 @@ function stateDir(): string {
 }
 
 function configDir(): string {
-  return process.env.HERDR_PLUGIN_CONFIG_DIR || stateDir();
+  if (process.env.HERDR_PLUGIN_CONFIG_DIR) return process.env.HERDR_PLUGIN_CONFIG_DIR;
+  // run outside herdr's plugin env (e.g. from an orchestrator's Bash): ask herdr
+  const r = spawnSync('herdr', ['plugin', 'config-dir', 'y011d4.agentweb'], { encoding: 'utf8' });
+  return r.status === 0 && r.stdout.trim() ? r.stdout.trim() : stateDir();
 }
 
 function readConfig(): Record<string, unknown> {
@@ -318,12 +323,13 @@ function run(): Promise<number> | number {
 }
 
 // One-shot herdr RPC: herdr answers one request per connection, then closes.
-function herdrRpc(method: string, params: Record<string, unknown> = {}): Promise<any> {
+// Errors carry herdr's code as `herdrCode` (agent-lifecycle retries on some).
+function herdrRpc(method: string, params: Record<string, unknown> = {}, timeoutMs = 5000): Promise<any> {
   const socketPath = process.env.HERDR_SOCKET_PATH || path.join(os.homedir(), '.config', 'herdr', 'herdr.sock');
   return new Promise((resolve, reject) => {
     const conn = net.createConnection(socketPath);
     const splitter = createSplitter();
-    conn.setTimeout(5000, () => conn.destroy(new Error(`${method}: timeout`)));
+    conn.setTimeout(timeoutMs, () => conn.destroy(new Error(`${method}: timeout`)));
     conn.setEncoding('utf8'); // decodes across chunk boundaries (a split multi-byte char stays whole)
     conn.on('connect', () => conn.write(serialize({ type: 'request', id: 'agentwebctl', method, params })));
     conn.on('data', (chunk: string) => {
@@ -332,7 +338,7 @@ function herdrRpc(method: string, params: Record<string, unknown> = {}): Promise
       conn.destroy();
       try {
         const msg = JSON.parse(line);
-        if (msg.error) reject(new Error(msg.error.message || `${method} failed`));
+        if (msg.error) reject(Object.assign(new Error(msg.error.message || `${method} failed`), { herdrCode: msg.error.code }));
         else resolve(msg.result);
       } catch (e) { reject(e); }
     });
@@ -341,9 +347,10 @@ function herdrRpc(method: string, params: Record<string, unknown> = {}): Promise
   });
 }
 
-// Read-only, LLM-facing summary of every other herdr agent (for an orchestrator
-// agent's Bash tool). Touches only the herdr socket and the claude transcripts,
-// never the state dir or the bridge token.
+// Read-only, LLM-facing summary of every other herdr agent of the caller's Claude
+// account (for an orchestrator agent's Bash tool; agents of other accounts, or whose
+// account can't be told, are left out). Touches only the herdr socket and the
+// claude transcripts, never the state dir or the bridge token.
 async function overview(): Promise<number> {
   let snapshot: RawSnapshot;
   let agents: RawAgent[];
@@ -355,6 +362,10 @@ async function overview(): Promise<number> {
     console.error(`herdr unreachable: ${(e as Error).message}`);
     return 1;
   }
+  const own = await ownAccount();
+  const mine = await Promise.all(agents.map(async (a) =>
+    own !== null && (await paneAccount(herdrRpc, a.pane_id).catch(() => null)) === own));
+  agents = agents.filter((_, i) => mine[i]);
   const self = process.env.HERDR_PANE_ID;
   const details = new Map<string, AgentDetail>();
   await Promise.all(orderAgents(agents, self).map(async (a) => {
@@ -381,11 +392,167 @@ async function overview(): Promise<number> {
   return 0;
 }
 
+// ── orchestrator agent commands ───────────────────────────────────────────────
+// The herdr agent commands an orchestrator needs, refused for any agent or place
+// outside its own Claude account (server/account.ts) — so an orchestrator allowed
+// only these (not the herdr CLI) can't see or drive another account's agents.
+// Once checked, get/read/prompt/wait run herdr's own CLI on the resolved pane, so
+// output, flags and --wait behave exactly like `herdr agent …`.
+
+const AGENT_USAGE = `usage: agentwebctl.js agent get|read|prompt|wait <target> [herdr agent flags]
+       agentwebctl.js agent start <name> --cwd <dir> [--profile <launch profile>] [--worktree <branch> [--base <ref>]]`;
+
+async function agent(): Promise<number> {
+  const [sub, ...args] = process.argv.slice(3);
+  if (sub === 'start') return agentStart(args);
+  const [target, ...rest] = args;
+  if (!['get', 'read', 'prompt', 'wait'].includes(sub) || !target || target.startsWith('-')) {
+    console.error(AGENT_USAGE);
+    return 2;
+  }
+  let paneId: string | undefined;
+  try {
+    paneId = (await herdrRpc('agent.get', { target })).agent?.pane_id;
+  } catch (e) {
+    console.error(`${target}: ${(e as Error).message}`);
+    return 1;
+  }
+  const own = await ownAccount();
+  const theirs = paneId ? await paneAccount(herdrRpc, paneId).catch(() => null) : null;
+  if (own === null || theirs !== own) {
+    console.error(`refused: ${target} is not an agent of this Claude account (or its account can't be told)`);
+    return 1;
+  }
+  // the pane id, not the name: what was checked is what herdr acts on
+  return spawnSync('herdr', ['agent', sub, paneId!, ...rest], { stdio: 'inherit' }).status ?? 1;
+}
+
+// Start an agent from a launch profile (config launch_profiles; never a raw command)
+// in a dir of the caller's account: a new tab in the workspace already at that dir
+// (else a new workspace), or a new worktree of the repo there. The dir's account is
+// checked before anything is created, the started agent's after; a mismatch closes it.
+async function agentStart(args: string[]): Promise<number> {
+  const [name, ...flags] = args;
+  const opt: Record<string, string> = {};
+  for (let i = 0; i < flags.length; i += 2) {
+    if (!['--cwd', '--profile', '--worktree', '--base'].includes(flags[i]) || flags[i + 1] === undefined) {
+      console.error(AGENT_USAGE);
+      return 2;
+    }
+    opt[flags[i].slice(2)] = flags[i + 1];
+  }
+  if (!name || name.startsWith('-') || !opt.cwd || (opt.base && !opt.worktree)) {
+    console.error(AGENT_USAGE);
+    return 2;
+  }
+  const dir = path.resolve(opt.cwd);
+  const input: StartAgentInput = { profile: opt.profile ?? 'claude', name, cwd: dir };
+  const places = [dir];
+  if (opt.worktree) {
+    const top = spawnSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+    if (top.status !== 0) {
+      console.error(`${dir}: not in a git repository`);
+      return 1;
+    }
+    const repo = top.stdout.trim();
+    // Next to the repo, not in herdr's worktrees dir: an .envrc above the repo (e.g.
+    // one per org dir) then sets the checkout's account too.
+    const wtPath = path.join(path.dirname(repo), `${path.basename(repo)}-wt-${opt.worktree.replace(/[^A-Za-z0-9._-]+/g, '-')}`);
+    input.worktree = { repo: dir, branch: opt.worktree, base: opt.base, path: wtPath };
+    places.push(path.dirname(repo));
+  }
+  const own = await ownAccount();
+  for (const p of places) {
+    if (own === null || (await dirAccount(p)) !== own) {
+      console.error(`refused: ${p} is not under this Claude account (its direnv CLAUDE_CONFIG_DIR differs, or can't be read)`);
+      return 1;
+    }
+  }
+
+  // agent.start waits for the agent to come up, and worktree.create runs git: allow time
+  const rpc: Rpc = (method, params) => herdrRpc(method, params, 60_000);
+  if (!input.worktree) {
+    // the workspace already at this dir (a worktree checkout, or any pane launched there)
+    const snap = ((await rpc('session.snapshot')) as { snapshot?: {
+      workspaces?: Array<{ workspace_id: string; worktree?: { checkout_path?: string } }>;
+      panes?: Array<{ workspace_id?: string; cwd?: string }>;
+    } }).snapshot ?? {};
+    const ws = snap.workspaces?.find((w) => w.worktree?.checkout_path === dir)?.workspace_id
+      ?? snap.panes?.find((p) => p.cwd === dir)?.workspace_id;
+    if (ws) input.workspace = ws;
+    else input.newWorkspace = true;
+  }
+  try {
+    const out = await startAgent(rpc, parseLaunchProfiles(readConfig().launch_profiles), input, {
+      verify: async (paneId) => {
+        // agent.start answers once the command is typed into the shell; until herdr
+        // detects the agent, the pane's foreground is still the shell (or its fork)
+        for (const end = Date.now() + 30_000; ; await new Promise((r) => setTimeout(r, 250))) {
+          if (((await rpc('agent.get', { target: paneId }).catch(() => null)) as { agent?: { agent?: string } } | null)?.agent?.agent) break;
+          if (Date.now() > end) throw new Error('the agent did not come up within 30s, so it was closed');
+        }
+        if ((await paneAccount(rpc, paneId)) !== own) throw new Error('the agent came up under another Claude account, so it was closed');
+      },
+    });
+    console.log(`started ${out.name} (pane ${out.paneId}) in ${input.worktree?.path ?? dir}`);
+    return 0;
+  } catch (e) {
+    console.error(`start failed: ${(e as Error).message}`);
+    return 1;
+  }
+}
+
+// Clean up a finished worker's worktree: remove the checkout (herdr's worktree.remove,
+// which itself refuses uncommitted or untracked files) and delete its branch — only
+// for a linked worktree of the caller's account with no agent left in it, whose
+// branch is merged upstream (an ancestor of origin's default branch, or the head of
+// a merged PR, for squash merges). Anything else is refused and left as it is.
+async function worktree(): Promise<number> {
+  const [sub, target] = process.argv.slice(3);
+  if (sub !== 'remove' || !target) {
+    console.error('usage: agentwebctl.js worktree remove <checkout path>');
+    return 2;
+  }
+  const dir = path.resolve(target);
+  const refuse = (why: string): number => { console.error(`refused: ${why}; ${dir} was left as it is`); return 1; };
+  const snap = ((await herdrRpc('session.snapshot')) as { snapshot?: {
+    workspaces?: Array<{ workspace_id: string; worktree?: { checkout_path?: string; repo_root?: string; is_linked_worktree?: boolean } }>;
+    panes?: Array<{ workspace_id?: string; agent?: string | null }>;
+  } }).snapshot ?? {};
+  const ws = snap.workspaces?.find((w) => w.worktree?.checkout_path === dir && w.worktree.is_linked_worktree);
+  if (!ws?.worktree?.repo_root) return refuse('not a linked worktree open in herdr');
+  const own = await ownAccount();
+  if (own === null || (await dirAccount(dir)) !== own) return refuse('it is not under this Claude account');
+  if (snap.panes?.some((p) => p.workspace_id === ws.workspace_id && p.agent)) return refuse('an agent still runs in it (end it with /exit first)');
+
+  const git = (...args: string[]) => spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', timeout: 60_000 });
+  const branch = git('symbolic-ref', '--short', 'HEAD').stdout?.trim();
+  if (!branch) return refuse('its HEAD is not on a branch');
+  const tip = git('rev-parse', 'HEAD').stdout.trim();
+  git('fetch', '--quiet', 'origin'); // best effort: judge against what's upstream now
+  const upstream = git('rev-parse', '--abbrev-ref', 'origin/HEAD').stdout?.trim() || 'origin/main';
+  const merged = git('merge-base', '--is-ancestor', tip, upstream).status === 0
+    || spawnSync('gh', ['pr', 'list', '--head', branch, '--state', 'merged', '--json', 'headRefOid', '--jq', '.[].headRefOid'],
+      { cwd: dir, encoding: 'utf8', timeout: 60_000 }).stdout?.split('\n').includes(tip);
+  if (!merged) return refuse(`${branch} has commits not merged into ${upstream} (nor the head of a merged PR)`);
+
+  try {
+    await herdrRpc('worktree.remove', { workspace_id: ws.workspace_id }, 60_000);
+  } catch (e) {
+    const dirty = (e as { herdrCode?: string }).herdrCode === 'dirty_worktree_requires_force';
+    return refuse(dirty ? 'it has uncommitted or untracked files' : (e as Error).message);
+  }
+  // merge verified above (a squash merge isn't an ancestor, so -d would balk)
+  const del = spawnSync('git', ['-C', ws.worktree.repo_root, 'branch', '-D', branch], { encoding: 'utf8' });
+  console.log(`removed ${dir}${del.status === 0 ? ` and branch ${branch}` : ` (branch ${branch} kept: ${del.stderr.trim()})`}`);
+  return 0;
+}
+
 const command = process.argv[2];
-const handlers: Record<string, () => number | Promise<number>> = { run, start, stop, status, qr, overview };
+const handlers: Record<string, () => number | Promise<number>> = { run, start, stop, status, qr, overview, agent, worktree };
 const handler = handlers[command];
 if (!handler) {
-  console.error('usage: agentwebctl.js <run|start|stop|status|qr|overview>');
+  console.error('usage: agentwebctl.js <run|start|stop|status|qr|overview|agent|worktree>');
   process.exit(2);
 }
 process.exit(await handler());
