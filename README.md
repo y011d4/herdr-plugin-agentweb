@@ -205,7 +205,7 @@ with defaults, is:
   "public_url": null,
   "notify_url": null,
   "orchestrators": [
-    { "name": "default", "label": "", "dir": "~/.local/share/herdr-agentweb/dispatcher" }
+    { "name": "default", "label": "", "env": {} }
   ],
   "launch_profiles": {
     "claude": { "argv": ["claude"], "label": "Claude Code" },
@@ -234,18 +234,17 @@ with defaults, is:
   entries merge over the built-in defaults shown above (same name overrides its `argv`; a new name is
   added; a malformed entry is ignored). Use it to add variants, e.g.
   `"claude-yolo": { "argv": ["claude", "--dangerously-skip-permissions"], "label": "Claude (yolo)" }`.
-- `orchestrators` — your **orchestrators**: the agents you talk to, which start and coordinate
-  the others (e.g. a Claude Code whose `CLAUDE.md` tells it to delegate to herdr agents). Each entry
-  is `{ "name", "label", "dir" }`; the agent running in `dir` is that orchestrator. Opening the app
-  lands on its **Home**: its chat with only the dialogue (tool calls hidden), a status bar of the
+- `orchestrators` — your **orchestrators**: Claude Code agents you talk to, which hand the work to
+  other agents and report back. Each entry is `{ "name", "label", "env" }`: `label` is its title on
+  the phone, `env` the environment it starts with — typically `CLAUDE_CONFIG_DIR` to pick its Claude
+  account (`"~/.config/claude/work"`; a leading `~` is expanded), so you can keep, say, a work and a
+  personal orchestrator apart. The plugin sets up each one's directory itself (see
+  [Orchestrators](#orchestrators)) and starts it from the phone (**Start** buttons atop the agents
+  list) or with `agentwebctl.js orchestrator start <name>`. Opening the app lands on an
+  orchestrator's **Home**: its chat with only the dialogue (tool calls hidden), a status bar of the
   agents that need you and counts of the rest, and a "doing now" line while it works. Its card is
   pinned atop the agents list. With several running, Home shows a switcher (`label`s, with their
   status) and reopens the one used last (`#/home/<name>`); with none, the app opens on the list.
-  The usual reason for several is one per Claude account (e.g. work and personal, each dir with a
-  direnv `.envrc` exporting its `CLAUDE_CONFIG_DIR`) — see
-  [Orchestrators per Claude account](#orchestrators-per-claude-account). The older single
-  `"orchestrator_dir": "<dir>"` still works when `orchestrators` is absent (one orchestrator named
-  `default`, titled by its workspace).
 - `notify_url` — optional [ntfy](https://ntfy.sh) topic URL for background push
   notifications, e.g. `https://ntfy.example.internal/herdr` for a **self-hosted**
   ntfy instance. When unset (default) the bridge performs no outbound requests at
@@ -265,50 +264,60 @@ default.
 > herdr sets that automatically for plugin actions and panes, so it "just works"
 > when launched through herdr.
 
-### Orchestrators per Claude account
+### Orchestrators
 
-An orchestrator drives its workers with `agentwebctl.js` (`node <plugin dir>/dist/bin/agentwebctl.js …`),
-which only ever touches agents of the orchestrator's own Claude account — the account being the
-agent process's `CLAUDE_CONFIG_DIR` (default `~/.claude`), which a direnv `.envrc` per directory sets.
-Anything whose account differs, or can't be told, is hidden or refused:
+For each entry of `orchestrators`, the plugin keeps a directory,
+`~/.local/share/herdr-agentweb/orchestrators/<name>/` (under `$XDG_DATA_HOME` when set), writing
+it when the bridge starts and again each time it starts that orchestrator:
+
+- `CLAUDE.md` — names the orchestrator and imports the two files below.
+- `rules.md` — the rules bundled with the plugin ([`orchestrator/rules.md`](orchestrator/rules.md)):
+  how to start workers, follow them, report, and clean up after them.
+- `.claude/settings.json` — its permissions (below).
+- `local.md` — **yours**: this orchestrator's own rules (which repositories it takes on, the
+  language to answer in, a cheaper launch profile for lookups…). Created empty once and never
+  overwritten. For your own permissions, use `.claude/settings.local.json`.
+
+It starts in a new herdr workspace at that directory, with its `env`. The plugin then checks that
+it came up under the Claude account that `env` sets, and stops it otherwise. No per-directory
+tool such as direnv is needed. **Clear** (in the agent menu) restarts it with the same account.
+
+An orchestrator drives its workers only through `agentwebctl.js`, which touches nothing outside
+its own Claude account. The account is an agent process's `CLAUDE_CONFIG_DIR` (default
+`~/.claude`). Anything whose account differs, or can't be told, is hidden or refused:
 
 - `overview` — a read-only text summary of the other agents of this account (location, launch dir,
   status, last request, last reply, current tool call).
 - `agent get|read|prompt|wait <target> [flags]` — `herdr agent …` on that agent, refused for
   another account's. Output and flags are herdr's.
 - `agent start <name> --cwd <dir> [--profile <launch profile>] [--worktree <branch> [--base <ref>]]` —
-  starts a `launch_profiles` agent in a new tab of the workspace already at `dir` (else a new
-  workspace), or in a new worktree of the repo there. The worktree goes next to the repo
-  (`<repo>-wt-<branch>`), not into herdr's worktrees dir, so an `.envrc` above the repo (one per
-  org dir, say) sets its account too. `dir`'s account is checked before anything is created and the
-  started agent's after; a mismatch stops it again (a new worktree is then kept, since the agent
-  may already have written to it).
+  starts a `launch_profiles` agent with the orchestrator's account, in a new tab of the workspace
+  already at `dir` (else a new workspace). It is refused where a direnv `.envrc` sets another
+  account. With `--worktree`, it starts in a new worktree of the repo there, created next to the
+  repo (`<repo>-wt-<branch>`). herdr can't hand a worktree an environment, so the worktree's account
+  must come from the directory: an `.envrc` above the repo (one per org dir, say) covers it. The
+  started agent's account is checked; a mismatch stops it again. A new worktree is then kept,
+  since the agent may already have written to it.
 - `worktree remove <checkout path>` — removes a finished worker's linked worktree and its branch,
   only when no agent is left in it, it has no uncommitted or untracked files, and the branch is
   merged (an ancestor of `origin/HEAD`, or the head of a merged PR per `gh`, for squash merges).
 
-These hold only if the orchestrator can't reach herdr another way, so give it `agentwebctl.js`
-alone: in its `.claude/settings.json`, `"defaultMode": "dontAsk"` (anything not allowed is denied),
-allow just those commands, deny the herdr CLI and other accounts' transcripts, and keep read-only
-commands (which `dontAsk` still runs) inside its own dir:
+The `.claude/settings.json` the plugin writes keeps the orchestrator to those commands:
+`"defaultMode": "dontAsk"` (anything not allowed is refused without asking), allow only those
+commands, deny the herdr CLI and other accounts' transcripts, and keep read-only commands (which
+`dontAsk` still runs) inside its own directory. Workers themselves are ordinary agents under your
+own permission prompts; this boundary is about what each orchestrator, and so each account, sees.
 
-```json
-{
-  "permissions": {
-    "defaultMode": "dontAsk",
-    "allow": [
-      "Bash(node <plugin dir>/dist/bin/agentwebctl.js overview)",
-      "Bash(node <plugin dir>/dist/bin/agentwebctl.js agent *)",
-      "Bash(node <plugin dir>/dist/bin/agentwebctl.js worktree remove *)"
-    ],
-    "deny": ["Edit", "Write", "NotebookEdit", "Bash(herdr *)", "Read(~/.config/claude/**)", "Read(~/.claude/projects/**)"],
-    "blockReadsOutsideWorkingDirectories": true
-  }
-}
-```
+**Older setups.** Without `orchestrators`, nothing changes. The single `"orchestrator_dir": "<dir>"`,
+or else the old default `~/.local/share/herdr-agentweb/dispatcher` if it exists, is still the one
+orchestrator, named `default`. It runs your own `CLAUDE.md` from that directory, which the plugin
+never writes to. To move to managed orchestrators:
 
-Workers themselves are ordinary agents under your own permission prompts; this boundary is
-about what each orchestrator (and so each account) sees.
+1. Add `orchestrators` to the config and restart the bridge. The plugin creates their directories.
+2. Put anything from your old `CLAUDE.md` that is still yours into each `local.md`. The bundled
+   rules replace the parts about driving herdr.
+3. Start them (phone or `agentwebctl.js orchestrator start <name>`) and answer the folder-trust
+   question once. Then end the old orchestrator and delete its directory.
 
 ## Security model
 
@@ -360,6 +369,9 @@ about what each orchestrator (and so each account) sees.
   New worktrees go **next to their repo**, as `<repo>-wt-<branch>` (a blank branch gets a generated
   `worktree/…` name), not into herdr's worktrees dir, so whatever covers the repo from a parent dir — a
   direnv `.envrc` per org dir that picks the Claude account, say — covers the checkout too.
+- `POST /api/orchestrators/:name/start` — start a configured orchestrator (its directory and `env`
+  come from the config; the request names it only) in a new workspace and return `{"paneId", "name"}`.
+  409 when it already runs.
 - `POST /api/worktrees` `{"cwd": "/repo", "branch": "feat/x", "base": "origin/main"}` — create a git
   worktree next to the repo, as above (herdr `worktree.create`; `cwd` is any path in the source repo,
   `branch`/`base` optional) and return `{"workspaceId", "checkoutPath", "branch", "paneId"}`. Standalone (create a worktree

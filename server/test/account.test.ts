@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { accountForConfigDir, paneAccount, parseProcStat } from '../account.ts';
+import { accountEnv, accountForConfigDir, paneAccount, parseProcStat } from '../account.ts';
 
 describe('accountForConfigDir', () => {
   it('is CLAUDE_CONFIG_DIR/projects, else ~/.claude/projects, normalized', () => {
@@ -9,6 +9,14 @@ describe('accountForConfigDir', () => {
     assert.equal(accountForConfigDir('', '/home/u'), '/home/u/.claude/projects');
     // an explicit default dir is the same account as an unset one
     assert.equal(accountForConfigDir('/home/u/.claude', '/home/u'), accountForConfigDir(undefined, '/home/u'));
+  });
+});
+
+describe('accountEnv', () => {
+  it('sets CLAUDE_CONFIG_DIR for any account but the default (left unset), nothing for an unknown one', () => {
+    assert.deepEqual(accountEnv('/home/u/.config/claude/work/projects', '/home/u'), { CLAUDE_CONFIG_DIR: '/home/u/.config/claude/work' });
+    assert.equal(accountEnv('/home/u/.claude/projects', '/home/u'), undefined);
+    assert.equal(accountEnv(null, '/home/u'), undefined);
   });
 });
 
