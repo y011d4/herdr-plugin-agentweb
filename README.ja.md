@@ -30,7 +30,7 @@ herdr サーバー
 
 ## 必要要件
 
-- herdr >= 0.7.0 (Linux / macOS)
+- herdr >= 0.8.0 (Linux / macOS)
 - Node.js >= 20
 - スマホからブリッジに到達する手段 — リバースプロキシ、トンネル、または VPN
   (「スマホへの公開」の節を参照)。Tailscale は手軽な選択肢の一つで、必須ではありません。
@@ -250,7 +250,8 @@ herdr plugin config-dir y011d4.agentweb
 - `POST /api/panes/:paneId/input` `{"text": "ls", "enter": true}` または `{"keys": ["ctrl+c"]}`
 - `POST /api/panes/:paneId/focus`
 - `POST /api/panes/:paneId/scroll` `{"direction": "up", "steps": 3}` — フルスクリーンアプリ向けの SGR ホイールイベント
-- `POST /api/agents/:target/send` `{"text": "continue"}`
+- `POST /api/agents/:target/send` `{"text": "continue"}` — 入力を受け付けられる状態のエージェントにプロンプトを送る
+  (herdr の `agent.prompt`。`text` は空にできない)
 - `WS /ws?token=…` — `{"type":"state"}` スナップショットと `{"type":"agent_status"}` 遷移
 
 ## 開発

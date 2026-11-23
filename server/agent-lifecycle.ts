@@ -6,13 +6,20 @@
  * worktree-resolve.ts. http.ts wires these behind REST routes; the actual socket
  * work stays in herdr-client.ts.
  *
- * Everything goes through herdr's own agent/pane API (verified against the
- * bundled `herdr api schema --json`, protocol 16):
- *   - agent.start { name, argv, cwd?, workspace_id?, focus } → { agent: { pane_id, agent, ... } }
+ * Everything goes through herdr's own agent/pane API (verified against herdr
+ * 0.9.5's `herdr api schema --json`, protocol 22). Since herdr 0.8, agent.start
+ * no longer spawns a pane: it launches an agent *kind* into an existing idle shell
+ * pane, so we open that pane first (tab.create / pane.split / worktree.create's
+ * root pane):
+ *   - tab.create  { cwd?, workspace_id?, label?, focus } → { root_pane: { pane_id } }
+ *   - pane.split  { target_pane_id, direction, cwd?, focus } → { pane: { pane_id } }
+ *   - agent.start { name, kind, pane_id, args? } → { agent: { pane_id, ... } }  (agent_pane_busy
+ *     while the new pane's shell is still starting)
  *   - pane.close  { pane_id }
  *   - agent.rename{ target, name }
- *   - agent.get   { target } → { agent: { pane_id, agent, cwd, foreground_cwd, ... } }
- *   - agent.send  { target, text }
+ *   - agent.get   { target } → { agent: { pane_id, agent, cwd, interactive_ready, ... } }
+ *   - agent.prompt{ target, text }  (agent_not_ready until the agent is interactive)
+ * Agent names must match herdr's ^[a-z][a-z0-9_-]{0,31}$.
  *
  * Security: agents are launched only from a fixed profile allowlist — a caller
  * never supplies raw argv/command. (The bearer token already grants full pane
@@ -21,7 +28,8 @@
  */
 
 export interface LaunchProfile {
-  /** the command + fixed flags to exec, e.g. ["claude", "--dangerously-skip-permissions"] */
+  /** the agent kind + fixed flags, e.g. ["claude", "--dangerously-skip-permissions"]. argv[0]
+   *  goes to herdr as the agent `kind` (herdr picks the executable for it), the rest as args. */
   argv: string[];
   /** human label for the profile */
   label: string;
@@ -47,17 +55,95 @@ export class LifecycleError extends Error {
 
 export type Rpc = (method: string, params?: Record<string, unknown>) => Promise<unknown>;
 
-const NAME_MAX = 80;
-
 function badRequest(message: string): LifecycleError {
   return new LifecycleError(400, 'invalid_params', message);
 }
 
-/** Trim and cap a display name; returns null when nothing usable is left. */
-function compactName(value: unknown): string | null {
+const NAME_RULE = 'name must contain a letter a-z (agent names use a-z, 0-9, - and _)';
+
+/**
+ * Fit a name to herdr's agent-name rule (^[a-z][a-z0-9_-]{0,31}$): lowercase it, join
+ * words with "-", drop leading non-letters, cap at 32. Returns null when nothing usable
+ * is left (e.g. no a-z at all).
+ */
+export function agentName(value: unknown): string | null {
   if (typeof value !== 'string') return null;
-  const trimmed = value.trim().slice(0, NAME_MAX);
-  return trimmed.length > 0 ? trimmed : null;
+  const name = value
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^[^a-z]+/, '')
+    .slice(0, 32)
+    .replace(/-+$/, '');
+  return name || null;
+}
+
+/** `<profile>-<base36 time>`, trimming the profile part (never the unique timestamp) to fit
+ *  herdr's 32-char limit — so two auto names from a long profile key can't collide. */
+function autoName(profile: string): string {
+  const ts = Date.now().toString(36);
+  const base = (agentName(profile) ?? 'agent').slice(0, 31 - ts.length).replace(/-+$/, '');
+  return `${base}-${ts}`;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** How long to retry agent.start while a just-opened pane's shell is still starting. */
+const SHELL_READY_MS = 10_000;
+/** How long to wait for a new agent to become interactive before giving up on its task
+ *  (herdr's own `agent start` default timeout). */
+const AGENT_READY_MS = 30_000;
+
+function herdrCode(err: unknown): string | undefined {
+  return (err as { herdrCode?: string } | null)?.herdrCode;
+}
+
+/**
+ * Launch `profile` into the idle shell pane `paneId` (agent.start). A pane we just
+ * opened reports agent_pane_busy until its shell is up, so retry that briefly — the
+ * same thing `herdr agent start` does.
+ */
+async function launchInPane(rpc: Rpc, paneId: string, profile: LaunchProfile, name: string): Promise<RawAgentInfo | null> {
+  const [kind, ...args] = profile.argv;
+  const deadline = Date.now() + SHELL_READY_MS;
+  for (;;) {
+    try {
+      return agentFromResult(await rpc('agent.start', { name, kind, pane_id: paneId, args }));
+    } catch (err) {
+      if (herdrCode(err) !== 'agent_pane_busy' || Date.now() >= deadline) throw err;
+      await sleep(100);
+    }
+  }
+}
+
+/** Best-effort pane close (rolling back a pane we opened); never throws. */
+async function closeQuietly(rpc: Rpc, paneId: string | undefined): Promise<void> {
+  if (!paneId) return;
+  try {
+    await rpc('pane.close', { pane_id: paneId });
+  } catch {
+    /* best-effort: must not mask the error the caller is about to see */
+  }
+}
+
+/**
+ * Send a new agent its first prompt. agent.prompt refuses an agent that is still
+ * launching (agent_not_ready), so wait until herdr reports it interactive.
+ */
+async function deliverTask(rpc: Rpc, paneId: string, text: string): Promise<boolean> {
+  const deadline = Date.now() + AGENT_READY_MS;
+  try {
+    for (;;) {
+      const agent = agentFromResult(await rpc('agent.get', { target: paneId }));
+      if (agent?.interactive_ready === true) break;
+      // blocked on a startup dialog: it won't become ready without the user
+      if (agent?.agent_status === 'blocked' || Date.now() >= deadline) return false;
+      await sleep(250);
+    }
+    await rpc('agent.prompt', { target: paneId, text });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Validate a single config launch-profile entry; return it normalized or null. */
@@ -98,7 +184,8 @@ interface RawAgentInfo {
   agent?: string | null;
   cwd?: string | null;
   foreground_cwd?: string | null;
-  workspace_id?: string | null;
+  interactive_ready?: boolean;
+  agent_status?: string;
 }
 
 function agentFromResult(result: unknown): RawAgentInfo | null {
@@ -143,59 +230,58 @@ export async function startAgent(
   if (input.workspace !== undefined && typeof input.workspace !== 'string') throw badRequest('workspace must be a string');
   if (input.task !== undefined && typeof input.task !== 'string') throw badRequest('task must be a string');
 
-  const name = compactName(input.name) ?? `${input.profile}-${Date.now().toString(36)}`;
+  const typed = typeof input.name === 'string' && input.name.trim() !== '' ? agentName(input.name) : undefined;
+  if (typed === null) throw badRequest(NAME_RULE);
+  const name = typed ?? autoName(input.profile);
 
-  // Resolve where the agent runs. A `worktree` spec creates a fresh worktree first
-  // and launches the agent inside its checkout; if the agent then fails to start we
-  // remove that worktree (best-effort rollback) so the caller never has to clean up
-  // a dangling worktree or hit "branch already exists" on retry.
-  let cwd = typeof input.cwd === 'string' ? input.cwd : undefined;
-  let workspaceId = typeof input.workspace === 'string' ? input.workspace : undefined;
-  let rollbackWorkspaceId: string | null = null;
+  // Open the shell pane the agent launches into. A `worktree` spec creates a fresh
+  // worktree and uses its root pane; otherwise a new tab (labelled with the agent
+  // name) at the cwd, in the requested workspace. If the agent then fails to start we
+  // undo that (best-effort) so the caller never has to clean up a dangling tab or
+  // worktree, or hit "branch already exists" on retry.
+  let paneId: string | undefined;
+  let rollback: () => Promise<void>;
   if (input.worktree !== undefined) {
     const wt = await createWorktree(rpc, input.worktree);
-    cwd = wt.checkoutPath;
-    workspaceId = wt.workspaceId ?? undefined;
-    rollbackWorkspaceId = wt.workspaceId;
+    paneId = wt.paneId ?? undefined;
+    rollback = () => rollbackWorktree(rpc, wt.workspaceId);
+  } else {
+    const params: Record<string, unknown> = { label: name, focus: false };
+    if (typeof input.cwd === 'string') params.cwd = input.cwd;
+    let opened: { root_pane?: { pane_id?: string } } | null;
+    if (typeof input.workspace === 'string' && input.workspace) {
+      opened = (await rpc('tab.create', { ...params, workspace_id: input.workspace })) as typeof opened;
+    } else {
+      try {
+        opened = (await rpc('tab.create', params)) as typeof opened;
+      } catch (err) {
+        // herdr has no workspace to put the tab in (all closed): open a workspace
+        // instead, as agent.start itself did before herdr 0.8.
+        if (herdrCode(err) !== 'workspace_not_found') throw err;
+        opened = (await rpc('workspace.create', params)) as typeof opened;
+      }
+    }
+    paneId = opened?.root_pane?.pane_id;
+    rollback = () => closeQuietly(rpc, paneId);
   }
-
-  const params: Record<string, unknown> = { name, argv: profile.argv, focus: false };
-  if (cwd) params.cwd = cwd;
-  if (workspaceId) params.workspace_id = workspaceId;
 
   let started: RawAgentInfo | null;
   try {
-    started = agentFromResult(await rpc('agent.start', params));
+    if (!paneId) throw new LifecycleError(502, 'error', 'herdr returned no pane to start the agent in');
+    started = await launchInPane(rpc, paneId, profile, name);
   } catch (err) {
-    await rollbackWorktree(rpc, rollbackWorkspaceId);
+    await rollback();
     throw err;
-  }
-  const paneId = started?.pane_id;
-  if (!paneId) {
-    await rollbackWorktree(rpc, rollbackWorkspaceId);
-    throw new LifecycleError(502, 'error', 'agent started but herdr returned no pane id');
   }
 
   const result: StartAgentResult = { paneId, name, agent: started?.agent ?? null };
 
-  // Best-effort initial task. Target the pane id herdr just returned (unambiguous)
-  // rather than the name — a name can collide with another agent, and even the
-  // auto-generated one could clash across two near-simultaneous starts, misrouting
-  // the first instruction. An agent may not be ready to accept input the instant
-  // it launches, so a send failure must not fail the (successful) start. When a
-  // task field was supplied, taskDelivered always reports the outcome (false for an
-  // empty task that was skipped), so the client can tell it apart from "no task".
+  // Best-effort initial task. Target the pane id (unambiguous) rather than the name.
+  // A failed delivery must not fail the (successful) start. When a task field was
+  // supplied, taskDelivered always reports the outcome (false for an empty task that
+  // was skipped), so the client can tell it apart from "no task".
   if (typeof input.task === 'string') {
-    if (input.task.length > 0) {
-      try {
-        await rpc('agent.send', { target: paneId, text: input.task });
-        result.taskDelivered = true;
-      } catch {
-        result.taskDelivered = false;
-      }
-    } else {
-      result.taskDelivered = false;
-    }
+    result.taskDelivered = input.task.length > 0 && await deliverTask(rpc, paneId, input.task);
   }
   return result;
 }
@@ -210,8 +296,8 @@ export async function stopAgent(rpc: Rpc, paneId: string): Promise<{ paneId: str
 // ── rename ────────────────────────────────────────────────────────────────────
 
 export async function renameAgent(rpc: Rpc, target: string, name: unknown): Promise<{ name: string }> {
-  const clean = compactName(name);
-  if (!clean) throw badRequest('name must be a non-empty string');
+  const clean = agentName(name);
+  if (!clean) throw badRequest(NAME_RULE);
   await rpc('agent.rename', { target, name: clean });
   return { name: clean };
 }
@@ -268,18 +354,21 @@ export async function clearAgent(
   // process wandered: the same dir keeps its identity (e.g. the orchestrator, which is
   // recognized by its launch dir) and its project context.
   const cwd = agent.cwd || agent.foreground_cwd || null;
-  // Keep the replacement in the old agent's workspace: cwd alone can land the new
-  // pane in the currently focused workspace, moving a cleared agent to the wrong group.
-  const workspaceId = agent.workspace_id ?? null;
 
-  const name = `${key}-${Date.now().toString(36)}`;
-  const startParams: Record<string, unknown> = { name, argv: profiles[key].argv, focus: false };
-  if (cwd) startParams.cwd = cwd;
-  if (workspaceId) startParams.workspace_id = workspaceId;
-
-  const started = agentFromResult(await rpc('agent.start', startParams));
-  const paneId = started?.pane_id;
-  if (!paneId) throw new LifecycleError(502, 'error', 'replacement started but herdr returned no pane id');
+  // Open the replacement's shell as a split of the old pane, so it stays in the old
+  // agent's tab/workspace and takes over its slot once the old pane closes.
+  const splitParams: Record<string, unknown> = { target_pane_id: oldPaneId, direction: 'right', focus: false };
+  if (cwd) splitParams.cwd = cwd;
+  const split = (await rpc('pane.split', splitParams)) as { pane?: { pane_id?: string } } | null;
+  const paneId = split?.pane?.pane_id;
+  const name = autoName(key);
+  try {
+    if (!paneId) throw new LifecycleError(502, 'error', 'herdr returned no pane to start the replacement in');
+    await launchInPane(rpc, paneId, profiles[key], name);
+  } catch (err) {
+    await closeQuietly(rpc, paneId);
+    throw err;
+  }
 
   // Replacement is up; retire the old pane. A close failure just leaves the old
   // pane around (reported), rather than failing an otherwise-successful clear.
