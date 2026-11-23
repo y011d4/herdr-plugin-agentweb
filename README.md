@@ -289,7 +289,8 @@ Anything whose account differs, or can't be told, is hidden or refused:
 
 These hold only if the orchestrator can't reach herdr another way, so give it `agentwebctl.js`
 alone: in its `.claude/settings.json`, `"defaultMode": "dontAsk"` (anything not allowed is denied),
-allow just those commands, and deny the herdr CLI and other accounts' transcripts:
+allow just those commands, deny the herdr CLI and other accounts' transcripts, and keep read-only
+commands (which `dontAsk` still runs) inside its own dir:
 
 ```json
 {
@@ -300,7 +301,8 @@ allow just those commands, and deny the herdr CLI and other accounts' transcript
       "Bash(node <plugin dir>/dist/bin/agentwebctl.js agent *)",
       "Bash(node <plugin dir>/dist/bin/agentwebctl.js worktree remove *)"
     ],
-    "deny": ["Edit", "Write", "NotebookEdit", "Bash(herdr *)", "Read(~/.config/claude/**)", "Read(~/.claude/projects/**)"]
+    "deny": ["Edit", "Write", "NotebookEdit", "Bash(herdr *)", "Read(~/.config/claude/**)", "Read(~/.claude/projects/**)"],
+    "blockReadsOutsideWorkingDirectories": true
   }
 }
 ```

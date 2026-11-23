@@ -267,14 +267,19 @@ test('startAgent: newWorkspace opens a workspace at cwd (herdr names it), not a 
 test('startAgent: a failing verify rolls the started agent back (its tab, or its worktree) and rethrows', async () => {
   const tab = fakeRpc(startResponse('P:new'));
   const verify = async (paneId: string) => { throw new Error(`wrong account: ${paneId}`); };
-  await assert.rejects(() => startAgent(tab.rpc, PROFILES, { profile: 'claude', cwd: '/p' }, { verify }), /wrong account: P:new/);
+  await assert.rejects(() => startAgent(tab.rpc, PROFILES, { profile: 'claude', cwd: '/p' }, { verify }), /wrong account: P:new: it was stopped/);
   assert.deepEqual(tab.calls.find((c) => c.method === 'pane.close')?.params, { pane_id: 'P:new' });
+
+  // a failed close is reported, not swallowed: the agent may still be running
+  const stuck = fakeRpc({ ...startResponse('P:new'), 'pane.close': herdrError('pane_not_found') });
+  await assert.rejects(() => startAgent(stuck.rpc, PROFILES, { profile: 'claude', cwd: '/p' }, { verify }),
+    /wrong account: P:new: its pane P:new could not be closed \(pane_not_found\), so it may still be running/);
 
   // the agent has run by then and may have written to its worktree: it is stopped, the
   // checkout kept (never removed, forced or not), and the error says where
   const wt = fakeRpc({ ...startResponse(), ...worktreeCreateResponse('/wt/new', 'wNEW', 'feat/x', 'wNEW:p1') });
   await assert.rejects(() => startAgent(wt.rpc, PROFILES, { profile: 'claude', worktree: { repo: '/proj' } }, { verify }),
-    (e: unknown) => e instanceof LifecycleError && e.status === 409 && /wrong account.*its worktree \/wt\/new was kept/.test(e.message));
+    (e: unknown) => e instanceof LifecycleError && e.status === 409 && /wrong account: wNEW:p1: it was stopped; its worktree \/wt\/new was kept/.test(e.message));
   assert.deepEqual(wt.calls.find((c) => c.method === 'pane.close')?.params, { pane_id: 'wNEW:p1' });
   assert.equal(wt.calls.some((c) => c.method === 'worktree.remove'), false);
 

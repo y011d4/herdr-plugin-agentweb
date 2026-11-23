@@ -490,9 +490,9 @@ async function agentStart(args: string[]): Promise<number> {
         // detects the agent, the pane's foreground is still the shell (or its fork)
         for (const end = Date.now() + 30_000; ; await new Promise((r) => setTimeout(r, 250))) {
           if (((await rpc('agent.get', { target: paneId }).catch(() => null)) as { agent?: { agent?: string } } | null)?.agent?.agent) break;
-          if (Date.now() > end) throw new Error('the agent did not come up within 30s, so it was closed');
+          if (Date.now() > end) throw new Error('the agent did not come up within 30s');
         }
-        if ((await paneAccount(rpc, paneId)) !== own) throw new Error('the agent came up under another Claude account, so it was closed');
+        if ((await paneAccount(rpc, paneId)) !== own) throw new Error('the agent came up under another Claude account');
       },
     });
     console.log(`started ${out.name} (pane ${out.paneId}) in ${input.worktree?.path ?? dir}`);
