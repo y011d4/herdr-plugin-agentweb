@@ -698,21 +698,22 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
           // The store is keyed by pane id, but `target` may be an agent name, so
           // clearAgent resolves the pane id and looks up / reports it (out.oldPaneId).
           // The replacement keeps the old agent's Claude account, which a plain new pane
-          // wouldn't have. An orchestrator restarts with its configured env, on any platform.
-          // Other agents' accounts are read from /proc (Linux): unknown, the clear is refused;
-          // not what came up, the old agent is kept. Without /proc (macOS) those go on as
-          // before — agentwebctl can't start env-picked workers there, as it can't check them.
+          // wouldn't have. Accounts are read from /proc (Linux): unknown, the clear is
+          // refused; not what came up, the old agent is kept. An orchestrator with a
+          // configured env restarts with it, so it keeps its account without /proc (macOS)
+          // too; other agents there go on as before this check existed (agentwebctl can't
+          // start env-picked workers there, as it can't check them).
           const readable = process.platform === 'linux';
           let account: string | null = null;
           const out = await clearAgent(rpc, config.launchProfiles, target, (pid) => startedProfiles.get(pid), {
             envFor: async (pid) => {
-              const state = getState();
-              const i = state ? findOrchestrators(state, config.orchestrators).findIndex((o) => o.paneId === pid) : -1;
               account = readable ? await paneAccount(rpc, pid).catch(() => null) : null;
-              if (i !== -1) return Object.keys(config.orchestrators[i].env).length ? config.orchestrators[i].env : undefined;
               if (!account && readable) {
                 throw new LifecycleError(409, 'account_unknown', "can't tell this agent's Claude account, so it was left as is");
               }
+              const state = getState();
+              const i = state ? findOrchestrators(state, config.orchestrators).findIndex((o) => o.paneId === pid) : -1;
+              if (i !== -1 && Object.keys(config.orchestrators[i].env).length > 0) return config.orchestrators[i].env;
               return accountEnv(account);
             },
             verify: async (pid) => {
