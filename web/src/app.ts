@@ -908,9 +908,11 @@ async function openNewAgentModal(): Promise<void> {
           if (wsId) body.workspace = wsId;
         }
       }
-      const res = (await apiPost('/api/agents', body)) as { paneId?: string; name?: string };
+      const res = (await apiPost('/api/agents', body)) as { paneId?: string; name?: string; taskDelivered?: boolean };
       close();
-      showToast('Agent started', res.name ? `Started ${res.name}` : 'Agent started');
+      const started = res.name ? `Started ${res.name}` : 'Agent started';
+      // the agent never became ready for its task (e.g. waiting on a startup dialog)
+      showToast('Agent started', res.taskDelivered === false && task ? `${started}, but the task was not sent — send it from the pane` : started);
       if (res.paneId) navigate(`#/pane/${encodeURIComponent(res.paneId)}`);
     } catch (err) {
       startBtn.disabled = false;
@@ -956,9 +958,10 @@ function openRenameModal(paneId: string, current: string): void {
     if (!name) { (overlay.querySelector('#rn-error') as HTMLElement).textContent = 'Name is required.'; return; }
     saveBtn.disabled = true;
     try {
-      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/rename`, { name });
+      // the bridge fits the name to herdr's rule (lowercase, a-z0-9-_), so show what it stored
+      const res = (await apiPost(`/api/panes/${encodeURIComponent(paneId)}/rename`, { name })) as { name?: string };
       close();
-      showToast('Renamed', `Agent renamed to ${name}`);
+      showToast('Renamed', `Agent renamed to ${res.name ?? name}`);
       updatePaneDetailHeader();
     } catch (err) {
       saveBtn.disabled = false;
