@@ -1205,6 +1205,34 @@ a {
 .home-dot.working { background: var(--color-working); }
 .home-dot.done    { background: var(--color-done); }
 .home-dot.idle    { background: var(--color-idle); }
+.home-dot.blocked { background: var(--color-blocked); }
+.home-dot.unknown { background: var(--color-idle); }
+/* switcher between orchestrators' Homes (shown when 2+ run) */
+.home-switch {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.home-switch-btn {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  padding: 4px 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.home-switch-btn.active {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+  background: var(--color-surface-2);
+}
 .home-counts-more {
   margin-left: auto;
   color: var(--color-accent);

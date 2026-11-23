@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createState, applyEvent, applyCompletionSeqs, toClientState, getPaneIds, findOrchestratorPane,
+  createState, applyEvent, applyCompletionSeqs, toClientState, getPaneIds, findOrchestrators,
   PANE_SET_CHANGING_EVENTS, APPLIED_EVENTS,
 } from '../state.ts';
 import type { RawSnapshot } from '../types.ts';
@@ -316,21 +316,40 @@ describe('toClientState', () => {
   });
 });
 
-describe('findOrchestratorPane', () => {
+describe('findOrchestrators', () => {
+  const one = (state: ReturnType<typeof createState>, dir: string) =>
+    findOrchestrators(state, [{ name: 'o', label: '', dir }])[0].paneId;
+
   it('is the agent pane running in the orchestrator dir (or below it)', () => {
     const state = createState(makeSnapshot());
-    assert.equal(findOrchestratorPane(state, '/home/user/proj'), 'w0:p1');
-    assert.equal(findOrchestratorPane(state, '/home/user'), 'w0:p1');
+    assert.equal(one(state, '/home/user/proj'), 'w0:p1');
+    assert.equal(one(state, '/home/user'), 'w0:p1');
   });
 
   it('ignores non-agent panes, sibling dirs that share a prefix, and a missing dir', () => {
     const state = createState(makeSnapshot());
-    assert.equal(findOrchestratorPane(state, '/home/user/pro'), null); // not /home/user/proj
-    assert.equal(findOrchestratorPane(state, '/elsewhere'), null);
+    assert.equal(one(state, '/home/user/pro'), null); // not /home/user/proj
+    assert.equal(one(state, '/elsewhere'), null);
     const noAgent = createState(makeSnapshot({
       panes: [{ pane_id: 'w0:p2', workspace_id: 'w0', tab_id: 'w0:t1', focused: false, agent_status: 'unknown', cwd: '/home/user/proj' }],
     }));
-    assert.equal(findOrchestratorPane(noAgent, '/home/user/proj'), null);
+    assert.equal(one(noAgent, '/home/user/proj'), null);
+  });
+
+  it('finds each orchestrator in config order; a pane under nested dirs belongs to the deepest', () => {
+    const pane = (id: string, cwd: string) =>
+      ({ pane_id: id, workspace_id: 'w0', tab_id: 'w0:t1', focused: false, agent: 'claude', agent_status: 'idle', cwd });
+    const state = createState(makeSnapshot({ panes: [pane('w0:p1', '/o/work'), pane('w0:p2', '/o'), pane('w0:p3', '/o/work/sub')] }));
+    const views = findOrchestrators(state, [
+      { name: 'home', label: 'Home', dir: '/o' },
+      { name: 'work', label: 'Work', dir: '/o/work' },
+      { name: 'off', label: '', dir: '/off' },
+    ]);
+    assert.deepEqual(views, [
+      { name: 'home', label: 'Home', paneId: 'w0:p2' },
+      { name: 'work', label: 'Work', paneId: 'w0:p1' },
+      { name: 'off', label: '', paneId: null },
+    ]);
   });
 
   it('goes by the launch (shell) cwd, not the foreground cwd', () => {
@@ -342,7 +361,7 @@ describe('findOrchestratorPane', () => {
         { pane_id: 'w0:p2', workspace_id: 'w0', tab_id: 'w0:t1', focused: false, agent: 'claude', agent_status: 'idle', cwd: '/repo', foreground_cwd: '/orch' },
       ],
     }));
-    assert.equal(findOrchestratorPane(state, '/orch'), 'w0:p1');
+    assert.equal(one(state, '/orch'), 'w0:p1');
   });
 });
 

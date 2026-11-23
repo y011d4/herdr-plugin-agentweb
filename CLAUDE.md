@@ -33,24 +33,36 @@ herdr server
   the agent in its checkout.
 - `server/auth.ts` / `notify.ts` / `config.ts` — token, agent-status fanout + optional ntfy, config
   (config also parses `launch_profiles`, merged over built-in defaults)
-- `bin/agentwebctl.ts` — plugin entrypoints: run | start | stop | status | qr, plus `overview`
-  (read-only text summary of every other agent for an orchestrator agent to run; pure part in
-  `server/overview.ts`; talks to the herdr socket + transcripts directly, never the token)
+- `bin/agentwebctl.ts` — plugin entrypoints: run | start | stop | status | qr, plus the
+  orchestrator's commands: `overview` (read-only text summary of the other agents; pure part in
+  `server/overview.ts`), `agent get|read|prompt|wait|start` and `worktree remove`. All of them are
+  confined to the caller's Claude account (`server/account.ts`: an account = the agent process's
+  `CLAUDE_CONFIG_DIR`/projects, read from /proc of the pane's foreground process group leader; the
+  caller's = its nearest `claude` ancestor's; a dir's = `direnv exec` with our own account/direnv
+  vars stripped; unknown = refused). get/read/prompt/wait shell out to the herdr CLI on the resolved
+  pane id after the check. Talks to the herdr socket + transcripts directly, never the token.
+  herdr's `agent.start` RPC answers before the agent's process exists (the shell is still in the
+  foreground), so `agent start` waits for `agent.get` to report the detected agent before
+  checking the started agent's account.
 - `web/src/app.ts` — SPA (hash routing), `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker
-- **Orchestrator home**: the agent running in config `orchestrator_dir` (default
-  `~/.local/share/herdr-agentweb/dispatcher`) is the orchestrator — identified by the pane shell's cwd
-  (`launchCwd`, not the mutable foreground cwd), since herdr's snapshot has no agent names
-  (`findOrchestratorPane`, sent as state `orchestratorPaneId`). Status events carry no cwd, so an
+- **Orchestrator homes**: config `orchestrators: [{name,label,dir}]` (else the legacy single
+  `orchestrator_dir`, default `~/.local/share/herdr-agentweb/dispatcher`, as one named `default`) —
+  the agent running in each `dir` is that orchestrator, identified by the pane shell's cwd
+  (`launchCwd`, not the mutable foreground cwd; nested dirs: the deepest wins), since herdr's
+  snapshot has no agent names (`findOrchestrators`, sent as state `orchestrators[]`, plus
+  `orchestratorPaneId` = the first running one for older clients). Typically one per Claude account. Status events carry no cwd, so an
   agent appearing in an existing pane triggers a re-snapshot (a `cd` before launch must count).
-  A fresh app open (empty hash) lands on **Home** (`#/home`): the pane view in `homeMode` — a
-  status bar of the other agents (blocked chips + counts, `homeSummary`), dialogue-only chat
+  A fresh app open (empty hash) lands on a **Home** (`#/home/<name>`; bare `#/home` = the one used
+  last on this phone, else the first running): the pane view in `homeMode` — a switcher between
+  running orchestrators (2+), a
+  status bar of every other agent incl. other orchestrators (blocked chips + counts, `homeSummary`), dialogue-only chat
   (`conversationItems` hides tools/injected turns), a "doing now" line (`latestActivity`) and a
   composer (the terminal + quick keys stay one `>_` tap away — the only way to send Esc/Ctrl+C, and
   the fallback when there's no transcript). Its card is pinned atop the agents list, and any route to
-  its pane (`#/pane/<id>`: notification clicks, stale links) is replaced by `#/home`. herdr's
+  its pane (`#/pane/<id>`: notification clicks, stale links) is replaced by its Home. herdr's
   `pane.agent_detected` (fires on detect *and* release) is rebuild-triggering, so agent presence and
-  `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via the `herdr agent` CLI, waking on background
+  `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `agentwebctl agent …`, waking on background
   `agent prompt --wait`) lives in that dir's `CLAUDE.md`, not in this repo.
 - `herdr-plugin.toml` — actions/panes call `dist/bin/agentwebctl.js`; `[[build]]` runs on
   `herdr plugin install` but NOT on `herdr plugin link`
