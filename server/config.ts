@@ -41,7 +41,8 @@ const expandDir = (dir: string, home: string): string => expandHome(dir, home).r
 /**
  * config `orchestrators: [{ name, label?, env? }]`, in order. Each is managed by the
  * plugin in <data>/orchestrators/<name> and started with its `env` (string values; a
- * leading ~ is expanded, so `"CLAUDE_CONFIG_DIR": "~/.config/claude/work"` works).
+ * leading ~ is expanded, so `"CLAUDE_CONFIG_DIR": "~/.config/claude/work"` works). An
+ * entry that still has the earlier format's `dir` is that dir, unmanaged.
  * Malformed entries and repeated names are dropped. With none left, the older setup
  * stays as it was: the single `orchestrator_dir`, else the old default dir
  * (<data>/dispatcher) when it exists — both unmanaged, as the user's own dir — else
@@ -56,14 +57,16 @@ export function parseOrchestrators(
 ): OrchestratorDef[] {
   const out: OrchestratorDef[] = [];
   for (const e of Array.isArray(raw) ? raw : []) {
-    const { name, label, env } = (typeof e === 'object' && e !== null ? e : {}) as Record<string, unknown>;
+    const { name, label, env, dir } = (typeof e === 'object' && e !== null ? e : {}) as Record<string, unknown>;
     // name is a dir name and goes into the app's #/home/<name> route: keep it a plain slug
     if (!nonEmpty(name) || !/^[A-Za-z0-9_-]+$/.test(name) || out.some((o) => o.name === name)) continue;
     const vars: Record<string, string> = {};
     if (typeof env === 'object' && env !== null && !Array.isArray(env)) {
       for (const [k, v] of Object.entries(env)) if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof v === 'string') vars[k] = expandHome(v, home);
     }
-    out.push({ name, label: nonEmpty(label) ? label.trim() : name, dir: join(data, 'orchestrators', name), env: vars, managed: true });
+    // an entry with its own dir (the earlier format) stays that unmanaged dir
+    const own = nonEmpty(dir) ? expandDir(dir, home) : null;
+    out.push({ name, label: nonEmpty(label) ? label.trim() : name, dir: own ?? join(data, 'orchestrators', name), env: vars, managed: own === null });
   }
   if (out.length > 0) return out;
   const legacy = nonEmpty(legacyDir) ? expandDir(legacyDir, home) : join(data, 'dispatcher');

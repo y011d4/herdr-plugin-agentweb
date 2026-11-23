@@ -388,8 +388,13 @@ export async function clearAgent(
   profiles: Record<string, LaunchProfile>,
   target: string,
   lookupProfile?: (paneId: string) => string | undefined,
-  /** the environment the replacement needs to stay what the old agent was (its Claude account, say) */
-  envFor?: (oldPaneId: string) => Promise<Record<string, string> | undefined>,
+  opts: {
+    /** the environment the replacement needs to stay what the old agent was (its Claude
+     *  account, say); throwing refuses the clear before anything is opened */
+    envFor?: (oldPaneId: string) => Promise<Record<string, string> | undefined>;
+    /** runs once the replacement is up; throwing closes it and keeps the old agent */
+    verify?: (paneId: string) => Promise<void>;
+  } = {},
 ): Promise<ClearAgentResult> {
   const agent = agentFromResult(await rpc('agent.get', { target }));
   if (!agent) throw new LifecycleError(404, 'not_found', 'agent not found');
@@ -418,7 +423,7 @@ export async function clearAgent(
   // agent's tab/workspace and takes over its slot once the old pane closes.
   const splitParams: Record<string, unknown> = { target_pane_id: oldPaneId, direction: 'right', focus: false };
   if (cwd) splitParams.cwd = cwd;
-  const env = await envFor?.(oldPaneId);
+  const env = await opts.envFor?.(oldPaneId);
   if (env) splitParams.env = env;
   const split = (await rpc('pane.split', splitParams)) as { pane?: { pane_id?: string } } | null;
   const paneId = split?.pane?.pane_id;
@@ -426,6 +431,7 @@ export async function clearAgent(
   try {
     if (!paneId) throw new LifecycleError(502, 'error', 'herdr returned no pane to start the replacement in');
     await launchInPane(rpc, paneId, profiles[key], name);
+    await opts.verify?.(paneId);
   } catch (err) {
     await closeQuietly(rpc, paneId);
     throw err;

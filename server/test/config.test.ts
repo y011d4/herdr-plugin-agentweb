@@ -10,11 +10,16 @@ describe('parseOrchestrators', () => {
   it('manages each entry in <data>/orchestrators/<name>, with its env (~ expanded)', () => {
     assert.deepEqual(parseOrchestrators([
       { name: 'personal', label: 'Personal' },
-      { name: 'work', label: ' Work ', env: { CLAUDE_CONFIG_DIR: '~/.config/claude/work', OTHER: '/x' }, dir: '/ignored' },
+      { name: 'work', label: ' Work ', env: { CLAUDE_CONFIG_DIR: '~/.config/claude/work', OTHER: '/x' } },
     ], undefined, HOME, DATA, none), [
       { name: 'personal', label: 'Personal', dir: `${DATA}/orchestrators/personal`, env: {}, managed: true },
       { name: 'work', label: 'Work', dir: `${DATA}/orchestrators/work`, env: { CLAUDE_CONFIG_DIR: '/home/u/.config/claude/work', OTHER: '/x' }, managed: true },
     ]);
+  });
+
+  it('keeps an entry in the earlier format (with its own dir) as that unmanaged dir', () => {
+    assert.deepEqual(parseOrchestrators([{ name: 'pfn', label: 'PFN', dir: '~/orch-pfn/' }], undefined, HOME, DATA, none),
+      [{ name: 'pfn', label: 'PFN', dir: '/home/u/orch-pfn', env: {}, managed: false }]);
   });
 
   it('labels an entry by its name, and keeps only string env vars with plain names', () => {

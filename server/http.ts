@@ -7,7 +7,7 @@ import { toClientState, findOrchestrators } from './state.ts';
 import { buildAgentStatusMessage } from './notify.ts';
 import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail, projectsRootForPid } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt-identity.ts';
-import { startAgent, stopAgent, renameAgent, clearAgent, createWorktree, LifecycleError, type CreateWorktreeInput } from './agent-lifecycle.ts';
+import { startAgent, stopAgent, renameAgent, clearAgent, createWorktree, LifecycleError, waitForDetectedAgent, type CreateWorktreeInput } from './agent-lifecycle.ts';
 import { createPaneProfileStore } from './pane-profile-store.ts';
 import { placeWorktreeNextToRepo } from './worktree-resolve.ts';
 import { startOrchestrator } from './orchestrator.ts';
@@ -697,10 +697,23 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
         try {
           // The store is keyed by pane id, but `target` may be an agent name, so
           // clearAgent resolves the pane id and looks up / reports it (out.oldPaneId).
-          // the replacement keeps the old agent's Claude account (an orchestrator started
-          // with CLAUDE_CONFIG_DIR, say), which a plain new pane wouldn't have
-          const out = await clearAgent(rpc, config.launchProfiles, target, (pid) => startedProfiles.get(pid),
-            async (pid) => accountEnv(await paneAccount(rpc, pid).catch(() => null)));
+          // The replacement keeps the old agent's Claude account (an orchestrator started
+          // with CLAUDE_CONFIG_DIR, say), which a plain new pane wouldn't have: unknown, the
+          // clear is refused; not what came up, the old agent is kept.
+          let account: string | null = null;
+          const out = await clearAgent(rpc, config.launchProfiles, target, (pid) => startedProfiles.get(pid), {
+            envFor: async (pid) => {
+              account = await paneAccount(rpc, pid).catch(() => null);
+              if (!account) throw new LifecycleError(409, 'account_unknown', "can't tell this agent's Claude account, so it was left as is");
+              return accountEnv(account);
+            },
+            verify: async (pid) => {
+              await waitForDetectedAgent(rpc, pid);
+              if ((await paneAccount(rpc, pid)) !== account) {
+                throw new LifecycleError(409, 'account_mismatch', 'the fresh session came up under another Claude account, so the old one was kept');
+              }
+            },
+          });
           // Only drop the old mapping once the old pane is actually gone; if the
           // close failed it still exists and must keep its recorded profile.
           if (out.closedOld) startedProfiles.delete(out.oldPaneId);

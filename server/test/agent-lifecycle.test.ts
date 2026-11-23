@@ -363,12 +363,27 @@ test('clearAgent: the replacement pane gets the env envFor gives for the old pan
       'agent.start': { agent: { pane_id: 'P:new' } },
     });
     let asked = '';
-    await clearAgent(rpc, PROFILES, 'orch', undefined, async (p) => { asked = p; return env; });
+    await clearAgent(rpc, PROFILES, 'orch', undefined, { envFor: async (p) => { asked = p; return env; } });
     assert.equal(asked, 'P:old');
     return calls.find((c) => c.method === 'pane.split')!.params;
   };
   assert.deepEqual((await clear({ CLAUDE_CONFIG_DIR: '/c/work' })).env, { CLAUDE_CONFIG_DIR: '/c/work' });
   assert.equal('env' in (await clear(undefined)), false);
+});
+
+test('clearAgent: an envFor that throws refuses the clear before anything opens; a failing verify keeps the old agent', async () => {
+  const responses = {
+    'agent.get': { agent: { pane_id: 'P:old', agent: 'claude', cwd: '/orch' } },
+    'pane.split': { pane: { pane_id: 'P:new' } },
+    'agent.start': { agent: { pane_id: 'P:new' } },
+  };
+  const refused = fakeRpc(responses);
+  await assert.rejects(() => clearAgent(refused.rpc, PROFILES, 'orch', undefined, { envFor: async () => { throw new Error('account unknown'); } }), /account unknown/);
+  assert.deepEqual(refused.calls.map((c) => c.method), ['agent.get']);
+
+  const kept = fakeRpc(responses);
+  await assert.rejects(() => clearAgent(kept.rpc, PROFILES, 'orch', undefined, { verify: async () => { throw new Error('wrong account'); } }), /wrong account/);
+  assert.deepEqual(kept.calls.filter((c) => c.method === 'pane.close').map((c) => c.params.pane_id), ['P:new']);
 });
 
 test('clearAgent: relaunches in the launch cwd, not a wandered foreground cwd', async () => {
