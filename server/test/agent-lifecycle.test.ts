@@ -269,9 +269,17 @@ test('startAgent: a failing verify rolls the started agent back (its tab, or its
   await assert.rejects(() => startAgent(tab.rpc, PROFILES, { profile: 'claude', cwd: '/p' }, { verify }), /wrong account: P:new/);
   assert.deepEqual(tab.calls.find((c) => c.method === 'pane.close')?.params, { pane_id: 'P:new' });
 
-  const wt = fakeRpc({ ...startResponse(), ...worktreeCreateResponse('/wt/new', 'wNEW') });
+  // the agent has run by then: its worktree goes only if clean (no force)…
+  const wt = fakeRpc({ ...startResponse(), ...worktreeCreateResponse('/wt/new', 'wNEW', 'feat/x', 'wNEW:p1') });
   await assert.rejects(() => startAgent(wt.rpc, PROFILES, { profile: 'claude', worktree: { repo: '/proj' } }, { verify }), /wrong account/);
-  assert.deepEqual(wt.calls.find((c) => c.method === 'worktree.remove')?.params, { workspace_id: 'wNEW', force: true });
+  assert.deepEqual(wt.calls.find((c) => c.method === 'worktree.remove')?.params, { workspace_id: 'wNEW', force: false });
+  assert.equal(wt.calls.some((c) => c.method === 'pane.close'), false);
+
+  // …else the agent is stopped and the checkout kept, and the error says so
+  const dirty = fakeRpc({ ...startResponse(), ...worktreeCreateResponse('/wt/new', 'wNEW', 'feat/x', 'wNEW:p1'), 'worktree.remove': herdrError('dirty_worktree_requires_force') });
+  await assert.rejects(() => startAgent(dirty.rpc, PROFILES, { profile: 'claude', worktree: { repo: '/proj' } }, { verify }),
+    (e: unknown) => e instanceof LifecycleError && e.status === 409 && /wrong account.*\/wt\/new has changes, so it was kept/.test(e.message));
+  assert.deepEqual(dirty.calls.find((c) => c.method === 'pane.close')?.params, { pane_id: 'wNEW:p1' });
 
   const ok = fakeRpc(startResponse('P:ok'));
   let checked = '';
