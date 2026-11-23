@@ -126,6 +126,19 @@ async function stopStarted(rpc: Rpc, paneId: string): Promise<string> {
   }
 }
 
+/**
+ * Wait until herdr detects the agent in `paneId`. agent.start answers once the command
+ * is typed into the shell, so until then the pane's foreground is still the shell (or
+ * its fork) and its environment is not yet the agent's.
+ */
+export async function waitForDetectedAgent(rpc: Rpc, paneId: string, ms = AGENT_READY_MS): Promise<void> {
+  for (const end = Date.now() + ms; ; await sleep(250)) {
+    const agent = agentFromResult(await rpc('agent.get', { target: paneId }).catch(() => null));
+    if (agent?.agent) return;
+    if (Date.now() > end) throw new LifecycleError(504, 'not_detected', `the agent did not come up within ${ms / 1000}s`);
+  }
+}
+
 /** Best-effort pane close (rolling back a pane we opened); never throws. */
 async function closeQuietly(rpc: Rpc, paneId: string | undefined): Promise<void> {
   if (!paneId) return;
@@ -217,6 +230,8 @@ export interface StartAgentInput {
   worktree?: CreateWorktreeInput;
   /** open a new workspace at cwd instead of a tab in `workspace` (or the focused one) */
   newWorkspace?: boolean;
+  /** environment for the new tab/workspace's shell, and so the agent (not for a worktree) */
+  env?: Record<string, string>;
 }
 
 export interface StartAgentOptions {
@@ -278,10 +293,11 @@ export async function startAgent(
   } else {
     const params: Record<string, unknown> = { label: name, focus: false };
     if (typeof input.cwd === 'string') params.cwd = input.cwd;
+    if (input.env) params.env = input.env;
     let opened: { root_pane?: { pane_id?: string } } | null;
     if (input.newWorkspace === true) {
       // herdr labels a new workspace after its dir
-      opened = (await rpc('workspace.create', { cwd: params.cwd, focus: false })) as typeof opened;
+      opened = (await rpc('workspace.create', { cwd: params.cwd, env: params.env, focus: false })) as typeof opened;
     } else if (typeof input.workspace === 'string' && input.workspace) {
       opened = (await rpc('tab.create', { ...params, workspace_id: input.workspace })) as typeof opened;
     } else {
@@ -372,6 +388,13 @@ export async function clearAgent(
   profiles: Record<string, LaunchProfile>,
   target: string,
   lookupProfile?: (paneId: string) => string | undefined,
+  opts: {
+    /** the environment the replacement needs to stay what the old agent was (its Claude
+     *  account, say); throwing refuses the clear before anything is opened */
+    envFor?: (oldPaneId: string) => Promise<Record<string, string> | undefined>;
+    /** runs once the replacement is up; throwing closes it and keeps the old agent */
+    verify?: (paneId: string) => Promise<void>;
+  } = {},
 ): Promise<ClearAgentResult> {
   const agent = agentFromResult(await rpc('agent.get', { target }));
   if (!agent) throw new LifecycleError(404, 'not_found', 'agent not found');
@@ -400,15 +423,24 @@ export async function clearAgent(
   // agent's tab/workspace and takes over its slot once the old pane closes.
   const splitParams: Record<string, unknown> = { target_pane_id: oldPaneId, direction: 'right', focus: false };
   if (cwd) splitParams.cwd = cwd;
+  const env = await opts.envFor?.(oldPaneId);
+  if (env) splitParams.env = env;
   const split = (await rpc('pane.split', splitParams)) as { pane?: { pane_id?: string } } | null;
   const paneId = split?.pane?.pane_id;
   const name = autoName(key);
+  let launched = false;
   try {
     if (!paneId) throw new LifecycleError(502, 'error', 'herdr returned no pane to start the replacement in');
     await launchInPane(rpc, paneId, profiles[key], name);
+    launched = true;
+    await opts.verify?.(paneId);
   } catch (err) {
-    await closeQuietly(rpc, paneId);
-    throw err;
+    if (!launched) {
+      await closeQuietly(rpc, paneId);
+      throw err;
+    }
+    // a failed verify: say whether the replacement could be stopped (it may still run)
+    throw new LifecycleError(409, 'start_undone', `${(err as Error).message}; the old agent was kept (the new one: ${await stopStarted(rpc, paneId!)})`);
   }
 
   // Replacement is up; retire the old pane. A close failure just leaves the old
