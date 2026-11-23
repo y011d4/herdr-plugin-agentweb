@@ -1311,15 +1311,19 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     paneInput.style.height = `${Math.min(paneInput.scrollHeight, 120)}px`;
   };
   paneInput.addEventListener('input', autoGrow);
-  // a new agent's first task the bridge couldn't deliver lands here, ready to send
+  // A new agent's first task the bridge couldn't deliver lands here, ready to send. It
+  // follows edits and is kept until sent or erased, so leaving the pane doesn't lose it.
   if (undeliveredTask?.paneId === paneId) {
     paneInput.value = undeliveredTask.text;
-    undeliveredTask = null;
     autoGrow();
   }
+  paneInput.addEventListener('input', () => {
+    if (undeliveredTask?.paneId === paneId) undeliveredTask = paneInput.value ? { paneId, text: paneInput.value } : null;
+  });
 
   const clearInput = (): void => {
     paneInput.value = '';
+    if (undeliveredTask?.paneId === paneId) undeliveredTask = null;
     autoGrow();
   };
 
