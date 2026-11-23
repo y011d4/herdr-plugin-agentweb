@@ -17,6 +17,7 @@ import type { PromptOption, ParsedPrompt } from './prompt.ts';
 import { dashboardCards, homeSummary, markSeen, shownStatus } from './dashboard-group.ts';
 import type { DashboardCard, SeenDone } from './dashboard-group.ts';
 import { watchMessages } from './watch.ts';
+import { KeptTasks, taskToKeep } from './kept-tasks.ts';
 import type { AppState, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 
 // ── App version ──────────────────────────────────────────────────────────────
@@ -757,9 +758,9 @@ function renderTokenScreen(message?: string): void {
 
 // ── Agent lifecycle UI (start / rename / clear / stop) ────────────────────────
 
-/** First tasks the bridge couldn't deliver to a just-started agent, by pane id. That pane's
- *  view keeps the task (with the user's edits to it) in its composer until it is sent. */
-const undeliveredTasks = new Map<string, string>();
+/** First tasks the bridge couldn't deliver to a just-started agent; each pane's composer
+ *  keeps its task (with the user's edits) until it is sent. */
+const keptTasks = new KeptTasks();
 
 // Minimal modal overlay appended to <body>, above everything (toasts are z 1000,
 // modals sit higher). Closes on backdrop tap, the buttons, or Escape; close() is
@@ -917,9 +918,9 @@ async function openNewAgentModal(): Promise<void> {
       const started = res.name ? `Started ${res.name}` : 'Agent started';
       // the agent never became ready for its task (e.g. waiting on a startup dialog):
       // keep the task in the new pane's composer instead of losing it
-      const keepTask = res.taskDelivered === false && !!task && !!res.paneId;
-      if (keepTask) undeliveredTasks.set(res.paneId!, task);
-      showToast('Agent started', keepTask ? `${started}. The task wasn't sent yet — it's in the composer, tap Send when the agent is ready` : started);
+      const kept = taskToKeep(res, task);
+      if (kept) keptTasks.keep(kept.paneId, kept.text);
+      showToast('Agent started', kept ?`${started}. The task wasn't sent yet — it's in the composer, tap Send when the agent is ready` : started);
       if (res.paneId) navigate(`#/pane/${encodeURIComponent(res.paneId)}`);
     } catch (err) {
       startBtn.disabled = false;
@@ -1312,16 +1313,16 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     paneInput.style.height = `${Math.min(paneInput.scrollHeight, 120)}px`;
   };
   paneInput.addEventListener('input', autoGrow);
-  // A new agent's first task the bridge couldn't deliver lands here, ready to send. It
-  // follows edits (even after being erased) and is kept until sent, so leaving the pane
-  // doesn't lose it.
-  if (undeliveredTasks.has(paneId)) {
-    paneInput.value = undeliveredTasks.get(paneId)!;
+  // A new agent's first task the bridge couldn't deliver lands here, ready to send, and
+  // stays (with the user's edits) until sent, so leaving the pane doesn't lose it. While
+  // its send is in flight the composer is locked, here and in a view reopened meanwhile.
+  const keptDraft = keptTasks.draft(paneId);
+  if (keptDraft !== null) {
+    paneInput.value = keptDraft;
     autoGrow();
   }
-  paneInput.addEventListener('input', () => {
-    if (undeliveredTasks.has(paneId)) undeliveredTasks.set(paneId, paneInput.value);
-  });
+  paneInput.disabled = keptTasks.sending(paneId);
+  paneInput.addEventListener('input', () => keptTasks.edit(paneId, paneInput.value));
 
   const clearInput = (): void => {
     paneInput.value = '';
@@ -1330,11 +1331,10 @@ async function renderPaneDetail(paneId: string): Promise<void> {
 
   document.getElementById('btn-send-enter')!.addEventListener('click', async () => {
     const text = paneInput.value;
-    if (!text) return;
-    // Stop keeping an undelivered task once it's being sent (so a reopened view can't
-    // offer it again mid-send); put it back if the send fails.
-    const sendingKept = undeliveredTasks.get(paneId) === text;
-    if (sendingKept) undeliveredTasks.delete(paneId);
+    if (!text || keptTasks.sending(paneId)) return;
+    const kept = keptTasks.beginSend(paneId, text); // false unless the pane has a kept task
+    if (kept) paneInput.disabled = true;
+    let restored: string | null = null;
     try {
       // clear:true wipes the pane's composer first so this message submits on its
       // own — never merged with a half-typed draft the user left in the pane that
@@ -1344,11 +1344,27 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       // text+enter. enter:true then submits in the same request.
       const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true, ...(isClaude ? { clear: true } : {}) });
+      if (kept) keptTasks.finishSend(paneId, true);
       if (paneInput.value === text) clearInput(); // clear on success, but keep text typed mid-send
       queuePaneEcho();
     } catch (err) {
-      if (sendingKept && !undeliveredTasks.has(paneId)) undeliveredTasks.set(paneId, text);
+      if (kept) restored = keptTasks.finishSend(paneId, false);
       showToast('Send failed', (err as Error).message);
+    } finally {
+      if (kept) {
+        // Unlock the pane's composer as displayed now — this view's, or one reopened
+        // during the send (this textarea is then detached) — and on failure show the
+        // task in it again.
+        paneInput.disabled = false;
+        const live = activePaneId === paneId ? document.getElementById('pane-input') as HTMLTextAreaElement | null : null;
+        if (live) {
+          live.disabled = false;
+          if (restored !== null) {
+            live.value = restored;
+            live.dispatchEvent(new Event('input')); // resize it
+          }
+        }
+      }
     }
   });
 
