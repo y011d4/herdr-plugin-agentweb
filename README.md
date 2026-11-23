@@ -357,9 +357,12 @@ about what each orchestrator (and so each account) sees.
   herdr's agent-name rule (lowercased, a-z/0-9/`-`/`_`, max 32). Pass a `"worktree": {"repo", "branch", "base"}` object
   instead of `cwd` to **create a worktree and launch the agent in its root pane atomically** — the worktree is
   rolled back if the agent fails to start. The new pane appears in `/api/state` a moment later.
+  New worktrees go **next to their repo**, as `<repo>-wt-<branch>` (a blank branch gets a generated
+  `worktree/…` name), not into herdr's worktrees dir, so whatever covers the repo from a parent dir — a
+  direnv `.envrc` per org dir that picks the Claude account, say — covers the checkout too.
 - `POST /api/worktrees` `{"cwd": "/repo", "branch": "feat/x", "base": "origin/main"}` — create a git
-  worktree (herdr `worktree.create`; `cwd` is any path in the source repo, `branch`/`base` optional)
-  and return `{"workspaceId", "checkoutPath", "branch", "paneId"}`. Standalone (create a worktree
+  worktree next to the repo, as above (herdr `worktree.create`; `cwd` is any path in the source repo,
+  `branch`/`base` optional) and return `{"workspaceId", "checkoutPath", "branch", "paneId"}`. Standalone (create a worktree
   without an agent); the New agent form's "＋ New worktree…" option instead uses the atomic
   `worktree` spec on `POST /api/agents` above.
 - `DELETE /api/panes/:paneId` — stop an agent by closing its pane
