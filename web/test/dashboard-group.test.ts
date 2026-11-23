@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { dashboardCards, homeSummary } from '../src/dashboard-group.ts';
+import { dashboardCards, homeSummary, markSeen, shownStatus } from '../src/dashboard-group.ts';
 import type { AgentStatus, PaneNode, WorkspaceNode, WorktreeInfo } from '../src/types.ts';
 
 function agentPane(id: string, sinceUnixMs: number, status: AgentStatus = 'idle'): PaneNode {
@@ -59,5 +59,30 @@ describe('homeSummary', () => {
     const s = homeSummary(ws, 'orch');
     assert.deepEqual(s.blocked.map((c) => c.pane.paneId), ['b2', 'b1']);
     assert.deepEqual([s.working, s.done, s.idle], [1, 1, 2]);
+  });
+
+  it('counts a done agent the phone has opened as idle', () => {
+    const ws = [wsNode('A', [agentPane('d1', 10, 'done'), agentPane('d2', 10, 'done')])];
+    const s = homeSummary(ws, null, markSeen({}, ws, 'd1'));
+    assert.deepEqual([s.done, s.idle], [1, 1]);
+  });
+});
+
+describe('phone-seen done', () => {
+  const done = (id: string, since: number): PaneNode => agentPane(id, since, 'done');
+
+  it('shows a done pane the phone has opened as idle, until its next status change', () => {
+    const seen = markSeen({}, [wsNode('A', [done('a1', 10)])], 'a1');
+    assert.equal(shownStatus(done('a1', 10), seen), 'idle');
+    assert.equal(shownStatus(done('a1', 20), seen), 'done'); // a new completion
+    assert.equal(shownStatus(done('b1', 10), seen), 'done'); // another pane
+  });
+
+  it('only records done panes and drops entries that went stale', () => {
+    let seen = markSeen({}, [wsNode('A', [agentPane('w', 1)])], 'w');
+    assert.deepEqual(seen, {}); // not done -> nothing to acknowledge
+    seen = markSeen({}, [wsNode('A', [done('a1', 10), done('a2', 10)])], 'a1');
+    seen = markSeen(seen, [wsNode('A', [done('a1', 30), done('a2', 10)])], 'a2');
+    assert.deepEqual(seen, { a2: 10 }); // a1 changed since it was seen
   });
 });
