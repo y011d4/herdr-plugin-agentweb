@@ -10,7 +10,9 @@ const BACKOFF_INITIAL_MS = 1_000;
 const BACKOFF_MAX_MS = 30_000;
 const PANE_REBUILD_DEBOUNCE_MS = 250;
 const STATE_BROADCAST_DEBOUNCE_MS = 250;
-const COMPLETION_SEQ_DEBOUNCE_MS = 250;
+// short, so the seq reaches the phone with (or right after) the done status itself:
+// the phone records a "seen" only against a known seq
+const COMPLETION_SEQ_DEBOUNCE_MS = 50;
 
 // Extend Error to carry a herdrCode property from RPC responses
 interface HerdrError extends Error {

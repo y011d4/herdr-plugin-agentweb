@@ -15,7 +15,7 @@ import type { TimelineItem } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt.ts';
 import type { PromptOption, ParsedPrompt } from './prompt.ts';
 import { dashboardCards, homeSummary, markSeen, shownStatus } from './dashboard-group.ts';
-import type { DashboardCard, SeenDone, SeenViews } from './dashboard-group.ts';
+import type { DashboardCard, SeenDone } from './dashboard-group.ts';
 import { watchMessages } from './watch.ts';
 import type { AppState, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 
@@ -59,28 +59,16 @@ let seenDone: SeenDone = (() => {
   try { return JSON.parse(localStorage.getItem(STORAGE_SEEN) ?? '{}') ?? {}; } catch { return {}; }
 })();
 
-/**
- * Done panes viewed before their completionSeq arrived; recorded when a state push
- * brings it. Dropped on any disconnect — bridge <-> herdr (markSeen) or phone <->
- * bridge (WS open): a missed done -> working -> done keeps the same sinceUnixMs.
- */
-let seenPending: SeenViews = {};
-
 // Opening a done pane (or watching it finish) with the page visible counts as
 // seeing it, like viewing it in herdr. Kept on the phone only: herdr can only mark
-// a pane seen by focusing it, which would switch the PC's screen.
+// a pane seen by focusing it, which would switch the PC's screen. Recorded against
+// herdr's completionSeq, which follows the done status by a moment; until then each
+// state push while the pane is open retries.
 function markActivePaneSeen(): void {
   if (!activePaneId || document.hidden || !appState) return;
   const agent = findPane(activePaneId)?.pane.agent;
-  if (agent?.status !== 'done' || (agent.completionSeq != null && seenDone[activePaneId] === agent.completionSeq)) return;
-  recordSeen({ ...seenPending, [activePaneId]: agent.sinceUnixMs });
-}
-
-function recordSeen(views: SeenViews): void {
-  const r = markSeen(seenDone, { connected: appState?.connected ?? false, workspaces: appState?.workspaces ?? [] }, views);
-  seenPending = r.pending;
-  if (JSON.stringify(r.seen) === JSON.stringify(seenDone)) return;
-  seenDone = r.seen;
+  if (agent?.status !== 'done' || agent.completionSeq == null || seenDone[activePaneId] === agent.completionSeq) return;
+  seenDone = markSeen(seenDone, appState.workspaces ?? [], activePaneId);
   // best-effort: a storage failure must not stop the pane view from rendering
   try { localStorage.setItem(STORAGE_SEEN, JSON.stringify(seenDone)); } catch { /* memory-only */ }
 }
@@ -220,7 +208,6 @@ function wsConnect(): void {
 
   ws.addEventListener('open', () => {
     wsConnected = true;
-    seenPending = {}; // transitions may have been missed while disconnected (see seenPending)
     wsReconnectDelay = WS_RECONNECT_BASE_MS;
     updateConnBadge();
     stopStatePoll();
@@ -340,7 +327,6 @@ function stopStatePoll(): void {
 // this is also where a first state routes the app, whichever source wins the race.
 function onStateUpdate(): void {
   updateConnBadge(); // state carries the bridge->herdr link status
-  if (appState && Object.keys(seenPending).length) recordSeen(seenPending); // before anything renders a badge
   if (goHomeToOrchestrator()) return; // first state of a fresh open: decide home
   // Nothing rendered yet (startup), or the token was just (re-)entered and the
   // login screen is still up: render the current route.
