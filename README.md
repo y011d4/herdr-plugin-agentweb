@@ -304,14 +304,21 @@ its own Claude account. The account is an agent process's `CLAUDE_CONFIG_DIR` (d
 
 The `.claude/settings.json` the plugin writes keeps the orchestrator to those commands:
 `"defaultMode": "dontAsk"` (anything not allowed is refused without asking), allow only those
-commands, deny the herdr CLI and other accounts' transcripts, and keep read-only commands (which
-`dontAsk` still runs) inside its own directory. Workers themselves are ordinary agents under your
-own permission prompts; this boundary is about what each orchestrator, and so each account, sees.
+commands, and deny the herdr CLI and other accounts' transcripts. `dontAsk` still runs read-only
+commands, but already refuses the usual readers (`cat`, `ls`, `grep`, `git -C`…) on paths outside
+the orchestrator's directory; as of Claude Code 2.1.322 it lets `tree`, `du`, `fd`/`fdfind` and
+`lsof` through, so those are denied too. Existence checks (`test -e`, `realpath`) still answer.
+(Claude Code's `blockReadsOutsideWorkingDirectories` is not used: it would also refuse
+`agentwebctl.js` itself, whose path and `--cwd`/worktree paths lie outside the directory, and no
+allow rule lifts it.) Workers themselves are ordinary agents under your own permission prompts;
+this boundary is about what each orchestrator, and so each account, sees.
 
 **Older setups.** Without `orchestrators`, nothing changes. The single `"orchestrator_dir": "<dir>"`,
 or else the old default `~/.local/share/herdr-agentweb/dispatcher` if it exists, is still the one
 orchestrator, named `default`. It runs your own `CLAUDE.md` from that directory, which the plugin
-never writes to. To move to managed orchestrators:
+never writes to. If its `.claude/settings.json` has `blockReadsOutsideWorkingDirectories` (an
+earlier README suggested it), remove it, since it refuses every `agentwebctl.js` call, and deny the
+listers above instead. To move to managed orchestrators:
 
 1. Add `orchestrators` to the config and restart the bridge. The plugin creates their directories.
 2. Put anything from your old `CLAUDE.md` that is still yours into each `local.md`. The bundled
