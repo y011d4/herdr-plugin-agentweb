@@ -373,7 +373,8 @@ async function overview(): Promise<number> {
     details.set(a.pane_id, detail);
     const sess = a.agent_session;
     if (sess?.source?.startsWith('herdr:claude') && sess.value) {
-      const file = resolveTranscriptPath(sess.value, a.foreground_cwd || a.cwd || null);
+      // own: every listed agent runs under it, wherever its CLAUDE_CONFIG_DIR lives
+      const file = resolveTranscriptPath(sess.value, a.foreground_cwd || a.cwd || null, own ? [own] : []);
       if (file) {
         detail.items = readTranscriptTail(file, 1000).items;
         // the request scrolled out of the tail window: look further back for it
@@ -517,13 +518,17 @@ async function worktree(): Promise<number> {
   const refuse = (why: string): number => { console.error(`refused: ${why}; ${dir} was left as it is`); return 1; };
   const snap = ((await herdrRpc('session.snapshot')) as { snapshot?: {
     workspaces?: Array<{ workspace_id: string; worktree?: { checkout_path?: string; repo_root?: string; is_linked_worktree?: boolean } }>;
-    panes?: Array<{ workspace_id?: string; agent?: string | null }>;
+    panes?: Array<{ workspace_id?: string; agent?: string | null; cwd?: string; foreground_cwd?: string }>;
   } }).snapshot ?? {};
   const ws = snap.workspaces?.find((w) => w.worktree?.checkout_path === dir && w.worktree.is_linked_worktree);
   if (!ws?.worktree?.repo_root) return refuse('not a linked worktree open in herdr');
   const own = await ownAccount();
   if (own === null || (await dirAccount(dir)) !== own) return refuse('it is not under this Claude account');
-  if (snap.panes?.some((p) => p.workspace_id === ws.workspace_id && p.agent)) return refuse('an agent still runs in it (end it with /exit first)');
+  // in its workspace, or working in the checkout from any other
+  const inDir = (c?: string) => !!c && (c === dir || c.startsWith(dir + '/'));
+  if (snap.panes?.some((p) => p.agent && (p.workspace_id === ws.workspace_id || inDir(p.cwd) || inDir(p.foreground_cwd)))) {
+    return refuse('an agent still runs in it (end it with /exit first)');
+  }
 
   const git = (...args: string[]) => spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', timeout: 60_000 });
   const branch = git('symbolic-ref', '--short', 'HEAD').stdout?.trim();

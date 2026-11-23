@@ -209,7 +209,8 @@ export interface StartAgentInput {
 }
 
 export interface StartAgentOptions {
-  /** runs once the agent is up; throwing rolls the start back (pane/worktree) and rethrows */
+  /** runs once the agent is up; throwing rolls the start back (pane/worktree) and rethrows
+   *  (by then the agent has run, so a worktree with changes is kept, not forced away) */
   verify?: (paneId: string) => Promise<void>;
 }
 
@@ -248,11 +249,18 @@ export async function startAgent(
   // undo that (best-effort) so the caller never has to clean up a dangling tab or
   // worktree, or hit "branch already exists" on retry.
   let paneId: string | undefined;
-  let rollback: () => Promise<void>;
+  // undoes what was opened; says what it had to leave behind, if anything
+  let rollback: (launched: boolean) => Promise<string | null>;
   if (input.worktree !== undefined) {
     const wt = await createWorktree(rpc, input.worktree);
     paneId = wt.paneId ?? undefined;
-    rollback = () => rollbackWorktree(rpc, wt.workspaceId);
+    rollback = async (launched) => {
+      // A launched agent (failed verify) may already have written files: remove only a
+      // clean worktree, else just stop the agent and keep the checkout.
+      if (await rollbackWorktree(rpc, wt.workspaceId, !launched) || !launched) return null;
+      await closeQuietly(rpc, paneId);
+      return `${wt.checkoutPath} has changes, so it was kept`;
+    };
   } else {
     const params: Record<string, unknown> = { label: name, focus: false };
     if (typeof input.cwd === 'string') params.cwd = input.cwd;
@@ -273,16 +281,19 @@ export async function startAgent(
       }
     }
     paneId = opened?.root_pane?.pane_id;
-    rollback = () => closeQuietly(rpc, paneId);
+    rollback = async () => { await closeQuietly(rpc, paneId); return null; };
   }
 
   let started: RawAgentInfo | null;
+  let launched = false;
   try {
     if (!paneId) throw new LifecycleError(502, 'error', 'herdr returned no pane to start the agent in');
     started = await launchInPane(rpc, paneId, profile, name);
+    launched = true;
     await opts.verify?.(paneId);
   } catch (err) {
-    await rollback();
+    const kept = await rollback(launched);
+    if (kept) throw new LifecycleError(409, 'worktree_kept', `${(err as Error).message}; ${kept}`);
     throw err;
   }
 
@@ -453,13 +464,16 @@ export async function createWorktree(rpc: Rpc, input: CreateWorktreeInput): Prom
   };
 }
 
-/** Best-effort removal of a worktree we just created (rollback); never throws. */
-async function rollbackWorktree(rpc: Rpc, workspaceId: string | null): Promise<void> {
-  if (!workspaceId) return;
+/** Best-effort removal of a worktree we just created (rollback); never throws. Without
+ *  `force`, herdr refuses a worktree with changes. Reports whether it was removed. */
+async function rollbackWorktree(rpc: Rpc, workspaceId: string | null, force = true): Promise<boolean> {
+  if (!workspaceId) return false;
   try {
-    await rpc('worktree.remove', { workspace_id: workspaceId, force: true });
+    await rpc('worktree.remove', { workspace_id: workspaceId, force });
+    return true;
   } catch {
     /* best-effort: a failed rollback leaves a worktree behind, but must not mask
        the original agent-start error the caller is about to see */
+    return false;
   }
 }
