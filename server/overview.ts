@@ -97,9 +97,10 @@ export function formatOverview(
     const last = main.findLast((i) => i.kind === 'assistant');
     if (last?.kind === 'assistant') lines.push(`  last: ${clip(last.text, 300)}`);
     // The call still open in the current turn — the newest tool_use since the last
-    // user turn with no result yet (parallel calls finish out of order, so the
-    // final item can be another call's result).
-    const turn = main.slice(main.findLastIndex((i) => i.kind === 'user') + 1);
+    // real user request with no result yet (parallel calls finish out of order, so
+    // the final item can be another call's result). Injected turns (a background
+    // task's notification, a reminder) land mid-turn and don't end it.
+    const turn = main.slice(main.findLastIndex(isTaskTurn) + 1);
     const resolved = new Set(turn.flatMap((i) => (i.kind === 'tool_result' ? [i.forId] : [])));
     const open = turn.findLast((i) => i.kind === 'tool_use' && !resolved.has(i.id));
     if (open?.kind === 'tool_use' && (status === 'working' || status === 'blocked')) {

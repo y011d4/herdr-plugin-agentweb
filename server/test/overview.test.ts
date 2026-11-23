@@ -58,6 +58,8 @@ describe('formatOverview', () => {
     assert.match(run([agent('p', 'blocked')], { p: { items: parallel } }), /\n {2}pending: Bash a$/);
     const done = [user('t'), call('a', 'Bash'), res('a')];
     assert.doesNotMatch(run([agent('p', 'working')], { p: { items: done } }), /doing/);
+    const midTurn = [user('t'), call('a', 'Bash'), call('b', 'Edit'), res('b'), user('<task-notification>bg done</task-notification>')];
+    assert.match(run([agent('p', 'blocked')], { p: { items: midTurn } }), /\n {2}pending: Bash a$/); // an injected turn doesn't end the turn
     const stale = [user('t'), call('old', 'Bash'), user('next'), asst('thinking about it')];
     assert.doesNotMatch(run([agent('p', 'working')], { p: { items: stale } }), /doing/); // an earlier turn's unanswered call
   });
