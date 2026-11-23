@@ -83,9 +83,18 @@ export type SeenViews = Record<string, number>;
  * the done it saw (same sinceUnixMs), so a missed done -> working -> done can't
  * mark the newer completion. A viewed done whose completionSeq hasn't arrived yet
  * comes back in `pending`, to pass in again with a later state; a pane whose seq
- * is being (re)fetched keeps its existing record.
+ * is being (re)fetched keeps its existing record. While the bridge is cut off from
+ * herdr nothing new is recorded and pending views are dropped: a done -> working ->
+ * done missed meanwhile keeps the old sinceUnixMs, so a view could land on the
+ * newer, unseen completion (losing one only shows done again).
  */
-export function markSeen(seen: SeenDone, workspaces: WorkspaceNode[], views: SeenViews): { seen: SeenDone; pending: SeenViews } {
+export function markSeen(
+  seen: SeenDone,
+  state: { connected: boolean; workspaces: WorkspaceNode[] },
+  views: SeenViews,
+): { seen: SeenDone; pending: SeenViews } {
+  if (!state.connected) return { seen, pending: {} };
+  const { workspaces } = state;
   const next: SeenDone = {};
   const pending: SeenViews = {};
   for (const ws of workspaces) {

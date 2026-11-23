@@ -61,9 +61,8 @@ let seenDone: SeenDone = (() => {
 
 /**
  * Done panes viewed before their completionSeq arrived; recorded when a state push
- * brings it. Dropped on any disconnect (bridge <-> herdr or phone <-> bridge): a
- * done -> working -> done missed meanwhile keeps the same sinceUnixMs, so a pending
- * view could otherwise land on the newer, unseen completion. Losing one shows done.
+ * brings it. Dropped on any disconnect — bridge <-> herdr (markSeen) or phone <->
+ * bridge (WS open): a missed done -> working -> done keeps the same sinceUnixMs.
  */
 let seenPending: SeenViews = {};
 
@@ -78,7 +77,7 @@ function markActivePaneSeen(): void {
 }
 
 function recordSeen(views: SeenViews): void {
-  const r = markSeen(seenDone, appState?.workspaces ?? [], views);
+  const r = markSeen(seenDone, { connected: appState?.connected ?? false, workspaces: appState?.workspaces ?? [] }, views);
   seenPending = r.pending;
   if (JSON.stringify(r.seen) === JSON.stringify(seenDone)) return;
   seenDone = r.seen;
@@ -341,7 +340,6 @@ function stopStatePoll(): void {
 // this is also where a first state routes the app, whichever source wins the race.
 function onStateUpdate(): void {
   updateConnBadge(); // state carries the bridge->herdr link status
-  if (appState && !appState.connected) seenPending = {}; // see seenPending
   if (appState && Object.keys(seenPending).length) recordSeen(seenPending); // before anything renders a badge
   if (goHomeToOrchestrator()) return; // first state of a fresh open: decide home
   // Nothing rendered yet (startup), or the token was just (re-)entered and the

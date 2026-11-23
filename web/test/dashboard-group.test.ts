@@ -63,7 +63,7 @@ describe('homeSummary', () => {
 
   it('counts a done agent the phone has opened as idle', () => {
     const ws = [wsNode('A', [agentPane('d1', 10, 'done', 5), agentPane('d2', 10, 'done', 6)])];
-    const s = homeSummary(ws, null, markSeen({}, ws, { d1: 10 }).seen);
+    const s = homeSummary(ws, null, markSeen({}, { connected: true, workspaces: ws }, { d1: 10 }).seen);
     assert.deepEqual([s.done, s.idle], [1, 1]);
   });
 });
@@ -72,7 +72,8 @@ describe('phone-seen done', () => {
   // completionSeq is herdr's completion_seq: which completion this is (stable across bridge
   // restarts); sinceUnixMs changes on every status change, so it ties a view to one done
   const done = (id: string, seq: number | null, since = 1): PaneNode => agentPane(id, since, 'done', seq);
-  const ws1 = (...panes: PaneNode[]) => [wsNode('A', panes)];
+  const ws1 = (...panes: PaneNode[]) => ({ connected: true, workspaces: [wsNode('A', panes)] });
+  const offline = (...panes: PaneNode[]) => ({ ...ws1(...panes), connected: false });
 
   it('shows a done pane the phone has opened as idle, until its next completion', () => {
     const { seen } = markSeen({}, ws1(done('a1', 10)), { a1: 1 });
@@ -99,6 +100,16 @@ describe('phone-seen done', () => {
     const { pending } = markSeen({}, ws1(done('a1', null, 5)), { a1: 5 });
     assert.deepEqual(markSeen({}, ws1(done('a1', 43, 9)), pending), { seen: {}, pending: {} }); // a later done
     assert.deepEqual(markSeen({}, ws1(agentPane('a1', 9, 'working')), pending), { seen: {}, pending: {} });
+  });
+
+  it('records nothing new and drops pending views while the bridge is cut off from herdr', () => {
+    // a done -> working -> done missed during the outage keeps the old sinceUnixMs, so a
+    // view made (or kept pending) meanwhile could land on the newer, unseen completion
+    const { pending } = markSeen({}, ws1(done('a1', null, 5)), { a1: 5 });
+    const out = markSeen({ b1: 3 }, offline(done('a1', null, 5), done('b1', 3)), { ...pending, b1: 1 });
+    assert.deepEqual(out, { seen: { b1: 3 }, pending: {} });
+    // back online, the snapshot still says done since 5 but it is a new completion: stays done
+    assert.equal(shownStatus(done('a1', 44, 5), markSeen(out.seen, ws1(done('a1', 44, 5)), out.pending).seen), 'done');
   });
 
   it("keeps a done pane's record while its completionSeq is being refetched (bridge restart)", () => {
