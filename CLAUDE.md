@@ -124,6 +124,13 @@ Verified live against herdr 0.7.3 / protocol 16:
   a `blocked` pane, so the chat answer UI never needs to drive it.
 - herdr emits focus events ~10/s during desktop activity. Never let them
   trigger WS pushes; apply them to the model silently.
+- **`done` vs `idle` is the server's per-pane `seen` flag, and only focus sets it**
+  (checked in herdr 0.9.5 source): `pane.focus` / `agent.focus` / tab or workspace
+  switches mark the active tab seen; reads don't; no API sets `seen` alone. Focus
+  would switch the PC's screen, so the PWA keeps its own "seen done" record
+  (`markSeen`/`shownStatus` in `web/src/dashboard-group.ts`, localStorage) and leaves
+  herdr's state alone. herdr's TUI clients likewise track viewed completions per client.
+  Don't fake it with `pane.report_agent`: that hijacks the agent's hook lifecycle authority.
 - Invalid enum values in request params make herdr **drop the connection
   without a response** (surfaces as opaque "connection closed"). The bridge
   validates enums in REST routes and returns a clear 400 instead.

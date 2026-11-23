@@ -8,6 +8,7 @@ mobile-first PWA:
 
 - Dashboard of all agents across all workspaces with live status
   (idle / working / **blocked** / done), blocked agents sorted to the top;
+  a done agent you open on the phone reads as idle there (herdr's own state is left as is);
   each card shows its git branch, and a linked worktree's agents appear inside their
   main checkout, chipped as a worktree
 - Start, rename, clear, and stop agents from the phone: **+** on the dashboard launches an

@@ -5,7 +5,7 @@
  * (sinceUnixMs) first. Each card carries its own workspace label and git context
  * since there are no per-workspace group headers.
  */
-import type { PaneNode, WorkspaceNode } from './types.ts';
+import type { AgentStatus, PaneNode, WorkspaceNode } from './types.ts';
 
 export interface DashboardCard {
   /** always has an agent */
@@ -52,15 +52,46 @@ export interface HomeSummary {
 }
 
 /** The home status bar: every agent but the orchestrator itself — the ones that need the user, and counts of the rest. */
-export function homeSummary(workspaces: WorkspaceNode[], orchestratorPaneId: string | null): HomeSummary {
+export function homeSummary(workspaces: WorkspaceNode[], orchestratorPaneId: string | null, seen: SeenDone = {}): HomeSummary {
   const s: HomeSummary = { blocked: [], working: 0, done: 0, idle: 0 };
   for (const c of dashboardCards(workspaces)) {
     if (c.pane.paneId === orchestratorPaneId) continue;
-    const st = c.pane.agent!.status;
+    const st = shownStatus(c.pane, seen);
     if (st === 'blocked') s.blocked.push(c);
     else if (st === 'working') s.working++;
     else if (st === 'done') s.done++;
     else s.idle++;
   }
   return s;
+}
+
+/**
+ * Done panes this phone has already looked at: paneId -> the sinceUnixMs of the
+ * done status it saw. herdr's server-side "seen" flag (what turns done into idle)
+ * can only be set by focusing the pane, which would switch the PC's screen, so the
+ * phone keeps its own record, the way each herdr TUI client tracks the completions
+ * it has viewed. sinceUnixMs changes on every status change, so the next completion
+ * shows as done again.
+ */
+export type SeenDone = Record<string, number>;
+
+/** Record `paneId` as seen if it is done; drop entries whose done status has since changed. */
+export function markSeen(seen: SeenDone, workspaces: WorkspaceNode[], paneId: string): SeenDone {
+  const next: SeenDone = {};
+  for (const ws of workspaces) {
+    for (const t of ws.tabs ?? []) {
+      for (const p of t.panes ?? []) {
+        if (p.agent?.status !== 'done') continue;
+        const since = p.agent.sinceUnixMs;
+        if (p.paneId === paneId || seen[p.paneId] === since) next[p.paneId] = since;
+      }
+    }
+  }
+  return next;
+}
+
+/** The status to show for an agent pane: a done the phone has seen reads as idle. */
+export function shownStatus(pane: PaneNode, seen: SeenDone): AgentStatus {
+  const { status, sinceUnixMs } = pane.agent!;
+  return status === 'done' && seen[pane.paneId] === sinceUnixMs ? 'idle' : status;
 }
