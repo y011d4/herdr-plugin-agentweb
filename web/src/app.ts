@@ -59,7 +59,12 @@ let seenDone: SeenDone = (() => {
   try { return JSON.parse(localStorage.getItem(STORAGE_SEEN) ?? '{}') ?? {}; } catch { return {}; }
 })();
 
-/** Done panes viewed before their completionSeq arrived; recorded when a state push brings it. */
+/**
+ * Done panes viewed before their completionSeq arrived; recorded when a state push
+ * brings it. Dropped on any disconnect (bridge <-> herdr or phone <-> bridge): a
+ * done -> working -> done missed meanwhile keeps the same sinceUnixMs, so a pending
+ * view could otherwise land on the newer, unseen completion. Losing one shows done.
+ */
 let seenPending: SeenViews = {};
 
 // Opening a done pane (or watching it finish) with the page visible counts as
@@ -216,6 +221,7 @@ function wsConnect(): void {
 
   ws.addEventListener('open', () => {
     wsConnected = true;
+    seenPending = {}; // transitions may have been missed while disconnected (see seenPending)
     wsReconnectDelay = WS_RECONNECT_BASE_MS;
     updateConnBadge();
     stopStatePoll();
@@ -335,6 +341,7 @@ function stopStatePoll(): void {
 // this is also where a first state routes the app, whichever source wins the race.
 function onStateUpdate(): void {
   updateConnBadge(); // state carries the bridge->herdr link status
+  if (appState && !appState.connected) seenPending = {}; // see seenPending
   if (appState && Object.keys(seenPending).length) recordSeen(seenPending); // before anything renders a badge
   if (goHomeToOrchestrator()) return; // first state of a fresh open: decide home
   // Nothing rendered yet (startup), or the token was just (re-)entered and the
