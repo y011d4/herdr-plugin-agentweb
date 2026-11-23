@@ -7,9 +7,11 @@ import { toClientState, findOrchestrators } from './state.ts';
 import { buildAgentStatusMessage } from './notify.ts';
 import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail, projectsRootForPid } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt-identity.ts';
-import { startAgent, stopAgent, renameAgent, clearAgent, createWorktree, LifecycleError, type CreateWorktreeInput } from './agent-lifecycle.ts';
+import { startAgent, stopAgent, renameAgent, clearAgent, createWorktree, LifecycleError, waitForDetectedAgent, type CreateWorktreeInput } from './agent-lifecycle.ts';
 import { createPaneProfileStore } from './pane-profile-store.ts';
 import { placeWorktreeNextToRepo } from './worktree-resolve.ts';
+import { startOrchestrator } from './orchestrator.ts';
+import { accountEnv, paneAccount } from './account.ts';
 import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
@@ -307,6 +309,24 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
         return;
       }
       jsonOk(res, clientState(state));
+      return;
+    }
+
+    // Start a configured orchestrator by name (its dir and env come from config, never
+    // from the request), in a new workspace; the client follows it via state.
+    const orchStart = /^\/api\/orchestrators\/([^/]+)\/start$/.exec(pathname);
+    if (orchStart && method === 'POST') {
+      const name = decodePathSegment(orchStart[1]);
+      const def = config.orchestrators.find((o) => o.name === name);
+      if (!def) {
+        jsonError(res, 404, 'not_found', `no orchestrator named ${String(name)}`);
+        return;
+      }
+      try {
+        jsonOk(res, { ok: true, ...(await startOrchestrator(rpc, def)) });
+      } catch (err) {
+        sendError(res, err);
+      }
       return;
     }
 
@@ -677,7 +697,33 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
         try {
           // The store is keyed by pane id, but `target` may be an agent name, so
           // clearAgent resolves the pane id and looks up / reports it (out.oldPaneId).
-          const out = await clearAgent(rpc, config.launchProfiles, target, (pid) => startedProfiles.get(pid));
+          // The replacement keeps the old agent's Claude account, which a plain new pane
+          // wouldn't have. Accounts are read from /proc (Linux): unknown, the clear is
+          // refused; not what came up, the old agent is kept. An orchestrator with a
+          // configured env restarts with it, so it keeps its account without /proc (macOS)
+          // too; other agents there go on as before this check existed (agentwebctl can't
+          // start env-picked workers there, as it can't check them).
+          const readable = process.platform === 'linux';
+          let account: string | null = null;
+          const out = await clearAgent(rpc, config.launchProfiles, target, (pid) => startedProfiles.get(pid), {
+            envFor: async (pid) => {
+              account = readable ? await paneAccount(rpc, pid).catch(() => null) : null;
+              if (!account && readable) {
+                throw new LifecycleError(409, 'account_unknown', "can't tell this agent's Claude account, so it was left as is");
+              }
+              const state = getState();
+              const i = state ? findOrchestrators(state, config.orchestrators).findIndex((o) => o.paneId === pid) : -1;
+              if (i !== -1 && Object.keys(config.orchestrators[i].env).length > 0) return config.orchestrators[i].env;
+              return accountEnv(account);
+            },
+            verify: async (pid) => {
+              if (account === null) return;
+              await waitForDetectedAgent(rpc, pid);
+              if ((await paneAccount(rpc, pid)) !== account) {
+                throw new LifecycleError(409, 'account_mismatch', 'the fresh session came up under another Claude account');
+              }
+            },
+          });
           // Only drop the old mapping once the old pane is actually gone; if the
           // close failed it still exists and must keep its recorded profile.
           if (out.closedOld) startedProfiles.delete(out.oldPaneId);

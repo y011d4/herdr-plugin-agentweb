@@ -25,7 +25,7 @@ import type { AppState, OrchestratorView, WsMessage, WsAgentStatusMessage, WsTra
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v101';
+const BUILD = 'v102';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -332,6 +332,12 @@ function stopStatePoll(): void {
 function onStateUpdate(): void {
   updateConnBadge(); // state carries the bridge->herdr link status
   if (goHomeToOrchestrator()) return; // first state of a fresh open: decide home
+  // an orchestrator started from the list is up: open its Home, if the list is still on screen
+  const started = startingHome ? orchestrators().find((o) => o.name === startingHome && o.paneId) : undefined;
+  if (started) {
+    startingHome = null;
+    if (location.hash === '#/agents') { navigate(homeHash(started.name)); return; }
+  }
   // Nothing rendered yet (startup), or the token was just (re-)entered and the
   // login screen is still up: render the current route.
   if (!routeRendered || document.getElementById('screen-login')) { handleRoute(); return; }
@@ -665,6 +671,21 @@ function holdHomeForReplacement(): void {
 function stopHoldingHome(): void {
   if (homeLostTimer) clearTimeout(homeLostTimer);
   homeLostTimer = null;
+}
+
+// An orchestrator started from the list: its Home opens once the state shows it running.
+let startingHome: string | null = null;
+
+async function startOrchestratorFlow(name: string): Promise<void> {
+  startingHome = name;
+  renderAgentsDashboard(); // the button shows it's starting
+  try {
+    await apiPost(`/api/orchestrators/${encodeURIComponent(name)}/start`);
+  } catch (err) {
+    startingHome = null;
+    showToast('Could not start the orchestrator', (err as Error).message);
+    if (location.hash === '#/agents') renderAgentsDashboard();
+  }
 }
 
 // An orchestrator's pane opens as its Home; every other pane as its own view.
@@ -1143,9 +1164,14 @@ function renderAgentsDashboard(): void {
   // One flat list of every agent, most recent status change first (pure helper,
   // unit-tested in dashboard-group.test.ts).
   const cards = dashboardCards(workspaces, orchestrators().map((o) => o.paneId));
-  const inner = workspaces.length === 0 ? '<div class="empty-state">No workspaces found.</div>'
+  // configured orchestrators that aren't running get a Start button atop the list
+  const stopped = orchestrators().filter((o) => !o.paneId);
+  const starts = stopped.length === 0 ? '' : '<div class="orch-start"><span class="orch-start-label">Start</span>' +
+    stopped.map((o) => `<button class="orch-start-btn" data-orch="${escHtml(o.name)}"${startingHome === o.name ? ' disabled' : ''}>` +
+      `${escHtml(o.label || o.name)}${startingHome === o.name ? ' …' : ''}</button>`).join('') + '</div>';
+  const inner = starts + (workspaces.length === 0 ? '<div class="empty-state">No workspaces found.</div>'
     : cards.length === 0 ? '<div class="empty-state">No active agents.</div>'
-    : `<div class="agent-list">${cards.map(renderCard).join('')}</div>`;
+    : `<div class="agent-list">${cards.map(renderCard).join('')}</div>`);
 
   // Keep the #screen-agents scroll container stable across state-push rebuilds:
   // replacing only its inner content preserves scrollTop and iOS momentum, while
@@ -1165,6 +1191,9 @@ function renderAgentsDashboard(): void {
   scroller.innerHTML = inner;
 
   // Attach tap handlers
+  scroller.querySelectorAll('.orch-start-btn').forEach((b) => {
+    b.addEventListener('click', () => { void startOrchestratorFlow((b as HTMLElement).dataset.orch!); });
+  });
   scroller.querySelectorAll('.agent-card').forEach((card) => {
     const el = card as HTMLElement;
     const paneId = el.dataset.paneId!;
