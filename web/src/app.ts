@@ -1314,12 +1314,14 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   };
   paneInput.addEventListener('input', autoGrow);
   // A new agent's first task the bridge couldn't deliver lands here, ready to send, and
-  // stays (with the user's edits) until sent, so leaving the pane doesn't lose it.
+  // stays (with the user's edits) until sent, so leaving the pane doesn't lose it. While
+  // its send is in flight the composer is locked, here and in a view reopened meanwhile.
   const keptDraft = keptTasks.draft(paneId);
   if (keptDraft !== null) {
     paneInput.value = keptDraft;
     autoGrow();
   }
+  paneInput.disabled = keptTasks.sending(paneId);
   paneInput.addEventListener('input', () => keptTasks.edit(paneId, paneInput.value));
 
   const clearInput = (): void => {
@@ -1329,8 +1331,10 @@ async function renderPaneDetail(paneId: string): Promise<void> {
 
   document.getElementById('btn-send-enter')!.addEventListener('click', async () => {
     const text = paneInput.value;
-    if (!text) return;
-    const keptToken = keptTasks.beginSend(paneId, text); // null unless a kept task's pane
+    if (!text || keptTasks.sending(paneId)) return;
+    const kept = keptTasks.beginSend(paneId, text); // false unless the pane has a kept task
+    if (kept) paneInput.disabled = true;
+    let restored: string | null = null;
     try {
       // clear:true wipes the pane's composer first so this message submits on its
       // own — never merged with a half-typed draft the user left in the pane that
@@ -1340,19 +1344,27 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       // text+enter. enter:true then submits in the same request.
       const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true, ...(isClaude ? { clear: true } : {}) });
-      if (keptToken !== null) keptTasks.finishSend(paneId, keptToken, true);
+      if (kept) keptTasks.finishSend(paneId, true);
       if (paneInput.value === text) clearInput(); // clear on success, but keep text typed mid-send
       queuePaneEcho();
     } catch (err) {
-      const restored = keptToken !== null ? keptTasks.finishSend(paneId, keptToken, false) : null;
-      // The task is kept again; show it in this pane's composer as displayed now, which
-      // may be a view reopened during the send (this one's textarea is then detached).
-      const live = activePaneId === paneId ? document.getElementById('pane-input') as HTMLTextAreaElement | null : null;
-      if (restored !== null && live) {
-        live.value = restored;
-        live.dispatchEvent(new Event('input')); // resize it
-      }
+      if (kept) restored = keptTasks.finishSend(paneId, false);
       showToast('Send failed', (err as Error).message);
+    } finally {
+      if (kept) {
+        // Unlock the pane's composer as displayed now — this view's, or one reopened
+        // during the send (this textarea is then detached) — and on failure show the
+        // task in it again.
+        paneInput.disabled = false;
+        const live = activePaneId === paneId ? document.getElementById('pane-input') as HTMLTextAreaElement | null : null;
+        if (live) {
+          live.disabled = false;
+          if (restored !== null) {
+            live.value = restored;
+            live.dispatchEvent(new Event('input')); // resize it
+          }
+        }
+      }
     }
   });
 
