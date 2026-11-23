@@ -27,7 +27,10 @@ describe('orchestratorFiles', () => {
     assert.equal(p.defaultMode, 'dontAsk');
     assert.deepEqual(p.allow, ['Bash(node /p/agentwebctl.js overview)', 'Bash(node /p/agentwebctl.js agent *)', 'Bash(node /p/agentwebctl.js worktree remove *)']);
     assert.ok(p.deny.includes('Bash(herdr *)') && p.deny.includes('Read(~/.config/claude/**)'));
-    assert.equal(p.blockReadsOutsideWorkingDirectories, true);
+    // listers dontAsk would run on any dir
+    for (const lister of ['tree', 'du', 'fd', 'fdfind', 'lsof']) assert.ok(p.deny.includes(`Bash(${lister} *)`), lister);
+    // it refuses agentwebctl itself: its path and the --cwd/worktree paths are outside the dir
+    assert.equal(p.blockReadsOutsideWorkingDirectories, undefined);
   });
 });
 

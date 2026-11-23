@@ -47,9 +47,14 @@ export function orchestratorFiles(def: OrchestratorDef, rules: string, ctl = AGE
       // anything not allowed below is refused without asking
       defaultMode: 'dontAsk',
       allow: [`Bash(${ctl} overview)`, `Bash(${ctl} agent *)`, `Bash(${ctl} worktree remove *)`],
-      deny: ['Edit', 'Write', 'NotebookEdit', 'Bash(herdr *)', 'Read(~/.config/claude/**)', 'Read(~/.claude/projects/**)'],
-      // dontAsk still runs read-only commands (cat, ls…): keep them inside this dir
-      blockReadsOutsideWorkingDirectories: true,
+      // dontAsk itself refuses most read-only commands (cat, ls, grep, git -C…) on paths outside
+      // this dir, but runs these listers there; existence checks (test -e, realpath) still answer.
+      // Not blockReadsOutsideWorkingDirectories: it also refuses agentwebctl, whose path and
+      // --cwd/worktree paths lie outside this dir, and no allow rule or hook lifts that.
+      // (Measured on Claude Code 2.1.322; recheck on upgrades.)
+      deny: ['Edit', 'Write', 'NotebookEdit', 'Bash(herdr *)',
+        'Bash(tree *)', 'Bash(du *)', 'Bash(fd *)', 'Bash(fdfind *)', 'Bash(lsof *)',
+        'Read(~/.config/claude/**)', 'Read(~/.claude/projects/**)'],
     },
   };
   return {
