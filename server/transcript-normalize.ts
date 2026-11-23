@@ -146,6 +146,35 @@ function toolResultText(content: unknown): string {
   return '';
 }
 
+/** A user turn's content (a string, or text / tool_result blocks) as TimelineItems. */
+function userItems(content: unknown, sidechain: boolean, ts: number | null): TimelineItem[] {
+  const out: TimelineItem[] = [];
+  if (typeof content === 'string') {
+    const text = content.trim();
+    if (text) out.push({ kind: 'user', text, sidechain, ts });
+  } else if (Array.isArray(content)) {
+    for (const block of content) {
+      const b = (block ?? {}) as Record<string, unknown>;
+      if (b.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
+        out.push({ kind: 'user', text: b.text, sidechain, ts });
+      } else if (b.type === 'tool_result') {
+        const raw = toolResultText(b.content);
+        const { text, truncated } = truncate(raw, RESULT_MAX);
+        out.push({
+          kind: 'tool_result',
+          forId: typeof b.tool_use_id === 'string' ? b.tool_use_id : null,
+          text,
+          truncated,
+          isError: b.is_error === true,
+          sidechain,
+          ts,
+        });
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Normalize one raw JSONL line into zero or more TimelineItems.
  * Returns [] for lines we don't render (meta, system, snapshots, unparseable).
@@ -167,35 +196,24 @@ export function normalizeLine(rawLine: string): TimelineItem[] {
 
   const sidechain = o.isSidechain === true;
   const ts = toMs(o.timestamp);
+
+  // A message the user sent while the agent was working, taken in mid-turn (at a tool
+  // boundary): Claude Code records it only as this attachment, never as a `user` line,
+  // so without this it never shows up in chat. Other queued commands (task
+  // notifications, messages from peer agents) aren't the user's words and stay hidden.
+  if (o.type === 'attachment') {
+    const a = (o.attachment ?? {}) as Record<string, unknown>;
+    const origin = (a.origin ?? {}) as Record<string, unknown>;
+    if (a.type !== 'queued_command' || origin.kind !== 'human') return [];
+    return userItems(a.prompt, sidechain, ts);
+  }
+
   const message = o.message as Record<string, unknown> | undefined;
   if (!message) return [];
   const out: TimelineItem[] = [];
 
   if (o.type === 'user') {
-    const content = message.content;
-    if (typeof content === 'string') {
-      const text = content.trim();
-      if (text) out.push({ kind: 'user', text, sidechain, ts });
-    } else if (Array.isArray(content)) {
-      for (const block of content) {
-        const b = (block ?? {}) as Record<string, unknown>;
-        if (b.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
-          out.push({ kind: 'user', text: b.text, sidechain, ts });
-        } else if (b.type === 'tool_result') {
-          const raw = toolResultText(b.content);
-          const { text, truncated } = truncate(raw, RESULT_MAX);
-          out.push({
-            kind: 'tool_result',
-            forId: typeof b.tool_use_id === 'string' ? b.tool_use_id : null,
-            text,
-            truncated,
-            isError: b.is_error === true,
-            sidechain,
-            ts,
-          });
-        }
-      }
-    }
+    out.push(...userItems(message.content, sidechain, ts));
   } else if (o.type === 'assistant') {
     const content = message.content;
     if (!Array.isArray(content)) return [];
