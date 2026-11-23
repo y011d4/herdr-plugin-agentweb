@@ -202,6 +202,13 @@ vendor-neutrality is preserved.
 - Reads are confined to `~/.claude/projects` (sessionId regex + path containment);
   the client only sends a paneId — sessionId/cwd come from herdr. The `session`
   query param is an equality gate only, never used to build a path.
+- **A message sent while the agent is working may never become a `user` line.**
+  Claude Code queues it (`queue-operation` enqueue). If it is taken in mid-turn at a
+  tool boundary (`remove`, `reason: "absorbed_mid_turn"`), the only record is
+  `{type:"attachment", attachment:{type:"queued_command", origin:{kind:"human"}, prompt}}`
+  (`prompt`: string or content blocks); if it waits for the turn to end (`dequeue`) it
+  becomes a normal `user` line. `normalizeLine` maps the human `queued_command` to a
+  user item; `task-notification` / `peer` queued commands stay hidden (verified live).
 - The tailer reads new bytes from a byte cursor that always sits on a newline
   boundary (safe for multi-byte UTF-8); a trailing partial line is left for the
   next read. WS `watch_transcript` re-resolves the session id each tick so a

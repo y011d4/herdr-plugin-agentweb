@@ -38,6 +38,31 @@ describe('normalizeLine — user turns', () => {
     assert.equal((items[0] as { text: string }).text, 'ab');
     assert.equal((items[0] as { isError: boolean }).isError, true);
   });
+
+  // A message sent while the agent was working, taken in mid-turn: Claude Code records it
+  // only as a queued_command attachment (shape as seen in real transcripts).
+  const queued = (prompt: unknown, kind: string, extra: Record<string, unknown> = {}) => line({
+    type: 'attachment', isSidechain: false, timestamp: '2026-11-23T11:52:30.000Z',
+    attachment: { type: 'queued_command', prompt, commandMode: kind === 'human' ? 'prompt' : kind, origin: { kind }, ...extra },
+  });
+
+  it('maps a message the user sent mid-turn (queued_command attachment) to a user item', () => {
+    assert.deepEqual(normalizeLine(queued('Also, reply with just the word TWO.', 'human', { humanTurn: true })), [
+      { kind: 'user', text: 'Also, reply with just the word TWO.', sidechain: false, ts: Date.parse('2026-11-23T11:52:30.000Z') },
+    ]);
+  });
+
+  it('takes the text blocks of an array-form queued prompt (e.g. with a pasted image)', () => {
+    const items = normalizeLine(queued([{ type: 'text', text: 'look at this' }, { type: 'image', source: { type: 'base64', data: 'x' } }], 'human'));
+    assert.deepEqual(items.map((i) => [i.kind, (i as { text: string }).text]), [['user', 'look at this']]);
+  });
+
+  it('keeps queued commands that are not the user\'s words, and other attachments, hidden', () => {
+    assert.deepEqual(normalizeLine(queued('<task-notification>done</task-notification>', 'task-notification')), []);
+    assert.deepEqual(normalizeLine(queued('message from another agent', 'peer')), []);
+    assert.deepEqual(normalizeLine(line({ type: 'attachment', attachment: { type: 'skill_listing', content: 'x' } })), []);
+    assert.deepEqual(normalizeLine(line({ type: 'attachment' })), []);
+  });
 });
 
 describe('normalizeLine — assistant turns', () => {
