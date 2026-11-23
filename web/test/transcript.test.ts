@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderMarkdown, renderItem, type TimelineItem } from '../src/transcript.ts';
+import { renderMarkdown, renderItem, conversationItems, latestActivity, type TimelineItem } from '../src/transcript.ts';
 
 // renderMarkdown is the chat prose renderer used for user + assistant turns.
 // It must be XSS-safe (all text escaped before formatting) and dependency-free.
@@ -128,5 +128,31 @@ describe('renderItem — assistant + user turns use the markdown renderer', () =
     const h = renderItem(item);
     assert.match(h, /class="chat-bubble chat-md"/);
     assert.match(h, /<code>ls<\/code>/);
+  });
+});
+
+describe('conversationItems / latestActivity (home chat)', () => {
+  const u = (text: string, sidechain = false): TimelineItem => ({ kind: 'user', text, sidechain, ts: null });
+  const a = (text: string, sidechain = false): TimelineItem => ({ kind: 'assistant', text, sidechain, ts: null });
+  const tool = (name: string, summary: string): TimelineItem =>
+    ({ kind: 'tool_use', id: name, name, summary, todos: null, ask: null, sidechain: false, ts: null });
+  const result: TimelineItem = { kind: 'tool_result', forId: 'x', text: 'out', truncated: false, isError: false, sidechain: false, ts: null };
+
+  it('keeps only the user/assistant words, dropping tools, injected turns and subagents', () => {
+    const items = [u('fix it'), tool('Bash', 'herdr agent list'), result, u('<task-notification> done'), a('sub', true), a('done!')];
+    assert.deepEqual(conversationItems(items).map((i) => (i as { text: string }).text), ['fix it', 'done!']);
+  });
+
+  it('hides only Claude Code\'s injected tags, not user text that starts with "<"', () => {
+    const injected = ['<system-reminder>x', '<local-command-stdout>x', '<command-name>/clear</command-name>', '<bash-input>ls'];
+    const own = ['<pasted_content>log</pasted_content>', '<div> is broken', '< 3 items?'];
+    assert.deepEqual(conversationItems([...injected, ...own].map((t) => u(t))).map((i) => (i as { text: string }).text), own);
+  });
+
+  it('tracks the latest tool since the agent last spoke, across appends', () => {
+    const first = latestActivity([u('go'), tool('Bash', 'herdr agent start w-x')], null);
+    assert.equal(first, 'Bash herdr agent start w-x');
+    assert.equal(latestActivity([result], first), first); // a result keeps the step shown
+    assert.equal(latestActivity([a('started w-x')], first), null); // it spoke: thinking/writing again
   });
 });

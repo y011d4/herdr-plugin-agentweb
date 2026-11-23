@@ -186,6 +186,9 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
       { type: 'pane.focused' },
       { type: 'pane.moved' },
       { type: 'pane.exited' },
+      // fires when an agent is detected in a pane and when it exits (released) —
+      // re-snapshot both ways (see PANE_SET_CHANGING_EVENTS)
+      { type: 'pane.agent_detected' },
       { type: 'worktree.created' },
       { type: 'worktree.opened' },
       { type: 'worktree.removed' },

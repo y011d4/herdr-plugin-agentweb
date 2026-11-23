@@ -22,7 +22,10 @@ export interface AgentInfo {
 export interface PaneNode {
   paneId: string;
   focused: boolean;
+  /** where the pane is now (foreground process cwd, else the shell's) — moves with `cd` */
   cwd: string | null;
+  /** the pane shell's cwd — where its agent was launched; stable while the agent runs */
+  launchCwd: string | null;
   title: string | null;
   agent: AgentInfo | null;
 }
@@ -112,6 +115,8 @@ export interface Config {
   socketPath: string;
   /** named launch profiles for starting agents (defaults + config.json launch_profiles) */
   launchProfiles: Record<string, LaunchProfile>;
+  /** an agent running in this dir is the orchestrator: the app opens on its chat (config orchestrator_dir) */
+  orchestratorDir: string;
 }
 
 // ── Raw herdr wire payloads (loose, index-signed) ─────────────────────────────

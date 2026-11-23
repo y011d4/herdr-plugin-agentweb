@@ -57,5 +57,9 @@ export function loadConfig(): Config {
     stateDir: resolveStateDir(),
     socketPath: resolveSocketPath(),
     launchProfiles: parseLaunchProfiles(file.launch_profiles),
+    orchestratorDir:
+      typeof file.orchestrator_dir === 'string' && file.orchestrator_dir.trim() !== ''
+        ? file.orchestrator_dir.trim().replace(/^~(?=\/|$)/, homedir()).replace(/\/+$/, '')
+        : join(homedir(), '.local', 'share', 'herdr-agentweb', 'dispatcher'),
   };
 }

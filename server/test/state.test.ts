@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createState, applyEvent, toClientState, getPaneIds,
+  createState, applyEvent, toClientState, getPaneIds, findOrchestratorPane,
   PANE_SET_CHANGING_EVENTS, APPLIED_EVENTS,
 } from '../state.ts';
 import type { RawSnapshot } from '../types.ts';
@@ -316,6 +316,36 @@ describe('toClientState', () => {
   });
 });
 
+describe('findOrchestratorPane', () => {
+  it('is the agent pane running in the orchestrator dir (or below it)', () => {
+    const state = createState(makeSnapshot());
+    assert.equal(findOrchestratorPane(state, '/home/user/proj'), 'w0:p1');
+    assert.equal(findOrchestratorPane(state, '/home/user'), 'w0:p1');
+  });
+
+  it('ignores non-agent panes, sibling dirs that share a prefix, and a missing dir', () => {
+    const state = createState(makeSnapshot());
+    assert.equal(findOrchestratorPane(state, '/home/user/pro'), null); // not /home/user/proj
+    assert.equal(findOrchestratorPane(state, '/elsewhere'), null);
+    const noAgent = createState(makeSnapshot({
+      panes: [{ pane_id: 'w0:p2', workspace_id: 'w0', tab_id: 'w0:t1', focused: false, agent_status: 'unknown', cwd: '/home/user/proj' }],
+    }));
+    assert.equal(findOrchestratorPane(noAgent, '/home/user/proj'), null);
+  });
+
+  it('goes by the launch (shell) cwd, not the foreground cwd', () => {
+    const state = createState(makeSnapshot({
+      panes: [
+        // the orchestrator's foreground process moved out of its dir
+        { pane_id: 'w0:p1', workspace_id: 'w0', tab_id: 'w0:t1', focused: true, agent: 'claude', agent_status: 'idle', cwd: '/orch', foreground_cwd: '/tmp' },
+        // another agent whose foreground process moved into it
+        { pane_id: 'w0:p2', workspace_id: 'w0', tab_id: 'w0:t1', focused: false, agent: 'claude', agent_status: 'idle', cwd: '/repo', foreground_cwd: '/orch' },
+      ],
+    }));
+    assert.equal(findOrchestratorPane(state, '/orch'), 'w0:p1');
+  });
+});
+
 describe('createState with prevState', () => {
   it('carries over sinceUnixMs when agent status is unchanged', () => {
     const prev = createState(makeSnapshot(), 1000);
@@ -370,7 +400,7 @@ describe('event routing table', () => {
     'workspace_created', 'workspace_updated', 'workspace_renamed',
     'workspace_moved', 'workspace_closed', 'workspace_focused',
     'tab_created', 'tab_closed', 'tab_focused', 'tab_renamed', 'tab_moved',
-    'pane_created', 'pane_closed', 'pane_focused', 'pane_moved', 'pane_exited',
+    'pane_created', 'pane_closed', 'pane_focused', 'pane_moved', 'pane_exited', 'pane_agent_detected',
     'worktree_created', 'worktree_opened', 'worktree_removed',
   ];
 

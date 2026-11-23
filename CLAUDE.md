@@ -32,9 +32,25 @@ herdr server
   the agent in its checkout.
 - `server/auth.ts` / `notify.ts` / `config.ts` — token, agent-status fanout + optional ntfy, config
   (config also parses `launch_profiles`, merged over built-in defaults)
-- `bin/agentwebctl.ts` — plugin entrypoints: run | start | stop | status | qr
+- `bin/agentwebctl.ts` — plugin entrypoints: run | start | stop | status | qr, plus `overview`
+  (read-only text summary of every other agent for an orchestrator agent to run; pure part in
+  `server/overview.ts`; talks to the herdr socket + transcripts directly, never the token)
 - `web/src/app.ts` — SPA (hash routing), `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker
+- **Orchestrator home**: the agent running in config `orchestrator_dir` (default
+  `~/.local/share/herdr-agentweb/dispatcher`) is the orchestrator — identified by the pane shell's cwd
+  (`launchCwd`, not the mutable foreground cwd), since herdr's snapshot has no agent names
+  (`findOrchestratorPane`, sent as state `orchestratorPaneId`). Status events carry no cwd, so an
+  agent appearing in an existing pane triggers a re-snapshot (a `cd` before launch must count).
+  A fresh app open (empty hash) lands on **Home** (`#/home`): the pane view in `homeMode` — a
+  status bar of the other agents (blocked chips + counts, `homeSummary`), dialogue-only chat
+  (`conversationItems` hides tools/injected turns), a "doing now" line (`latestActivity`) and a
+  composer (the terminal + quick keys stay one `>_` tap away — the only way to send Esc/Ctrl+C, and
+  the fallback when there's no transcript). Its card is pinned atop the agents list, and any route to
+  its pane (`#/pane/<id>`: notification clicks, stale links) is replaced by `#/home`. herdr's
+  `pane.agent_detected` (fires on detect *and* release) is rebuild-triggering, so agent presence and
+  `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via the `herdr agent` CLI, waking on background
+  `agent prompt --wait`) lives in that dir's `CLAUDE.md`, not in this repo.
 - `herdr-plugin.toml` — actions/panes call `dist/bin/agentwebctl.js`; `[[build]]` runs on
   `herdr plugin install` but NOT on `herdr plugin link`
 
