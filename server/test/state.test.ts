@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createState, applyEvent, toClientState, getPaneIds, findOrchestratorPane,
+  createState, applyEvent, applyCompletionSeqs, toClientState, getPaneIds, findOrchestratorPane,
   PANE_SET_CHANGING_EVENTS, APPLIED_EVENTS,
 } from '../state.ts';
 import type { RawSnapshot } from '../types.ts';
@@ -445,5 +445,41 @@ describe('applyEvent immutability', () => {
     assert.notEqual(s1._tabById, s0._tabById);
     assert.equal(s1._paneById.get('w0:p1')!.agent!.status, 'blocked');
     assert.equal(s0._paneById.get('w0:p1')!.agent!.status, 'working');
+  });
+});
+
+describe('applyCompletionSeqs (herdr agent.list completion_seq)', () => {
+  const doneSnap = (): RawSnapshot => makeSnapshot({
+    panes: [{ pane_id: 'w0:p1', workspace_id: 'w0', tab_id: 'w0:t1', focused: true, agent: 'claude', agent_status: 'done' }],
+  });
+  const reply = (seq: number, status = 'done') => [{ pane_id: 'w0:p1', agent_status: status, completion_seq: seq }];
+  const LATER = 2000; // agent.list was requested after the pane's last status change (at 1000)
+
+  it('fills completionSeq where herdr reports the same status, without mutating the input', () => {
+    const s0 = createState(doneSnap(), 1000);
+    assert.equal(s0._paneById.get('w0:p1')!.agent!.completionSeq, null);
+    const s1 = applyCompletionSeqs(s0, reply(42), LATER);
+    assert.equal(s1._paneById.get('w0:p1')!.agent!.completionSeq, 42);
+    assert.equal(s1.workspaces[0].tabs[0].panes[0].agent!.completionSeq, 42);
+    assert.equal(s0._paneById.get('w0:p1')!.agent!.completionSeq, null);
+  });
+
+  it('ignores a stale reply, and returns the same state when nothing changes', () => {
+    const s0 = createState(doneSnap(), 1000);
+    assert.equal(applyCompletionSeqs(s0, reply(7, 'working'), LATER), s0); // status differs
+    assert.equal(applyCompletionSeqs(s0, [{ pane_id: 'nope', agent_status: 'done', completion_seq: 7 }], LATER), s0);
+    // the pane changed status after the request went out (e.g. done -> working -> done):
+    // the reply may describe the previous completion
+    assert.equal(applyCompletionSeqs(s0, reply(7), 1000), s0);
+    assert.equal(applyCompletionSeqs(s0, reply(7), 500), s0);
+    const s1 = applyCompletionSeqs(s0, reply(7), LATER);
+    assert.equal(applyCompletionSeqs(s1, reply(7), LATER), s1);
+  });
+
+  it('survives a re-snapshot with the same status and clears on a status change', () => {
+    const s1 = applyCompletionSeqs(createState(doneSnap(), 1000), reply(42), LATER);
+    assert.equal(createState(doneSnap(), 3000, s1)._paneById.get('w0:p1')!.agent!.completionSeq, 42);
+    const { state } = applyEvent(s1, 'pane_agent_status_changed', { pane_id: 'w0:p1', agent_status: 'working' });
+    assert.equal(state._paneById.get('w0:p1')!.agent!.completionSeq, null);
   });
 });

@@ -1,12 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { dashboardCards, homeSummary } from '../src/dashboard-group.ts';
+import { dashboardCards, homeSummary, markSeen, shownStatus } from '../src/dashboard-group.ts';
 import type { AgentStatus, PaneNode, WorkspaceNode, WorktreeInfo } from '../src/types.ts';
 
-function agentPane(id: string, sinceUnixMs: number, status: AgentStatus = 'idle'): PaneNode {
+function agentPane(id: string, sinceUnixMs: number, status: AgentStatus = 'idle', completionSeq: number | null = null): PaneNode {
   return {
     paneId: id, focused: false, cwd: null, launchCwd: null, title: null,
-    agent: { name: 'claude', displayName: null, status, customStatus: null, message: null, sinceUnixMs },
+    agent: { name: 'claude', displayName: null, status, customStatus: null, message: null, sinceUnixMs, completionSeq },
   };
 }
 const shell = (id: string): PaneNode => ({ paneId: id, focused: false, cwd: null, launchCwd: null, title: null, agent: null });
@@ -59,5 +59,38 @@ describe('homeSummary', () => {
     const s = homeSummary(ws, 'orch');
     assert.deepEqual(s.blocked.map((c) => c.pane.paneId), ['b2', 'b1']);
     assert.deepEqual([s.working, s.done, s.idle], [1, 1, 2]);
+  });
+
+  it('counts a done agent the phone has opened as idle', () => {
+    const ws = [wsNode('A', [agentPane('d1', 10, 'done', 5), agentPane('d2', 10, 'done', 6)])];
+    const s = homeSummary(ws, null, markSeen({}, ws, 'd1'));
+    assert.deepEqual([s.done, s.idle], [1, 1]);
+  });
+});
+
+describe('phone-seen done', () => {
+  // completionSeq is herdr's completion_seq: which completion this is (stable across bridge restarts)
+  const done = (id: string, seq: number | null, since = 1): PaneNode => agentPane(id, since, 'done', seq);
+  const ws1 = (...panes: PaneNode[]) => [wsNode('A', panes)];
+
+  it('shows a done pane the phone has opened as idle, until its next completion', () => {
+    const seen = markSeen({}, ws1(done('a1', 10)), 'a1');
+    assert.equal(shownStatus(done('a1', 10), seen), 'idle');
+    assert.equal(shownStatus(done('a1', 10, 999), seen), 'idle'); // bridge restart: new sinceUnixMs, same completion
+    assert.equal(shownStatus(done('a1', 20), seen), 'done'); // a new completion
+    assert.equal(shownStatus(done('b1', 10), seen), 'done'); // another pane
+  });
+
+  it('only records a done pane whose completion is known, and drops entries that went stale', () => {
+    assert.deepEqual(markSeen({}, ws1(agentPane('w', 1, 'idle', 3)), 'w'), {}); // not done
+    // seq not fetched yet: nothing to tie the view to (it would have to guess which completion)
+    assert.deepEqual(markSeen({}, ws1(done('n', null)), 'n'), {});
+    let seen = markSeen({}, ws1(done('a1', 10), done('a2', 11)), 'a1');
+    seen = markSeen(seen, ws1(done('a1', 30), done('a2', 11)), 'a2');
+    assert.deepEqual(seen, { a2: 11 }); // a1 completed again since it was seen
+  });
+
+  it("keeps a done pane's record while its completionSeq is being refetched (bridge restart)", () => {
+    assert.deepEqual(markSeen({ a1: 42 }, ws1(done('a1', null), done('b1', 3)), 'b1'), { a1: 42, b1: 3 });
   });
 });

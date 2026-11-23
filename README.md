@@ -8,6 +8,7 @@ mobile-first PWA:
 
 - Dashboard of all agents across all workspaces with live status
   (idle / working / **blocked** / done), blocked agents sorted to the top;
+  a done agent you open on the phone reads as idle there (herdr's own state is left as is);
   each card shows its git branch, and a linked worktree's agents appear inside their
   main checkout, chipped as a worktree
 - Start, rename, clear, and stop agents from the phone: **+** on the dashboard launches an
@@ -283,7 +284,8 @@ default.
 ## API surface (for scripting)
 
 - `GET /api/state` — normalized workspaces/tabs/panes/agents tree, plus `orchestratorPaneId`
-  (the agent running in `orchestrator_dir`, or `null`)
+  (the agent running in `orchestrator_dir`, or `null`). Each agent's `completionSeq` is herdr's
+  `completion_seq` (which completion its idle/done status is; `null` until fetched)
 - `GET /api/panes/:paneId/read?source=visible|recent&lines=N&format=text|ansi`
 - `POST /api/panes/:paneId/input` `{"text": "ls", "enter": true}` or `{"keys": ["ctrl+c"]}`
   — add `"clear": true` to wipe the pane's composer (repeated Ctrl+U) before the

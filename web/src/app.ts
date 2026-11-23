@@ -14,8 +14,8 @@ import { renderItems, conversationItems, latestActivity } from './transcript.ts'
 import type { TimelineItem } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt.ts';
 import type { PromptOption, ParsedPrompt } from './prompt.ts';
-import { dashboardCards, homeSummary } from './dashboard-group.ts';
-import type { DashboardCard } from './dashboard-group.ts';
+import { dashboardCards, homeSummary, markSeen, shownStatus } from './dashboard-group.ts';
+import type { DashboardCard, SeenDone } from './dashboard-group.ts';
 import { watchMessages } from './watch.ts';
 import type { AppState, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 
@@ -29,6 +29,7 @@ const BUILD = 'v100';
 const STORAGE_TOKEN = 'herdr_token';
 const STORAGE_NOTIF = 'herdr_notifications';
 const STORAGE_VIEW = 'herdr_pane_view'; // preferred pane view: 'terminal' | 'chat'
+const STORAGE_SEEN = 'herdr_seen_done'; // done panes already opened on this phone (SeenDone)
 
 // ── WS reconnect config ───────────────────────────────────────────────────────
 const WS_PING_INTERVAL_MS = 30_000;
@@ -52,6 +53,26 @@ let appState: AppState | null = null;
 
 /** paneId currently shown in detail view (null if not on pane screen) */
 let activePaneId: string | null = null;
+
+/** Done panes this phone has looked at; the dashboard shows them as idle (see SeenDone). */
+let seenDone: SeenDone = (() => {
+  try { return JSON.parse(localStorage.getItem(STORAGE_SEEN) ?? '{}') ?? {}; } catch { return {}; }
+})();
+
+// Opening a done pane (or watching it finish) with the page visible counts as
+// seeing it, like viewing it in herdr. Kept on the phone only: herdr can only mark
+// a pane seen by focusing it, which would switch the PC's screen. Recorded against
+// herdr's completionSeq, which follows the done status by a moment; until then each
+// state push while the pane is open retries. Not while the bridge is cut off from
+// herdr: the pane state shown may be stale.
+function markActivePaneSeen(): void {
+  if (!activePaneId || document.hidden || !appState?.connected) return;
+  const agent = findPane(activePaneId)?.pane.agent;
+  if (agent?.status !== 'done' || agent.completionSeq == null || seenDone[activePaneId] === agent.completionSeq) return;
+  seenDone = markSeen(seenDone, appState.workspaces ?? [], activePaneId);
+  // best-effort: a storage failure must not stop the pane view from rendering
+  try { localStorage.setItem(STORAGE_SEEN, JSON.stringify(seenDone)); } catch { /* memory-only */ }
+}
 
 // ── Chat view (Claude Code transcript) ────────────────────────────────────────
 // A claude pane can be shown as its structured transcript instead of the raw
@@ -322,6 +343,7 @@ function onStateUpdate(): void {
       navigate('#/agents');
       return;
     }
+    markActivePaneSeen(); // it may have just finished while on screen
     // Pane detail auto-refreshes via its own poller; header may need updating
     updatePaneDetailHeader();
     updatePromptPanel(); // agent may have just become (un)blocked
@@ -334,6 +356,7 @@ function onStateUpdate(): void {
       return;
     }
     stopHoldingHome();
+    markActivePaneSeen(); // the orchestrator may have just finished while on screen
     updatePaneDetailHeader();
     renderHomeStatus();
     renderHomeActivity();
@@ -650,6 +673,7 @@ function handleRoute(e?: Event): void {
       activePaneId = id;
       dismissToastsForPane(id);
       dismissNotificationsForPane(id);
+      markActivePaneSeen();
       renderPaneDetail(id);
     }
   } else if (hash === '#/agents' || hash === '#/') {
@@ -674,6 +698,7 @@ function handleRoute(e?: Event): void {
     // opening a pane clears its pending notifications (in-app toasts + OS)
     dismissToastsForPane(paneId);
     dismissNotificationsForPane(paneId);
+    markActivePaneSeen();
     renderPaneDetail(paneId);
   } else if (hash === '#/settings') {
     renderSettingsScreen();
@@ -985,12 +1010,12 @@ function cardTitle({ pane, tabLabel, tabAgentIndex, tabAgentCount }: DashboardCa
 function renderCard(card: DashboardCard): string {
   const { pane, workspaceLabel, branch, isWorktree } = card;
   const { paneId, agent, title } = pane;
-  const { displayName, name, status, customStatus, message, sinceUnixMs } = agent!;
+  const { displayName, name, customStatus, message, sinceUnixMs } = agent!;
   // The chip shows the stable agent kind, so prefer `name` (raw pane.agent,
   // e.g. "claude"/"codex") over displayName, which can be a richer label.
   const agentKind = name || displayName || 'agent';
   const cardLabel = cardTitle(card);
-  const statusClass = status || 'unknown';
+  const statusClass = shownStatus(pane, seenDone) || 'unknown';
   const meta = customStatus || message || '';
   const relTime = relativeTime(sinceUnixMs);
 
@@ -1144,7 +1169,7 @@ function updatePaneDetailHeader(): void {
 function renderHomeStatus(): void {
   const el = document.getElementById('home-status');
   if (!el || !appState) return;
-  const s = homeSummary(appState.workspaces, appState.orchestratorPaneId);
+  const s = homeSummary(appState.workspaces, appState.orchestratorPaneId, seenDone);
   const chips = s.blocked.map((c) =>
     `<button class="home-chip" data-pane-id="${escHtml(c.pane.paneId)}">${escHtml(cardTitle(c))}<span class="home-chip-ws">${escHtml(c.workspaceLabel)}</span></button>`).join('');
   const html = (chips ? `<div class="home-attn"><span class="home-attn-label">Needs you</span>${chips}</div>` : '') +
@@ -2379,6 +2404,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Returning to a pane that's already open (app switch, no route change) won't
     // fire handleRoute, so clear any OS notification raised for it while hidden.
     dismissNotificationsForPane(activePaneId);
+    markActivePaneSeen();
     // In chat mode the transcript watch keeps pushing while the WS is up, so the
     // HTTP fallback must only run when the socket is down — otherwise a fallback
     // response racing a WS push duplicates items and rewinds chatCursor.
