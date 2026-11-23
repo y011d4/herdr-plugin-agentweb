@@ -453,16 +453,20 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   // ── completion seq (agent.list, off the hot path) ─────────────────────────────
 
   // herdr's completion_seq is only in agent.list, so fetch it after each snapshot
-  // and each transition to done (coalesced) and push when it changes. Best-effort:
-  // without it (older herdr, a failed call) the phone just keeps showing done.
+  // and each transition to done and push when it changes. Trailing debounce: the
+  // request always goes out after the change that asked for it, which
+  // applyCompletionSeqs' requestedAtMs guard relies on. Best-effort: without it
+  // (older herdr, a failed call) the phone just keeps showing done.
   function refreshCompletionSeqsSoon(): void {
-    if (destroyed || completionTimer) return;
+    if (destroyed) return;
+    if (completionTimer) clearTimeout(completionTimer);
     completionTimer = setTimeout(async () => {
       completionTimer = null;
       try {
+        const requestedAtMs = Date.now();
         const result = await request('agent.list') as { agents?: Parameters<typeof applyCompletionSeqs>[1] };
         if (destroyed || !currentState) return;
-        const next = applyCompletionSeqs(currentState, result.agents ?? []);
+        const next = applyCompletionSeqs(currentState, result.agents ?? [], requestedAtMs);
         if (next === currentState) return;
         currentState = next;
         onState?.(currentState);

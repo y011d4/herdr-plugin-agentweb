@@ -59,15 +59,27 @@ let seenDone: SeenDone = (() => {
   try { return JSON.parse(localStorage.getItem(STORAGE_SEEN) ?? '{}') ?? {}; } catch { return {}; }
 })();
 
+/** Done panes viewed before their completionSeq arrived; recorded when it does (notePaneSeen). */
+const seenPending = new Set<string>();
+
 // Opening a done pane (or watching it finish) with the page visible counts as
 // seeing it, like viewing it in herdr. Kept on the phone only: herdr can only mark
 // a pane seen by focusing it, which would switch the PC's screen.
 function markActivePaneSeen(): void {
-  if (!activePaneId || document.hidden || !appState) return;
-  const agent = findPane(activePaneId)?.pane.agent;
-  // completionSeq arrives a moment after the done status; the next state push retries
-  if (agent?.status !== 'done' || agent.completionSeq == null || seenDone[activePaneId] === agent.completionSeq) return;
-  seenDone = markSeen(seenDone, appState.workspaces ?? [], activePaneId);
+  if (activePaneId && !document.hidden) notePaneSeen(activePaneId);
+}
+
+// Record the pane's current done as seen. completionSeq arrives a moment after the
+// done status, so a pane viewed before then stays pending until a state push brings
+// it — or drops out if the pane stops being done first.
+function notePaneSeen(paneId: string): void {
+  if (!appState) return; // the first state push retries (markActivePaneSeen)
+  seenPending.delete(paneId);
+  const agent = findPane(paneId)?.pane.agent;
+  if (agent?.status !== 'done') return;
+  if (agent.completionSeq == null) { seenPending.add(paneId); return; }
+  if (seenDone[paneId] === agent.completionSeq) return;
+  seenDone = markSeen(seenDone, appState.workspaces ?? [], paneId);
   // best-effort: a storage failure must not stop the pane view from rendering
   try { localStorage.setItem(STORAGE_SEEN, JSON.stringify(seenDone)); } catch { /* memory-only */ }
 }
@@ -326,6 +338,7 @@ function stopStatePoll(): void {
 // this is also where a first state routes the app, whichever source wins the race.
 function onStateUpdate(): void {
   updateConnBadge(); // state carries the bridge->herdr link status
+  for (const id of [...seenPending]) notePaneSeen(id); // before anything renders a badge
   if (goHomeToOrchestrator()) return; // first state of a fresh open: decide home
   // Nothing rendered yet (startup), or the token was just (re-)entered and the
   // login screen is still up: render the current route.
