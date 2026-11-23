@@ -117,8 +117,25 @@ export interface Config {
   socketPath: string;
   /** named launch profiles for starting agents (defaults + config.json launch_profiles) */
   launchProfiles: Record<string, LaunchProfile>;
-  /** an agent running in this dir is the orchestrator: the app opens on its chat (config orchestrator_dir) */
-  orchestratorDir: string;
+  /** config `orchestrators` (or the legacy single `orchestrator_dir`): the agent running in
+   *  each dir is that orchestrator, shown as a Home in the app */
+  orchestrators: OrchestratorDef[];
+}
+
+export interface OrchestratorDef {
+  /** stable id, used in the app's #/home/<name> route */
+  name: string;
+  /** shown as the Home title; '' = fall back to the workspace label */
+  label: string;
+  /** absolute dir, no trailing slash */
+  dir: string;
+}
+
+/** An orchestrator as sent to clients: which pane (if any) runs it now. */
+export interface OrchestratorView {
+  name: string;
+  label: string;
+  paneId: string | null;
 }
 
 // ── Raw herdr wire payloads (loose, index-signed) ─────────────────────────────

@@ -115,6 +115,17 @@ async function launchInPane(rpc: Rpc, paneId: string, profile: LaunchProfile, na
   }
 }
 
+/** Stop a launched agent by closing its pane, and say how that went: a failed close
+ *  must be told, since the agent may then still be running. */
+async function stopStarted(rpc: Rpc, paneId: string): Promise<string> {
+  try {
+    await rpc('pane.close', { pane_id: paneId });
+    return 'it was stopped';
+  } catch (err) {
+    return `its pane ${paneId} could not be closed (${(err as Error).message}), so it may still be running`;
+  }
+}
+
 /** Best-effort pane close (rolling back a pane we opened); never throws. */
 async function closeQuietly(rpc: Rpc, paneId: string | undefined): Promise<void> {
   if (!paneId) return;
@@ -204,6 +215,14 @@ export interface StartAgentInput {
   /** create a worktree first and launch the agent inside it (atomic — rolled back
    *  if the agent fails to start, so the client never sees a dangling worktree) */
   worktree?: CreateWorktreeInput;
+  /** open a new workspace at cwd instead of a tab in `workspace` (or the focused one) */
+  newWorkspace?: boolean;
+}
+
+export interface StartAgentOptions {
+  /** runs once the agent is up; throwing stops it (closes its pane) and rethrows. A new
+   *  worktree is kept then: the agent may already have written to it. */
+  verify?: (paneId: string) => Promise<void>;
 }
 
 export interface StartAgentResult {
@@ -217,6 +236,7 @@ export async function startAgent(
   rpc: Rpc,
   profiles: Record<string, LaunchProfile>,
   input: StartAgentInput,
+  opts: StartAgentOptions = {},
 ): Promise<StartAgentResult> {
   // Object.hasOwn, not `in`: `in` also matches inherited names ("toString",
   // "__proto__", …), which would wrongly accept them as profiles from POST input.
@@ -240,16 +260,29 @@ export async function startAgent(
   // undo that (best-effort) so the caller never has to clean up a dangling tab or
   // worktree, or hit "branch already exists" on retry.
   let paneId: string | undefined;
-  let rollback: () => Promise<void>;
+  // Undoes what was opened. Once the agent was launched (a failed verify) it says what
+  // became of the agent and what was left behind, for the error.
+  let rollback: (launched: boolean) => Promise<string | null>;
   if (input.worktree !== undefined) {
     const wt = await createWorktree(rpc, input.worktree);
     paneId = wt.paneId ?? undefined;
-    rollback = () => rollbackWorktree(rpc, wt.workspaceId);
+    rollback = async (launched) => {
+      if (!launched) {
+        await rollbackWorktree(rpc, wt.workspaceId);
+        return null;
+      }
+      // the agent has run and may have written files (it could still be writing during
+      // any cleanliness check), so stop it and keep the checkout
+      return `${await stopStarted(rpc, paneId!)}; its worktree ${wt.checkoutPath} was kept`;
+    };
   } else {
     const params: Record<string, unknown> = { label: name, focus: false };
     if (typeof input.cwd === 'string') params.cwd = input.cwd;
     let opened: { root_pane?: { pane_id?: string } } | null;
-    if (typeof input.workspace === 'string' && input.workspace) {
+    if (input.newWorkspace === true) {
+      // herdr labels a new workspace after its dir
+      opened = (await rpc('workspace.create', { cwd: params.cwd, focus: false })) as typeof opened;
+    } else if (typeof input.workspace === 'string' && input.workspace) {
       opened = (await rpc('tab.create', { ...params, workspace_id: input.workspace })) as typeof opened;
     } else {
       try {
@@ -262,15 +295,23 @@ export async function startAgent(
       }
     }
     paneId = opened?.root_pane?.pane_id;
-    rollback = () => closeQuietly(rpc, paneId);
+    rollback = async (launched) => {
+      if (launched) return stopStarted(rpc, paneId!);
+      await closeQuietly(rpc, paneId);
+      return null;
+    };
   }
 
   let started: RawAgentInfo | null;
+  let launched = false;
   try {
     if (!paneId) throw new LifecycleError(502, 'error', 'herdr returned no pane to start the agent in');
     started = await launchInPane(rpc, paneId, profile, name);
+    launched = true;
+    await opts.verify?.(paneId);
   } catch (err) {
-    await rollback();
+    const undone = await rollback(launched);
+    if (undone) throw new LifecycleError(409, 'start_undone', `${(err as Error).message}: ${undone}`);
     throw err;
   }
 
@@ -392,6 +433,8 @@ export interface CreateWorktreeInput {
   branch?: unknown;
   /** base ref for the new branch (e.g. "origin/main"); herdr's default when blank */
   base?: unknown;
+  /** checkout dir for the worktree; herdr's worktrees dir when absent */
+  path?: unknown;
 }
 
 export interface CreateWorktreeResult {
@@ -407,6 +450,7 @@ export async function createWorktree(rpc: Rpc, input: CreateWorktreeInput): Prom
   if (input.workspace !== undefined && typeof input.workspace !== 'string') throw badRequest('workspace must be a string');
   if (input.branch !== undefined && typeof input.branch !== 'string') throw badRequest('branch must be a string');
   if (input.base !== undefined && typeof input.base !== 'string') throw badRequest('base must be a string');
+  if (input.path !== undefined && (typeof input.path !== 'string' || input.path === '')) throw badRequest('path must be a non-empty string');
   const repo = typeof input.repo === 'string' ? input.repo : '';
   const workspace = typeof input.workspace === 'string' ? input.workspace : '';
   if (!repo && !workspace) throw badRequest('repo (a cwd in the repo) or workspace is required');
@@ -418,6 +462,7 @@ export async function createWorktree(rpc: Rpc, input: CreateWorktreeInput): Prom
   if (branch) params.branch = branch;
   const base = typeof input.base === 'string' ? input.base.trim() : '';
   if (base) params.base = base;
+  if (typeof input.path === 'string') params.path = input.path;
 
   // herdr's worktree_created result carries the git-worktree object as `worktree`
   // (its checkout dir is `path`, NOT `checkout_path`) and the opened workspace as
@@ -446,4 +491,16 @@ async function rollbackWorktree(rpc: Rpc, workspaceId: string | null): Promise<v
     /* best-effort: a failed rollback leaves a worktree behind, but must not mask
        the original agent-start error the caller is about to see */
   }
+}
+
+/** Whether an agent works in a checkout: one in its workspace, or one launched in or
+ *  moved into `dir` from any other workspace. Removing the checkout would pull its
+ *  working directory away. */
+export function checkoutInUse(
+  panes: Array<{ workspace_id?: string; agent?: string | null; cwd?: string; foreground_cwd?: string }>,
+  workspaceId: string,
+  dir: string,
+): boolean {
+  const inDir = (c?: string) => !!c && (c === dir || c.startsWith(dir + '/'));
+  return panes.some((p) => !!p.agent && (p.workspace_id === workspaceId || inDir(p.cwd) || inDir(p.foreground_cwd)));
 }

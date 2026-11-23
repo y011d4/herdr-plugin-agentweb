@@ -19,7 +19,7 @@
  * }
  */
 
-import type { NormalizedState, PaneNode, TabNode, WorkspaceNode, WorktreeInfo, AgentInfo, StatusChange, RawSnapshot, RawPane, RawWorkspace } from './types.ts';
+import type { NormalizedState, PaneNode, TabNode, WorkspaceNode, WorktreeInfo, AgentInfo, StatusChange, RawSnapshot, RawPane, RawWorkspace, OrchestratorDef, OrchestratorView } from './types.ts';
 
 // Events that change the workspace/tab/pane structure. The client reacts by
 // re-fetching session.snapshot and re-subscribing (per-pane status
@@ -365,22 +365,29 @@ export function toClientState(state: NormalizedState): Omit<NormalizedState, '_p
 }
 
 /**
- * The orchestrator: the first agent pane launched in `dir` (or below it). The
- * phone opens on its chat and pins it atop the agents list. herdr's snapshot
- * carries no agent names, so the launch dir is the identity — the shell's cwd,
- * not the mutable foreground cwd, so neither the orchestrator wandering off nor
- * another agent wandering in changes which pane it is.
+ * The orchestrators: each one is the first agent pane launched in its `dir` (or
+ * below it). The phone opens on their chats (Home) and pins them atop the agents
+ * list. herdr's snapshot carries no agent names, so the launch dir is the identity —
+ * the shell's cwd, not the mutable foreground cwd, so neither an orchestrator
+ * wandering off nor another agent wandering in changes which pane it is. A pane
+ * under nested dirs belongs to the deepest one only.
  */
-export function findOrchestratorPane(state: NormalizedState, dir: string): string | null {
+export function findOrchestrators(state: NormalizedState, defs: OrchestratorDef[]): OrchestratorView[] {
+  const paneIds: Array<string | null> = defs.map(() => null);
   for (const ws of state.workspaces) {
     for (const tab of ws.tabs) {
       for (const pane of tab.panes) {
         const cwd = pane.launchCwd;
-        if (pane.agent && cwd && (cwd === dir || cwd.startsWith(dir + '/'))) return pane.paneId;
+        if (!pane.agent || !cwd) continue;
+        let best = -1;
+        defs.forEach((d, i) => {
+          if ((cwd === d.dir || cwd.startsWith(d.dir + '/')) && (best === -1 || d.dir.length > defs[best].dir.length)) best = i;
+        });
+        if (best !== -1) paneIds[best] ??= pane.paneId;
       }
     }
   }
-  return null;
+  return defs.map((d, i) => ({ name: d.name, label: d.label, paneId: paneIds[i] }));
 }
 
 /**
