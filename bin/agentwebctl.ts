@@ -12,6 +12,7 @@ import { formatOverview, orderAgents, isTaskTurn, type AgentDetail, type RawAgen
 import { readTranscriptTail, resolveTranscriptPath, findLastItem } from '../server/transcript.ts';
 import { dirAccount, ownAccount, paneAccount } from '../server/account.ts';
 import { checkoutInUse, parseLaunchProfiles, startAgent, type Rpc, type StartAgentInput } from '../server/agent-lifecycle.ts';
+import { placeWorktreeNextToRepo } from '../server/worktree-resolve.ts';
 
 // Walk up from the script's directory until a directory containing package.json
 // is found. This is necessary because this file runs from dist/bin/agentwebctl.js,
@@ -450,17 +451,14 @@ async function agentStart(args: string[]): Promise<number> {
   const input: StartAgentInput = { profile: opt.profile ?? 'claude', name, cwd: dir };
   const places = [dir];
   if (opt.worktree) {
-    const top = spawnSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
-    if (top.status !== 0) {
-      console.error(`${dir}: not in a git repository`);
+    // next to the repo, so an .envrc above it (e.g. one per org dir) sets the checkout's account too
+    try {
+      input.worktree = await placeWorktreeNextToRepo({ repo: dir, branch: opt.worktree, base: opt.base });
+    } catch (e) {
+      console.error((e as Error).message);
       return 1;
     }
-    const repo = top.stdout.trim();
-    // Next to the repo, not in herdr's worktrees dir: an .envrc above the repo (e.g.
-    // one per org dir) then sets the checkout's account too.
-    const wtPath = path.join(path.dirname(repo), `${path.basename(repo)}-wt-${opt.worktree.replace(/[^A-Za-z0-9._-]+/g, '-')}`);
-    input.worktree = { repo: dir, branch: opt.worktree, base: opt.base, path: wtPath };
-    places.push(path.dirname(repo));
+    places.push(path.dirname(input.worktree.path as string));
   }
   const own = await ownAccount();
   for (const p of places) {
