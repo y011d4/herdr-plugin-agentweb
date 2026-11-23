@@ -246,7 +246,9 @@ function handleWsMessage(msg: WsMessage): void {
       renderPaneOutput(msg.ansi);
     }
   } else if (msg.type === 'pane_gone') {
-    if (msg.paneId === activePaneId) {
+    if (msg.paneId === activePaneId && homeMode) {
+      holdHomeForReplacement(); // the orchestrator may be mid-replacement; state decides
+    } else if (msg.paneId === activePaneId) {
       showToast('Pane closed', 'This pane no longer exists.');
       navigate('#/agents');
     }
@@ -324,12 +326,14 @@ function onStateUpdate(): void {
     updatePaneDetailHeader();
     updatePromptPanel(); // agent may have just become (un)blocked
   } else if (hash === '#/home') {
-    // the orchestrator stopped or was replaced (e.g. cleared): re-resolve Home
-    if (appState?.orchestratorPaneId !== activePaneId) {
-      if (!appState?.orchestratorPaneId) showToast('Orchestrator stopped', 'Showing all agents.');
-      handleRoute();
+    const id = appState?.orchestratorPaneId ?? null;
+    if (id !== activePaneId) {
+      if (!id) { holdHomeForReplacement(); return; } // gone — maybe being replaced
+      stopHoldingHome();
+      handleRoute(); // replaced (e.g. cleared): re-resolve Home onto the new pane
       return;
     }
+    stopHoldingHome();
     updatePaneDetailHeader();
     renderHomeStatus();
     renderHomeActivity();
@@ -590,6 +594,27 @@ let homeActivity: string | null = null; // latest tool call since the orchestrat
 let homeStatusHtml = ''; // last rendered status bar, to skip no-op DOM writes
 // Where a pane's Back goes: Home when it was opened from there, else the list.
 let paneBackRoute = '#/agents';
+
+// A cleared or restarted orchestrator leaves a gap: its old pane is gone before the
+// replacement is detected as an agent. Home holds through that gap instead of
+// bouncing to the list, and gives up only if no orchestrator shows up in time.
+const HOME_REPLACE_GRACE_MS = 8_000;
+let homeLostTimer: ReturnType<typeof setTimeout> | null = null;
+
+function holdHomeForReplacement(): void {
+  if (homeLostTimer) return;
+  homeLostTimer = setTimeout(() => {
+    homeLostTimer = null;
+    if (location.hash !== '#/home' || appState?.orchestratorPaneId) return; // left, or onStateUpdate re-resolved
+    showToast('Orchestrator stopped', 'Showing all agents.');
+    handleRoute(); // no orchestrator → the list
+  }, HOME_REPLACE_GRACE_MS);
+}
+
+function stopHoldingHome(): void {
+  if (homeLostTimer) clearTimeout(homeLostTimer);
+  homeLostTimer = null;
+}
 
 // The orchestrator's pane opens as Home; every other pane as its own view.
 function paneRoute(paneId: string): string {

@@ -268,6 +268,45 @@ function tailUnsafe(file: string, maxItems: number): TailResult {
 }
 
 /**
+ * The newest item matching `pred`, scanning the file backwards from EOF in 1 MiB
+ * chunks (at most `maxBytes`) — for an item that has scrolled out of the tail
+ * window, e.g. the last real user request in a long tool-heavy session. Only lines
+ * that can hold a user turn are parsed. Null if none / unreadable.
+ */
+export function findLastItem(file: string, pred: (item: TimelineItem) => boolean, maxBytes = 64 * 1024 * 1024): TimelineItem | null {
+  const CHUNK = 1024 * 1024;
+  let fd: number | null = null;
+  try {
+    fd = openSync(file, 'r');
+    let pos = fstatSync(fd).size;
+    const floor = Math.max(0, pos - maxBytes);
+    let carry = Buffer.alloc(0); // the partial first line of the chunk after this one
+    while (pos > floor) {
+      const start = Math.max(floor, pos - CHUNK);
+      const buf = Buffer.alloc(pos - start);
+      const read = readSync(fd, buf, 0, buf.length, start);
+      const data = Buffer.concat([buf.subarray(0, read), carry]);
+      // below the floor/start the first line may be partial: keep it for the next chunk
+      const firstNl = start > 0 ? data.indexOf(0x0a) : -1;
+      carry = firstNl === -1 && start > 0 ? data : data.subarray(0, Math.max(0, firstNl));
+      const body = start > 0 ? (firstNl === -1 ? '' : data.toString('utf8', firstNl + 1)) : data.toString('utf8');
+      const lines = body.split('\n');
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (!lines[i].includes('"user"')) continue; // cheap prefilter before JSON.parse
+        const hit = normalizeLine(lines[i]).findLast(pred);
+        if (hit) return hit;
+      }
+      pos = start;
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+}
+
+/**
  * Initial load: read at most the last TAIL_MAX_BYTES of the file, normalize the
  * complete lines within, and return the last `maxItems` items with a cursor at
  * the end of the last complete line. Older history (beyond the cap or maxItems)

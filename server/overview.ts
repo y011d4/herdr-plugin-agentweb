@@ -28,6 +28,13 @@ export interface RawSnapshot {
 export interface AgentDetail {
   items?: TimelineItem[];
   screen?: string;
+  /** the last real user request, found further back when it has scrolled out of `items` */
+  olderTask?: string;
+}
+
+/** A request the user actually made (main thread, not a Claude Code injected turn). */
+export function isTaskTurn(i: TimelineItem): boolean {
+  return i.kind === 'user' && !i.sidechain && !INJECTED_USER_TURN.test(i.text);
 }
 
 const STATUS_ORDER = ['blocked', 'working', 'done', 'idle', 'unknown'];
@@ -84,13 +91,19 @@ export function formatOverview(
     const meta = [`pane ${a.pane_id}`, newestTs !== null ? `last activity ${ago(now - newestTs)}` : null].filter(Boolean).join(', ');
     const lines = [[a.name || a.pane_id, status, where, `(${meta})`].filter(Boolean).join('  ')];
 
-    const task = main.findLast((i) => i.kind === 'user' && !INJECTED_USER_TURN.test(i.text));
-    if (task?.kind === 'user') lines.push(`  task: ${clip(task.text, 160)}`);
+    const task = main.findLast(isTaskTurn);
+    const taskText = task?.kind === 'user' ? task.text : details.get(a.pane_id)?.olderTask;
+    if (taskText) lines.push(`  task: ${clip(taskText, 160)}`);
     const last = main.findLast((i) => i.kind === 'assistant');
     if (last?.kind === 'assistant') lines.push(`  last: ${clip(last.text, 300)}`);
-    const tail = main.at(-1);
-    if (tail?.kind === 'tool_use' && (status === 'working' || status === 'blocked')) {
-      lines.push(`  ${status === 'blocked' ? 'pending' : 'doing'}: ${clip(`${tail.name} ${tail.summary}`, 300)}`);
+    // The call still open in the current turn — the newest tool_use since the last
+    // user turn with no result yet (parallel calls finish out of order, so the
+    // final item can be another call's result).
+    const turn = main.slice(main.findLastIndex((i) => i.kind === 'user') + 1);
+    const resolved = new Set(turn.flatMap((i) => (i.kind === 'tool_result' ? [i.forId] : [])));
+    const open = turn.findLast((i) => i.kind === 'tool_use' && !resolved.has(i.id));
+    if (open?.kind === 'tool_use' && (status === 'working' || status === 'blocked')) {
+      lines.push(`  ${status === 'blocked' ? 'pending' : 'doing'}: ${clip(`${open.name} ${open.summary}`, 300)}`);
     }
 
     const screen = details.get(a.pane_id)?.screen;

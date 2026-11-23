@@ -51,6 +51,22 @@ describe('formatOverview', () => {
     assert.match(out, /\n {2}last: main reply$/);
   });
 
+  it('shows the call still open in this turn, not just the final item (parallel calls)', () => {
+    const res = (forId: string): TimelineItem => ({ kind: 'tool_result', forId, text: 'ok', truncated: false, isError: false, sidechain: false, ts: null });
+    const call = (id: string, name: string): TimelineItem => ({ kind: 'tool_use', id, name, summary: id, todos: null, ask: null, sidechain: false, ts: null });
+    const parallel = [user('t'), call('a', 'Bash'), call('b', 'Edit'), res('b')];
+    assert.match(run([agent('p', 'blocked')], { p: { items: parallel } }), /\n {2}pending: Bash a$/);
+    const done = [user('t'), call('a', 'Bash'), res('a')];
+    assert.doesNotMatch(run([agent('p', 'working')], { p: { items: done } }), /doing/);
+    const stale = [user('t'), call('old', 'Bash'), user('next'), asst('thinking about it')];
+    assert.doesNotMatch(run([agent('p', 'working')], { p: { items: stale } }), /doing/); // an earlier turn's unanswered call
+  });
+
+  it('falls back to an older task found beyond the tail window', () => {
+    const out = run([agent('p', 'working')], { p: { items: [asst('still going')], olderTask: 'refactor the parser' } });
+    assert.match(out, /\n {2}task: refactor the parser\n/);
+  });
+
   it('counts user text that merely starts with "<" (pastes, HTML) as the task', () => {
     for (const text of ['<pasted_content>stack trace</pasted_content>', '<div> is broken']) {
       const out = run([agent('p', 'idle')], { p: { items: [user('older'), user(text), user('<command-name>/clear</command-name>')] } });
