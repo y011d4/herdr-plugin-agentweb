@@ -1331,6 +1331,10 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   document.getElementById('btn-send-enter')!.addEventListener('click', async () => {
     const text = paneInput.value;
     if (!text) return;
+    // Stop keeping an undelivered task once it's being sent (so a reopened view can't
+    // offer it again mid-send); put it back if the send fails.
+    const sendingKept = undeliveredTasks.get(paneId) === text;
+    if (sendingKept) undeliveredTasks.delete(paneId);
     try {
       // clear:true wipes the pane's composer first so this message submits on its
       // own — never merged with a half-typed draft the user left in the pane that
@@ -1340,11 +1344,10 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       // text+enter. enter:true then submits in the same request.
       const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true, ...(isClaude ? { clear: true } : {}) });
-      // the kept task is sent — unless a newer view of this pane has edited it since
-      if (undeliveredTasks.get(paneId) === text) undeliveredTasks.delete(paneId);
       if (paneInput.value === text) clearInput(); // clear on success, but keep text typed mid-send
       queuePaneEcho();
     } catch (err) {
+      if (sendingKept && !undeliveredTasks.has(paneId)) undeliveredTasks.set(paneId, text);
       showToast('Send failed', (err as Error).message);
     }
   });
