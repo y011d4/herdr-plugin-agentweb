@@ -75,44 +75,29 @@ export function homeSummary(workspaces: WorkspaceNode[], orchestratorPaneId: str
  */
 export type SeenDone = Record<string, number>;
 
-/** Views to record: paneId -> the sinceUnixMs of the done status the phone saw (ties a view to that one done). */
-export type SeenViews = Record<string, number>;
-
 /**
- * Record viewed done panes as seen and prune stale entries. A view counts only for
- * the done it saw (same sinceUnixMs), so a missed done -> working -> done can't
- * mark the newer completion. A viewed done whose completionSeq hasn't arrived yet
- * comes back in `pending`, to pass in again with a later state; a pane whose seq
- * is being (re)fetched keeps its existing record. While the bridge is cut off from
- * herdr nothing new is recorded and pending views are dropped: a done -> working ->
- * done missed meanwhile keeps the old sinceUnixMs, so a view could land on the
- * newer, unseen completion (losing one only shows done again).
+ * Record `paneId`'s current done as seen and prune entries whose pane has moved on
+ * to another completion. A view is recorded only against a known completionSeq —
+ * before it arrives there is nothing reliable to tie the view to, so the caller
+ * retries on later states while the pane is still open. A done pane whose seq is
+ * being (re)fetched (e.g. right after a bridge restart) keeps its existing record.
  */
-export function markSeen(
-  seen: SeenDone,
-  state: { connected: boolean; workspaces: WorkspaceNode[] },
-  views: SeenViews,
-): { seen: SeenDone; pending: SeenViews } {
-  if (!state.connected) return { seen, pending: {} };
-  const { workspaces } = state;
+export function markSeen(seen: SeenDone, workspaces: WorkspaceNode[], paneId: string): SeenDone {
   const next: SeenDone = {};
-  const pending: SeenViews = {};
   for (const ws of workspaces) {
     for (const t of ws.tabs ?? []) {
       for (const p of t.panes ?? []) {
         const a = p.agent;
         if (a?.status !== 'done') continue;
-        const viewed = views[p.paneId] === a.sinceUnixMs;
         if (a.completionSeq == null) {
-          if (viewed) pending[p.paneId] = a.sinceUnixMs;
           if (p.paneId in seen) next[p.paneId] = seen[p.paneId];
-        } else if (viewed || seen[p.paneId] === a.completionSeq) {
+        } else if (p.paneId === paneId || seen[p.paneId] === a.completionSeq) {
           next[p.paneId] = a.completionSeq;
         }
       }
     }
   }
-  return { seen: next, pending };
+  return next;
 }
 
 /** The status to show for an agent pane: a done the phone has seen reads as idle. */
