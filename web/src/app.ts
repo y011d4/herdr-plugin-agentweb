@@ -757,6 +757,9 @@ function renderTokenScreen(message?: string): void {
 
 // ── Agent lifecycle UI (start / rename / clear / stop) ────────────────────────
 
+/** A just-started agent's first task the bridge couldn't deliver; its pane view puts it in the composer. */
+let undeliveredTask: { paneId: string; text: string } | null = null;
+
 // Minimal modal overlay appended to <body>, above everything (toasts are z 1000,
 // modals sit higher). Closes on backdrop tap, the buttons, or Escape; close() is
 // idempotent and fires onClose exactly once (so a confirm can resolve on dismiss).
@@ -911,8 +914,11 @@ async function openNewAgentModal(): Promise<void> {
       const res = (await apiPost('/api/agents', body)) as { paneId?: string; name?: string; taskDelivered?: boolean };
       close();
       const started = res.name ? `Started ${res.name}` : 'Agent started';
-      // the agent never became ready for its task (e.g. waiting on a startup dialog)
-      showToast('Agent started', res.taskDelivered === false && task ? `${started}, but the task was not sent — send it from the pane` : started);
+      // the agent never became ready for its task (e.g. waiting on a startup dialog):
+      // keep the task in the new pane's composer instead of losing it
+      const keepTask = res.taskDelivered === false && !!task && !!res.paneId;
+      if (keepTask) undeliveredTask = { paneId: res.paneId!, text: task };
+      showToast('Agent started', keepTask ? `${started}. The task wasn't sent yet — it's in the composer, tap Send when the agent is ready` : started);
       if (res.paneId) navigate(`#/pane/${encodeURIComponent(res.paneId)}`);
     } catch (err) {
       startBtn.disabled = false;
@@ -1305,6 +1311,12 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     paneInput.style.height = `${Math.min(paneInput.scrollHeight, 120)}px`;
   };
   paneInput.addEventListener('input', autoGrow);
+  // a new agent's first task the bridge couldn't deliver lands here, ready to send
+  if (undeliveredTask?.paneId === paneId) {
+    paneInput.value = undeliveredTask.text;
+    undeliveredTask = null;
+    autoGrow();
+  }
 
   const clearInput = (): void => {
     paneInput.value = '';
