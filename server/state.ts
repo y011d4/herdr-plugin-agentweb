@@ -325,21 +325,26 @@ export function applyEvent(state: NormalizedState, eventName: string, data: Reco
 /**
  * Fill in each agent's completionSeq from herdr's agent.list. herdr carries it
  * only there (not in snapshots or status events); the phone keys its "seen done"
- * record on it, as it survives a bridge restart. A pane is updated only while its
- * status still matches the reply, so a reply racing a newer status event can't
- * attach a stale seq. Returns the same state when nothing changed.
+ * record on it, as it survives a bridge restart. A pane is updated only if its
+ * status matches the reply and hasn't changed since the request went out
+ * (`requestedAtMs`): after done -> working -> done mid-request the reply would
+ * carry the previous completion's seq (that newer done schedules its own fetch).
+ * Per pane, so overlapping requests can't overwrite a newer seq with an older one.
+ * Returns the same state when nothing changed.
  */
 export function applyCompletionSeqs(
   state: NormalizedState,
   agents: Array<{ pane_id: string; agent_status?: string; completion_seq?: number | null }>,
+  requestedAtMs: number,
 ): NormalizedState {
   const paneById = new Map(state._paneById);
   let changed = false;
   for (const a of agents) {
     const pane = paneById.get(a.pane_id);
     const seq = a.completion_seq ?? null;
-    if (!pane?.agent || pane.agent.status !== a.agent_status || pane.agent.completionSeq === seq) continue;
-    paneById.set(a.pane_id, { ...pane, agent: { ...pane.agent, completionSeq: seq } });
+    const agent = pane?.agent;
+    if (!agent || agent.status !== a.agent_status || agent.sinceUnixMs >= requestedAtMs || agent.completionSeq === seq) continue;
+    paneById.set(a.pane_id, { ...pane!, agent: { ...agent, completionSeq: seq } });
     changed = true;
   }
   if (!changed) return state;
