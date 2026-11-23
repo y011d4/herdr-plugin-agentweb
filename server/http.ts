@@ -263,11 +263,14 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
   const startedProfiles = createPaneProfileStore(join(config.stateDir, 'pane-profiles.json'));
 
   // Each agent pane's Claude account, so an orchestrator's agents list can show just
-  // its own account's agents; refreshed on each push, and a changed answer re-pushes.
-  const paneAccounts = paneAccountCache((id) => paneAccount(rpc, id), () => {
+  // its own account's agents; refreshed on each push and each minute even when nothing
+  // changes (an unchanged push is deduped), and a changed answer re-pushes.
+  const pushCurrentState = (): void => {
     const now = getState();
     if (now) broadcastState(now);
-  });
+  };
+  const paneAccounts = paneAccountCache((id) => paneAccount(rpc, id), pushCurrentState);
+  const accountTimer = setInterval(pushCurrentState, 60_000);
 
   // The JSON state sent to clients (REST + WS): the normalized tree plus which pane
   // runs each orchestrator (the phone opens on their chats). orchestratorPaneId (the
@@ -750,6 +753,8 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
   });
 
   // ── WebSocket server ───────────────────────────────────────────────────────
+
+  server.on('close', () => clearInterval(accountTimer));
 
   // the only expected inbound WS message is a small ping — cap payloads.
   // permessage-deflate: pane_output resends the whole screen (~9KB) on every

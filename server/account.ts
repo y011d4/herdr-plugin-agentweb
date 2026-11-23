@@ -85,8 +85,11 @@ export async function paneAccount(rpc: Rpc, paneId: string): Promise<string | nu
  * Each agent pane's account, for the per-orchestrator lists. `refresh` (with the panes
  * that have an agent now) looks a pane up when it has none yet and again once `ttlMs` has
  * passed, so an answer that couldn't tell (null) or one left by an agent swapped in the
- * same pane corrects itself; panes that lost their agent are forgotten. A lookup that
- * fails is tried again on the next refresh. `onChange` runs when an answer changes the map.
+ * same pane corrects itself; panes that lost their agent are forgotten, and so is the
+ * answer of a lookup during which its pane lost its agent (it may describe that agent,
+ * not the next one). A lookup that fails is tried again on the next refresh. `onChange`
+ * runs when an answer changes the map. The caller refreshes on each state change and
+ * at least every ttlMs.
  * ponytail: a swapped agent keeps the old account for up to ttlMs; key on herdr's agent
  * session if that ever matters.
  */
@@ -99,20 +102,25 @@ export function paneAccountCache(
   const accounts = new Map<string, string | null>();
   const checkedAt = new Map<string, number>();
   const pending = new Set<string>();
+  const dropped = new Set<string>(); // pending lookups whose pane lost its agent meanwhile
   function refresh(agentPanes: string[]): void {
     const live = new Set(agentPanes);
     for (const id of checkedAt.keys()) {
       if (!live.has(id)) { checkedAt.delete(id); accounts.delete(id); }
     }
+    for (const id of pending) {
+      if (!live.has(id)) dropped.add(id);
+    }
     for (const id of live) {
       if (pending.has(id) || now() - (checkedAt.get(id) ?? -Infinity) < ttlMs) continue;
       pending.add(id);
       void lookup(id).then((account) => {
+        if (dropped.has(id)) return; // the pane's agent changed: a later refresh asks again
         checkedAt.set(id, now());
         if (accounts.has(id) && accounts.get(id) === account) return;
         accounts.set(id, account);
         onChange();
-      }, () => { /* no answer: the next refresh tries again */ }).finally(() => pending.delete(id));
+      }, () => { /* no answer: the next refresh tries again */ }).finally(() => { pending.delete(id); dropped.delete(id); });
     }
   }
   return { accounts, refresh };
