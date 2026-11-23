@@ -11,7 +11,7 @@ import { startAgent, stopAgent, renameAgent, clearAgent, createWorktree, Lifecyc
 import { createPaneProfileStore } from './pane-profile-store.ts';
 import { placeWorktreeNextToRepo } from './worktree-resolve.ts';
 import { startOrchestrator } from './orchestrator.ts';
-import { accountEnv, paneAccount } from './account.ts';
+import { accountEnv, paneAccount, paneAccountCache } from './account.ts';
 import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
 
 const BODY_LIMIT = 64 * 1024; // 64 KB
@@ -262,11 +262,21 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
   // stop/clear.
   const startedProfiles = createPaneProfileStore(join(config.stateDir, 'pane-profiles.json'));
 
+  // Each agent pane's Claude account, so an orchestrator's agents list can show just
+  // its own account's agents; refreshed on each push and each minute even when nothing
+  // changes (an unchanged push is deduped), and a changed answer re-pushes.
+  const pushCurrentState = (): void => {
+    const now = getState();
+    if (now) broadcastState(now);
+  };
+  const paneAccounts = paneAccountCache((id) => paneAccount(rpc, id), pushCurrentState);
+  const accountTimer = setInterval(pushCurrentState, 60_000);
+
   // The JSON state sent to clients (REST + WS): the normalized tree plus which pane
   // runs each orchestrator (the phone opens on their chats). orchestratorPaneId (the
   // first running one) stays for clients of the single-orchestrator contract.
   const clientState = (state: NormalizedState) => {
-    const orchestrators = findOrchestrators(state, config.orchestrators);
+    const orchestrators = findOrchestrators(state, config.orchestrators, paneAccounts.accounts);
     return {
       ...toClientState(state),
       orchestrators,
@@ -744,6 +754,8 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
 
   // ── WebSocket server ───────────────────────────────────────────────────────
 
+  server.on('close', () => clearInterval(accountTimer));
+
   // the only expected inbound WS message is a small ping — cap payloads.
   // permessage-deflate: pane_output resends the whole screen (~9KB) on every
   // change, and consecutive screens are near-identical, so context-takeover
@@ -940,7 +952,8 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
   let lastStateMsg: string | null = null;
 
   function broadcastState(state: NormalizedState): void {
-    const msg = JSON.stringify({ type: 'state', state: clientState(state) });
+    paneAccounts.refresh([...state._paneById.values()].filter((p) => p.agent).map((p) => p.paneId));
+    const msg =JSON.stringify({ type: 'state', state: clientState(state) });
     // focus churn in the TUI produces frequent no-op state updates; skip resends.
     // The dedupe baseline is updated even with no clients connected, so a client
     // that connects during a lull isn't left stale when state later returns to a
