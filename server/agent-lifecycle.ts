@@ -115,6 +115,17 @@ async function launchInPane(rpc: Rpc, paneId: string, profile: LaunchProfile, na
   }
 }
 
+/** Stop a launched agent by closing its pane, and say how that went: a failed close
+ *  must be told, since the agent may then still be running. */
+async function stopStarted(rpc: Rpc, paneId: string): Promise<string> {
+  try {
+    await rpc('pane.close', { pane_id: paneId });
+    return 'it was stopped';
+  } catch (err) {
+    return `its pane ${paneId} could not be closed (${(err as Error).message}), so it may still be running`;
+  }
+}
+
 /** Best-effort pane close (rolling back a pane we opened); never throws. */
 async function closeQuietly(rpc: Rpc, paneId: string | undefined): Promise<void> {
   if (!paneId) return;
@@ -249,7 +260,8 @@ export async function startAgent(
   // undo that (best-effort) so the caller never has to clean up a dangling tab or
   // worktree, or hit "branch already exists" on retry.
   let paneId: string | undefined;
-  // undoes what was opened; says what it had to leave behind, if anything
+  // Undoes what was opened. Once the agent was launched (a failed verify) it says what
+  // became of the agent and what was left behind, for the error.
   let rollback: (launched: boolean) => Promise<string | null>;
   if (input.worktree !== undefined) {
     const wt = await createWorktree(rpc, input.worktree);
@@ -259,10 +271,9 @@ export async function startAgent(
         await rollbackWorktree(rpc, wt.workspaceId);
         return null;
       }
-      // a failed verify: the agent has run and may have written files (it could still be
-      // writing during any cleanliness check), so stop it and keep the checkout
-      await closeQuietly(rpc, paneId);
-      return `its worktree ${wt.checkoutPath} was kept`;
+      // the agent has run and may have written files (it could still be writing during
+      // any cleanliness check), so stop it and keep the checkout
+      return `${await stopStarted(rpc, paneId!)}; its worktree ${wt.checkoutPath} was kept`;
     };
   } else {
     const params: Record<string, unknown> = { label: name, focus: false };
@@ -284,7 +295,11 @@ export async function startAgent(
       }
     }
     paneId = opened?.root_pane?.pane_id;
-    rollback = async () => { await closeQuietly(rpc, paneId); return null; };
+    rollback = async (launched) => {
+      if (launched) return stopStarted(rpc, paneId!);
+      await closeQuietly(rpc, paneId);
+      return null;
+    };
   }
 
   let started: RawAgentInfo | null;
@@ -295,8 +310,8 @@ export async function startAgent(
     launched = true;
     await opts.verify?.(paneId);
   } catch (err) {
-    const kept = await rollback(launched);
-    if (kept) throw new LifecycleError(409, 'worktree_kept', `${(err as Error).message}; ${kept}`);
+    const undone = await rollback(launched);
+    if (undone) throw new LifecycleError(409, 'start_undone', `${(err as Error).message}: ${undone}`);
     throw err;
   }
 
