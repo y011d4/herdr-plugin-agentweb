@@ -229,6 +229,15 @@ test('clearAgent: starts a replacement (inferred argv + cwd) then closes the old
   assert.equal(out.closedOld, true);
 });
 
+test('clearAgent: relaunches in the launch cwd, not a wandered foreground cwd', async () => {
+  const { rpc, calls } = fakeRpc({
+    'agent.get': { agent: { pane_id: 'old:pane', name: 'orig', agent: 'claude', cwd: '/home/u/orch', foreground_cwd: '/tmp', workspace_id: 'wOLD' } },
+    'agent.start': { type: 'agent_started', agent: { pane_id: 'new:pane', name: 'x', agent: 'claude' }, argv: ['claude'] },
+  });
+  await clearAgent(rpc, PROFILES, 'old:pane');
+  assert.equal(calls.find((c) => c.method === 'agent.start')?.params.cwd, '/home/u/orch');
+});
+
 test('clearAgent: an agent whose type matches no profile is a LifecycleError, nothing started', async () => {
   const { rpc, calls } = fakeRpc(agentGetResponse('some-unknown-agent'));
   await assert.rejects(() => clearAgent(rpc, PROFILES, 'old:pane'), (e: unknown) => e instanceof LifecycleError);

@@ -295,3 +295,33 @@ export function renderItem(item: TimelineItem): string {
 export function renderItems(items: TimelineItem[]): string {
   return items.map(renderItem).join('');
 }
+
+// User turns Claude Code writes itself: background-task wakeups, reminders, slash
+// commands and their output, `!` shell runs. (`<pasted_content>` is the user's
+// own paste, so it stays.)
+const INJECTED_USER_TURN = /^\s*<(task-notification|system-reminder|local-command-[\w-]+|command-(name|message|args)|bash-(input|stdout|stderr))>/;
+
+/**
+ * The home (orchestrator) chat shows only the dialogue: the user's and the
+ * assistant's own words. Tool calls/results, thinking, subagent traffic and
+ * injected user turns are hidden.
+ */
+export function conversationItems(items: TimelineItem[]): TimelineItem[] {
+  return items.filter((it) => !it.sidechain &&
+    (it.kind === 'assistant' || (it.kind === 'user' && !INJECTED_USER_TURN.test(it.text))));
+}
+
+/**
+ * What the agent is doing right now, folded over newly arrived items: its latest
+ * tool call since it last spoke, or null (thinking / writing). Pass the previous
+ * result as `prev` so appends continue from it.
+ */
+export function latestActivity(items: TimelineItem[], prev: string | null): string | null {
+  let cur = prev;
+  for (const it of items) {
+    if (it.sidechain) continue;
+    if (it.kind === 'tool_use') cur = it.summary ? `${it.name} ${it.summary}` : it.name;
+    else if (it.kind === 'assistant' || it.kind === 'user') cur = null;
+  }
+  return cur;
+}

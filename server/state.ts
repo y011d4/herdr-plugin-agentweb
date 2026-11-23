@@ -30,6 +30,10 @@ export const PANE_SET_CHANGING_EVENTS = new Set([
   'pane_closed',
   'pane_moved',
   'pane_exited',
+  // An agent appeared in / left an existing pane. Status events carry no cwd, and a
+  // shell may have `cd`-ed before launching, so re-snapshot: cwd/launchCwd
+  // (orchestrator identity, git branch) and agent presence stay current.
+  'pane_agent_detected',
   'workspace_created',
   'workspace_updated',
   'workspace_moved',
@@ -87,6 +91,7 @@ function normalizePane(pane: RawPane, nowMs: number): PaneNode {
     paneId: pane.pane_id,
     focused: pane.focused || false,
     cwd: pane.foreground_cwd || pane.cwd || null,
+    launchCwd: pane.cwd || null,
     title: pane.title || null,
     agent: normalizeAgent(pane, nowMs),
   };
@@ -320,6 +325,25 @@ export function applyEvent(state: NormalizedState, eventName: string, data: Reco
 export function toClientState(state: NormalizedState): Omit<NormalizedState, '_paneById' | '_tabById'> {
   const { _paneById: _p, _tabById: _t, ...safe } = state;
   return safe;
+}
+
+/**
+ * The orchestrator: the first agent pane launched in `dir` (or below it). The
+ * phone opens on its chat and pins it atop the agents list. herdr's snapshot
+ * carries no agent names, so the launch dir is the identity — the shell's cwd,
+ * not the mutable foreground cwd, so neither the orchestrator wandering off nor
+ * another agent wandering in changes which pane it is.
+ */
+export function findOrchestratorPane(state: NormalizedState, dir: string): string | null {
+  for (const ws of state.workspaces) {
+    for (const tab of ws.tabs) {
+      for (const pane of tab.panes) {
+        const cwd = pane.launchCwd;
+        if (pane.agent && cwd && (cwd === dir || cwd.startsWith(dir + '/'))) return pane.paneId;
+      }
+    }
+  }
+  return null;
 }
 
 /**

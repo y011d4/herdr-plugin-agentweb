@@ -3,7 +3,7 @@ import { createReadStream, statSync } from 'node:fs';
 import { join, resolve, extname } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { verifyToken, extractToken } from './auth.ts';
-import { toClientState } from './state.ts';
+import { toClientState, findOrchestratorPane } from './state.ts';
 import { buildAgentStatusMessage } from './notify.ts';
 import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail, projectsRootForPid } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt-identity.ts';
@@ -259,6 +259,13 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
   // stop/clear.
   const startedProfiles = createPaneProfileStore(join(config.stateDir, 'pane-profiles.json'));
 
+  // The JSON state sent to clients (REST + WS): the normalized tree plus which pane
+  // is the orchestrator (the phone opens on its chat).
+  const clientState = (state: NormalizedState) => ({
+    ...toClientState(state),
+    orchestratorPaneId: findOrchestratorPane(state, config.orchestratorDir),
+  });
+
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const pathname = url.pathname;
@@ -293,7 +300,7 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
         jsonError(res, 502, 'unavailable', 'herdr not connected');
         return;
       }
-      jsonOk(res, toClientState(state));
+      jsonOk(res, clientState(state));
       return;
     }
 
@@ -709,7 +716,7 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
       wsClients.add(ws);
       const state = getState();
       if (state) {
-        ws.send(JSON.stringify({ type: 'state', state: toClientState(state) }));
+        ws.send(JSON.stringify({ type: 'state', state: clientState(state) }));
       }
 
       // Pane watch: while a client views a pane, poll it server-side over the
@@ -880,7 +887,7 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
   let lastStateMsg: string | null = null;
 
   function broadcastState(state: NormalizedState): void {
-    const msg = JSON.stringify({ type: 'state', state: toClientState(state) });
+    const msg = JSON.stringify({ type: 'state', state: clientState(state) });
     // focus churn in the TUI produces frequent no-op state updates; skip resends.
     // The dedupe baseline is updated even with no clients connected, so a client
     // that connects during a lull isn't left stale when state later returns to a
