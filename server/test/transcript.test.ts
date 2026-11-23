@@ -233,6 +233,17 @@ describe('findLastItem (backward scan past the tail window)', () => {
     assert.equal(hit?.kind === 'user' && hit.text, '本当の依頼 ✓');
   });
 
+  it('finds a message the user sent mid-turn (queued_command attachment) past the tail window', () => {
+    const file = join(dir, 'scan-queued.jsonl');
+    // as Claude Code writes it: no "user" anywhere in the raw line
+    const queued = JSON.stringify({ type: 'attachment', isSidechain: false, attachment: { type: 'queued_command', prompt: 'also do this', commandMode: 'prompt', origin: { kind: 'human' } } });
+    assert.equal(queued.includes('"user"'), false);
+    writeFileSync(file, userLine('first request') + '\n' + queued + '\n' + (asstLine('z'.repeat(500)) + '\n').repeat(5000));
+    assert.equal(readTranscriptTail(file, 1000).items.some(isUser), false); // out of the tail
+    const hit = findLastItem(file, isUser);
+    assert.equal(hit?.kind === 'user' && hit.text, 'also do this');
+  });
+
   it('respects maxBytes and returns null when nothing matches or the file is missing', () => {
     const file = join(dir, 'scan2.jsonl');
     writeFileSync(file, userLine('far back') + '\n' + (asstLine('y'.repeat(500)) + '\n').repeat(3000));

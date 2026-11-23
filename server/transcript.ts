@@ -292,7 +292,9 @@ export function findLastItem(file: string, pred: (item: TimelineItem) => boolean
       const body = start > 0 ? (firstNl === -1 ? '' : data.toString('utf8', firstNl + 1)) : data.toString('utf8');
       const lines = body.split('\n');
       for (let i = lines.length - 1; i >= 0; i--) {
-        if (!lines[i].includes('"user"')) continue; // cheap prefilter before JSON.parse
+        // cheap prefilter before JSON.parse: a user line, or a message the user sent
+        // mid-turn (a queued_command attachment, whose raw line has no "user")
+        if (!lines[i].includes('"user"') && !lines[i].includes('"queued_command"')) continue;
         const hit = normalizeLine(lines[i]).findLast(pred);
         if (hit) return hit;
       }
