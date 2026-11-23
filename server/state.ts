@@ -370,9 +370,11 @@ export function toClientState(state: NormalizedState): Omit<NormalizedState, '_p
  * list. herdr's snapshot carries no agent names, so the launch dir is the identity —
  * the shell's cwd, not the mutable foreground cwd, so neither an orchestrator
  * wandering off nor another agent wandering in changes which pane it is. A pane
- * under nested dirs belongs to the deepest one only.
+ * under nested dirs belongs to the deepest one only. Given each agent pane's Claude
+ * account (`accounts`), each also lists the agents of its own account (itself
+ * included), or null when its account isn't known.
  */
-export function findOrchestrators(state: NormalizedState, defs: OrchestratorDef[]): OrchestratorView[] {
+export function findOrchestrators(state: NormalizedState, defs: OrchestratorDef[], accounts?: ReadonlyMap<string, string | null>): OrchestratorView[] {
   const paneIds: Array<string | null> = defs.map(() => null);
   for (const ws of state.workspaces) {
     for (const tab of ws.tabs) {
@@ -387,7 +389,12 @@ export function findOrchestrators(state: NormalizedState, defs: OrchestratorDef[
       }
     }
   }
-  return defs.map((d, i) => ({ name: d.name, label: d.label, paneId: paneIds[i] }));
+  const agentPanes = getPaneIds(state).filter((id) => state._paneById.get(id)!.agent);
+  return defs.map((d, i) => {
+    const account = paneIds[i] && accounts?.get(paneIds[i]);
+    const agents = account ? agentPanes.filter((id) => accounts!.get(id) === account) : null;
+    return { name: d.name, label: d.label, paneId: paneIds[i], agents };
+  });
 }
 
 /**

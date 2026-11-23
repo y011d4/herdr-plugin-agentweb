@@ -75,7 +75,10 @@ herdr server
   status bar of every other agent incl. other orchestrators (blocked chips + counts, `homeSummary`), dialogue-only chat
   (`conversationItems` hides tools/injected turns), a "doing now" line (`latestActivity`) and a
   composer (the terminal + quick keys stay one `>_` tap away — the only way to send Esc/Ctrl+C, and
-  the fallback when there's no transcript). Its card is pinned atop the agents list, and any route to
+  the fallback when there's no transcript). Its card is pinned atop the agents list. Home's Agents /
+  All agents open `#/agents/<name>`: only the panes in its state `agents` (its Claude account's, via
+  `paneAccount`, cached per agent pane in http.ts; `null` = unknown → every agent), with Back to the
+  Home; a pane opened from there goes Back to that list. Any route to
   its pane (`#/pane/<id>`: notification clicks, stale links) is replaced by its Home. herdr's
   `pane.agent_detected` (fires on detect *and* release) is rebuild-triggering, so agent presence and
   `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `agentwebctl agent …`, waking on background

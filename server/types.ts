@@ -141,6 +141,8 @@ export interface OrchestratorView {
   name: string;
   label: string;
   paneId: string | null;
+  /** the agent panes of its Claude account (itself included); null when that isn't known */
+  agents: string[] | null;
 }
 
 // ── Raw herdr wire payloads (loose, index-signed) ─────────────────────────────

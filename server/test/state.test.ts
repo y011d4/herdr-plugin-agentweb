@@ -346,10 +346,26 @@ describe('findOrchestrators', () => {
       { name: 'off', label: '', dir: '/off' },
     ]);
     assert.deepEqual(views, [
-      { name: 'home', label: 'Home', paneId: 'w0:p2' },
-      { name: 'work', label: 'Work', paneId: 'w0:p1' },
-      { name: 'off', label: '', paneId: null },
+      { name: 'home', label: 'Home', paneId: 'w0:p2', agents: null },
+      { name: 'work', label: 'Work', paneId: 'w0:p1', agents: null },
+      { name: 'off', label: '', paneId: null, agents: null },
     ]);
+  });
+
+  it("lists the agents of each orchestrator's account; none when its account isn't known", () => {
+    const pane = (id: string, cwd: string, agent?: string) =>
+      ({ pane_id: id, workspace_id: 'w0', tab_id: 'w0:t1', focused: false, agent, agent_status: 'idle', cwd });
+    const state = createState(makeSnapshot({
+      panes: [pane('w0:p1', '/o/a', 'claude'), pane('w0:p2', '/o/b', 'claude'), pane('w0:p3', '/r', 'claude'),
+        pane('w0:p4', '/r', 'codex'), pane('w0:p5', '/r'), pane('w0:p6', '/r', 'claude')],
+    }));
+    const accounts = new Map([['w0:p1', 'A'], ['w0:p2', 'B'], ['w0:p3', 'A'], ['w0:p4', 'B'], ['w0:p5', 'A'], ['w0:p6', null]]);
+    const views = findOrchestrators(state, [
+      { name: 'a', label: '', dir: '/o/a' },
+      { name: 'b', label: '', dir: '/o/b' },
+    ], accounts);
+    assert.deepEqual(views.map((v) => v.agents), [['w0:p1', 'w0:p3'], ['w0:p2', 'w0:p4']]); // p5 has no agent
+    assert.equal(findOrchestrators(state, [{ name: 'a', label: '', dir: '/o/a' }], new Map())[0].agents, null);
   });
 
   it('goes by the launch (shell) cwd, not the foreground cwd', () => {
