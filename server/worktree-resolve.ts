@@ -217,3 +217,33 @@ export async function refreshWorktrees(cwds: string[], onChange: () => void): Pr
   const results = await Promise.all(stale.map(resolveCwd));
   if (results.some(Boolean)) onChange();
 }
+
+// ── placing a new worktree ────────────────────────────────────────────────────
+
+/** The repo root containing `cwd`, or null outside git. */
+export function repoToplevel(cwd: string): Promise<string | null> {
+  return new Promise((res) => {
+    execFile('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { timeout: 5000 },
+      (err, stdout) => res(err ? null : stdout.trim() || null));
+  });
+}
+
+/**
+ * Put a new worktree of the repo at `spec.repo` next to the repo, as
+ * `<repo>-wt-<branch>`, instead of herdr's worktrees dir: whatever covers the repo
+ * from a parent dir (e.g. a direnv .envrc per org dir, which may pick the Claude
+ * account) then covers the checkout too. A blank branch gets a generated name, since
+ * the path needs one. A spec with its own path, no repo cwd, or a branch that isn't a
+ * string comes back as is, and so does a cwd outside git (herdr reports that).
+ */
+export async function placeWorktreeNextToRepo<T extends { repo?: unknown; branch?: unknown; path?: unknown }>(
+  spec: T,
+  toplevel: (cwd: string) => Promise<string | null> = repoToplevel,
+): Promise<T> {
+  if (spec.path !== undefined || typeof spec.repo !== 'string' || !spec.repo) return spec;
+  if (spec.branch !== undefined && typeof spec.branch !== 'string') return spec;
+  const root = await toplevel(spec.repo);
+  if (!root) return spec;
+  const branch = (spec.branch as string | undefined)?.trim() || `worktree/${Date.now().toString(36)}`;
+  return { ...spec, branch, path: `${dirname(root)}/${basename(root)}-wt-${branch.replace(/[^A-Za-z0-9._-]+/g, '-')}` };
+}

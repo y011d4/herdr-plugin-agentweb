@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
-import { enrichStateWorktrees, refreshWorktrees, worktreeForCwd, isNotARepo, resolveOutcome, parseGit, _setGitRunForTest } from '../worktree-resolve.ts';
+import { enrichStateWorktrees, refreshWorktrees, worktreeForCwd, isNotARepo, resolveOutcome, parseGit, _setGitRunForTest, placeWorktreeNextToRepo } from '../worktree-resolve.ts';
 import type { NormalizedState, WorkspaceNode, WorktreeInfo } from '../types.ts';
 
 function mkState(workspaces: WorkspaceNode[]): NormalizedState {
@@ -281,5 +281,27 @@ describe('refreshWorktrees + worktreeForCwd (real git)', () => {
     // second sees it in-flight and does nothing — only one resolution/onChange.
     assert.equal(fires, 1);
     assert.ok(worktreeForCwd(cwd));
+  });
+});
+
+describe('placeWorktreeNextToRepo', () => {
+  const top = (root: string | null) => async () => root;
+  it('puts the checkout next to the repo as <repo>-wt-<branch>, with a filesystem-safe branch', async () => {
+    const spec = await placeWorktreeNextToRepo({ repo: '/src/org/repo/sub', branch: ' feat/x y ', base: 'origin/main' }, top('/src/org/repo'));
+    assert.deepEqual(spec, { repo: '/src/org/repo/sub', branch: 'feat/x y', base: 'origin/main', path: '/src/org/repo-wt-feat-x-y' });
+  });
+
+  it('names a blank branch itself, since the path needs one', async () => {
+    const spec = await placeWorktreeNextToRepo({ repo: '/r/repo', branch: '  ' }, top('/r/repo'));
+    assert.match(spec.branch as string, /^worktree\/[0-9a-z]+$/);
+    assert.equal(spec.path, `/r/repo-wt-${(spec.branch as string).replace('/', '-')}`);
+    assert.match((await placeWorktreeNextToRepo({ repo: '/r/repo' }, top('/r/repo'))).path as string, /^\/r\/repo-wt-worktree-/);
+  });
+
+  it('leaves alone a spec with its own path, no repo cwd, a non-string branch, or a cwd outside git', async () => {
+    for (const spec of [{ repo: '/r', path: '/elsewhere' }, { workspace: 'w1' }, { repo: '/r', branch: 7 }]) {
+      assert.deepEqual(await placeWorktreeNextToRepo(spec, top('/r')), spec);
+    }
+    assert.deepEqual(await placeWorktreeNextToRepo({ repo: '/tmp/x', branch: 'b' }, top(null)), { repo: '/tmp/x', branch: 'b' });
   });
 });
