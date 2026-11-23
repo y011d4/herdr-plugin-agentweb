@@ -8,8 +8,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSplitter, serialize } from '../server/ndjson.ts';
-import { formatOverview, orderAgents, type AgentDetail, type RawAgent, type RawSnapshot } from '../server/overview.ts';
-import { readTranscriptTail, resolveTranscriptPath } from '../server/transcript.ts';
+import { formatOverview, orderAgents, isTaskTurn, type AgentDetail, type RawAgent, type RawSnapshot } from '../server/overview.ts';
+import { readTranscriptTail, resolveTranscriptPath, findLastItem } from '../server/transcript.ts';
 
 // Walk up from the script's directory until a directory containing package.json
 // is found. This is necessary because this file runs from dist/bin/agentwebctl.js,
@@ -324,9 +324,10 @@ function herdrRpc(method: string, params: Record<string, unknown> = {}): Promise
     const conn = net.createConnection(socketPath);
     const splitter = createSplitter();
     conn.setTimeout(5000, () => conn.destroy(new Error(`${method}: timeout`)));
+    conn.setEncoding('utf8'); // decodes across chunk boundaries (a split multi-byte char stays whole)
     conn.on('connect', () => conn.write(serialize({ type: 'request', id: 'agentwebctl', method, params })));
-    conn.on('data', (chunk: Buffer) => {
-      const line = splitter.push(chunk.toString('utf8'))[0];
+    conn.on('data', (chunk: string) => {
+      const line = splitter.push(chunk)[0];
       if (!line) return;
       conn.destroy();
       try {
@@ -362,7 +363,14 @@ async function overview(): Promise<number> {
     const sess = a.agent_session;
     if (sess?.source?.startsWith('herdr:claude') && sess.value) {
       const file = resolveTranscriptPath(sess.value, a.foreground_cwd || a.cwd || null);
-      if (file) detail.items = readTranscriptTail(file, 1000).items;
+      if (file) {
+        detail.items = readTranscriptTail(file, 1000).items;
+        // the request scrolled out of the tail window: look further back for it
+        if (!detail.items.some(isTaskTurn)) {
+          const older = findLastItem(file, isTaskTurn);
+          if (older?.kind === 'user') detail.olderTask = older.text;
+        }
+      }
     }
     if (detail.items?.length) return;
     try {

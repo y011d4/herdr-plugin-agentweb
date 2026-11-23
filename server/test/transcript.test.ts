@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, appendFileSync, rmSync, mkdirSync, symlinkSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readTranscriptTail, readTranscriptFrom, slugForCwd, resolveTranscriptPath } from '../transcript.ts';
+import { readTranscriptTail, readTranscriptFrom, slugForCwd, resolveTranscriptPath, findLastItem } from '../transcript.ts';
 
 // One JSONL line (a minimal user turn) whose content is `n` bytes of filler, so
 // tests can build files of a known size.
@@ -216,5 +216,28 @@ describe('readTranscriptFrom — bounded when the cursor is far behind', () => {
     // and a follow-up read finds nothing new — no re-read loop
     assert.equal(readTranscriptFrom(f, r.cursor, 300).items.length, 0);
     assert.equal(readTranscriptFrom(f, r.cursor, 300).reset, false);
+  });
+});
+
+describe('findLastItem (backward scan past the tail window)', () => {
+  const asstLine = (text: string): string => JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
+  const isUser = (i: { kind: string }): boolean => i.kind === 'user';
+
+  it('finds the newest matching item across 1 MiB chunk boundaries, even a multi-byte one', () => {
+    const file = join(dir, 'scan.jsonl');
+    const filler = asstLine('x'.repeat(500)) + '\n';
+    // the request, then ~2.5 MB of assistant output: beyond the 2 MB tail window
+    writeFileSync(file, userLine('older') + '\n' + userLine('本当の依頼 ✓') + '\n' + filler.repeat(5000));
+    assert.equal(readTranscriptTail(file, 1000).items.some(isUser), false); // out of the tail
+    const hit = findLastItem(file, isUser);
+    assert.equal(hit?.kind === 'user' && hit.text, '本当の依頼 ✓');
+  });
+
+  it('respects maxBytes and returns null when nothing matches or the file is missing', () => {
+    const file = join(dir, 'scan2.jsonl');
+    writeFileSync(file, userLine('far back') + '\n' + (asstLine('y'.repeat(500)) + '\n').repeat(3000));
+    assert.equal(findLastItem(file, isUser, 512 * 1024), null); // the request is beyond the bound
+    assert.equal(findLastItem(file, (i) => i.kind === 'thinking'), null);
+    assert.equal(findLastItem(join(dir, 'nope.jsonl'), isUser), null);
   });
 });
