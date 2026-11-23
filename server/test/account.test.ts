@@ -41,21 +41,21 @@ describe('paneAccountCache', () => {
     assert.equal(changes, 4);
   });
 
-  it("drops a lookup's answer when its pane lost the agent meanwhile, and asks again for the next one", async () => {
+  it("drops a lookup's answer when its pane lost the agent meanwhile, and asks right away for the next one", async () => {
     let answer!: (a: string) => void;
     const asked: string[] = [];
+    let live: string[] = [];
+    // like the bridge, onChange leads to a refresh with the panes that have an agent now
     const cache = paneAccountCache((id) => {
       asked.push(id);
       return asked.length === 1 ? new Promise((r) => { answer = r; }) : Promise.resolve('B');
-    }, () => {}, 100, () => 0);
+    }, () => cache.refresh(live), 100, () => 0);
     const settle = () => new Promise((r) => setTimeout(r, 0));
 
-    cache.refresh(['p1']); // lookup for the first agent, in flight
-    cache.refresh([]); // its agent exits
+    cache.refresh(live = ['p1']); // lookup for the first agent, in flight
+    cache.refresh(live = []); // its agent exits
+    cache.refresh(live = ['p1']); // a replacement starts in the pane: its lookup waits for the first
     answer('A'); // the first agent's account arrives late
-    await settle();
-    assert.equal(cache.accounts.has('p1'), false);
-    cache.refresh(['p1']); // a replacement started in the pane
     await settle();
     assert.deepEqual([asked, cache.accounts.get('p1')], [['p1', 'p1'], 'B']);
   });

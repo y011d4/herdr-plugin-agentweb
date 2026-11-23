@@ -88,8 +88,8 @@ export async function paneAccount(rpc: Rpc, paneId: string): Promise<string | nu
  * same pane corrects itself; panes that lost their agent are forgotten, and so is the
  * answer of a lookup during which its pane lost its agent (it may describe that agent,
  * not the next one). A lookup that fails is tried again on the next refresh. `onChange`
- * runs when an answer changes the map. The caller refreshes on each state change and
- * at least every ttlMs.
+ * runs when an answer changes the map or a dropped one leaves its pane to ask about again;
+ * the caller refreshes then, on each state change, and at least every ttlMs.
  * ponytail: a swapped agent keeps the old account for up to ttlMs; key on herdr's agent
  * session if that ever matters.
  */
@@ -120,7 +120,10 @@ export function paneAccountCache(
         if (accounts.has(id) && accounts.get(id) === account) return;
         accounts.set(id, account);
         onChange();
-      }, () => { /* no answer: the next refresh tries again */ }).finally(() => { pending.delete(id); dropped.delete(id); });
+      }, () => { /* no answer: the next refresh tries again */ }).finally(() => {
+        pending.delete(id);
+        if (dropped.delete(id)) onChange(); // the caller refreshes: its pane may hold the next agent already
+      });
     }
   }
   return { accounts, refresh };
