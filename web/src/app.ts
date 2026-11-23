@@ -26,7 +26,7 @@ import type { AppState, OrchestratorView, WsMessage, WsAgentStatusMessage, WsTra
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v103';
+const BUILD = 'v104';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -647,7 +647,7 @@ function defaultHome(): OrchestratorView | undefined {
 let routeRendered = false;
 
 // Home (#/home) is the orchestrator's chat as the app's main screen: the pane view
-// with its own chrome — a status bar of the other agents, dialogue-only chat (no
+// with its own chrome — a status bar of its account's agents, dialogue-only chat (no
 // tool calls or injected notifications), a "doing now" line while it works, and a
 // plain messenger composer without terminal keys.
 let homeMode = false;
@@ -1146,8 +1146,10 @@ function renderAgentsDashboard(): void {
     topbar.style.display = '';
     document.getElementById('topbar-title')!.innerHTML = 'Agents' +
       (scope ? `<span class="topbar-subtitle">&#183; ${escHtml(orchestratorLabel(scope))}</span>` : '');
-    document.getElementById('topbar-left')!.innerHTML = scope ? '<button class="topbar-back" aria-label="Back">&#8592; Home</button>' : '';
-    if (scope) document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate(homeHash(scope.name)));
+    // Orchestrators have no cards, so this is the way to a Home: its own, else the one used last
+    const home = scope ?? defaultHome();
+    document.getElementById('topbar-left')!.innerHTML = home ? '<button class="topbar-back" aria-label="Home">&#8592; Home</button>' : '';
+    if (home) document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate(homeHash(home.name)));
     document.getElementById('topbar-right')!.innerHTML =
       `<button class="topbar-action" id="btn-new-agent" aria-label="New agent">+</button>` +
       `<button class="topbar-action" id="btn-settings" aria-label="Settings">&#9881;</button>`;
@@ -1170,11 +1172,7 @@ function renderAgentsDashboard(): void {
   }
 
   const { workspaces = [] } = appState;
-
-  // One flat list of every agent, most recent status change first (pure helper,
-  // unit-tested in dashboard-group.test.ts).
-  const cards = dashboardCards(workspaces, orchestrators().map((o) => o.paneId))
-    .filter((c) => !scope?.agents || scope.agents.includes(c.pane.paneId)); // account unknown: all
+  const cards = agentCards(scope);
   // configured orchestrators that aren't running get a Start button atop the list
   const stopped = orchestrators().filter((o) => !o.paneId);
   const starts = stopped.length === 0 ? '' : '<div class="orch-start"><span class="orch-start-label">Start</span>' +
@@ -1255,13 +1253,20 @@ function updatePaneDetailHeader(): void {
   }
 }
 
-// Home status bar: agents waiting on the user (tap → that agent) and counts of
-// the rest (tap → the list). Rewritten only when its content changes, so the
+// The agents a list or a Home shows, most recent status change first: never the
+// orchestrators, and for an orchestrator (`scope`) only its account's agents —
+// all of them when that isn't known (pure helper, tested in dashboard-group.test.ts).
+function agentCards(scope?: OrchestratorView): DashboardCard[] {
+  return dashboardCards(appState?.workspaces ?? [], orchestrators().map((o) => o.paneId), scope?.agents ?? null);
+}
+
+// Home status bar: its agents waiting on the user (tap → that agent) and counts of
+// the rest (tap → its list). Rewritten only when its content changes, so the
 // constant state pushes don't replace a chip under a finger.
 function renderHomeStatus(): void {
   const el = document.getElementById('home-status');
   if (!el || !appState) return;
-  const s = homeSummary(appState.workspaces, activePaneId, seenDone);
+  const s = homeSummary(agentCards(orchestratorOfPane(activePaneId)), seenDone);
   // With several orchestrators running, a switcher between their Homes (tap = that
   // orchestrator's pane, which routes to its Home like any chip), each with its status.
   const running = orchestrators().filter((o) => o.paneId);

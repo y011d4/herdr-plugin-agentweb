@@ -25,11 +25,12 @@ describe('dashboardCards', () => {
     assert.deepEqual(cards.map((c) => c.workspaceLabel), ['A-label', 'B-label', 'A-label']);
   });
 
-  it('pins the orchestrators first in their order, then the rest by recency', () => {
+  it('leaves the orchestrators out, and with a scope keeps only its panes', () => {
     const ws = [wsNode('A', [agentPane('a1', 100), agentPane('a2', 300)]), wsNode('B', [agentPane('b1', 200)])];
-    assert.deepEqual(dashboardCards(ws, ['a1']).map((c) => c.pane.paneId), ['a1', 'a2', 'b1']);
-    assert.deepEqual(dashboardCards(ws, ['b1', null, 'a1']).map((c) => c.pane.paneId), ['b1', 'a1', 'a2']);
+    assert.deepEqual(dashboardCards(ws, ['a1']).map((c) => c.pane.paneId), ['a2', 'b1']);
     assert.deepEqual(dashboardCards(ws, ['gone', null]).map((c) => c.pane.paneId), ['a2', 'b1', 'a1']);
+    assert.deepEqual(dashboardCards(ws, ['a1'], ['a1', 'b1']).map((c) => c.pane.paneId), ['b1']);
+    assert.deepEqual(dashboardCards(ws, [], []).map((c) => c.pane.paneId), []);
   });
 
   it('keeps workspace order for equal times (e.g. right after a bridge restart)', () => {
@@ -51,20 +52,20 @@ describe('dashboardCards', () => {
 });
 
 describe('homeSummary', () => {
-  it('lists blocked agents (newest first) and counts the rest, excluding the orchestrator', () => {
+  it("lists blocked agents (newest first) and counts the rest, of the Home's agents only", () => {
     const ws = [wsNode('A', [
-      agentPane('orch', 900, 'working'),
+      agentPane('orch', 900, 'working'), agentPane('other', 1, 'working'),
       agentPane('b1', 100, 'blocked'), agentPane('b2', 300, 'blocked'),
       agentPane('w1', 1, 'working'), agentPane('d1', 1, 'done'), agentPane('i1', 1, 'idle'), agentPane('u1', 1, 'unknown'),
     ])];
-    const s = homeSummary(ws, 'orch');
+    const s = homeSummary(dashboardCards(ws, ['orch'], ['orch', 'b1', 'b2', 'w1', 'd1', 'i1', 'u1']));
     assert.deepEqual(s.blocked.map((c) => c.pane.paneId), ['b2', 'b1']);
     assert.deepEqual([s.working, s.done, s.idle], [1, 1, 2]);
   });
 
   it('counts a done agent the phone has opened as idle', () => {
     const ws = [wsNode('A', [agentPane('d1', 10, 'done', 5), agentPane('d2', 10, 'done', 6)])];
-    const s = homeSummary(ws, null, markSeen({}, ws, 'd1'));
+    const s = homeSummary(dashboardCards(ws), markSeen({}, ws, 'd1'));
     assert.deepEqual([s.done, s.idle], [1, 1]);
   });
 });
