@@ -241,10 +241,11 @@ with defaults, is:
   personal orchestrator apart. The plugin sets up each one's directory itself (see
   [Orchestrators](#orchestrators)) and starts it from the phone (**Start** buttons atop the agents
   list) or with `agentwebctl.js orchestrator start <name>`. Opening the app lands on an
-  orchestrator's **Home**: its chat with only the dialogue (tool calls hidden), a status bar of the
-  agents that need you and counts of the rest, and a "doing now" line while it works. Its card is
-  pinned atop the agents list; opened from a Home, the list shows only the agents of that
-  orchestrator's Claude account (`#/agents/<name>`, Back returns to the Home). With several running, Home shows a switcher (`label`s, with their
+  orchestrator's **Home**: its chat with only the dialogue (tool calls hidden), a status bar of its
+  Claude account's agents (those that need you, and counts of the rest), and a "doing now" line while
+  it works. Orchestrators aren't listed among the agents. Opened from a Home, the agents list shows
+  only that account's agents (`#/agents/<name>`, Back returns to the Home); the full list's
+  **← Home** opens the Home used last. With several running, Home shows a switcher (`label`s, with their
   status) and reopens the one used last (`#/home/<name>`); with none, the app opens on the list.
 - `notify_url` — optional [ntfy](https://ntfy.sh) topic URL for background push
   notifications, e.g. `https://ntfy.example.internal/herdr` for a **self-hosted**

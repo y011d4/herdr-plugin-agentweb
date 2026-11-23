@@ -72,13 +72,14 @@ herdr server
   A fresh app open (empty hash) lands on a **Home** (`#/home/<name>`; bare `#/home` = the one used
   last on this phone, else the first running): the pane view in `homeMode` — a switcher between
   running orchestrators (2+), a
-  status bar of every other agent incl. other orchestrators (blocked chips + counts, `homeSummary`), dialogue-only chat
+  status bar of its account's agents (blocked chips + counts, `homeSummary`; no orchestrators), dialogue-only chat
   (`conversationItems` hides tools/injected turns), a "doing now" line (`latestActivity`) and a
   composer (the terminal + quick keys stay one `>_` tap away — the only way to send Esc/Ctrl+C, and
-  the fallback when there's no transcript). Its card is pinned atop the agents list. Home's Agents /
-  All agents open `#/agents/<name>`: only the panes in its state `agents` (its Claude account's, via
-  `paneAccount`, cached per agent pane in http.ts; `null` = unknown → every agent), with Back to the
-  Home; a pane opened from there goes Back to that list. Any route to
+  the fallback when there's no transcript). Orchestrators get no card in any agents list (`agentCards`
+  in app.ts feeds both the list and `homeSummary`); the full list's ← Home opens `defaultHome()`.
+  Home's Agents / All agents open `#/agents/<name>`: only the panes in its state `agents` (its Claude
+  account's, via `paneAccount`, cached per agent pane in http.ts; `null` = unknown → every agent),
+  with Back to the Home; a pane opened from there goes Back to that list. Any route to
   its pane (`#/pane/<id>`: notification clicks, stale links) is replaced by its Home. herdr's
   `pane.agent_detected` (fires on detect *and* release) is rebuild-triggering, so agent presence and
   `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `agentwebctl agent …`, waking on background

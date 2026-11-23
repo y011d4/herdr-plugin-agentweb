@@ -366,8 +366,8 @@ export function toClientState(state: NormalizedState): Omit<NormalizedState, '_p
 
 /**
  * The orchestrators: each one is the first agent pane launched in its `dir` (or
- * below it). The phone opens on their chats (Home) and pins them atop the agents
- * list. herdr's snapshot carries no agent names, so the launch dir is the identity —
+ * below it). The phone opens on their chats (Home) and leaves them out of its agents
+ * lists. herdr's snapshot carries no agent names, so the launch dir is the identity —
  * the shell's cwd, not the mutable foreground cwd, so neither an orchestrator
  * wandering off nor another agent wandering in changes which pane it is. A pane
  * under nested dirs belongs to the deepest one only. Given each agent pane's Claude
