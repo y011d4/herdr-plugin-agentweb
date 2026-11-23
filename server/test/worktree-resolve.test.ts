@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, rmSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { enrichStateWorktrees, refreshWorktrees, worktreeForCwd, isNotARepo, resolveOutcome, parseGit, _setGitRunForTest, placeWorktreeNextToRepo } from '../worktree-resolve.ts';
@@ -298,10 +300,32 @@ describe('placeWorktreeNextToRepo', () => {
     assert.match((await placeWorktreeNextToRepo({ repo: '/r/repo' }, top('/r/repo'))).path as string, /^\/r\/repo-wt-worktree-/);
   });
 
-  it('leaves alone a spec with its own path, no repo cwd, a non-string branch, or a cwd outside git', async () => {
+  it('leaves alone a spec with its own path, no repo cwd, or a non-string branch', async () => {
     for (const spec of [{ repo: '/r', path: '/elsewhere' }, { workspace: 'w1' }, { repo: '/r', branch: 7 }]) {
       assert.deepEqual(await placeWorktreeNextToRepo(spec, top('/r')), spec);
     }
-    assert.deepEqual(await placeWorktreeNextToRepo({ repo: '/tmp/x', branch: 'b' }, top(null)), { repo: '/tmp/x', branch: 'b' });
+  });
+
+  it('refuses when git cannot place it, rather than fall back to herdr\'s dir', async () => {
+    await assert.rejects(() => placeWorktreeNextToRepo({ repo: '/tmp/x', branch: 'b' }, top(null)), /not in a git repository/);
+  });
+
+  it('does not land on a taken dir (feat/x and feat-x share a name)', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'place-'));
+    mkdirSync(join(base, 'repo-wt-feat-x'));
+    const spec = await placeWorktreeNextToRepo({ repo: join(base, 'repo'), branch: 'feat/x' }, top(join(base, 'repo')));
+    assert.match(spec.path as string, new RegExp(`^${base}/repo-wt-feat-x-[0-9a-z]+$`));
+    rmSync(base, { recursive: true });
+  });
+
+  it('places from the main checkout, even when asked from one of its linked worktrees', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'place-'));
+    const git = (...a: string[]) => spawnSync('git', a, { cwd: base, encoding: 'utf8' });
+    git('init', '-q', 'main');
+    spawnSync('git', ['-C', join(base, 'main'), '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'i']);
+    spawnSync('git', ['-C', join(base, 'main'), 'worktree', 'add', '-q', join(base, 'elsewhere', 'wt'), '-b', 'w']);
+    const spec = await placeWorktreeNextToRepo({ repo: join(base, 'elsewhere', 'wt'), branch: 'next' });
+    assert.equal(spec.path, `${realpathSync(base)}/main-wt-next`);
+    rmSync(base, { recursive: true });
   });
 });

@@ -17,8 +17,10 @@
  */
 
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
 import type { NormalizedState, WorkspaceNode, WorktreeInfo } from './types.ts';
+import { LifecycleError } from './agent-lifecycle.ts';
 
 const TTL_MS = 30_000;
 const MAX_CONCURRENCY = 4;
@@ -220,11 +222,17 @@ export async function refreshWorktrees(cwds: string[], onChange: () => void): Pr
 
 // ── placing a new worktree ────────────────────────────────────────────────────
 
-/** The repo root containing `cwd`, or null outside git. */
-export function repoToplevel(cwd: string): Promise<string | null> {
+/** The main checkout of the repo containing `cwd` — for a linked worktree, the repo it
+ *  belongs to — or null when git can't tell (not a repo, or git failed). */
+export function mainCheckout(cwd: string): Promise<string | null> {
   return new Promise((res) => {
-    execFile('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { timeout: 5000 },
-      (err, stdout) => res(err ? null : stdout.trim() || null));
+    execFile('git', ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--show-toplevel'], { timeout: 5000 },
+      (err, stdout) => {
+        if (err) return res(null);
+        const [common, top] = stdout.trim().split('\n');
+        // <main>/.git is shared by all its worktrees; a bare repo has no main checkout
+        res(common?.endsWith('/.git') ? dirname(common) : top || null);
+      });
   });
 }
 
@@ -234,16 +242,20 @@ export function repoToplevel(cwd: string): Promise<string | null> {
  * from a parent dir (e.g. a direnv .envrc per org dir, which may pick the Claude
  * account) then covers the checkout too. A blank branch gets a generated name, since
  * the path needs one. A spec with its own path, no repo cwd, or a branch that isn't a
- * string comes back as is, and so does a cwd outside git (herdr reports that).
+ * string comes back as is (createWorktree validates it). When git can't place it,
+ * this refuses rather than let herdr's default dir take the checkout.
  */
 export async function placeWorktreeNextToRepo<T extends { repo?: unknown; branch?: unknown; path?: unknown }>(
   spec: T,
-  toplevel: (cwd: string) => Promise<string | null> = repoToplevel,
+  repoOf: (cwd: string) => Promise<string | null> = mainCheckout,
 ): Promise<T> {
   if (spec.path !== undefined || typeof spec.repo !== 'string' || !spec.repo) return spec;
   if (spec.branch !== undefined && typeof spec.branch !== 'string') return spec;
-  const root = await toplevel(spec.repo);
-  if (!root) return spec;
+  const root = await repoOf(spec.repo);
+  if (!root) throw new LifecycleError(400, 'invalid_params', `${spec.repo}: not in a git repository (or git could not tell)`);
   const branch = (spec.branch as string | undefined)?.trim() || `worktree/${Date.now().toString(36)}`;
-  return { ...spec, branch, path: `${dirname(root)}/${basename(root)}-wt-${branch.replace(/[^A-Za-z0-9._-]+/g, '-')}` };
+  let path = `${dirname(root)}/${basename(root)}-wt-${branch.replace(/[^A-Za-z0-9._-]+/g, '-')}`;
+  // distinct branches can share that name (feat/x, feat-x): don't land on a taken one
+  if (existsSync(path)) path += `-${Date.now().toString(36)}`;
+  return { ...spec, branch, path };
 }
