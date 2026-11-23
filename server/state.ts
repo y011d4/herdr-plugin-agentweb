@@ -67,6 +67,7 @@ function normalizeAgent(pane: RawPane, nowMs: number): AgentInfo | null {
     message: pane.agent_message || null,
     sinceUnixMs: nowMs,
     completionSeq: null, // not in snapshots; filled from agent.list (applyCompletionSeqs)
+    stateChangeSeq: null, // likewise
   };
 }
 
@@ -120,6 +121,7 @@ export function createState(snapshot: RawSnapshot, nowMs = Date.now(), prevState
     if (pane.agent && prev?.agent && prev.agent.status === pane.agent.status) {
       pane.agent.sinceUnixMs = prev.agent.sinceUnixMs;
       pane.agent.completionSeq = prev.agent.completionSeq;
+      pane.agent.stateChangeSeq = prev.agent.stateChangeSeq;
     }
     paneById.set(p.pane_id, pane);
   }
@@ -235,12 +237,13 @@ export function applyEvent(state: NormalizedState, eventName: string, data: Reco
       if (from !== to) {
         // Merge optional fields present in the event payload so agents that start
         // after the initial snapshot get their name/displayName/customStatus filled in.
-        const existingAgent: AgentInfo = pane.agent ?? { name: null, displayName: null, status: 'unknown', customStatus: null, message: null, sinceUnixMs: nowMs, completionSeq: null };
+        const existingAgent: AgentInfo = pane.agent ?? { name: null, displayName: null, status: 'unknown', customStatus: null, message: null, sinceUnixMs: nowMs, completionSeq: null, stateChangeSeq: null };
         const updatedAgent: AgentInfo = {
           ...existingAgent,
           status: to as AgentInfo['status'],
           sinceUnixMs: nowMs,
-          completionSeq: null, // a new status; agent.list fills it in again
+          completionSeq: null, // a new status; agent.list fills these in again
+          stateChangeSeq: null,
           ...(data.agent != null       && { name: data.agent as string }),
           ...(data.display_agent != null || data.agent != null
             ? { displayName: (data.display_agent ?? data.agent ?? existingAgent.displayName) as string | null }
@@ -323,9 +326,10 @@ export function applyEvent(state: NormalizedState, eventName: string, data: Reco
 }
 
 /**
- * Fill in each agent's completionSeq from herdr's agent.list. herdr carries it
- * only there (not in snapshots or status events); the phone keys its "seen done"
- * record on it, as it survives a bridge restart. A pane is updated only if its
+ * Fill in each agent's completionSeq and stateChangeSeq from herdr's agent.list.
+ * herdr carries them only there (not in snapshots or status events); the phone keys
+ * its "seen done" record on the first and orders its lists by the second, as both
+ * survive a bridge restart. A pane is updated only if its
  * status matches the reply and hasn't changed since the request went out
  * (`requestedAtMs`): after done -> working -> done mid-request the reply would
  * carry the previous completion's seq (that newer done schedules its own fetch).
@@ -334,7 +338,7 @@ export function applyEvent(state: NormalizedState, eventName: string, data: Reco
  */
 export function applyCompletionSeqs(
   state: NormalizedState,
-  agents: Array<{ pane_id: string; agent_status?: string; completion_seq?: number | null }>,
+  agents: Array<{ pane_id: string; agent_status?: string; completion_seq?: number | null; state_change_seq?: number | null }>,
   requestedAtMs: number,
 ): NormalizedState {
   const paneById = new Map(state._paneById);
@@ -342,9 +346,11 @@ export function applyCompletionSeqs(
   for (const a of agents) {
     const pane = paneById.get(a.pane_id);
     const seq = a.completion_seq ?? null;
+    const changeSeq = a.state_change_seq ?? null;
     const agent = pane?.agent;
-    if (!agent || agent.status !== a.agent_status || agent.sinceUnixMs >= requestedAtMs || agent.completionSeq === seq) continue;
-    paneById.set(a.pane_id, { ...pane!, agent: { ...agent, completionSeq: seq } });
+    if (!agent || agent.status !== a.agent_status || agent.sinceUnixMs >= requestedAtMs) continue;
+    if (agent.completionSeq === seq && agent.stateChangeSeq === changeSeq) continue;
+    paneById.set(a.pane_id, { ...pane!, agent: { ...agent, completionSeq: seq, stateChangeSeq: changeSeq } });
     changed = true;
   }
   if (!changed) return state;

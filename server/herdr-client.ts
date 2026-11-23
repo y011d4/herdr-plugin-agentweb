@@ -369,7 +369,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
     for (const change of changes) {
       onAgentStatus?.(change, currentState);
     }
-    if (changes.some(c => c.to === 'done')) refreshCompletionSeqsSoon();
+    if (changes.length > 0) refreshCompletionSeqsSoon();
 
     // Focus events are applied to the model but do not trigger WS pushes: herdr
     // emits them ~10/s during desktop activity, and phone clients don't track
@@ -459,8 +459,8 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
 
   // ── completion seq (agent.list, off the hot path) ─────────────────────────────
 
-  // herdr's completion_seq is only in agent.list, so fetch it after each snapshot
-  // and each transition to done and push when it changes. Trailing debounce: the
+  // herdr's completion_seq and state_change_seq are only in agent.list, so fetch
+  // them after each snapshot and each status change and push when they change. Trailing debounce: the
   // request always goes out after the change that asked for it, which
   // applyCompletionSeqs' requestedAtMs guard relies on. Best-effort: without it
   // (older herdr, a failed call) the phone just keeps showing done.

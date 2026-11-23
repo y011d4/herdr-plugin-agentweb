@@ -175,8 +175,10 @@ Verified live against herdr 0.7.3 / protocol 16:
   herdr's state alone. herdr's TUI clients likewise track viewed completions per client.
   The record is keyed on herdr's `completion_seq` (which completion it is), which is
   **only in `agent.list`/`agent.get`** — not in snapshots or `pane.agent_status_changed` —
-  so the bridge fetches `agent.list` after each snapshot and each transition to done
-  (`applyCompletionSeqs` → `completionSeq`). Not `sinceUnixMs`: that resets on a bridge restart.
+  so the bridge fetches `agent.list` after each snapshot and each status change
+  (`applyCompletionSeqs` → `completionSeq`, plus `state_change_seq` → `stateChangeSeq`, a
+  server-wide counter that orders status changes; verified live on 0.9.5). Not `sinceUnixMs`:
+  that resets on a bridge restart.
   Don't fake it with `pane.report_agent`: that hijacks the agent's hook lifecycle authority.
 - Invalid enum values in request params make herdr **drop the connection
   without a response** (surfaces as opaque "connection closed"). The bridge
@@ -195,10 +197,11 @@ Verified live against herdr 0.7.3 / protocol 16:
   pane cwd (and clears when that stops resolving). `repo_key` uses git's
   shared `--git-common-dir`, matching herdr's own repoKey. In the UI each card shows its
   tab name and (dim, beside it) its git branch. The dashboard is one flat list of every
-  agent, most recent status change (`sinceUnixMs`) first, so each card names its own
-  workspace; a linked worktree's card adds a `worktree` chip. `sinceUnixMs` lives only in
-  bridge memory, so a bridge restart resets every card to "just now" (order falls back to
-  workspace order). A cwd git can't resolve just renders plain (graceful degradation).
+  agent, most recent status change first, so each card names its own workspace; a linked
+  worktree's card adds a `worktree` chip. The order is herdr's `stateChangeSeq` (a change
+  not fetched yet counts as newest), then `sinceUnixMs`: that one lives only in bridge memory,
+  so a bridge restart resets every card to "just now" — ordering by it alone sank agents
+  working since before the restart. A cwd git can't resolve just renders plain (graceful degradation).
 
 ## The two scrolling mechanisms (phone pane view)
 
