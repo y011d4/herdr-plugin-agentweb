@@ -7,7 +7,7 @@ import { toClientState, findOrchestrators } from './state.ts';
 import { buildAgentStatusMessage } from './notify.ts';
 import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail, projectsRootForPid } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt-identity.ts';
-import { startAgent, stopAgent, renameAgent, clearAgent, createWorktree, LifecycleError } from './agent-lifecycle.ts';
+import { startAgent, stopAgent, renameAgent, clearAgent, createWorktree, LifecycleError, type CreateWorktreeInput } from './agent-lifecycle.ts';
 import { createPaneProfileStore } from './pane-profile-store.ts';
 import { placeWorktreeNextToRepo, resolveCwdFor } from './worktree-resolve.ts';
 import type { HerdrClient, NormalizedState, StatusChange, Config } from './types.ts';
@@ -272,6 +272,19 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
     };
   };
 
+  // Every worktree the bridge creates goes next to its repo (placeWorktreeNextToRepo), or
+  // isn't created: a workspace alone is placed from its dir, and herdr then gets only that
+  // dir (it takes a cwd or a workspace, not both).
+  async function placeWorktree(spec: CreateWorktreeInput): Promise<CreateWorktreeInput> {
+    if ((spec.repo === undefined || spec.repo === '') && typeof spec.workspace === 'string' && spec.workspace) {
+      const ws = getState()?.workspaces.find((w) => w.workspaceId === spec.workspace);
+      const repo = ws ? resolveCwdFor(ws) : null;
+      if (!repo) throw new LifecycleError(400, 'invalid_params', `workspace ${spec.workspace}: its directory is not known yet`);
+      spec = { ...spec, repo, workspace: undefined };
+    }
+    return placeWorktreeNextToRepo(spec);
+  }
+
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const pathname = url.pathname;
@@ -340,7 +353,7 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
         }
         const out = await startAgent(rpc, config.launchProfiles, {
           profile: body.profile, cwd: body.cwd, name: body.name, workspace: body.workspace, task: body.task,
-          worktree: body.worktree === undefined ? undefined : await placeWorktreeNextToRepo(body.worktree as Record<string, unknown>),
+          worktree: body.worktree === undefined ? undefined : await placeWorktree(body.worktree as CreateWorktreeInput),
         });
         if (typeof body.profile === 'string') startedProfiles.set(out.paneId, body.profile);
         jsonOk(res, { ok: true, ...out });
@@ -360,12 +373,9 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
         return;
       }
       try {
-        // a workspace alone names the repo too: place the worktree from its dir (herdr
-        // takes a cwd or a workspace, not both)
-        const ws = body.cwd === undefined && typeof body.workspace === 'string'
-          ? getState()?.workspaces.find((w) => w.workspaceId === body.workspace) : undefined;
-        const source = ws ? { repo: resolveCwdFor(ws) ?? undefined } : { repo: body.cwd, workspace: body.workspace };
-        const out = await createWorktree(rpc, await placeWorktreeNextToRepo({ ...source, branch: body.branch, base: body.base }));
+        const out = await createWorktree(rpc, await placeWorktree({
+          repo: body.cwd, workspace: body.workspace, branch: body.branch, base: body.base,
+        }));
         jsonOk(res, { ok: true, ...out });
       } catch (err) {
         sendError(res, err);

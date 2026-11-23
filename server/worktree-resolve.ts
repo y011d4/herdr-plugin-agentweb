@@ -222,18 +222,22 @@ export async function refreshWorktrees(cwds: string[], onChange: () => void): Pr
 
 // ── placing a new worktree ────────────────────────────────────────────────────
 
-/** The main checkout of the repo containing `cwd` — for a linked worktree, the repo it
- *  belongs to — or null when git can't tell (not a repo, or git failed). */
-export function mainCheckout(cwd: string): Promise<string | null> {
-  return new Promise((res) => {
-    execFile('git', ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--show-toplevel'], { timeout: 5000 },
-      (err, stdout) => {
-        if (err) return res(null);
-        const [common, top] = stdout.trim().split('\n');
-        // <main>/.git is shared by all its worktrees; a bare repo has no main checkout
-        res(common?.endsWith('/.git') ? dirname(common) : top || null);
-      });
-  });
+const git = (cwd: string, args: string[]): Promise<string | null> =>
+  new Promise((res) => execFile('git', ['-C', cwd, ...args], { timeout: 5000 }, (err, stdout) => res(err ? null : stdout)));
+
+/**
+ * The main checkout of the repo containing `cwd` — for a linked worktree, the repo it
+ * belongs to — or null when there is none (bare repo) or git can't tell. From a linked
+ * worktree it is the first entry of git's worktree list, trusted only when it really is
+ * a checkout: with a separate git dir, git lists the git dir there instead.
+ */
+export async function mainCheckout(cwd: string): Promise<string | null> {
+  const [gitDir, commonDir, top] = (await git(cwd, ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--show-toplevel']))?.trim().split('\n') ?? [];
+  if (!top) return null;
+  if (gitDir === commonDir) return top; // cwd is in the main checkout itself
+  const main = ((await git(cwd, ['worktree', 'list', '--porcelain'])) ?? '').split('\n\n')[0].split('\n');
+  const path = main[0]?.startsWith('worktree ') ? main[0].slice('worktree '.length) : null;
+  return path && !main.includes('bare') && existsSync(`${path}/.git`) ? path : null;
 }
 
 /**
@@ -252,7 +256,7 @@ export async function placeWorktreeNextToRepo<T extends { repo?: unknown; branch
   if (spec.path !== undefined || typeof spec.repo !== 'string' || !spec.repo) return spec;
   if (spec.branch !== undefined && typeof spec.branch !== 'string') return spec;
   const root = await repoOf(spec.repo);
-  if (!root) throw new LifecycleError(400, 'invalid_params', `${spec.repo}: not in a git repository (or git could not tell)`);
+  if (!root) throw new LifecycleError(400, 'invalid_params', `${spec.repo}: no repo checkout found to put the worktree next to`);
   const branch = (spec.branch as string | undefined)?.trim() || `worktree/${Date.now().toString(36)}`;
   let path = `${dirname(root)}/${basename(root)}-wt-${branch.replace(/[^A-Za-z0-9._-]+/g, '-')}`;
   // distinct branches can share that name (feat/x, feat-x): don't land on a taken one

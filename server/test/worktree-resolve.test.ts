@@ -307,7 +307,7 @@ describe('placeWorktreeNextToRepo', () => {
   });
 
   it('refuses when git cannot place it, rather than fall back to herdr\'s dir', async () => {
-    await assert.rejects(() => placeWorktreeNextToRepo({ repo: '/tmp/x', branch: 'b' }, top(null)), /not in a git repository/);
+    await assert.rejects(() => placeWorktreeNextToRepo({ repo: '/tmp/x', branch: 'b' }, top(null)), /no repo checkout found/);
   });
 
   it('does not land on a taken dir (feat/x and feat-x share a name)', async () => {
@@ -326,6 +326,16 @@ describe('placeWorktreeNextToRepo', () => {
     spawnSync('git', ['-C', join(base, 'main'), 'worktree', 'add', '-q', join(base, 'elsewhere', 'wt'), '-b', 'w']);
     const spec = await placeWorktreeNextToRepo({ repo: join(base, 'elsewhere', 'wt'), branch: 'next' });
     assert.equal(spec.path, `${realpathSync(base)}/main-wt-next`);
+    rmSync(base, { recursive: true });
+  });
+
+  it('with a separate git dir: places from the main checkout, refuses from a linked worktree (git can\'t tell the main one)', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'place-'));
+    spawnSync('git', ['init', '-q', '--separate-git-dir', join(base, 'gitdir'), join(base, 'main')]);
+    spawnSync('git', ['-C', join(base, 'main'), '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'i']);
+    spawnSync('git', ['-C', join(base, 'main'), 'worktree', 'add', '-q', join(base, 'elsewhere', 'wt'), '-b', 'w']);
+    assert.equal((await placeWorktreeNextToRepo({ repo: join(base, 'main'), branch: 'next' })).path, `${realpathSync(base)}/main-wt-next`);
+    await assert.rejects(() => placeWorktreeNextToRepo({ repo: join(base, 'elsewhere', 'wt'), branch: 'next' }), /no repo checkout found/);
     rmSync(base, { recursive: true });
   });
 });
