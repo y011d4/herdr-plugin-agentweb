@@ -19,8 +19,9 @@ export interface DashboardCard {
   tabAgentCount: number;
 }
 
-/** `pinned` panes (the orchestrators) go first, in that order, regardless of recency. */
-export function dashboardCards(workspaces: WorkspaceNode[], pinned: Array<string | null> = []): DashboardCard[] {
+/** Every agent but the `orchestrators` (they have Homes, not cards); with a `scope` (an
+ *  orchestrator's account's agents), only those. */
+export function dashboardCards(workspaces: WorkspaceNode[], orchestrators: Array<string | null> = [], scope: string[] | null = null): DashboardCard[] {
   const cards = workspaces.flatMap((ws) => {
     const branch = ws.worktree?.branch || null;
     const isWorktree = ws.worktree?.isLinkedWorktree ?? false;
@@ -37,12 +38,14 @@ export function dashboardCards(workspaces: WorkspaceNode[], pinned: Array<string
       }));
     });
   });
-  // sort is stable: equal times (every agent right after a bridge restart) keep workspace order
-  const rank = (c: DashboardCard): number => {
-    const i = pinned.indexOf(c.pane.paneId);
-    return i === -1 ? pinned.length : i;
-  };
-  return cards.sort((a, b) => rank(a) - rank(b) || b.pane.agent!.sinceUnixMs - a.pane.agent!.sinceUnixMs);
+  // Most recent status change first, in herdr's own order (stateChangeSeq): sinceUnixMs is
+  // the bridge's clock and resets on a bridge restart, so alone it would sink an agent that has
+  // been working since before it. A change not fetched yet (null) is the newest. Stable sort:
+  // full ties (no seqs, e.g. an older herdr, and equal times) keep workspace order.
+  const changed = (c: DashboardCard): number => c.pane.agent!.stateChangeSeq ?? Infinity;
+  return cards
+    .filter((c) => !orchestrators.includes(c.pane.paneId) && (!scope || scope.includes(c.pane.paneId)))
+    .sort((a, b) => changed(b) - changed(a) || b.pane.agent!.sinceUnixMs - a.pane.agent!.sinceUnixMs);
 }
 
 export interface HomeSummary {
@@ -54,11 +57,10 @@ export interface HomeSummary {
   idle: number;
 }
 
-/** The home status bar: every agent but this Home's orchestrator (other orchestrators included) — the ones that need the user, and counts of the rest. */
-export function homeSummary(workspaces: WorkspaceNode[], orchestratorPaneId: string | null, seen: SeenDone = {}): HomeSummary {
+/** The home status bar over a Home's agents (dashboardCards): the ones that need the user, and counts of the rest. */
+export function homeSummary(cards: DashboardCard[], seen: SeenDone = {}): HomeSummary {
   const s: HomeSummary = { blocked: [], working: 0, done: 0, idle: 0 };
-  for (const c of dashboardCards(workspaces)) {
-    if (c.pane.paneId === orchestratorPaneId) continue;
+  for (const c of cards) {
     const st = shownStatus(c.pane, seen);
     if (st === 'blocked') s.blocked.push(c);
     else if (st === 'working') s.working++;

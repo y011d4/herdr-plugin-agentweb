@@ -1,6 +1,65 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { accountEnv, accountForConfigDir, paneAccount, parseProcStat } from '../account.ts';
+import { accountEnv, accountForConfigDir, paneAccount, paneAccountCache, parseProcStat } from '../account.ts';
+
+describe('paneAccountCache', () => {
+  it('looks each agent pane up again after the ttl, retries failures, and forgets panes without an agent', async () => {
+    let clock = 0;
+    const answers: Record<string, string | null | Error> = { p1: 'A', p2: null, p3: new Error('no answer') };
+    const asked: string[] = [];
+    let changes = 0;
+    const cache = paneAccountCache((id) => {
+      asked.push(id);
+      const a = answers[id];
+      return a instanceof Error ? Promise.reject(a) : Promise.resolve(a);
+    }, () => { changes++; }, 100, () => clock);
+    const settle = () => new Promise((r) => setTimeout(r, 0));
+
+    cache.refresh(['p1', 'p2', 'p3']);
+    await settle();
+    assert.deepEqual([...cache.accounts], [['p1', 'A'], ['p2', null]]); // p3 failed: not stored
+    assert.equal(changes, 2);
+
+    asked.length = 0;
+    clock = 50; // within the ttl: only the failed one is asked again
+    cache.refresh(['p1', 'p2', 'p3']);
+    await settle();
+    assert.deepEqual(asked, ['p3']);
+
+    asked.length = 0;
+    clock = 200; // past the ttl: p2 can now be told, and p1 was swapped for another account's agent
+    Object.assign(answers, { p1: 'B', p2: 'A' });
+    cache.refresh(['p1', 'p2']); // p3 lost its agent
+    await settle();
+    assert.deepEqual(asked, ['p1', 'p2']);
+    assert.deepEqual([...cache.accounts], [['p1', 'B'], ['p2', 'A']]);
+    assert.equal(changes, 4);
+
+    clock = 400; // the same answers again: no change pushed
+    cache.refresh(['p1', 'p2']);
+    await settle();
+    assert.equal(changes, 4);
+  });
+
+  it("drops a lookup's answer when its pane lost the agent meanwhile, and asks right away for the next one", async () => {
+    let answer!: (a: string) => void;
+    const asked: string[] = [];
+    let live: string[] = [];
+    // like the bridge, onChange leads to a refresh with the panes that have an agent now
+    const cache = paneAccountCache((id) => {
+      asked.push(id);
+      return asked.length === 1 ? new Promise((r) => { answer = r; }) : Promise.resolve('B');
+    }, () => cache.refresh(live), 100, () => 0);
+    const settle = () => new Promise((r) => setTimeout(r, 0));
+
+    cache.refresh(live = ['p1']); // lookup for the first agent, in flight
+    cache.refresh(live = []); // its agent exits
+    cache.refresh(live = ['p1']); // a replacement starts in the pane: its lookup waits for the first
+    answer('A'); // the first agent's account arrives late
+    await settle();
+    assert.deepEqual([asked, cache.accounts.get('p1')], [['p1', 'p1'], 'B']);
+  });
+});
 
 describe('accountForConfigDir', () => {
   it('is CLAUDE_CONFIG_DIR/projects, else ~/.claude/projects, normalized', () => {
