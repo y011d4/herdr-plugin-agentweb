@@ -82,6 +82,43 @@ export async function paneAccount(rpc: Rpc, paneId: string): Promise<string | nu
 }
 
 /**
+ * Each agent pane's account, for the per-orchestrator lists. `refresh` (with the panes
+ * that have an agent now) looks a pane up when it has none yet and again once `ttlMs` has
+ * passed, so an answer that couldn't tell (null) or one left by an agent swapped in the
+ * same pane corrects itself; panes that lost their agent are forgotten. A lookup that
+ * fails is tried again on the next refresh. `onChange` runs when an answer changes the map.
+ * ponytail: a swapped agent keeps the old account for up to ttlMs; key on herdr's agent
+ * session if that ever matters.
+ */
+export function paneAccountCache(
+  lookup: (paneId: string) => Promise<string | null>,
+  onChange: () => void,
+  ttlMs = 60_000,
+  now: () => number = Date.now,
+): { accounts: ReadonlyMap<string, string | null>; refresh: (agentPanes: string[]) => void } {
+  const accounts = new Map<string, string | null>();
+  const checkedAt = new Map<string, number>();
+  const pending = new Set<string>();
+  function refresh(agentPanes: string[]): void {
+    const live = new Set(agentPanes);
+    for (const id of checkedAt.keys()) {
+      if (!live.has(id)) { checkedAt.delete(id); accounts.delete(id); }
+    }
+    for (const id of live) {
+      if (pending.has(id) || now() - (checkedAt.get(id) ?? -Infinity) < ttlMs) continue;
+      pending.add(id);
+      void lookup(id).then((account) => {
+        checkedAt.set(id, now());
+        if (accounts.has(id) && accounts.get(id) === account) return;
+        accounts.set(id, account);
+        onChange();
+      }, () => { /* no answer: the next refresh tries again */ }).finally(() => pending.delete(id));
+    }
+  }
+  return { accounts, refresh };
+}
+
+/**
  * The account a fresh shell in `dir` would run under: what direnv exports there,
  * starting from our environment minus any account and direnv state of our own.
  * null when direnv is missing, the dir doesn't exist, or its .envrc is blocked.
