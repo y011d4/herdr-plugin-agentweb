@@ -382,8 +382,14 @@ test('clearAgent: an envFor that throws refuses the clear before anything opens;
   assert.deepEqual(refused.calls.map((c) => c.method), ['agent.get']);
 
   const kept = fakeRpc(responses);
-  await assert.rejects(() => clearAgent(kept.rpc, PROFILES, 'orch', undefined, { verify: async () => { throw new Error('wrong account'); } }), /wrong account/);
+  await assert.rejects(() => clearAgent(kept.rpc, PROFILES, 'orch', undefined, { verify: async () => { throw new Error('wrong account'); } }),
+    /wrong account; the old agent was kept \(the new one: it was stopped\)/);
   assert.deepEqual(kept.calls.filter((c) => c.method === 'pane.close').map((c) => c.params.pane_id), ['P:new']);
+
+  // a replacement that can't be stopped is reported, not swallowed
+  const stuck = fakeRpc({ ...responses, 'pane.close': herdrError('pane_not_found') });
+  await assert.rejects(() => clearAgent(stuck.rpc, PROFILES, 'orch', undefined, { verify: async () => { throw new Error('wrong account'); } }),
+    /its pane P:new could not be closed \(pane_not_found\), so it may still be running/);
 });
 
 test('clearAgent: relaunches in the launch cwd, not a wandered foreground cwd', async () => {

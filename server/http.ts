@@ -699,18 +699,22 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
           // clearAgent resolves the pane id and looks up / reports it (out.oldPaneId).
           // The replacement keeps the old agent's Claude account (an orchestrator started
           // with CLAUDE_CONFIG_DIR, say), which a plain new pane wouldn't have: unknown, the
-          // clear is refused; not what came up, the old agent is kept.
+          // clear is refused; not what came up, the old agent is kept. Accounts are read from
+          // /proc, so elsewhere (macOS) a clear goes on without them, as it did before.
           let account: string | null = null;
           const out = await clearAgent(rpc, config.launchProfiles, target, (pid) => startedProfiles.get(pid), {
             envFor: async (pid) => {
               account = await paneAccount(rpc, pid).catch(() => null);
-              if (!account) throw new LifecycleError(409, 'account_unknown', "can't tell this agent's Claude account, so it was left as is");
+              if (!account && process.platform === 'linux') {
+                throw new LifecycleError(409, 'account_unknown', "can't tell this agent's Claude account, so it was left as is");
+              }
               return accountEnv(account);
             },
             verify: async (pid) => {
+              if (account === null) return;
               await waitForDetectedAgent(rpc, pid);
               if ((await paneAccount(rpc, pid)) !== account) {
-                throw new LifecycleError(409, 'account_mismatch', 'the fresh session came up under another Claude account, so the old one was kept');
+                throw new LifecycleError(409, 'account_mismatch', 'the fresh session came up under another Claude account');
               }
             },
           });
