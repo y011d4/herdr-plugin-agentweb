@@ -35,7 +35,7 @@ herdr server
 
 ## Requirements
 
-- herdr >= 0.7.0 (Linux/macOS)
+- herdr >= 0.8.0 (Linux/macOS)
 - Node.js >= 20
 - A way to reach the bridge from your phone — a reverse proxy, a tunnel, or a VPN
   (see [Exposing the bridge to your phone](#exposing-the-bridge-to-your-phone)).

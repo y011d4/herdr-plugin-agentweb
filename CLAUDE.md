@@ -121,8 +121,9 @@ Verified live against herdr 0.7.3 / protocol 16:
   are named keys only). Because the digit is atomic, the bridge's answer path sends
   just the digit — no follow-up read/Enter/arrow that could land on a later prompt,
   and the `❯` position is irrelevant (selection is by number). The startup trust
-  prompt is a different widget (Enter/Esc only, no digits), but it never surfaces as
-  a `blocked` pane, so the chat answer UI never needs to drive it.
+  prompt is a different widget (Enter/Esc only, no digits). On herdr 0.9.5 it *does*
+  surface as a `blocked` pane (seen live: a claude started in an untrusted dir reports
+  `agent_status: blocked`), so a new agent's first task is withheld until it's answered.
 - **Starting agents changed in herdr 0.8** (verified live on 0.9.5 / protocol 22).
   `agent.start` no longer creates a pane or takes `argv`/`cwd`/`workspace_id`: it is
   `{ name, kind, pane_id, args? }` and launches into an existing **idle shell pane**, so
