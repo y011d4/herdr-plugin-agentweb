@@ -65,7 +65,8 @@ let seenDone: SeenDone = (() => {
 function markActivePaneSeen(): void {
   if (!activePaneId || document.hidden || !appState) return;
   const agent = findPane(activePaneId)?.pane.agent;
-  if (agent?.status !== 'done' || seenDone[activePaneId] === agent.sinceUnixMs) return;
+  // completionSeq arrives a moment after the done status; the next state push retries
+  if (agent?.status !== 'done' || agent.completionSeq == null || seenDone[activePaneId] === agent.completionSeq) return;
   seenDone = markSeen(seenDone, appState.workspaces ?? [], activePaneId);
   // best-effort: a storage failure must not stop the pane view from rendering
   try { localStorage.setItem(STORAGE_SEEN, JSON.stringify(seenDone)); } catch { /* memory-only */ }

@@ -17,6 +17,8 @@ export interface AgentInfo {
   customStatus: string | null;
   message: string | null;
   sinceUnixMs: number;
+  /** herdr's completion_seq: which completion this idle/done status is (agent.list only; null until fetched) */
+  completionSeq: number | null;
 }
 
 export interface PaneNode {
