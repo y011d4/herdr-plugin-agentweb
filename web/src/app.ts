@@ -757,8 +757,9 @@ function renderTokenScreen(message?: string): void {
 
 // ── Agent lifecycle UI (start / rename / clear / stop) ────────────────────────
 
-/** A just-started agent's first task the bridge couldn't deliver; its pane view puts it in the composer. */
-let undeliveredTask: { paneId: string; text: string } | null = null;
+/** First tasks the bridge couldn't deliver to a just-started agent, by pane id. That pane's
+ *  view keeps the task (with the user's edits to it) in its composer until it is sent. */
+const undeliveredTasks = new Map<string, string>();
 
 // Minimal modal overlay appended to <body>, above everything (toasts are z 1000,
 // modals sit higher). Closes on backdrop tap, the buttons, or Escape; close() is
@@ -917,7 +918,7 @@ async function openNewAgentModal(): Promise<void> {
       // the agent never became ready for its task (e.g. waiting on a startup dialog):
       // keep the task in the new pane's composer instead of losing it
       const keepTask = res.taskDelivered === false && !!task && !!res.paneId;
-      if (keepTask) undeliveredTask = { paneId: res.paneId!, text: task };
+      if (keepTask) undeliveredTasks.set(res.paneId!, task);
       showToast('Agent started', keepTask ? `${started}. The task wasn't sent yet — it's in the composer, tap Send when the agent is ready` : started);
       if (res.paneId) navigate(`#/pane/${encodeURIComponent(res.paneId)}`);
     } catch (err) {
@@ -1312,18 +1313,18 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   };
   paneInput.addEventListener('input', autoGrow);
   // A new agent's first task the bridge couldn't deliver lands here, ready to send. It
-  // follows edits and is kept until sent or erased, so leaving the pane doesn't lose it.
-  if (undeliveredTask?.paneId === paneId) {
-    paneInput.value = undeliveredTask.text;
+  // follows edits (even after being erased) and is kept until sent, so leaving the pane
+  // doesn't lose it.
+  if (undeliveredTasks.has(paneId)) {
+    paneInput.value = undeliveredTasks.get(paneId)!;
     autoGrow();
   }
   paneInput.addEventListener('input', () => {
-    if (undeliveredTask?.paneId === paneId) undeliveredTask = paneInput.value ? { paneId, text: paneInput.value } : null;
+    if (undeliveredTasks.has(paneId)) undeliveredTasks.set(paneId, paneInput.value);
   });
 
   const clearInput = (): void => {
     paneInput.value = '';
-    if (undeliveredTask?.paneId === paneId) undeliveredTask = null;
     autoGrow();
   };
 
@@ -1339,6 +1340,8 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       // text+enter. enter:true then submits in the same request.
       const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
       await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true, ...(isClaude ? { clear: true } : {}) });
+      // the kept task is sent — unless a newer view of this pane has edited it since
+      if (undeliveredTasks.get(paneId) === text) undeliveredTasks.delete(paneId);
       if (paneInput.value === text) clearInput(); // clear on success, but keep text typed mid-send
       queuePaneEcho();
     } catch (err) {
