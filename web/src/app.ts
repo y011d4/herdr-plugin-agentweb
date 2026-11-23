@@ -757,6 +757,10 @@ function renderTokenScreen(message?: string): void {
 
 // ── Agent lifecycle UI (start / rename / clear / stop) ────────────────────────
 
+/** First tasks the bridge couldn't deliver to a just-started agent, by pane id. That pane's
+ *  view keeps the task (with the user's edits to it) in its composer until it is sent. */
+const undeliveredTasks = new Map<string, string>();
+
 // Minimal modal overlay appended to <body>, above everything (toasts are z 1000,
 // modals sit higher). Closes on backdrop tap, the buttons, or Escape; close() is
 // idempotent and fires onClose exactly once (so a confirm can resolve on dismiss).
@@ -908,9 +912,14 @@ async function openNewAgentModal(): Promise<void> {
           if (wsId) body.workspace = wsId;
         }
       }
-      const res = (await apiPost('/api/agents', body)) as { paneId?: string; name?: string };
+      const res = (await apiPost('/api/agents', body)) as { paneId?: string; name?: string; taskDelivered?: boolean };
       close();
-      showToast('Agent started', res.name ? `Started ${res.name}` : 'Agent started');
+      const started = res.name ? `Started ${res.name}` : 'Agent started';
+      // the agent never became ready for its task (e.g. waiting on a startup dialog):
+      // keep the task in the new pane's composer instead of losing it
+      const keepTask = res.taskDelivered === false && !!task && !!res.paneId;
+      if (keepTask) undeliveredTasks.set(res.paneId!, task);
+      showToast('Agent started', keepTask ? `${started}. The task wasn't sent yet — it's in the composer, tap Send when the agent is ready` : started);
       if (res.paneId) navigate(`#/pane/${encodeURIComponent(res.paneId)}`);
     } catch (err) {
       startBtn.disabled = false;
@@ -956,9 +965,10 @@ function openRenameModal(paneId: string, current: string): void {
     if (!name) { (overlay.querySelector('#rn-error') as HTMLElement).textContent = 'Name is required.'; return; }
     saveBtn.disabled = true;
     try {
-      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/rename`, { name });
+      // the bridge fits the name to herdr's rule (lowercase, a-z0-9-_), so show what it stored
+      const res = (await apiPost(`/api/panes/${encodeURIComponent(paneId)}/rename`, { name })) as { name?: string };
       close();
-      showToast('Renamed', `Agent renamed to ${name}`);
+      showToast('Renamed', `Agent renamed to ${res.name ?? name}`);
       updatePaneDetailHeader();
     } catch (err) {
       saveBtn.disabled = false;
@@ -1302,6 +1312,16 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     paneInput.style.height = `${Math.min(paneInput.scrollHeight, 120)}px`;
   };
   paneInput.addEventListener('input', autoGrow);
+  // A new agent's first task the bridge couldn't deliver lands here, ready to send. It
+  // follows edits (even after being erased) and is kept until sent, so leaving the pane
+  // doesn't lose it.
+  if (undeliveredTasks.has(paneId)) {
+    paneInput.value = undeliveredTasks.get(paneId)!;
+    autoGrow();
+  }
+  paneInput.addEventListener('input', () => {
+    if (undeliveredTasks.has(paneId)) undeliveredTasks.set(paneId, paneInput.value);
+  });
 
   const clearInput = (): void => {
     paneInput.value = '';
@@ -1311,6 +1331,10 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   document.getElementById('btn-send-enter')!.addEventListener('click', async () => {
     const text = paneInput.value;
     if (!text) return;
+    // Stop keeping an undelivered task once it's being sent (so a reopened view can't
+    // offer it again mid-send); put it back if the send fails.
+    const sendingKept = undeliveredTasks.get(paneId) === text;
+    if (sendingKept) undeliveredTasks.delete(paneId);
     try {
       // clear:true wipes the pane's composer first so this message submits on its
       // own — never merged with a half-typed draft the user left in the pane that
@@ -1323,6 +1347,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       if (paneInput.value === text) clearInput(); // clear on success, but keep text typed mid-send
       queuePaneEcho();
     } catch (err) {
+      if (sendingKept && !undeliveredTasks.has(paneId)) undeliveredTasks.set(paneId, text);
       showToast('Send failed', (err as Error).message);
     }
   });
