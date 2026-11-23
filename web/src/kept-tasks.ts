@@ -3,13 +3,17 @@
  * on a startup dialog), kept per pane until they are sent. Pure state, no DOM: app.ts
  * mirrors the pane's composer into it (`edit`), asks it what a rebuilt composer should
  * show (`draft`), and brackets each send with `beginSend` / `finishSend`.
+ *
+ * While a kept task's send is in flight (`sending`), app.ts locks that pane's composer
+ * — in every view of the pane, including one reopened meanwhile — so the task can't be
+ * edited or sent a second time before the outcome is known.
  */
 
 interface Kept {
   /** what the pane's composer should show: the task, as the user has edited it */
   draft: string;
-  /** the send in flight, and whether the user edited the composer since it began */
-  sending: { token: number; text: string; edited: boolean } | null;
+  /** the text of the send in flight, if any */
+  sending: string | null;
 }
 
 /** The task to keep after `POST /api/agents`, or null when it was delivered or there was none. */
@@ -22,7 +26,6 @@ export function taskToKeep(
 
 export class KeptTasks {
   private kept = new Map<string, Kept>();
-  private nextToken = 1;
 
   keep(paneId: string, text: string): void {
     this.kept.set(paneId, { draft: text, sending: null });
@@ -36,37 +39,36 @@ export class KeptTasks {
   /** The user changed the pane's composer. Ignored for panes with nothing kept. */
   edit(paneId: string, text: string): void {
     const k = this.kept.get(paneId);
-    if (!k) return;
-    k.draft = text;
-    if (k.sending) k.sending.edited = true;
+    if (k) k.draft = text;
+  }
+
+  /** Whether a send of the pane's kept task is in flight (its composer stays locked). */
+  sending(paneId: string): boolean {
+    return this.kept.get(paneId)?.sending != null;
   }
 
   /**
-   * A send of `text` from the pane's composer starts. While it is in flight a reopened
-   * composer shows no task, so it can't be sent twice. Returns the token for
-   * finishSend, or null when nothing is kept for the pane.
+   * A send of `text` from the pane's composer starts. Returns false (and does nothing)
+   * when nothing is kept for the pane; otherwise call finishSend when it completes.
+   * Meanwhile a reopened composer shows no task, so it can't be sent twice.
    */
-  beginSend(paneId: string, text: string): number | null {
+  beginSend(paneId: string, text: string): boolean {
     const k = this.kept.get(paneId);
-    if (!k) return null;
-    const token = this.nextToken++;
-    k.sending = { token, text, edited: false };
-    if (k.draft === text) k.draft = '';
-    return token;
+    if (!k) return false;
+    k.sending = text;
+    k.draft = '';
+    return true;
   }
 
   /**
-   * The send finished. If the user edited the composer meanwhile, their text stays kept
-   * as typed. Otherwise a success stops keeping the task, and a failure keeps it again
-   * and returns it for the displayed composer to show. Returns null when the composer
-   * should be left alone (also for a send that a newer one has superseded).
+   * The send finished. A success stops keeping the task; a failure keeps it again and
+   * returns it, for the pane's displayed composer to show. Returns null otherwise.
    */
-  finishSend(paneId: string, token: number, ok: boolean): string | null {
+  finishSend(paneId: string, ok: boolean): string | null {
     const k = this.kept.get(paneId);
-    if (!k?.sending || k.sending.token !== token) return null;
-    const { text, edited } = k.sending;
+    if (k?.sending == null) return null;
+    const text = k.sending;
     k.sending = null;
-    if (edited) return null;
     if (ok) {
       this.kept.delete(paneId);
       return null;
