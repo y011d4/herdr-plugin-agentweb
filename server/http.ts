@@ -697,15 +697,20 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
         try {
           // The store is keyed by pane id, but `target` may be an agent name, so
           // clearAgent resolves the pane id and looks up / reports it (out.oldPaneId).
-          // The replacement keeps the old agent's Claude account (an orchestrator started
-          // with CLAUDE_CONFIG_DIR, say), which a plain new pane wouldn't have: unknown, the
-          // clear is refused; not what came up, the old agent is kept. Accounts are read from
-          // /proc, so elsewhere (macOS) a clear goes on without them, as it did before.
+          // The replacement keeps the old agent's Claude account, which a plain new pane
+          // wouldn't have. An orchestrator restarts with its configured env, on any platform.
+          // Other agents' accounts are read from /proc (Linux): unknown, the clear is refused;
+          // not what came up, the old agent is kept. Without /proc (macOS) those go on as
+          // before — agentwebctl can't start env-picked workers there, as it can't check them.
+          const readable = process.platform === 'linux';
           let account: string | null = null;
           const out = await clearAgent(rpc, config.launchProfiles, target, (pid) => startedProfiles.get(pid), {
             envFor: async (pid) => {
-              account = await paneAccount(rpc, pid).catch(() => null);
-              if (!account && process.platform === 'linux') {
+              const state = getState();
+              const i = state ? findOrchestrators(state, config.orchestrators).findIndex((o) => o.paneId === pid) : -1;
+              account = readable ? await paneAccount(rpc, pid).catch(() => null) : null;
+              if (i !== -1) return Object.keys(config.orchestrators[i].env).length ? config.orchestrators[i].env : undefined;
+              if (!account && readable) {
                 throw new LifecycleError(409, 'account_unknown', "can't tell this agent's Claude account, so it was left as is");
               }
               return accountEnv(account);
