@@ -288,54 +288,61 @@ describe('refreshWorktrees + worktreeForCwd (real git)', () => {
 
 describe('placeWorktreeNextToRepo', () => {
   const top = (root: string | null) => async () => root;
+  const at = (root: string | null) => [[] as never[], top(root)] as const;
   it('puts the checkout next to the repo as <repo>-wt-<branch>, with a filesystem-safe branch', async () => {
-    const spec = await placeWorktreeNextToRepo({ repo: '/src/org/repo/sub', branch: ' feat/x y ', base: 'origin/main' }, top('/src/org/repo'));
+    const spec = await placeWorktreeNextToRepo({ repo: '/src/org/repo/sub', branch: ' feat/x y ', base: 'origin/main' }, ...at('/src/org/repo'));
     assert.deepEqual(spec, { repo: '/src/org/repo/sub', branch: 'feat/x y', base: 'origin/main', path: '/src/org/repo-wt-feat-x-y' });
   });
 
   it('names a blank branch itself, since the path needs one', async () => {
-    const spec = await placeWorktreeNextToRepo({ repo: '/r/repo', branch: '  ' }, top('/r/repo'));
+    const spec = await placeWorktreeNextToRepo({ repo: '/r/repo', branch: '  ' }, ...at('/r/repo'));
     assert.match(spec.branch as string, /^worktree\/[0-9a-z]+$/);
     assert.equal(spec.path, `/r/repo-wt-${(spec.branch as string).replace('/', '-')}`);
-    assert.match((await placeWorktreeNextToRepo({ repo: '/r/repo' }, top('/r/repo'))).path as string, /^\/r\/repo-wt-worktree-/);
+    assert.match((await placeWorktreeNextToRepo({ repo: '/r/repo' }, ...at('/r/repo'))).path as string, /^\/r\/repo-wt-worktree-/);
   });
 
-  it('leaves alone a spec with its own path, no repo cwd, or a non-string branch', async () => {
-    for (const spec of [{ repo: '/r', path: '/elsewhere' }, { workspace: 'w1' }, { repo: '/r', branch: 7 }]) {
-      assert.deepEqual(await placeWorktreeNextToRepo(spec, top('/r')), spec);
+  it('leaves alone a spec with its own path, no repo at all, or a non-string branch', async () => {
+    for (const spec of [{ repo: '/r', path: '/elsewhere' }, { branch: 'b' }, { repo: '/r', branch: 7 }]) {
+      assert.deepEqual(await placeWorktreeNextToRepo(spec, ...at('/r')), spec);
     }
   });
 
   it('refuses when git cannot place it, rather than fall back to herdr\'s dir', async () => {
-    await assert.rejects(() => placeWorktreeNextToRepo({ repo: '/tmp/x', branch: 'b' }, top(null)), /no repo checkout found/);
+    await assert.rejects(() => placeWorktreeNextToRepo({ repo: '/tmp/x', branch: 'b' }, ...at(null)), /not the main checkout/);
   });
 
   it('does not land on a taken dir (feat/x and feat-x share a name)', async () => {
     const base = mkdtempSync(join(tmpdir(), 'place-'));
     mkdirSync(join(base, 'repo-wt-feat-x'));
-    const spec = await placeWorktreeNextToRepo({ repo: join(base, 'repo'), branch: 'feat/x' }, top(join(base, 'repo')));
+    const spec = await placeWorktreeNextToRepo({ repo: join(base, 'repo'), branch: 'feat/x' }, ...at(join(base, 'repo')));
     assert.match(spec.path as string, new RegExp(`^${base}/repo-wt-feat-x-[0-9a-z]+$`));
     rmSync(base, { recursive: true });
   });
 
-  it('places from the main checkout, even when asked from one of its linked worktrees', async () => {
+  it('places from the main checkout (from a subdir too, or with a separate git dir) and refuses a linked worktree (real git)', async () => {
     const base = mkdtempSync(join(tmpdir(), 'place-'));
-    const git = (...a: string[]) => spawnSync('git', a, { cwd: base, encoding: 'utf8' });
-    git('init', '-q', 'main');
-    spawnSync('git', ['-C', join(base, 'main'), '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'i']);
-    spawnSync('git', ['-C', join(base, 'main'), 'worktree', 'add', '-q', join(base, 'elsewhere', 'wt'), '-b', 'w']);
-    const spec = await placeWorktreeNextToRepo({ repo: join(base, 'elsewhere', 'wt'), branch: 'next' });
-    assert.equal(spec.path, `${realpathSync(base)}/main-wt-next`);
+    for (const [repo, sep] of [['main', false], ['sep', true]] as const) {
+      spawnSync('git', ['init', '-q', ...(sep ? ['--separate-git-dir', join(base, 'gitdir')] : []), join(base, repo)]);
+      spawnSync('git', ['-C', join(base, repo), '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'i']);
+      spawnSync('git', ['-C', join(base, repo), 'worktree', 'add', '-q', join(base, 'elsewhere', repo), '-b', 'w']);
+      mkdirSync(join(base, repo, 'sub'));
+      assert.equal((await placeWorktreeNextToRepo({ repo: join(base, repo, 'sub'), branch: 'next' })).path, `${realpathSync(base)}/${repo}-wt-next`);
+      await assert.rejects(() => placeWorktreeNextToRepo({ repo: join(base, 'elsewhere', repo), branch: 'next' }), /not the main checkout/);
+    }
+    await assert.rejects(() => placeWorktreeNextToRepo({ repo: base, branch: 'next' }), /not the main checkout/); // outside git
     rmSync(base, { recursive: true });
   });
 
-  it('with a separate git dir: places from the main checkout, refuses from a linked worktree (git can\'t tell the main one)', async () => {
-    const base = mkdtempSync(join(tmpdir(), 'place-'));
-    spawnSync('git', ['init', '-q', '--separate-git-dir', join(base, 'gitdir'), join(base, 'main')]);
-    spawnSync('git', ['-C', join(base, 'main'), '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'i']);
-    spawnSync('git', ['-C', join(base, 'main'), 'worktree', 'add', '-q', join(base, 'elsewhere', 'wt'), '-b', 'w']);
-    assert.equal((await placeWorktreeNextToRepo({ repo: join(base, 'main'), branch: 'next' })).path, `${realpathSync(base)}/main-wt-next`);
-    await assert.rejects(() => placeWorktreeNextToRepo({ repo: join(base, 'elsewhere', 'wt'), branch: 'next' }), /no repo checkout found/);
-    rmSync(base, { recursive: true });
+  it('places a workspace-only spec from that workspace\'s dir, then names just the dir; refuses an unknown workspace', async () => {
+    const ws = [
+      { workspaceId: 'w1', cwd: '/src/org/repo/sub', worktree: null },
+      { workspaceId: 'w2', cwd: '/moved', worktree: { checkoutPath: '/src/org/other' } as WorktreeInfo },
+    ];
+    assert.deepEqual(await placeWorktreeNextToRepo({ workspace: 'w1', branch: 'b' }, ws, top('/src/org/repo')),
+      { workspace: undefined, repo: '/src/org/repo/sub', branch: 'b', path: '/src/org/repo-wt-b' });
+    let asked = '';
+    await placeWorktreeNextToRepo({ workspace: 'w2', branch: 'b' }, ws, async (cwd) => { asked = cwd; return '/src/org/other'; });
+    assert.equal(asked, '/src/org/other'); // a worktree workspace by its checkout, not its moved cwd
+    await assert.rejects(() => placeWorktreeNextToRepo({ workspace: 'gone', branch: 'b' }, ws, top('/x')), /workspace gone: its directory is not known yet/);
   });
 });

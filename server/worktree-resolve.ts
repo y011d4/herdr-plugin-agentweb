@@ -225,38 +225,40 @@ export async function refreshWorktrees(cwds: string[], onChange: () => void): Pr
 const git = (cwd: string, args: string[]): Promise<string | null> =>
   new Promise((res) => execFile('git', ['-C', cwd, ...args], { timeout: 5000 }, (err, stdout) => res(err ? null : stdout)));
 
-/**
- * The main checkout of the repo containing `cwd` — for a linked worktree, the repo it
- * belongs to — or null when there is none (bare repo) or git can't tell. From a linked
- * worktree it is the first entry of git's worktree list, trusted only when it really is
- * a checkout: with a separate git dir, git lists the git dir there instead.
- */
+/** The repo checkout containing `cwd` when it is the repo's main one, else null (not in
+ *  git, or in a linked worktree — herdr makes new worktrees only from the main one). */
 export async function mainCheckout(cwd: string): Promise<string | null> {
   const [gitDir, commonDir, top] = (await git(cwd, ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--show-toplevel']))?.trim().split('\n') ?? [];
-  if (!top) return null;
-  if (gitDir === commonDir) return top; // cwd is in the main checkout itself
-  const main = ((await git(cwd, ['worktree', 'list', '--porcelain'])) ?? '').split('\n\n')[0].split('\n');
-  const path = main[0]?.startsWith('worktree ') ? main[0].slice('worktree '.length) : null;
-  return path && !main.includes('bare') && existsSync(`${path}/.git`) ? path : null;
+  return top && gitDir === commonDir ? top : null;
 }
 
 /**
  * Put a new worktree of the repo at `spec.repo` next to the repo, as
  * `<repo>-wt-<branch>`, instead of herdr's worktrees dir: whatever covers the repo
  * from a parent dir (e.g. a direnv .envrc per org dir, which may pick the Claude
- * account) then covers the checkout too. A blank branch gets a generated name, since
- * the path needs one. A spec with its own path, no repo cwd, or a branch that isn't a
- * string comes back as is (createWorktree validates it). When git can't place it,
- * this refuses rather than let herdr's default dir take the checkout.
+ * account) then covers the checkout too. A spec naming only a workspace is placed from
+ * that workspace's dir (looked up in `workspaces`) and then names just the dir, since
+ * herdr takes one or the other. A blank branch gets a generated name, since the path
+ * needs one. A spec with its own path, no repo at all, or a branch that isn't a string
+ * comes back as is (createWorktree validates it). Anything else this can't place is
+ * refused rather than left to herdr's default dir.
  */
-export async function placeWorktreeNextToRepo<T extends { repo?: unknown; branch?: unknown; path?: unknown }>(
+export async function placeWorktreeNextToRepo<T extends { repo?: unknown; workspace?: unknown; branch?: unknown; path?: unknown }>(
   spec: T,
+  workspaces: Array<Pick<WorkspaceNode, 'workspaceId' | 'cwd' | 'worktree'>> = [],
   repoOf: (cwd: string) => Promise<string | null> = mainCheckout,
 ): Promise<T> {
-  if (spec.path !== undefined || typeof spec.repo !== 'string' || !spec.repo) return spec;
+  if (spec.path !== undefined) return spec;
+  if ((spec.repo === undefined || spec.repo === '') && typeof spec.workspace === 'string' && spec.workspace) {
+    const ws = workspaces.find((w) => w.workspaceId === spec.workspace);
+    const repo = ws ? resolveCwdFor(ws) : null;
+    if (!repo) throw new LifecycleError(400, 'invalid_params', `workspace ${spec.workspace}: its directory is not known yet`);
+    spec = { ...spec, repo, workspace: undefined };
+  }
+  if (typeof spec.repo !== 'string' || !spec.repo) return spec;
   if (spec.branch !== undefined && typeof spec.branch !== 'string') return spec;
   const root = await repoOf(spec.repo);
-  if (!root) throw new LifecycleError(400, 'invalid_params', `${spec.repo}: no repo checkout found to put the worktree next to`);
+  if (!root) throw new LifecycleError(400, 'invalid_params', `${spec.repo}: not the main checkout of a git repository (new worktrees start from the repo itself)`);
   const branch = (spec.branch as string | undefined)?.trim() || `worktree/${Date.now().toString(36)}`;
   let path = `${dirname(root)}/${basename(root)}-wt-${branch.replace(/[^A-Za-z0-9._-]+/g, '-')}`;
   // distinct branches can share that name (feat/x, feat-x): don't land on a taken one
