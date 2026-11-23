@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { accountForConfigDir, paneAccount } from './account.ts';
+import { accountForConfigDir, dirAccount, paneAccount } from './account.ts';
 import { agentName, LifecycleError, startAgent, waitForDetectedAgent, type LaunchProfile, type Rpc } from './agent-lifecycle.ts';
 import type { OrchestratorDef } from './types.ts';
 
@@ -26,8 +26,13 @@ export const PLUGIN_ROOT = (() => {
   return dir;
 })();
 
+/** A path as one shell word (quoted only when it needs to be). */
+export function shellWord(p: string): string {
+  return /^[\w./@%+=:,-]+$/.test(p) ? p : `'${p.replaceAll("'", `'\\''`)}'`;
+}
+
 /** How an orchestrator runs agentwebctl: the exact command its allowlist permits. */
-export const AGENTWEBCTL = `node ${join(PLUGIN_ROOT, 'dist', 'bin', 'agentwebctl.js')}`;
+export const AGENTWEBCTL = `node ${shellWord(join(PLUGIN_ROOT, 'dist', 'bin', 'agentwebctl.js'))}`;
 
 const LOCAL_TEMPLATE = `<!-- This orchestrator's own rules: which repos it takes on, what language to answer in,
      anything else. herdr-agentweb never changes this file (CLAUDE.md and rules.md are
@@ -85,7 +90,9 @@ export async function startOrchestrator(rpc: Rpc, def: OrchestratorDef): Promise
   if (running) throw new LifecycleError(409, 'already_running', `orchestrator ${def.name} already runs (pane ${running.pane_id})`);
   if (def.managed) ensureOrchestratorDir(def);
   else if (!existsSync(def.dir)) throw new LifecycleError(404, 'not_found', `${def.dir} does not exist`);
-  const expected = accountForConfigDir(def.env.CLAUDE_CONFIG_DIR);
+  // the account its env sets; else what its dir sets (a legacy dir's own .envrc), else the default
+  const expected = def.env.CLAUDE_CONFIG_DIR ? accountForConfigDir(def.env.CLAUDE_CONFIG_DIR)
+    : (await dirAccount(def.dir)) ?? accountForConfigDir(undefined);
   const out = await startAgent(rpc, ORCHESTRATOR_PROFILE, {
     profile: 'claude', name: agentName(`orch-${def.name}`) ?? 'orch', cwd: def.dir, newWorkspace: true, env: def.env,
   }, {

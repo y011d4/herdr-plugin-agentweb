@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ensureOrchestratorDir, orchestratorFiles, startOrchestrator } from '../orchestrator.ts';
+import { ensureOrchestratorDir, orchestratorFiles, shellWord, startOrchestrator } from '../orchestrator.ts';
 import { LifecycleError } from '../agent-lifecycle.ts';
 import type { OrchestratorDef } from '../types.ts';
 
@@ -28,6 +28,14 @@ describe('orchestratorFiles', () => {
     assert.deepEqual(p.allow, ['Bash(node /p/agentwebctl.js overview)', 'Bash(node /p/agentwebctl.js agent *)', 'Bash(node /p/agentwebctl.js worktree remove *)']);
     assert.ok(p.deny.includes('Bash(herdr *)') && p.deny.includes('Read(~/.config/claude/**)'));
     assert.equal(p.blockReadsOutsideWorkingDirectories, true);
+  });
+});
+
+describe('shellWord', () => {
+  it('leaves a plain path alone and single-quotes one with spaces or quotes', () => {
+    assert.equal(shellWord('/home/u/plugin/dist/bin/agentwebctl.js'), '/home/u/plugin/dist/bin/agentwebctl.js');
+    assert.equal(shellWord('/home/u/my plugin/x.js'), "'/home/u/my plugin/x.js'");
+    assert.equal(shellWord("/it's/x.js"), "'/it'\\''s/x.js'");
   });
 });
 
