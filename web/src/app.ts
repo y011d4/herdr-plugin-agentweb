@@ -63,9 +63,10 @@ let seenDone: SeenDone = (() => {
 // seeing it, like viewing it in herdr. Kept on the phone only: herdr can only mark
 // a pane seen by focusing it, which would switch the PC's screen. Recorded against
 // herdr's completionSeq, which follows the done status by a moment; until then each
-// state push while the pane is open retries.
+// state push while the pane is open retries. Not while the bridge is cut off from
+// herdr: the pane state shown may be stale.
 function markActivePaneSeen(): void {
-  if (!activePaneId || document.hidden || !appState) return;
+  if (!activePaneId || document.hidden || !appState?.connected) return;
   const agent = findPane(activePaneId)?.pane.agent;
   if (agent?.status !== 'done' || agent.completionSeq == null || seenDone[activePaneId] === agent.completionSeq) return;
   seenDone = markSeen(seenDone, appState.workspaces ?? [], activePaneId);
