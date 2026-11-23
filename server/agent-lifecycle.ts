@@ -428,13 +428,19 @@ export async function clearAgent(
   const split = (await rpc('pane.split', splitParams)) as { pane?: { pane_id?: string } } | null;
   const paneId = split?.pane?.pane_id;
   const name = autoName(key);
+  let launched = false;
   try {
     if (!paneId) throw new LifecycleError(502, 'error', 'herdr returned no pane to start the replacement in');
     await launchInPane(rpc, paneId, profiles[key], name);
+    launched = true;
     await opts.verify?.(paneId);
   } catch (err) {
-    await closeQuietly(rpc, paneId);
-    throw err;
+    if (!launched) {
+      await closeQuietly(rpc, paneId);
+      throw err;
+    }
+    // a failed verify: say whether the replacement could be stopped (it may still run)
+    throw new LifecycleError(409, 'start_undone', `${(err as Error).message}; the old agent was kept (the new one: ${await stopStarted(rpc, paneId!)})`);
   }
 
   // Replacement is up; retire the old pane. A close failure just leaves the old
