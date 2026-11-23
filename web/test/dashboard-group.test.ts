@@ -25,10 +25,11 @@ describe('dashboardCards', () => {
     assert.deepEqual(cards.map((c) => c.workspaceLabel), ['A-label', 'B-label', 'A-label']);
   });
 
-  it('pins the orchestrator first, then the rest by recency', () => {
+  it('pins the orchestrators first in their order, then the rest by recency', () => {
     const ws = [wsNode('A', [agentPane('a1', 100), agentPane('a2', 300)]), wsNode('B', [agentPane('b1', 200)])];
-    assert.deepEqual(dashboardCards(ws, 'a1').map((c) => c.pane.paneId), ['a1', 'a2', 'b1']);
-    assert.deepEqual(dashboardCards(ws, 'gone').map((c) => c.pane.paneId), ['a2', 'b1', 'a1']);
+    assert.deepEqual(dashboardCards(ws, ['a1']).map((c) => c.pane.paneId), ['a1', 'a2', 'b1']);
+    assert.deepEqual(dashboardCards(ws, ['b1', null, 'a1']).map((c) => c.pane.paneId), ['b1', 'a1', 'a2']);
+    assert.deepEqual(dashboardCards(ws, ['gone', null]).map((c) => c.pane.paneId), ['a2', 'b1', 'a1']);
   });
 
   it('keeps workspace order for equal times (e.g. right after a bridge restart)', () => {

@@ -19,8 +19,8 @@ export interface DashboardCard {
   tabAgentCount: number;
 }
 
-/** `pinnedPaneId` (the orchestrator) goes first regardless of recency. */
-export function dashboardCards(workspaces: WorkspaceNode[], pinnedPaneId: string | null = null): DashboardCard[] {
+/** `pinned` panes (the orchestrators) go first, in that order, regardless of recency. */
+export function dashboardCards(workspaces: WorkspaceNode[], pinned: Array<string | null> = []): DashboardCard[] {
   const cards = workspaces.flatMap((ws) => {
     const branch = ws.worktree?.branch || null;
     const isWorktree = ws.worktree?.isLinkedWorktree ?? false;
@@ -38,8 +38,11 @@ export function dashboardCards(workspaces: WorkspaceNode[], pinnedPaneId: string
     });
   });
   // sort is stable: equal times (every agent right after a bridge restart) keep workspace order
-  const pinned = (c: DashboardCard): number => (c.pane.paneId === pinnedPaneId ? 1 : 0);
-  return cards.sort((a, b) => pinned(b) - pinned(a) || b.pane.agent!.sinceUnixMs - a.pane.agent!.sinceUnixMs);
+  const rank = (c: DashboardCard): number => {
+    const i = pinned.indexOf(c.pane.paneId);
+    return i === -1 ? pinned.length : i;
+  };
+  return cards.sort((a, b) => rank(a) - rank(b) || b.pane.agent!.sinceUnixMs - a.pane.agent!.sinceUnixMs);
 }
 
 export interface HomeSummary {
@@ -51,7 +54,7 @@ export interface HomeSummary {
   idle: number;
 }
 
-/** The home status bar: every agent but the orchestrator itself — the ones that need the user, and counts of the rest. */
+/** The home status bar: every agent but this Home's orchestrator (other orchestrators included) — the ones that need the user, and counts of the rest. */
 export function homeSummary(workspaces: WorkspaceNode[], orchestratorPaneId: string | null, seen: SeenDone = {}): HomeSummary {
   const s: HomeSummary = { blocked: [], working: 0, done: 0, idle: 0 };
   for (const c of dashboardCards(workspaces)) {

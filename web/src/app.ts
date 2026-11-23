@@ -3,6 +3,7 @@
  *
  * Single-page application with hash routing:
  *   #/agents    — dashboard (default)
+ *   #/home/:name — an orchestrator's chat (Home); #/home opens the last one used
  *   #/pane/:id  — pane terminal detail
  *   #/settings  — settings
  *
@@ -18,19 +19,20 @@ import { dashboardCards, homeSummary, markSeen, shownStatus } from './dashboard-
 import type { DashboardCard, SeenDone } from './dashboard-group.ts';
 import { watchMessages } from './watch.ts';
 import { KeptTasks, taskToKeep } from './kept-tasks.ts';
-import type { AppState, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
+import type { AppState, OrchestratorView, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 
 // ── App version ──────────────────────────────────────────────────────────────
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v100';
+const BUILD = 'v101';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
 const STORAGE_NOTIF = 'herdr_notifications';
 const STORAGE_VIEW = 'herdr_pane_view'; // preferred pane view: 'terminal' | 'chat'
 const STORAGE_SEEN = 'herdr_seen_done'; // done panes already opened on this phone (SeenDone)
+const STORAGE_HOME = 'herdr_home'; // the orchestrator whose Home was opened last
 
 // ── WS reconnect config ───────────────────────────────────────────────────────
 const WS_PING_INTERVAL_MS = 30_000;
@@ -348,8 +350,8 @@ function onStateUpdate(): void {
     // Pane detail auto-refreshes via its own poller; header may need updating
     updatePaneDetailHeader();
     updatePromptPanel(); // agent may have just become (un)blocked
-  } else if (hash === '#/home') {
-    const id = appState?.orchestratorPaneId ?? null;
+  } else if (hash.startsWith('#/home/')) {
+    const id = homeOf(hash)?.paneId ?? null;
     if (id !== activePaneId) {
       if (!id) { holdHomeForReplacement(); return; } // gone — maybe being replaced
       stopHoldingHome();
@@ -593,16 +595,41 @@ function navigate(hash: string): void {
   location.hash = hash;
 }
 
-// Opening the app without a route (the PWA's start_url) lands on the
+// Opening the app without a route (the PWA's start_url) lands on an
 // orchestrator's chat — the agent the user talks to — when one is running, and
 // on the agents list otherwise. Decided once, on the first state: the empty hash
 // is replaced either way, so an orchestrator that starts later never yanks the
 // user off the list. location.replace keeps the empty-hash entry out of history.
 function goHomeToOrchestrator(): boolean {
   if (location.hash || !appState) return false;
-  const id = appState.orchestratorPaneId;
-  location.replace(id ? '#/home' : '#/agents');
+  const home = defaultHome();
+  location.replace(home ? homeHash(home.name) : '#/agents');
   return true;
+}
+
+// Orchestrators (one per Claude account, say) each have a Home: #/home/<name>.
+const orchestrators = (): OrchestratorView[] => appState?.orchestrators ?? [];
+const orchestratorOfPane = (paneId: string | null): OrchestratorView | undefined =>
+  paneId === null ? undefined : orchestrators().find((o) => o.paneId === paneId);
+const homeHash = (name: string): string => `#/home/${encodeURIComponent(name)}`;
+
+/** The orchestrator a #/home/<name> route names. */
+function homeOf(hash: string): OrchestratorView | undefined {
+  let name: string;
+  try {
+    name = decodeURIComponent(hash.slice('#/home/'.length));
+  } catch {
+    return undefined;
+  }
+  return orchestrators().find((o) => o.name === name);
+}
+
+/** The Home to open by default: the one last opened here while it runs, else the first running one. */
+function defaultHome(): OrchestratorView | undefined {
+  let last: string | null = null;
+  try { last = localStorage.getItem(STORAGE_HOME); } catch { /* none */ }
+  const running = orchestrators().filter((o) => o.paneId);
+  return running.find((o) => o.name === last) ?? running[0];
 }
 
 // Set once a route has been rendered: until then, the first state (WS push or
@@ -629,7 +656,7 @@ function holdHomeForReplacement(): void {
   if (homeLostTimer) return;
   homeLostTimer = setTimeout(() => {
     homeLostTimer = null;
-    if (location.hash !== '#/home' || appState?.orchestratorPaneId) return; // left, or onStateUpdate re-resolved
+    if (!location.hash.startsWith('#/home/') || homeOf(location.hash)?.paneId) return; // left, or onStateUpdate re-resolved
     showToast('Orchestrator stopped', 'Showing all agents.');
     handleRoute(); // no orchestrator → the list
   }, HOME_REPLACE_GRACE_MS);
@@ -640,9 +667,10 @@ function stopHoldingHome(): void {
   homeLostTimer = null;
 }
 
-// The orchestrator's pane opens as Home; every other pane as its own view.
+// An orchestrator's pane opens as its Home; every other pane as its own view.
 function paneRoute(paneId: string): string {
-  return paneId === appState?.orchestratorPaneId ? '#/home' : `#/pane/${encodeURIComponent(paneId)}`;
+  const o = orchestratorOfPane(paneId);
+  return o ? homeHash(o.name) : `#/pane/${encodeURIComponent(paneId)}`;
 }
 
 function handleRoute(e?: Event): void {
@@ -660,8 +688,14 @@ function handleRoute(e?: Event): void {
   const hash = location.hash || '#/agents';
   const fromHash = e instanceof HashChangeEvent ? new URL(e.oldURL).hash : null;
 
-  if (hash === '#/home') {
-    const id = appState?.orchestratorPaneId;
+  if (hash === '#/home' && appState) {
+    // no name (older links): the default Home
+    const home = defaultHome();
+    location.replace(home ? homeHash(home.name) : '#/agents');
+    return;
+  }
+  if (hash === '#/home' || hash.startsWith('#/home/')) {
+    const id = homeOf(hash)?.paneId;
     if (!appState) {
       // can't resolve the orchestrator yet — the first state re-routes (onStateUpdate)
       routeRendered = false;
@@ -672,6 +706,7 @@ function handleRoute(e?: Event): void {
     } else {
       homeMode = true;
       activePaneId = id;
+      try { localStorage.setItem(STORAGE_HOME, homeOf(hash)!.name); } catch { /* memory-only */ }
       dismissToastsForPane(id);
       dismissNotificationsForPane(id);
       markActivePaneSeen();
@@ -688,13 +723,14 @@ function handleRoute(e?: Event): void {
       navigate('#/agents'); // malformed pane hash — don't break routing
       return;
     }
-    // the orchestrator always opens as Home (notification clicks, stale links, …)
-    if (paneId === appState?.orchestratorPaneId) {
-      location.replace('#/home');
+    // an orchestrator always opens as its Home (notification clicks, stale links, …)
+    const o = orchestratorOfPane(paneId);
+    if (o) {
+      location.replace(homeHash(o.name));
       return;
     }
     activePaneId = paneId;
-    if (fromHash === '#/home') paneBackRoute = '#/home';
+    if (fromHash?.startsWith('#/home/')) paneBackRoute = fromHash;
     else if (!fromHash?.startsWith('#/pane/')) paneBackRoute = '#/agents'; // pane→pane keeps it
     // opening a pane clears its pending notifications (in-app toasts + OS)
     dismissToastsForPane(paneId);
@@ -984,9 +1020,9 @@ async function clearAgentFlow(paneId: string): Promise<void> {
   try {
     const res = (await apiPost(`/api/agents/${encodeURIComponent(paneId)}/clear`)) as { paneId?: string };
     showToast('Cleared', 'Started a fresh session');
-    // Clearing the orchestrator keeps the user on Home: the state may not know the
-    // replacement yet, so stay on #/home and let onStateUpdate re-resolve it.
-    if (homeMode) { if (location.hash !== '#/home') navigate('#/home'); return; }
+    // Clearing an orchestrator keeps the user on its Home: the state may not know the
+    // replacement yet, so stay on #/home/<name> and let onStateUpdate re-resolve it.
+    if (homeMode) return;
     navigate(res.paneId ? paneRoute(res.paneId) : '#/agents');
   } catch (err) {
     showToast('Clear failed', (err as Error).message);
@@ -1031,7 +1067,7 @@ function renderCard(card: DashboardCard): string {
   const relTime = relativeTime(sinceUnixMs);
 
   return `
-    <div class="agent-card${paneId === appState?.orchestratorPaneId ? ' orchestrator' : ''}" data-pane-id="${escHtml(paneId)}" role="button" tabindex="0">
+    <div class="agent-card${orchestratorOfPane(paneId) ? ' orchestrator' : ''}" data-pane-id="${escHtml(paneId)}" role="button" tabindex="0">
       <div class="agent-card-header">
         <span class="agent-name">${escHtml(cardLabel)}</span>
         ${branch ? `<span class="card-branch">${escHtml(branch)}</span>` : ''}
@@ -1106,7 +1142,7 @@ function renderAgentsDashboard(): void {
 
   // One flat list of every agent, most recent status change first (pure helper,
   // unit-tested in dashboard-group.test.ts).
-  const cards = dashboardCards(workspaces, appState.orchestratorPaneId);
+  const cards = dashboardCards(workspaces, orchestrators().map((o) => o.paneId));
   const inner = workspaces.length === 0 ? '<div class="empty-state">No workspaces found.</div>'
     : cards.length === 0 ? '<div class="empty-state">No active agents.</div>'
     : `<div class="agent-list">${cards.map(renderCard).join('')}</div>`;
@@ -1158,11 +1194,16 @@ function paneHeaderHtml(found: ReturnType<typeof findPane>, paneId: string): str
   return `${escHtml(label)}${context ? `<span class="topbar-subtitle">&#183; ${escHtml(context)}</span>` : ''}`;
 }
 
-// Home's title: the orchestrator's name (its workspace label) and what it's up to.
+// An orchestrator's name: its configured label, else its workspace label.
+function orchestratorLabel(o: OrchestratorView | undefined): string {
+  return o?.label || (o?.paneId ? findPane(o.paneId)?.ws.label : '') || o?.name || 'Home';
+}
+
+// Home's title: the orchestrator's name and what it's up to.
 function homeHeaderHtml(found: ReturnType<typeof findPane>): string {
   const st = found?.pane?.agent?.status ?? '';
   const sub = st === 'working' ? 'working…' : st === 'blocked' ? 'needs you' : 'ready';
-  return `${escHtml(found?.ws.label || 'Home')}<span class="topbar-subtitle home-state ${escHtml(st)}">&#183; ${sub}</span>`;
+  return `${escHtml(orchestratorLabel(orchestratorOfPane(activePaneId)))}<span class="topbar-subtitle home-state ${escHtml(st)}">&#183; ${sub}</span>`;
 }
 
 function updatePaneDetailHeader(): void {
@@ -1180,10 +1221,19 @@ function updatePaneDetailHeader(): void {
 function renderHomeStatus(): void {
   const el = document.getElementById('home-status');
   if (!el || !appState) return;
-  const s = homeSummary(appState.workspaces, appState.orchestratorPaneId, seenDone);
+  const s = homeSummary(appState.workspaces, activePaneId, seenDone);
+  // With several orchestrators running, a switcher between their Homes (tap = that
+  // orchestrator's pane, which routes to its Home like any chip), each with its status.
+  const running = orchestrators().filter((o) => o.paneId);
+  const switcher = running.length < 2 ? '' : '<div class="home-switch">' + running.map((o) => {
+    const pane = findPane(o.paneId!)?.pane;
+    const st = pane?.agent ? shownStatus(pane, seenDone) : 'unknown';
+    return `<button class="home-switch-btn${o.paneId === activePaneId ? ' active' : ''}" data-pane-id="${escHtml(o.paneId!)}">` +
+      `<i class="home-dot ${escHtml(st)}"></i>${escHtml(orchestratorLabel(o))}</button>`;
+  }).join('') + '</div>';
   const chips = s.blocked.map((c) =>
     `<button class="home-chip" data-pane-id="${escHtml(c.pane.paneId)}">${escHtml(cardTitle(c))}<span class="home-chip-ws">${escHtml(c.workspaceLabel)}</span></button>`).join('');
-  const html = (chips ? `<div class="home-attn"><span class="home-attn-label">Needs you</span>${chips}</div>` : '') +
+  const html = switcher + (chips ? `<div class="home-attn"><span class="home-attn-label">Needs you</span>${chips}</div>` : '') +
     '<button class="home-counts" data-go="agents">' +
     `<span><i class="home-dot working"></i>${s.working} working</span>` +
     `<span><i class="home-dot done"></i>${s.done} done</span>` +
@@ -1226,7 +1276,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     document.getElementById('topbar-title')!.innerHTML = paneHeaderHtml(found, paneId);
     const backRoute = paneBackRoute;
     document.getElementById('topbar-left')!.innerHTML =
-      `<button class="topbar-back" aria-label="Back">&#8592; ${backRoute === '#/home' ? 'Home' : 'Agents'}</button>`;
+      `<button class="topbar-back" aria-label="Back">&#8592; ${backRoute.startsWith('#/home/') ? 'Home' : 'Agents'}</button>`;
     // View toggle (terminal ⇄ chat, hidden until a claude transcript is found) +
     // the agent-actions kebab (rename / clear / stop).
     document.getElementById('topbar-right')!.innerHTML =
@@ -1272,7 +1322,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       <div class="chat-prompt" id="chat-prompt" style="display:none;"></div>
       <div class="input-bar">
         <div class="input-row">
-          <textarea id="pane-input" rows="1" placeholder="${homeMode ? `Message ${escHtml(found?.ws.label || 'the orchestrator')}…` : 'Send text…'}" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+          <textarea id="pane-input" rows="1" placeholder="${homeMode ? `Message ${escHtml(orchestratorLabel(orchestratorOfPane(paneId)))}…` : 'Send text…'}" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
           <button class="input-send-btn" id="btn-send-enter">Send</button>
         </div>
         <div class="quickkey-row" id="quickkey-row"${homeMode ? ' style="display:none;"' : ''}></div>
@@ -1432,7 +1482,7 @@ async function initChatAvailability(paneId: string): Promise<void> {
     chatAvailable = data.available;
     showViewToggle(chatAvailable);
     // the orchestrator is someone to talk to: always open it as chat
-    if (chatAvailable && (preferredView() === 'chat' || paneId === appState?.orchestratorPaneId)) switchToChat(data, false);
+    if (chatAvailable && (preferredView() === 'chat' || orchestratorOfPane(paneId))) switchToChat(data, false);
     else updateViewToggleLabel(); // staying on the terminal: Home reveals its keys
   } catch {
     // leave the terminal view; toggle stays hidden (Home reveals the keys)

@@ -3,7 +3,7 @@ import { createReadStream, statSync } from 'node:fs';
 import { join, resolve, extname } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { verifyToken, extractToken } from './auth.ts';
-import { toClientState, findOrchestratorPane } from './state.ts';
+import { toClientState, findOrchestrators } from './state.ts';
 import { buildAgentStatusMessage } from './notify.ts';
 import { resolveTranscriptPath, readTranscriptFrom, readTranscriptTail, projectsRootForPid } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity } from './prompt-identity.ts';
@@ -260,11 +260,16 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
   const startedProfiles = createPaneProfileStore(join(config.stateDir, 'pane-profiles.json'));
 
   // The JSON state sent to clients (REST + WS): the normalized tree plus which pane
-  // is the orchestrator (the phone opens on its chat).
-  const clientState = (state: NormalizedState) => ({
-    ...toClientState(state),
-    orchestratorPaneId: findOrchestratorPane(state, config.orchestratorDir),
-  });
+  // runs each orchestrator (the phone opens on their chats). orchestratorPaneId (the
+  // first running one) stays for clients of the single-orchestrator contract.
+  const clientState = (state: NormalizedState) => {
+    const orchestrators = findOrchestrators(state, config.orchestrators);
+    return {
+      ...toClientState(state),
+      orchestrators,
+      orchestratorPaneId: orchestrators.find((o) => o.paneId)?.paneId ?? null,
+    };
+  };
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
