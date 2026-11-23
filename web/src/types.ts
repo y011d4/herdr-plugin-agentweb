@@ -19,7 +19,10 @@ export interface AgentInfo {
 export interface PaneNode {
   paneId: string;
   focused: boolean;
+  /** where the pane is now (foreground process cwd, else the shell's) — moves with `cd` */
   cwd: string | null;
+  /** the pane shell's cwd — where its agent was launched; stable while the agent runs */
+  launchCwd: string | null;
   title: string | null;
   agent: AgentInfo | null;
 }
@@ -63,6 +66,8 @@ export interface AppState {
     paneId: string | null;
   };
   workspaces: WorkspaceNode[];
+  /** the orchestrator agent (running in the bridge's orchestrator_dir): the app opens on its chat */
+  orchestratorPaneId: string | null;
 }
 
 export interface WsStateMessage {

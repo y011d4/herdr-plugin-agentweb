@@ -264,7 +264,10 @@ export async function clearAgent(
     : profileForAgentType(profiles, agent.agent ?? null);
   if (!key) throw new LifecycleError(422, 'no_profile', `no launch profile matches agent type: ${String(agent.agent)}`);
 
-  const cwd = agent.foreground_cwd || agent.cwd || null;
+  // Relaunch where the agent was launched (the shell's cwd), not where its foreground
+  // process wandered: the same dir keeps its identity (e.g. the orchestrator, which is
+  // recognized by its launch dir) and its project context.
+  const cwd = agent.cwd || agent.foreground_cwd || null;
   // Keep the replacement in the old agent's workspace: cwd alone can land the new
   // pane in the currently focused workspace, moving a cleared agent to the wrong group.
   const workspaceId = agent.workspace_id ?? null;

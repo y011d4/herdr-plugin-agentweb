@@ -1,11 +1,15 @@
 #!/usr/bin/env node
-// Plugin entrypoint: run | start | stop | status
+// Plugin entrypoint: run | start | stop | status | qr | overview
 // Invoked by herdr plugin actions/panes with cwd = plugin root, or manually.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createSplitter, serialize } from '../server/ndjson.ts';
+import { formatOverview, orderAgents, isTaskTurn, type AgentDetail, type RawAgent, type RawSnapshot } from '../server/overview.ts';
+import { readTranscriptTail, resolveTranscriptPath, findLastItem } from '../server/transcript.ts';
 
 // Walk up from the script's directory until a directory containing package.json
 // is found. This is necessary because this file runs from dist/bin/agentwebctl.js,
@@ -313,11 +317,75 @@ function run(): Promise<number> | number {
   });
 }
 
+// One-shot herdr RPC: herdr answers one request per connection, then closes.
+function herdrRpc(method: string, params: Record<string, unknown> = {}): Promise<any> {
+  const socketPath = process.env.HERDR_SOCKET_PATH || path.join(os.homedir(), '.config', 'herdr', 'herdr.sock');
+  return new Promise((resolve, reject) => {
+    const conn = net.createConnection(socketPath);
+    const splitter = createSplitter();
+    conn.setTimeout(5000, () => conn.destroy(new Error(`${method}: timeout`)));
+    conn.setEncoding('utf8'); // decodes across chunk boundaries (a split multi-byte char stays whole)
+    conn.on('connect', () => conn.write(serialize({ type: 'request', id: 'agentwebctl', method, params })));
+    conn.on('data', (chunk: string) => {
+      const line = splitter.push(chunk)[0];
+      if (!line) return;
+      conn.destroy();
+      try {
+        const msg = JSON.parse(line);
+        if (msg.error) reject(new Error(msg.error.message || `${method} failed`));
+        else resolve(msg.result);
+      } catch (e) { reject(e); }
+    });
+    conn.on('error', reject);
+    conn.on('close', () => reject(new Error(`${method}: connection closed`)));
+  });
+}
+
+// Read-only, LLM-facing summary of every other herdr agent (for an orchestrator
+// agent's Bash tool). Touches only the herdr socket and the claude transcripts,
+// never the state dir or the bridge token.
+async function overview(): Promise<number> {
+  let snapshot: RawSnapshot;
+  let agents: RawAgent[];
+  try {
+    const [list, snap] = await Promise.all([herdrRpc('agent.list'), herdrRpc('session.snapshot')]);
+    agents = list.agents ?? [];
+    snapshot = snap.snapshot ?? {};
+  } catch (e) {
+    console.error(`herdr unreachable: ${(e as Error).message}`);
+    return 1;
+  }
+  const self = process.env.HERDR_PANE_ID;
+  const details = new Map<string, AgentDetail>();
+  await Promise.all(orderAgents(agents, self).map(async (a) => {
+    const detail: AgentDetail = {};
+    details.set(a.pane_id, detail);
+    const sess = a.agent_session;
+    if (sess?.source?.startsWith('herdr:claude') && sess.value) {
+      const file = resolveTranscriptPath(sess.value, a.foreground_cwd || a.cwd || null);
+      if (file) {
+        detail.items = readTranscriptTail(file, 1000).items;
+        // the request scrolled out of the tail window: look further back for it
+        if (!detail.items.some(isTaskTurn)) {
+          const older = findLastItem(file, isTaskTurn);
+          if (older?.kind === 'user') detail.olderTask = older.text;
+        }
+      }
+    }
+    if (detail.items?.length) return;
+    try {
+      detail.screen = (await herdrRpc('pane.read', { pane_id: a.pane_id, source: 'recent', lines: 40, format: 'text' })).read?.text;
+    } catch { /* header only, no screen excerpt */ }
+  }));
+  console.log(formatOverview(agents, snapshot, details, self, Date.now()));
+  return 0;
+}
+
 const command = process.argv[2];
-const handlers: Record<string, () => number | Promise<number>> = { run, start, stop, status, qr };
+const handlers: Record<string, () => number | Promise<number>> = { run, start, stop, status, qr, overview };
 const handler = handlers[command];
 if (!handler) {
-  console.error('usage: agentwebctl.js <run|start|stop|status|qr>');
+  console.error('usage: agentwebctl.js <run|start|stop|status|qr|overview>');
   process.exit(2);
 }
 process.exit(await handler());

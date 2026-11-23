@@ -203,6 +203,7 @@ with defaults, is:
   "port": 8390,
   "public_url": null,
   "notify_url": null,
+  "orchestrator_dir": "~/.local/share/herdr-agentweb/dispatcher",
   "launch_profiles": {
     "claude": { "argv": ["claude"], "label": "Claude Code" },
     "codex": { "argv": ["codex"], "label": "Codex" },
@@ -229,6 +230,14 @@ with defaults, is:
   entries merge over the built-in defaults shown above (same name overrides its `argv`; a new name is
   added; a malformed entry is ignored). Use it to add variants, e.g.
   `"claude-yolo": { "argv": ["claude", "--dangerously-skip-permissions"], "label": "Claude (yolo)" }`.
+- `orchestrator_dir` — an agent running in this directory is your **orchestrator**: the agent
+  you talk to, which starts and coordinates the others (e.g. a Claude Code whose `CLAUDE.md` there
+  tells it to delegate to herdr agents via the `herdr agent` CLI). Opening the app lands on **Home**:
+  its chat with only the dialogue (tool calls hidden), a status bar of the agents that need you and
+  counts of the rest, and a "doing now" line while it works. Its card is pinned atop the agents list.
+  With no agent there, the app opens on the list as before. To let it see what every other agent is
+  doing, allow it to run `node <plugin dir>/dist/bin/agentwebctl.js overview` — a read-only text
+  summary of every other agent (location, status, last request, last reply, current tool call).
 - `notify_url` — optional [ntfy](https://ntfy.sh) topic URL for background push
   notifications, e.g. `https://ntfy.example.internal/herdr` for a **self-hosted**
   ntfy instance. When unset (default) the bridge performs no outbound requests at
@@ -273,7 +282,8 @@ default.
 
 ## API surface (for scripting)
 
-- `GET /api/state` — normalized workspaces/tabs/panes/agents tree
+- `GET /api/state` — normalized workspaces/tabs/panes/agents tree, plus `orchestratorPaneId`
+  (the agent running in `orchestrator_dir`, or `null`)
 - `GET /api/panes/:paneId/read?source=visible|recent&lines=N&format=text|ansi`
 - `POST /api/panes/:paneId/input` `{"text": "ls", "enter": true}` or `{"keys": ["ctrl+c"]}`
   — add `"clear": true` to wipe the pane's composer (repeated Ctrl+U) before the
