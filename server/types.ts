@@ -19,6 +19,9 @@ export interface AgentInfo {
   sinceUnixMs: number;
   /** herdr's completion_seq: which completion this idle/done status is (agent.list only; null until fetched) */
   completionSeq: number | null;
+  /** herdr's state_change_seq: when this status began, in herdr's own order of changes, which
+   *  (unlike sinceUnixMs) survives a bridge restart (agent.list only; null until fetched) */
+  stateChangeSeq: number | null;
 }
 
 export interface PaneNode {

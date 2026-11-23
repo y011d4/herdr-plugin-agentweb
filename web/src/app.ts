@@ -26,7 +26,7 @@ import type { AppState, OrchestratorView, WsMessage, WsAgentStatusMessage, WsTra
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v104';
+const BUILD = 'v105';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';

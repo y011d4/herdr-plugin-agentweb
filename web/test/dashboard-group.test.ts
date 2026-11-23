@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { dashboardCards, homeSummary, markSeen, shownStatus } from '../src/dashboard-group.ts';
 import type { AgentStatus, PaneNode, WorkspaceNode, WorktreeInfo } from '../src/types.ts';
 
-function agentPane(id: string, sinceUnixMs: number, status: AgentStatus = 'idle', completionSeq: number | null = null): PaneNode {
+function agentPane(id: string, sinceUnixMs: number, status: AgentStatus = 'idle', completionSeq: number | null = null, stateChangeSeq: number | null = null): PaneNode {
   return {
     paneId: id, focused: false, cwd: null, launchCwd: null, title: null,
-    agent: { name: 'claude', displayName: null, status, customStatus: null, message: null, sinceUnixMs, completionSeq },
+    agent: { name: 'claude', displayName: null, status, customStatus: null, message: null, sinceUnixMs, completionSeq, stateChangeSeq },
   };
 }
 const shell = (id: string): PaneNode => ({ paneId: id, focused: false, cwd: null, launchCwd: null, title: null, agent: null });
@@ -31,6 +31,16 @@ describe('dashboardCards', () => {
     assert.deepEqual(dashboardCards(ws, ['gone', null]).map((c) => c.pane.paneId), ['a2', 'b1', 'a1']);
     assert.deepEqual(dashboardCards(ws, ['a1'], ['a1', 'b1']).map((c) => c.pane.paneId), ['b1']);
     assert.deepEqual(dashboardCards(ws, [], []).map((c) => c.pane.paneId), []);
+  });
+
+  it("orders by herdr's state_change_seq, not the bridge's clock; a change not fetched yet first", () => {
+    // right after a bridge restart every sinceUnixMs is the restart time; w1 has been working
+    // since before it (seq 30), i1/i2 went idle earlier (10, 20), n1 just changed (null, newer time)
+    const cards = dashboardCards([
+      wsNode('A', [agentPane('i1', 5, 'idle', 10, 10), agentPane('i2', 5, 'idle', 20, 20)]),
+      wsNode('B', [agentPane('w1', 5, 'working', null, 30), agentPane('n1', 9, 'idle', null, null)]),
+    ]);
+    assert.deepEqual(cards.map((c) => c.pane.paneId), ['n1', 'w1', 'i2', 'i1']);
   });
 
   it('keeps workspace order for equal times (e.g. right after a bridge restart)', () => {

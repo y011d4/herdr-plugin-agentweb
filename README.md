@@ -350,7 +350,9 @@ never writes to. To move to managed orchestrators:
   (`[{ name, label, paneId, agents }]` in config order; `paneId` is the agent running in its dir, or
   `null`; `agents` the agent panes of its Claude account, itself included, or `null` when unknown)
   and `orchestratorPaneId` (the first running one's, or `null`). Each agent's `completionSeq` is herdr's
-  `completion_seq` (which completion its idle/done status is; `null` until fetched)
+  `completion_seq` (which completion its idle/done status is; `null` until fetched), and its
+  `stateChangeSeq` is herdr's `state_change_seq` (herdr's order of status changes, which the app
+  lists by; `null` until fetched)
 - `GET /api/panes/:paneId/read?source=visible|recent&lines=N&format=text|ansi`
 - `POST /api/panes/:paneId/input` `{"text": "ls", "enter": true}` or `{"keys": ["ctrl+c"]}`
   — add `"clear": true` to wipe the pane's composer (repeated Ctrl+U) before the

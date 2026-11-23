@@ -38,10 +38,14 @@ export function dashboardCards(workspaces: WorkspaceNode[], orchestrators: Array
       }));
     });
   });
-  // sort is stable: equal times (every agent right after a bridge restart) keep workspace order
+  // Most recent status change first, in herdr's own order (stateChangeSeq): sinceUnixMs is
+  // the bridge's clock and resets on a bridge restart, so alone it would sink an agent that has
+  // been working since before it. A change not fetched yet (null) is the newest. Stable sort:
+  // full ties (no seqs, e.g. an older herdr, and equal times) keep workspace order.
+  const changed = (c: DashboardCard): number => c.pane.agent!.stateChangeSeq ?? Infinity;
   return cards
     .filter((c) => !orchestrators.includes(c.pane.paneId) && (!scope || scope.includes(c.pane.paneId)))
-    .sort((a, b) => b.pane.agent!.sinceUnixMs - a.pane.agent!.sinceUnixMs);
+    .sort((a, b) => changed(b) - changed(a) || b.pane.agent!.sinceUnixMs - a.pane.agent!.sinceUnixMs);
 }
 
 export interface HomeSummary {
