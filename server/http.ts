@@ -650,12 +650,13 @@ export function createHttpServer({ webRoot, herdrClient, getState, config }: {
           jsonError(res, herdrErr.status || 400, 'bad_request', herdrErr.message);
           return;
         }
-        if (body.text != null && typeof body.text !== 'string') {
-          jsonError(res, 400, 'invalid_params', 'text must be a string');
+        // agent.prompt submits the text (with Enter) and refuses an empty one
+        if (typeof body.text !== 'string' || body.text === '') {
+          jsonError(res, 400, 'invalid_params', 'text must be a non-empty string');
           return;
         }
         try {
-          await herdrClient.rpc('agent.send', { target, text: body.text || '' });
+          await herdrClient.rpc('agent.prompt', { target, text: body.text });
           jsonOk(res, { ok: true });
         } catch (err) {
           const herdrErr = err as HerdrError;

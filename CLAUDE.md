@@ -25,7 +25,8 @@ herdr server
 - `server/http.ts` — REST routes, WS (state pushes, per-client pane + transcript watch), static files
 - `server/agent-lifecycle.ts` — pure start/stop/rename/clear/create-worktree orchestration over an
   injected herdr `rpc` (unit-tested, I/O-free like worktree-resolve's injectable git). Uses herdr's own
-  `agent.start`/`pane.close`/`agent.rename`/`agent.get`/`worktree.create`; agents launch only from a
+  `tab.create`/`pane.split`/`agent.start`/`agent.prompt`/`pane.close`/`agent.rename`/`agent.get`/`worktree.create`;
+  agents launch only from a
   fixed `launch_profiles` allowlist (never a caller-supplied command). http.ts wires the routes
   (`POST /api/agents`, `DELETE /api/panes/:id`, `POST /api/panes/:id/rename`, `POST /api/agents/:target/clear`,
   `POST /api/worktrees`). The New agent UI's "＋ New worktree…" option creates a worktree, then starts
@@ -122,6 +123,15 @@ Verified live against herdr 0.7.3 / protocol 16:
   and the `❯` position is irrelevant (selection is by number). The startup trust
   prompt is a different widget (Enter/Esc only, no digits), but it never surfaces as
   a `blocked` pane, so the chat answer UI never needs to drive it.
+- **Starting agents changed in herdr 0.8** (verified live on 0.9.5 / protocol 22).
+  `agent.start` no longer creates a pane or takes `argv`/`cwd`/`workspace_id`: it is
+  `{ name, kind, pane_id, args? }` and launches into an existing **idle shell pane**, so
+  open one first (`tab.create` → `root_pane`, `pane.split` → `pane`, or
+  `worktree.create`'s `root_pane`). A just-opened pane answers `agent_pane_busy`
+  until its shell is up — retry briefly (herdr's CLI does too). `name` must match
+  `^[a-z][a-z0-9_-]{0,31}$` (also for `agent.rename`). `agent.send` is gone; use
+  `agent.prompt { target, text }`, which answers `agent_not_ready` until `agent.get`
+  shows `interactive_ready: true`.
 - herdr emits focus events ~10/s during desktop activity. Never let them
   trigger WS pushes; apply them to the model silently.
 - **`done` vs `idle` is the server's per-pane `seen` flag, and only focus sets it**

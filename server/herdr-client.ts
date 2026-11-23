@@ -44,7 +44,7 @@ export function createHerdrClient({ socketPath, onState, onAgentStatus, onConnec
   }
 
   // Only non-sensitive identifiers reach the logs — never text/keys/prompts,
-  // which pane.send_input and agent.send carry and bridge.log would persist.
+  // which pane.send_input and agent.prompt carry and bridge.log would persist.
   function safeParamsForLog(params: Record<string, unknown>): string {
     const parts: string[] = [];
     for (const k of ['pane_id', 'target', 'source', 'format']) {

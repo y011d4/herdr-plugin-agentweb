@@ -250,7 +250,8 @@ herdr plugin config-dir y011d4.agentweb
 - `POST /api/panes/:paneId/input` `{"text": "ls", "enter": true}` または `{"keys": ["ctrl+c"]}`
 - `POST /api/panes/:paneId/focus`
 - `POST /api/panes/:paneId/scroll` `{"direction": "up", "steps": 3}` — フルスクリーンアプリ向けの SGR ホイールイベント
-- `POST /api/agents/:target/send` `{"text": "continue"}`
+- `POST /api/agents/:target/send` `{"text": "continue"}` — 入力を受け付けられる状態のエージェントにプロンプトを送る
+  (herdr の `agent.prompt`。`text` は空にできない)
 - `WS /ws?token=…` — `{"type":"state"}` スナップショットと `{"type":"agent_status"}` 遷移
 
 ## 開発

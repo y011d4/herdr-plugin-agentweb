@@ -226,7 +226,8 @@ with defaults, is:
   `http://127.0.0.1:<port>` — so set it for any transport other than Tailscale. See
   [Exposing the bridge to your phone](#exposing-the-bridge-to-your-phone).
 - `launch_profiles` — named agent launch profiles for `POST /api/agents`. Each entry is
-  `{ "argv": [...], "label": "…" }`; `argv` is the command + fixed flags herdr execs (the whole
+  `{ "argv": [...], "label": "…" }`; `argv[0]` is an agent kind herdr knows (`claude`, `codex`,
+  `opencode`, …; herdr picks the executable for it) and the rest are fixed flags (the whole
   point of the allowlist is that a phone/script picks a *profile name*, never a raw command). Your
   entries merge over the built-in defaults shown above (same name overrides its `argv`; a new name is
   added; a malformed entry is ignored). Use it to add variants, e.g.
@@ -298,9 +299,11 @@ default.
 - `POST /api/agents` `{"profile": "claude", "cwd": "/path", "name": "review", "task": "…", "workspace": "w7"}`
   — start a new agent from a named [launch profile](#configuration) (fixed argv allowlist; a caller
   never supplies a raw command). Only `profile` is required; returns `{"paneId", "name", "agent"}`
-  (plus `"taskDelivered"` when `task` was given). Pass `"workspace"` to place the pane in a specific
-  workspace (not just at a matching `cwd`). Pass a `"worktree": {"repo", "branch", "base"}` object
-  instead of `cwd` to **create a worktree and launch the agent in it atomically** — the worktree is
+  (plus `"taskDelivered"` when `task` was given — the response then waits, up to 30s, for the agent to
+  become ready for it). The agent opens in a new tab (labelled with its name) at `cwd`; pass
+  `"workspace"` to put that tab in a specific workspace (else the active one). `name` is fitted to
+  herdr's agent-name rule (lowercased, a-z/0-9/`-`/`_`, max 32). Pass a `"worktree": {"repo", "branch", "base"}` object
+  instead of `cwd` to **create a worktree and launch the agent in its root pane atomically** — the worktree is
   rolled back if the agent fails to start. The new pane appears in `/api/state` a moment later.
 - `POST /api/worktrees` `{"cwd": "/repo", "branch": "feat/x", "base": "origin/main"}` — create a git
   worktree (herdr `worktree.create`; `cwd` is any path in the source repo, `branch`/`base` optional)
@@ -317,7 +320,8 @@ default.
   `{"available": false}` when the pane isn't a claude session or its transcript
   isn't on this host. Add `?session=<id>&after=<cursor>` to fetch only items past
   the cursor for that session (incremental polling).
-- `POST /api/agents/:target/send` `{"text": "continue"}`
+- `POST /api/agents/:target/send` `{"text": "continue"}` — submit a prompt to a ready agent (herdr
+  `agent.prompt`; `text` must be non-empty)
 - `WS /ws?token=…` — `{"type":"state"}` snapshots and `{"type":"agent_status"}`
   transitions. `{"type":"watch_transcript","paneId":…}` starts a live tail that
   pushes `{"type":"transcript_items",…}` (`reset` rebuilds, else appends);
