@@ -116,7 +116,8 @@ type StatusChange struct {
 	Agent            *AgentInfo
 }
 
-// HerdrClientCallbacks run on the client's actor goroutine.
+// HerdrClientCallbacks run on the client's actor goroutine, so they must not call
+// Refresh (it waits for that goroutine) or block for long.
 type HerdrClientCallbacks struct {
 	OnState            func(*State)
 	OnAgentStatus      func(StatusChange, *State)
@@ -211,7 +212,8 @@ func (c *HerdrClient) RPC(method string, params map[string]any) (json.RawMessage
 }
 
 // Refresh re-fetches the snapshot now and pushes it, for changes herdr sends no
-// subscribed event for (e.g. agent.rename).
+// subscribed event for (e.g. agent.rename). It waits for the client's goroutine:
+// never call it from a callback, which runs on that goroutine and would deadlock.
 func (c *HerdrClient) Refresh() error {
 	done := make(chan error, 1)
 	c.post(func() {
