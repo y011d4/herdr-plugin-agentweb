@@ -128,6 +128,32 @@ describe('parsePrompt — option descriptions', () => {
     assert.equal(p!.options[1].label, 'Yes, allow reading from /home/me/projects/herdr-plugin/ during this session');
   });
 
+  it('rejoins a path split before a wide glyph that left one cell', () => {
+    const p = parsePrompt([
+      rule(40),
+      ' ❯ 1. Yes',
+      '   2. Yes, allow /home/me/projects/d/ab', // 39 columns: 設 is two cells wide
+      '      設計メモ/notes.md',
+      '   3. No',
+      '',
+      ' Esc to cancel',
+    ].join('\n'));
+    assert.equal(p!.options[1].label, 'Yes, allow /home/me/projects/d/ab設計メモ/notes.md');
+  });
+
+  it('keeps the space of a label that filled its line exactly (Claude Code, live)', () => {
+    const p = parsePrompt([
+      rule(40),
+      '❯ 1. abcdefghi abcdefghi abcdefghi abcde', // 40 columns, ends on a whole word
+      '     /home/me/projects/repo-name',
+      '     exact fit',
+      '  2. Short',
+      HINT.slice(0, 40),
+    ].join('\n'));
+    assert.deepEqual([p!.options[0].label, p!.options[0].description],
+      ['abcdefghi abcdefghi abcdefghi abcde /home/me/projects/repo-name', 'exact fit']);
+  });
+
   it('keeps a space a CJK description wrapped at', () => {
     const p = parsePrompt([rule(40), '❯ 1. 안정', '     이 옵션은 가장 안정적인 선택이며', '     팀이 이미 잘 알고 있습니다', '  2. 실험', HINT].join('\n'));
     assert.equal(p!.options[0].description, '이 옵션은 가장 안정적인 선택이며 팀이 이미 잘 알고 있습니다');
