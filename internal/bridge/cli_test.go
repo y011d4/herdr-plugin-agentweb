@@ -140,24 +140,18 @@ func TestCLIPort(t *testing.T) {
 	}
 }
 
-// The same on systems without /proc, where ps prints the command line in one piece.
+// Without /proc, ps prints the command line in one piece: only agentwebctl serve|run
+// counts (a path with spaces too); the TS bridge isn't guessed at (Linux only, D15).
 func TestIsBridgeCommandLine(t *testing.T) {
-	const root = "/Users/u/my repo"
 	for cmd, want := range map[string]bool{
-		"/Users/u/Library/herdr plugins/bin/agentwebctl serve":             true, // a path with a space
-		"./bin/agentwebctl run":                                            true,
-		"/opt/homebrew/bin/node /Users/u/my repo/dist/server/main.js":      true, // a checkout path with a space
-		"node /Users/u/my repo/server/main.ts":                             true,
-		"vim /Users/u/my repo/server/main.ts":                              false,
-		"node -e setInterval(()=>{},1000) /Users/u/my repo/server/main.ts": false,
-		"node --inspect /Users/u/my repo/dist/server/main.js":              false,
-		"node -e x /tmp/node /Users/u/my repo/server/main.ts":              false,
-		"/Users/u/my tools/bin/node /Users/u/my repo/dist/server/main.js":  false, // ambiguous without boundaries: refused
-		"node /Users/u/repo/dist/server/main.js":                           false,
-		"node /Users/u/other/dist/server/main.js":                          false,
-		"/x/agentwebctl agent wait p1":                                     false,
+		"/Users/u/Library/herdr plugins/bin/agentwebctl serve":     true,
+		"./bin/agentwebctl run":                                    true,
+		"/x/agentwebctl agent wait p1":                             false,
+		"/x/agentwebctl overview":                                  false,
+		"/opt/homebrew/bin/node /Users/u/repo/dist/server/main.js": false,
+		"sleep 600": false,
 	} {
-		if got := isBridgeCommandLine(cmd, root); got != want {
+		if got := isBridgeCommandLine(cmd); got != want {
 			t.Errorf("isBridgeCommandLine(%q) = %v, want %v", cmd, got, want)
 		}
 	}
