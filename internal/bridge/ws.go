@@ -253,9 +253,9 @@ func (c *wsClient) watchPane(paneID string) {
 
 // pollPane is one look at the watched pane; false once the watch is over.
 func (c *wsClient) pollPane(gen int, paneID string, last **WsPaneOutputMessage) bool {
-	// Fresh scroll metadata (pane.get) picks the screen to read and drives the
-	// app-scroll decision; if that fails the visible screen still goes out, with the
-	// last decision (or false).
+	// Fresh scroll metadata (pane.get) sizes the screen read and drives the app-scroll
+	// decision; if that fails the visible screen still goes out, with the last
+	// decision (or false).
 	info, infoErr := c.srv.paneInfo(paneID)
 	params := map[string]any{"pane_id": paneID, "source": "visible", "lines": 200, "format": "ansi"}
 	screenRead(params, info)

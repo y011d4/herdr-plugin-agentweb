@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -368,14 +369,21 @@ func TestWSPaneWatch(t *testing.T) {
 
 // A pane scrolled up on the desktop (to read a long reply, say): herdr's visible read
 // is that old viewport, not the prompt waiting at the bottom. Every screen read (REST,
-// the press verify, the WS watch) takes the bottom viewport_rows rows instead.
+// the press verify, the WS watch) takes the bottom viewport_rows rows instead, also
+// when pane.get said unscrolled (the desktop may scroll between the two calls).
 func TestScrolledPaneReadsTheBottomScreen(t *testing.T) {
+	for _, offset := range []int{30, 0} {
+		t.Run(strconv.Itoa(offset), func(t *testing.T) { testBottomScreen(t, offset) })
+	}
+}
+
+func testBottomScreen(t *testing.T, offset int) {
 	menu := " ☐ Pick\n\nWhich?\n\n❯ 1. apple\n  2. banana\n\nEnter to select · Esc to cancel"
 	b := startBridge(t, Config{}, func(m string, p json.RawMessage) (fakeherdr.Reply, bool) {
 		switch m {
 		case "pane.get":
 			return fakeherdr.Reply{Result: map[string]any{"pane": map[string]any{"pane_id": "p1", "agent": "claude",
-				"scroll": map[string]any{"offset_from_bottom": 30, "max_offset_from_bottom": 69, "viewport_rows": 8}}}}, true
+				"scroll": map[string]any{"offset_from_bottom": offset, "max_offset_from_bottom": 69, "viewport_rows": 8}}}}, true
 		case "pane.read":
 			text := "| row 12 of a long table |" // the scrolled-up viewport
 			if strings.Contains(string(p), `"source":"recent"`) && strings.Contains(string(p), `"lines":8`) {
@@ -403,8 +411,8 @@ func TestScrolledPaneReadsTheBottomScreen(t *testing.T) {
 	}
 }
 
-// Without the scroll state the press can't tell the live screen from a stale
-// viewport, so it refuses instead of verifying against visible.
+// Without pane.get (the screen's size) the press can't read the live screen, and
+// visible may be a stale viewport, so it refuses instead of verifying against that.
 func TestPressRefusedWithoutScrollState(t *testing.T) {
 	menu := " ☐ Pick\n\nWhich?\n\n❯ 1. apple\n  2. banana\n\nEnter to select · Esc to cancel"
 	b := startBridge(t, Config{}, func(m string, p json.RawMessage) (fakeherdr.Reply, bool) {
