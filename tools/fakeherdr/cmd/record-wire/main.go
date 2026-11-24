@@ -24,12 +24,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -407,6 +407,12 @@ func run() error {
 		"XDG_DATA_HOME=" + filepath.Join(tmp, "data"),
 		"HERDR_AGENTWEB_PORT=" + port,
 	}
+	// something else on the port would answer the health check in our bridge's place
+	if ln, err := net.Listen("tcp", "127.0.0.1:"+port); err != nil {
+		return fmt.Errorf("port %s is in use: %w", port, err)
+	} else {
+		ln.Close()
+	}
 	bridge := exec.Command(nodeBin, "server/main.ts")
 	bridge.Env = baseEnv
 	blog, _ := os.Create(filepath.Join(tmp, "bridge.log"))
@@ -415,7 +421,9 @@ func run() error {
 		return err
 	}
 	defer bridge.Process.Kill()
-	if err := waitConnected(); err != nil {
+	exited := make(chan struct{})
+	go func() { _ = bridge.Wait(); close(exited) }()
+	if err := waitConnected(srv, exited); err != nil {
 		b, _ := os.ReadFile(filepath.Join(tmp, "bridge.log"))
 		return fmt.Errorf("%w; bridge log: %s", err, b)
 	}
@@ -428,21 +436,24 @@ func run() error {
 
 	tsRe := regexp.MustCompile(`\b(claude|codex|opencode|agent)-[0-9a-z]{8}\b`)
 	agoRe := regexp.MustCompile(`last activity \d+[smhd] ago`)
-	pidRe := regexp.MustCompile(`"foreground_process_group_id": \d+`)
 	norm := func(t string) string {
 		t = strings.ReplaceAll(t, tmp, "$TMP")
 		t = tsRe.ReplaceAllString(t, "$1-<time>")
-		t = agoRe.ReplaceAllString(t, "last activity <ago>")
-		t = strings.ReplaceAll(t, strconv.Itoa(s.pidDefault), "<pid-default>")
-		t = strings.ReplaceAll(t, strconv.Itoa(s.pidOther), "<pid-other>")
-		return pidRe.ReplaceAllString(t, `"foreground_process_group_id": <pid>`)
+		return agoRe.ReplaceAllString(t, "last activity <ago>")
 	}
 	r := &recorder{s: s, srv: srv, token: strings.TrimSpace(string(tok)), baseEnv: baseEnv, norm: norm}
 	return recordAll(r)
 }
 
-func waitConnected() error {
+// waitConnected waits until our bridge (still running) reports itself connected and
+// our fake herdr has its subscription.
+func waitConnected(srv *fakeherdr.Server, exited <-chan struct{}) error {
 	for i := 0; i < 200; i++ {
+		select {
+		case <-exited:
+			return fmt.Errorf("the bridge exited")
+		default:
+		}
 		res, err := http.Get("http://127.0.0.1:" + port + "/healthz")
 		if err == nil {
 			var h struct {
@@ -450,7 +461,7 @@ func waitConnected() error {
 			}
 			_ = json.NewDecoder(res.Body).Decode(&h)
 			res.Body.Close()
-			if h.HerdrConnected {
+			if h.HerdrConnected && srv.Subscribed() > 0 {
 				return nil
 			}
 		}

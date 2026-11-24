@@ -23,7 +23,7 @@ Regenerate (about 40 s; needs node ≥ 23.6 and `npm ci`):
 
 Per operation (REST, WS, CLI): the requests herdr received, in order, and the HTTP
 answer, WS messages or CLI output. Paths under the recording's temp dir read `$TMP`,
-generated agent names `claude-<time>`, the stand-in processes' pids `<pid-…>`.
+and generated agent names `claude-<time>`.
 
 The recorder runs the bridge on 127.0.0.1:8392 with every directory (state, config,
 data, HOME, a scratch git repo with an origin) in a fresh temp dir, two `sleep`
