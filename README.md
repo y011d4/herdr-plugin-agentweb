@@ -35,42 +35,74 @@ herdr server
 
 ## Requirements
 
-- herdr >= 0.8.0 (Linux/macOS)
-- To build it: Go >= 1.27, and Node.js >= 20 with `npm` for the web UI. The plugin builds
-  from source until releases with a prebuilt binary exist; the binary itself needs neither.
+- [herdr](https://herdr.dev) >= 0.9.5 (see [Compatibility](#compatibility))
+- Linux on amd64 or arm64. macOS (Apple silicon and Intel) is experimental.
+- Nothing else to install: the plugin is one prebuilt binary, which the install downloads
+  and checks with the usual `sh`, `curl` or `wget`, and `sha256sum` or `shasum`. No Node.js,
+  no Go.
 - A way to reach the bridge from your phone — a reverse proxy, a tunnel, or a VPN
   (see [Exposing the bridge to your phone](#exposing-the-bridge-to-your-phone)).
   Tailscale is one easy option, not a requirement.
+- Optional commands, used when present:
+  - `git` >= 2.31 — branch names on the cards, worktrees
+  - `qrencode` — the connect QR code (without it, the connect pane prints the URL)
+  - `tailscale` — the connect URL is detected when the bridge is behind `tailscale serve`
+  - `direnv` — per-directory Claude accounts for [orchestrators](#orchestrators)
+  - `gh` — `worktree remove` recognizes squash-merged branches
 
 ## Setup
 
-Install straight from GitHub — herdr fetches the repo and runs the build for you:
+Install a release straight from GitHub:
 
 ```bash
-herdr plugin install y011d4/herdr-plugin-agentweb
-# or pin a version:  herdr plugin install y011d4/herdr-plugin-agentweb --ref v0.1.0
+herdr plugin install y011d4/herdr-plugin-agentweb --ref v0.1.0
 ```
 
-No clone, no manual build: `herdr plugin install` runs the manifest `[[build]]` step
-(`scripts/plugin-build.sh`: `npm ci`, the web build, `go build`), so it needs Go, Node.js
-and `npm` on `PATH`. To hack on
-the plugin from a local checkout instead, see [Development](#development).
+No clone, no build: `herdr plugin install` runs the manifest `[[build]]` step,
+`scripts/plugin-build.sh`, which downloads that version's binary for your OS and CPU from the
+[GitHub releases](https://github.com/y011d4/herdr-plugin-agentweb/releases) and checks it
+against the SHA-256 in `release/checksums.txt`, committed in the repo at that tag. A binary that
+doesn't match is not installed. (Without `--ref`, herdr installs the default branch, which
+downloads the release its `herdr-plugin.toml` names.) To hack on the plugin from a local
+checkout instead, see [Development](#development).
 
-**Updating from a version before the Go bridge** (the actions ran `node dist/...`): stop the
-bridge first, then update, then start. The new `stop` doesn't recognize a Node bridge started
-from an earlier install, so it would drop the pidfile and leave that bridge holding the port:
+### Updating
+
+Stop the bridge, update, start it again — in that order: the update moves the plugin to a new
+directory, and the new `stop` may not find a bridge the old binary started:
 
 ```bash
 herdr plugin action invoke y011d4.agentweb.stop   # wait until it has finished
-herdr plugin update
+herdr plugin update                               # or: herdr plugin install … --ref v<new>
 herdr plugin action invoke y011d4.agentweb.start
 ```
 
 Then restart each running orchestrator (**Clear** on its Home). The bridge rewrites their rules and
 allowlists with the new `agentwebctl` path when it starts, and a running orchestrator still calls the old one.
 An older unmanaged orchestrator directory (`orchestrator_dir`, or the old `dispatcher`) is yours and
-is never rewritten: change its `node …/dist/bin/agentwebctl.js` to `<plugin dir>/bin/agentwebctl`
-in its `CLAUDE.md` and `.claude/settings.json` yourself, or move to managed `orchestrators`.
+is never rewritten: change its `agentwebctl` path (from a version before the Go bridge:
+`node …/dist/bin/agentwebctl.js`) to `<plugin dir>/bin/agentwebctl` in its `CLAUDE.md` and
+`.claude/settings.json` yourself, or move to managed `orchestrators`.
+
+### Uninstalling
+
+```bash
+herdr plugin action invoke y011d4.agentweb.stop
+herdr plugin config-dir y011d4.agentweb            # note the config dir before uninstalling
+herdr plugin uninstall y011d4.agentweb
+```
+
+`herdr plugin uninstall` leaves files behind. Delete what you no longer want:
+
+- the installed checkout: `~/.config/herdr/plugins/github-installations/y011d4.agentweb-*`
+  (older herdr: `~/.config/herdr/plugins/github/y011d4.agentweb-*`)
+- the state dir, `~/.local/state/herdr/plugins/y011d4.agentweb` (under `$XDG_STATE_HOME` when
+  set): the access token, `bridge.log`, `pane-profiles.json`
+- the config dir printed above (`config.json`)
+- `~/.local/share/herdr-agentweb` (under `$XDG_DATA_HOME` when set): the orchestrator directories,
+  including your own `local.md` files
+
+### Starting
 
 Start the bridge (any of these):
 
@@ -101,7 +133,7 @@ The plugin exposes three workspace actions and two panes:
 | --- | --- | --- |
 | `y011d4.agentweb.start` | action | Start the bridge as a detached daemon |
 | `y011d4.agentweb.stop` | action | Stop the running bridge |
-| `y011d4.agentweb.status` | action | Report whether it's running and print the URL (no token) |
+| `y011d4.agentweb.status` | action | Report whether it's running, the URL (no token), the versions of the plugin and herdr, and which optional commands it finds |
 | `server` | pane | Run the bridge in a visible pane (foreground; the tokenized URL is shown here) |
 | `connect` | pane | Show the connect QR / URL as an overlay |
 
@@ -370,6 +402,49 @@ listers above instead. To move to managed orchestrators:
   Tokens are 32 hex chars (128-bit); tokens created by older versions were 64 and
   stay valid until rotated.
 
+## Compatibility
+
+| | Status |
+| --- | --- |
+| Linux amd64 | Supported, used daily |
+| Linux arm64 | Supported: CI runs the tests (including a bridge against a fake herdr) on arm64; not yet run against a real herdr |
+| macOS arm64 / amd64 | Experimental: built and unit-tested in CI, not yet run against a real herdr; see [Known limitations](#known-limitations) |
+| herdr | 0.9.5 (socket protocol 22) verified. With another protocol the bridge logs a warning in `bridge.log`, and `status` shows it |
+| Claude Code | 2.1.322 verified: the orchestrator permission rules and the chat view's transcript format |
+
+Windows isn't supported (herdr doesn't run there). The binaries are statically linked
+(`CGO_ENABLED=0`), so any Linux distribution works, glibc or musl.
+
+## Known limitations
+
+- **macOS: no Claude-account checks.** An agent's Claude account is read from Linux's `/proc`.
+  On macOS, the commands that need a pane's account (`overview`, `agent …`, `worktree remove`)
+  refuse, an orchestrator's Home lists every agent rather than its account's, **Clear**
+  relaunches without checking the account, and the CLI takes its own `CLAUDE_CONFIG_DIR` as the
+  caller's account.
+- **Claude Code installed with npm** runs as `node`, so `agentwebctl` doesn't recognize it as the
+  calling orchestrator's Claude process and falls back to its own `CLAUDE_CONFIG_DIR`. Use
+  Claude Code's native installer for orchestrators.
+- **Chat view transcripts** are found under `~/.claude/projects` and
+  `~/.config/claude/<name>/projects`. On Linux, an agent with any other `CLAUDE_CONFIG_DIR` is
+  found through its process environment; on macOS it isn't, and its pane keeps the terminal view.
+
+## Troubleshooting
+
+- `curl -s http://127.0.0.1:8390/healthz` should answer `{"ok":true,"herdrConnected":true}`. No
+  answer: the bridge isn't running (start it, then read `bridge.log`). `"herdrConnected":false`:
+  it can't reach herdr's socket (`$HERDR_SOCKET_PATH`, by default `~/.config/herdr/herdr.sock`).
+- `herdr plugin action invoke y011d4.agentweb.status` reports the plugin's and herdr's versions,
+  herdr's protocol (with a warning when it isn't a verified one) and the optional commands found
+  on the PATH herdr gives plugins. Read the output with
+  `herdr plugin log list --plugin y011d4.agentweb` (its `stdout`).
+- The detached bridge logs to `bridge.log` in the state dir
+  (`~/.local/state/herdr/plugins/y011d4.agentweb`): the version it runs, the herdr it connected
+  to, and errors. It holds the tokenized connect URL, so keep it private.
+- The phone still shows the old app after an update: close and reopen it (the service worker
+  fetches the new version in the background).
+- The connect pane prints a URL but no QR code: install `qrencode`.
+
 ## API surface (for scripting)
 
 - `GET /api/state` — normalized workspaces/tabs/panes/agents tree, plus `orchestrators`
@@ -430,10 +505,13 @@ listers above instead. To move to managed orchestrators:
 For local development, clone and **link** a working tree instead of installing from
 GitHub — `herdr plugin link` points herdr at your checkout so your edits take effect:
 
+Building from source needs Go (the version in `go.mod`) and Node.js >= 23.6 with `npm` (the
+web UI's TypeScript build and tests).
+
 ```bash
 git clone https://github.com/y011d4/herdr-plugin-agentweb
 cd herdr-plugin-agentweb
-./scripts/plugin-build.sh      # web UI, then bin/agentwebctl (Go)
+sh scripts/plugin-build.sh source   # web UI, then bin/agentwebctl (Go)
 herdr plugin link "$(pwd)"
 ```
 
@@ -442,16 +520,37 @@ under `web/src/`, built to `web/` and embedded in the binary. The earlier TypeSc
 (`server/`, `bin/`) stays for now, only to roll back to.
 
 ```bash
-./scripts/plugin-build.sh      # rebuild after changes, web ones too (the binary embeds the web UI)
-go test ./...                  # Go tests
-npm test                       # TypeScript tests (node --test, needs Node >= 23.6)
-./bin/agentwebctl run          # run against your live herdr in the foreground (config: see Configuration)
+sh scripts/plugin-build.sh source   # rebuild after changes, web ones too (the binary embeds the web UI)
+go test ./...                       # Go tests
+npm test                            # TypeScript tests (node --test)
+./bin/agentwebctl run               # run against your live herdr in the foreground (config: see Configuration)
 ```
 
-`herdr plugin link` does **not** run build commands — rebuild with `./scripts/plugin-build.sh`
-after edits (and re-run `herdr plugin link` only when `herdr-plugin.toml` changed).
-`herdr plugin install` runs the manifest build commands automatically.
+`herdr plugin link` does **not** run build commands — rebuild with
+`sh scripts/plugin-build.sh source` after edits (and re-run `herdr plugin link` only when
+`herdr-plugin.toml` changed). Without `source`, the script downloads the release binary of the
+version in `herdr-plugin.toml` instead of building your changes.
 
 Logs for the detached daemon go to `<state dir>/bridge.log`
-(`herdr plugin config-dir y011d4.agentweb` prints the config dir; state dir is its
-sibling, or `$HERDR_PLUGIN_STATE_DIR` inside plugin commands).
+(`~/.local/state/herdr/plugins/y011d4.agentweb`, or `$HERDR_PLUGIN_STATE_DIR` inside plugin
+commands).
+
+### Releasing
+
+Maintainers, from a clean checkout of the commit to release:
+
+```bash
+scripts/release.sh 0.2.0    # builds dist/release/* in a temporary worktree with the pinned Go
+                            # toolchain; writes release/checksums.txt and the manifest version
+git add herdr-plugin.toml release/checksums.txt && git commit -m "release v0.2.0" && git tag v0.2.0
+git push origin main v0.2.0
+gh release create v0.2.0 dist/release/* --title v0.2.0 --notes "…"
+```
+
+The binaries are uploaded as built, uncompressed: their checksums are the ones committed with the
+tag, which `scripts/plugin-build.sh` checks on install. Name the verified herdr and Claude Code
+versions in the release notes.
+
+## License
+
+[MIT](LICENSE)

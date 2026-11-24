@@ -30,41 +30,72 @@ herdr サーバー
 
 ## 必要要件
 
-- herdr >= 0.8.0 (Linux / macOS)
-- ビルドに: Go >= 1.27 と、web UI のための Node.js >= 20 と `npm`。ビルド済みのバイナリを
-  配るリリースができるまでは、ソースからビルドします。バイナリ自体はどちらも要りません。
+- [herdr](https://herdr.dev) >= 0.9.5 (「対応状況」の節を参照)
+- Linux (amd64、arm64)。macOS (Apple シリコン、Intel) は試験的な対応です。
+- ほかにインストールするものはありません。プラグインはビルド済みのバイナリ 1 つで、インストール時に
+  `sh`、`curl` か `wget`、`sha256sum` か `shasum` という普通の道具で取得し、検証します。Node.js も
+  Go も要りません。
 - スマホからブリッジに到達する手段 — リバースプロキシ、トンネル、または VPN
   (「スマホへの公開」の節を参照)。Tailscale は手軽な選択肢の一つで、必須ではありません。
+- 任意のコマンド (あれば使います):
+  - `git` 2.31 以上 — カードのブランチ名、worktree
+  - `qrencode` — 接続用の QR コード (無ければ接続ペインは URL を表示します)
+  - `tailscale` — ブリッジを `tailscale serve` の後ろに置いたとき、接続 URL を自動で検出します
+  - `direnv` — [orchestrator](./README.md#orchestrators) のための、ディレクトリごとの Claude アカウント
+  - `gh` — `worktree remove` が squash merge されたブランチを見分けます
 
 ## セットアップ
 
-GitHub から直接インストールできます — herdr がリポジトリを取得し、ビルドまで自動で実行します:
+リリースを GitHub から直接インストールします:
 
 ```bash
-herdr plugin install y011d4/herdr-plugin-agentweb
-# バージョンを固定する場合:  herdr plugin install y011d4/herdr-plugin-agentweb --ref v0.1.0
+herdr plugin install y011d4/herdr-plugin-agentweb --ref v0.1.0
 ```
 
-clone も手動ビルドも不要です。`herdr plugin install` はマニフェストの `[[build]]`
-(`scripts/plugin-build.sh`: `npm ci` → web のビルド → `go build`) を実行するため、`PATH` に
-Go、Node.js、`npm` が必要です。ローカルの
-チェックアウトで開発したい場合は「開発」の節を参照してください。
+clone もビルドも不要です。`herdr plugin install` はマニフェストの `[[build]]`
+(`scripts/plugin-build.sh`) を実行します。これは、その版の OS と CPU に合うバイナリを
+[GitHub のリリース](https://github.com/y011d4/herdr-plugin-agentweb/releases) から取得し、そのタグの
+リポジトリにコミットされた `release/checksums.txt` の SHA-256 と照らし合わせます。合わないバイナリは
+インストールしません。(`--ref` を付けないと herdr は既定のブランチを入れ、その `herdr-plugin.toml` に
+書かれた版のリリースを取得します。) ローカルのチェックアウトで開発したい場合は「開発」の節を参照してください。
 
-**Go の bridge より前の版から更新するとき** (action が `node dist/...` を動かしていた版): 先に
-bridge を止めてから更新し、それから起動します。新しい `stop` は前のインストールから起動した
-Node の bridge を見分けられないので、pidfile だけを消し、その bridge がポートを握ったまま残ります:
+### 更新
+
+ブリッジを止め、更新し、起動し直します。この順番を守ってください。更新でプラグインのディレクトリが
+変わるので、新しい `stop` は古いバイナリが起動したブリッジを見つけられないことがあります:
 
 ```bash
 herdr plugin action invoke y011d4.agentweb.stop   # 終わるまで待つ
-herdr plugin update
+herdr plugin update                               # または: herdr plugin install … --ref v<新しい版>
 herdr plugin action invoke y011d4.agentweb.start
 ```
 
 続いて、動いている orchestrator をそれぞれ起動し直します (Home の **Clear**)。bridge は起動のときに
 rules と許可リストを新しい `agentwebctl` のパスに書き直しますが、動いている orchestrator は古いパスを呼び続けます。
 以前の、管理されない orchestrator のディレクトリ (`orchestrator_dir`、または古い `dispatcher`) は利用者のもので、
-書き直されません。その `CLAUDE.md` と `.claude/settings.json` の `node …/dist/bin/agentwebctl.js` を
-`<plugin dir>/bin/agentwebctl` に自分で直すか、管理される `orchestrators` に移ってください。
+書き直されません。その `CLAUDE.md` と `.claude/settings.json` の `agentwebctl` のパス (Go の bridge より前の版
+からなら `node …/dist/bin/agentwebctl.js`) を `<plugin dir>/bin/agentwebctl` に自分で直すか、管理される
+`orchestrators` に移ってください。
+
+### アンインストール
+
+```bash
+herdr plugin action invoke y011d4.agentweb.stop
+herdr plugin config-dir y011d4.agentweb            # アンインストールの前に config ディレクトリを控える
+herdr plugin uninstall y011d4.agentweb
+```
+
+`herdr plugin uninstall` はファイルを残します。要らないものを消してください:
+
+- インストールしたチェックアウト: `~/.config/herdr/plugins/github-installations/y011d4.agentweb-*`
+  (古い herdr では `~/.config/herdr/plugins/github/y011d4.agentweb-*`)
+- state ディレクトリ `~/.local/state/herdr/plugins/y011d4.agentweb` (`$XDG_STATE_HOME` があればその下):
+  アクセストークン、`bridge.log`、`pane-profiles.json`
+- 上で控えた config ディレクトリ (`config.json`)
+- `~/.local/share/herdr-agentweb` (`$XDG_DATA_HOME` があればその下): orchestrator のディレクトリ。
+  自分で書いた `local.md` も含みます
+
+### 起動
 
 ブリッジを起動する (いずれかの方法):
 
@@ -94,7 +125,7 @@ state ディレクトリ (`token` ファイル。パスはアクションの出�
 | --- | --- | --- |
 | `y011d4.agentweb.start` | action | ブリッジをデタッチしたデーモンとして起動 |
 | `y011d4.agentweb.stop` | action | 動作中のブリッジを停止 |
-| `y011d4.agentweb.status` | action | 動作状況を報告し、URL を表示 (トークンなし) |
+| `y011d4.agentweb.status` | action | 動作状況、URL (トークンなし)、プラグインと herdr の版、見つかった任意のコマンドを表示 |
 | `server` | pane | ブリッジを可視ペインで起動 (フォアグラウンド。トークン付き URL はここに表示) |
 | `connect` | pane | 接続用の QR / URL をオーバーレイ表示 |
 
@@ -262,6 +293,48 @@ herdr plugin config-dir y011d4.agentweb
   再起動します。トークンは 32 桁の 16 進数 (128 ビット) です。旧バージョンが生成した 64 桁の
   トークンも、ローテーションするまでは有効です。
 
+## 対応状況
+
+| | 状況 |
+| --- | --- |
+| Linux amd64 | 対応。日常的に使っています |
+| Linux arm64 | 対応。CI が arm64 でテスト (偽の herdr を相手にしたブリッジの動作を含む) を回しています。本物の herdr ではまだ動かしていません |
+| macOS arm64 / amd64 | 試験的。CI でビルドと単体テストを回していますが、本物の herdr ではまだ動かしていません。「既知の制限」を参照 |
+| herdr | 0.9.5 (ソケットの protocol 22) で確認。ほかの protocol では、ブリッジが `bridge.log` に警告を出し、`status` にも表示します |
+| Claude Code | 2.1.322 で確認: orchestrator の権限の規則と、チャット表示が読む transcript の形 |
+
+Windows は対象外です (herdr が動きません)。バイナリは静的にリンクしている (`CGO_ENABLED=0`) ので、
+glibc でも musl でも、どの Linux ディストリビューションでも動きます。
+
+## 既知の制限
+
+- **macOS では Claude アカウントの確認ができません。** エージェントの Claude アカウントは Linux の
+  `/proc` から読みます。macOS では、ペインのアカウントが要るコマンド (`overview`、`agent …`、
+  `worktree remove`) は断られ、orchestrator の Home にはそのアカウントのものではなく全エージェントが並び、
+  **Clear** はアカウントを確かめずに起動し直し、CLI は自分の `CLAUDE_CONFIG_DIR` を呼び出し元のアカウントと
+  みなします。
+- **npm で入れた Claude Code** は `node` として動くので、`agentwebctl` はそれを呼び出し元の orchestrator の
+  Claude のプロセスと見分けられず、自分の `CLAUDE_CONFIG_DIR` で代わりにします。orchestrator には
+  Claude Code のネイティブインストーラーで入れたものを使ってください。
+- **チャット表示の transcript** は `~/.claude/projects` と `~/.config/claude/<name>/projects` から探します。
+  Linux では、ほかの `CLAUDE_CONFIG_DIR` を使うエージェントもプロセスの環境変数から見つけますが、
+  macOS では見つけられず、そのペインは端末の表示のままになります。
+
+## 困ったとき
+
+- `curl -s http://127.0.0.1:8390/healthz` が `{"ok":true,"herdrConnected":true}` を返すはずです。応答が
+  なければブリッジが動いていません (起動して `bridge.log` を読んでください)。`"herdrConnected":false` なら、
+  herdr のソケット (`$HERDR_SOCKET_PATH`、既定は `~/.config/herdr/herdr.sock`) につながっていません。
+- `herdr plugin action invoke y011d4.agentweb.status` は、プラグインと herdr の版、herdr の protocol
+  (確認済みでなければ警告つき)、herdr がプラグインに渡す PATH で見つかった任意のコマンドを表示します。
+  出力は `herdr plugin log list --plugin y011d4.agentweb` の `stdout` で読めます。
+- デタッチしたブリッジのログは state ディレクトリ (`~/.local/state/herdr/plugins/y011d4.agentweb`) の
+  `bridge.log` です。動いている版、つながった herdr、エラーが出ます。トークン付きの接続 URL も
+  書かれているので、ほかの人に見せないでください。
+- 更新した後もスマホに古いアプリが出るときは、閉じて開き直してください (service worker が裏で新しい版を
+  取得します)。
+- 接続ペインに URL だけが出て QR コードが出ないときは、`qrencode` を入れてください。
+
 ## API サーフェス (スクリプト用)
 
 - `GET /api/state` — 正規化されたワークスペース / タブ / ペイン / エージェントのツリー
@@ -279,10 +352,13 @@ herdr plugin config-dir y011d4.agentweb
 **link** します — `herdr plugin link` は herdr にあなたのチェックアウトを指させるので、編集が
 そのまま反映されます:
 
+ソースからのビルドには、Go (`go.mod` の版) と、web UI の TypeScript のビルドとテストのための
+Node.js 23.6 以上と `npm` が要ります。
+
 ```bash
 git clone https://github.com/y011d4/herdr-plugin-agentweb
 cd herdr-plugin-agentweb
-./scripts/plugin-build.sh      # web UI、続いて bin/agentwebctl (Go)
+sh scripts/plugin-build.sh source   # web UI、続いて bin/agentwebctl (Go)
 herdr plugin link "$(pwd)"
 ```
 
@@ -291,16 +367,35 @@ bridge と CLI は Go (`cmd/agentwebctl`、`internal/bridge`) です。PWA は `
 戻すときのためだけに当面残しています。
 
 ```bash
-./scripts/plugin-build.sh      # 変更後に再ビルド。web の変更も (バイナリが web UI を埋め込むため)
-go test ./...                  # Go のテスト
-npm test                       # TypeScript のテスト (node --test。Node >= 23.6 が必要)
-./bin/agentwebctl run          # ライブの herdr に対しフォアグラウンドで実行 (config は「設定」の節を参照)
+sh scripts/plugin-build.sh source   # 変更後に再ビルド。web の変更も (バイナリが web UI を埋め込むため)
+go test ./...                       # Go のテスト
+npm test                            # TypeScript のテスト (node --test)
+./bin/agentwebctl run               # ライブの herdr に対しフォアグラウンドで実行 (config は「設定」の節を参照)
 ```
 
-`herdr plugin link` は build コマンドを実行**しません** — 編集後は `./scripts/plugin-build.sh` で
-再ビルドしてください (`herdr plugin link` の再実行は `herdr-plugin.toml` を変更したときだけ)。
-`herdr plugin install` はマニフェストの build コマンドを自動で実行します。
+`herdr plugin link` は build コマンドを実行**しません** — 編集後は `sh scripts/plugin-build.sh source` で
+再ビルドしてください (`herdr plugin link` の再実行は `herdr-plugin.toml` を変更したときだけ)。`source` を
+付けないと、手元の変更をビルドせずに、`herdr-plugin.toml` の版のリリースのバイナリを取得します。
 
 デタッチしたデーモンのログは `<state dir>/bridge.log` に出力されます
-(`herdr plugin config-dir y011d4.agentweb` が config ディレクトリを表示します。state ディレクトリは
-その兄弟、またはプラグインコマンド内では `$HERDR_PLUGIN_STATE_DIR`)。
+(`~/.local/state/herdr/plugins/y011d4.agentweb`、プラグインコマンド内では `$HERDR_PLUGIN_STATE_DIR`)。
+
+### リリース
+
+メンテナー向け。リリースするコミットの、変更のないチェックアウトで:
+
+```bash
+scripts/release.sh 0.2.0    # 一時的な worktree で、固定した Go のツールチェーンで dist/release/* を作り、
+                            # release/checksums.txt とマニフェストの版を書く
+git add herdr-plugin.toml release/checksums.txt && git commit -m "release v0.2.0" && git tag v0.2.0
+git push origin main v0.2.0
+gh release create v0.2.0 dist/release/* --title v0.2.0 --notes "…"
+```
+
+バイナリは作ったまま、圧縮せずに上げます。そのチェックサムはタグと一緒にコミットしたもので、
+`scripts/plugin-build.sh` がインストールのときに照らし合わせます。リリースノートには、確認した herdr と
+Claude Code の版を書いてください。
+
+## ライセンス
+
+[MIT](LICENSE)
