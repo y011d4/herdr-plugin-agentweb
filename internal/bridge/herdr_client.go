@@ -7,7 +7,9 @@ package bridge
 // runs the same steps, in the same order, as the single-threaded TypeScript client.
 // Nothing else touches that state: socket reads, RPCs and timers run on their own
 // goroutines and post a closure back to the actor. The actor never blocks on I/O.
-// The current State is also published through an atomic pointer for readers.
+// The State last handed to a callback is also published through an atomic pointer
+// for readers: what server/main.ts keeps as its currentState (a focus event updates
+// the model but not that, until the next push).
 
 import (
 	"bufio"
@@ -32,7 +34,8 @@ const (
 	stateBroadcastDebounce = 250 * time.Millisecond
 	// short, so the seq reaches the phone with (or right after) the done status itself:
 	// the phone records a "seen" only against a known seq
-	completionSeqDebounce = 50 * time.Millisecond
+	completionSeqDebounce   = 50 * time.Millisecond
+	worktreeRefreshInterval = 30 * time.Second
 )
 
 var logf = log.Printf
@@ -185,14 +188,29 @@ func (c *HerdrClient) post(f func()) {
 	}
 }
 
-// Start connects (and keeps reconnecting).
-// ponytail: P0 spike; the 30 s worktree refresh and git enrichment come with P2.
-func (c *HerdrClient) Start() { c.post(c.connect) }
+// Start connects (and keeps reconnecting). Call it once.
+func (c *HerdrClient) Start() {
+	// catch branch changes (git checkout) that don't produce a herdr snapshot
+	go func() {
+		t := time.NewTicker(worktreeRefreshInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				c.post(c.refreshWorktreesSoon)
+			case <-c.quit:
+				return
+			}
+		}
+	}()
+	c.post(c.connect)
+}
 
 // IsConnected reports whether the event subscription is acknowledged and open.
 func (c *HerdrClient) IsConnected() bool { return c.isConn.Load() }
 
-// State is the current state (nil before the first snapshot). Never modify it.
+// State is the state last pushed to the callbacks (nil before the first snapshot).
+// Never modify it.
 func (c *HerdrClient) State() *State { return c.published.Load() }
 
 // RPC sends one request to herdr.
@@ -234,9 +252,16 @@ func (c *HerdrClient) Destroy() {
 	})
 }
 
-func (c *HerdrClient) setState(s *State) {
-	c.cur = s
+func (c *HerdrClient) setState(s *State) { c.cur = s }
+
+func (c *HerdrClient) emitState(s *State) {
 	c.published.Store(s)
+	c.cb.OnState(s)
+}
+
+func (c *HerdrClient) emitStatus(ch StatusChange, s *State) {
+	c.published.Store(s)
+	c.cb.OnAgentStatus(ch, s)
 }
 
 func (c *HerdrClient) setConnected(v bool) {
@@ -334,7 +359,9 @@ func (c *HerdrClient) applySnapshot(res json.RawMessage, replay bool, coverage m
 		return err
 	}
 	prev := c.cur
-	next := createState(raw, nowMs(), prev)
+	// plus the git context herdr omits (the branch, and worktree info for untagged
+	// checkouts), from the cache: git itself runs in refreshWorktreesSoon below
+	next := enrichStateWorktrees(createState(raw, nowMs(), prev), nil)
 	c.setState(next)
 	if replay && prev != nil {
 		for _, id := range next.paneOrder {
@@ -347,15 +374,41 @@ func (c *HerdrClient) applySnapshot(res json.RawMessage, replay bool, coverage m
 				from = statusOf(pp.Agent)
 			}
 			if from != a.Status {
-				c.cb.OnAgentStatus(StatusChange{PaneID: id, From: from, To: a.Status, Agent: a}, next)
+				c.emitStatus(StatusChange{PaneID: id, From: from, To: a.Status, Agent: a}, next)
 				c.replayedPanes[id] = true // the drain must not emit this one again
 			}
 		}
 	}
 	// delivered at once (not debounced), so a flood of held events can't starve it
-	c.cb.OnState(next)
+	c.emitState(next)
+	c.refreshWorktreesSoon()
 	c.refreshCompletionSeqsSoon()
 	return nil
+}
+
+// refreshWorktreesSoon resolves the workspaces' git info off the actor (after each
+// snapshot, and every 30 s for a `git checkout` that makes no snapshot) and, when
+// it changed, re-enriches the latest state and pushes it.
+func (c *HerdrClient) refreshWorktreesSoon() {
+	if c.destroyed || c.cur == nil {
+		return
+	}
+	// each workspace's stable path, the key enrichStateWorktrees looks up
+	var cwds []string
+	for _, ws := range c.cur.Workspaces {
+		if cwd := resolveCwdFor(ws); cwd != "" {
+			cwds = append(cwds, cwd)
+		}
+	}
+	refreshWorktrees(cwds, func() {
+		c.post(func() {
+			if c.destroyed || c.cur == nil {
+				return
+			}
+			c.setState(enrichStateWorktrees(c.cur, nil))
+			c.emitState(c.cur)
+		})
+	})
 }
 
 // ── events ───────────────────────────────────────────────────────────────────
@@ -410,7 +463,7 @@ func (c *HerdrClient) handleEvent(name string, data map[string]any) {
 	next, changes := applyEvent(c.cur, name, data, nowMs())
 	c.setState(next)
 	for _, ch := range changes {
-		c.cb.OnAgentStatus(ch, next)
+		c.emitStatus(ch, next)
 	}
 	if len(changes) > 0 {
 		c.refreshCompletionSeqsSoon()
@@ -579,7 +632,7 @@ func (c *HerdrClient) onSubClose(s *subscription) {
 		// stop showing stale data as connected; the next snapshot restores it
 		if c.cur != nil {
 			c.setState(c.cur.withConnected(false))
-			c.cb.OnState(c.cur)
+			c.emitState(c.cur)
 		}
 		c.scheduleReconnect()
 	}
@@ -634,7 +687,7 @@ func (c *HerdrClient) schedulePaneRebuild() {
 func (c *HerdrClient) scheduleBroadcast() {
 	c.schedule(&c.broadcastT, stateBroadcastDebounce, func() {
 		if c.cur != nil {
-			c.cb.OnState(c.cur)
+			c.emitState(c.cur)
 		}
 	})
 }
@@ -668,7 +721,7 @@ func (c *HerdrClient) refreshCompletionSeqsSoon() {
 					return
 				}
 				c.setState(next)
-				c.cb.OnState(next)
+				c.emitState(next)
 			})
 		}()
 	})
