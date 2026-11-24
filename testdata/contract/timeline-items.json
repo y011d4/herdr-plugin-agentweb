@@ -1,0 +1,94 @@
+[
+ {
+  "kind": "user",
+  "text": "fix the bug",
+  "sidechain": false,
+  "ts": 1795478400000
+ },
+ {
+  "kind": "assistant",
+  "text": "Done: **fixed** it.",
+  "sidechain": true,
+  "ts": null
+ },
+ {
+  "kind": "thinking",
+  "text": "let me look",
+  "truncated": true,
+  "sidechain": false,
+  "ts": 1795478400000
+ },
+ {
+  "kind": "tool_use",
+  "id": "toolu_01",
+  "name": "Bash",
+  "summary": "npm test",
+  "todos": null,
+  "ask": null,
+  "sidechain": false,
+  "ts": 1795478400000
+ },
+ {
+  "kind": "tool_use",
+  "id": "toolu_02",
+  "name": "TodoWrite",
+  "summary": "2 todos",
+  "todos": [
+   {
+    "content": "port state",
+    "status": "completed"
+   },
+   {
+    "content": "port http",
+    "status": "pending"
+   }
+  ],
+  "ask": null,
+  "sidechain": false,
+  "ts": null
+ },
+ {
+  "kind": "tool_use",
+  "id": "toolu_03",
+  "name": "AskUserQuestion",
+  "summary": "Which fruit?",
+  "todos": null,
+  "ask": [
+   {
+    "question": "Which fruit?",
+    "header": "Fruit",
+    "multiSelect": false,
+    "options": [
+     {
+      "label": "apple",
+      "description": "red"
+     },
+     {
+      "label": "cherry",
+      "description": ""
+     }
+    ]
+   }
+  ],
+  "sidechain": false,
+  "ts": null
+ },
+ {
+  "kind": "tool_result",
+  "forId": "toolu_01",
+  "text": "ok",
+  "truncated": false,
+  "isError": false,
+  "sidechain": false,
+  "ts": 1795478400000
+ },
+ {
+  "kind": "tool_result",
+  "forId": null,
+  "text": "boom",
+  "truncated": true,
+  "isError": true,
+  "sidechain": false,
+  "ts": null
+ }
+]
