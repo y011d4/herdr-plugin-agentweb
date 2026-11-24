@@ -77,11 +77,17 @@ jobs:
       - name: Test
         run: npm test
 
-  # The Go port (docs/go-migration-plan.md). Same hardening as above: pinned SHAs,
-  # no persisted token, no scripts from dependencies, read-only permissions.
+  # The Go bridge and CLI, on each released OS/CPU family: linux/amd64 and linux/arm64
+  # (supported), macOS on arm64 (experimental: unit tests; the /proc-based parts are refused
+  # there). Same hardening as above: pinned SHAs, no persisted token, no scripts from
+  # dependencies, read-only permissions.
   go:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -112,4 +118,5 @@ jobs:
 
       # Known vulnerabilities in the module and its dependencies, pinned version.
       - name: govulncheck
+        if: matrix.os == 'ubuntu-latest'
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...

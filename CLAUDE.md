@@ -87,8 +87,15 @@ herdr server
   `agent prompt --wait`) lives in that dir's `CLAUDE.md`, not in this repo.
 - `herdr-plugin.toml` — actions/panes call `./bin/agentwebctl`, the Go port of the bridge and
   CLI (`cmd/agentwebctl`, `internal/bridge`; docs/go-migration-plan.md P5). The TS sources
-  stay only for rolling back until P5 step 6. `[[build]]` (`scripts/plugin-build.sh`) runs on
-  `herdr plugin install` but NOT on `herdr plugin link`
+  stay only for rolling back until P5 step 6. `[[build]]` (`scripts/plugin-build.sh release`) runs on
+  `herdr plugin install`/`update` only — never for a linked plugin (not on link, relink, update,
+  enable or a herdr restart; checked on 0.9.5): it downloads the GitHub release binary of the
+  manifest's `version` and checks it against the committed `release/checksums.txt` (no line or a
+  mismatch fails; never a fallback to a source build). Without `release`, as run by hand in a
+  linked checkout, `plugin-build.sh` builds that checkout from source (so the linked main is
+  always main's latest, whatever release exists). `scripts/release.sh <version>` builds the 4 release binaries
+  (linux/darwin × amd64/arm64, pinned toolchain, stripped, `-X …/internal/bridge.Version`) and writes the
+  checksums + manifest version; README "Releasing" has the rest
 
 The REST/WS/State JSON contract is documented in README "API surface". Server
 and web are separate tsc projects that only share this contract — change both
@@ -107,7 +114,7 @@ change needs this rebuild too. `herdr plugin action invoke` returns before the a
 let `stop` finish before `start`.
 
 ```bash
-./scripts/plugin-build.sh   # web build + go build -o bin/agentwebctl
+sh scripts/plugin-build.sh   # web build + go build -o bin/agentwebctl, from this checkout
 herdr plugin action invoke y011d4.agentweb.stop
 herdr plugin action invoke y011d4.agentweb.start
 curl -s http://127.0.0.1:8390/healthz   # expect {"ok":true,"herdrConnected":true}
@@ -310,5 +317,11 @@ vendor-neutrality is preserved.
 - TS sources use explicit `.ts` relative-import extensions
   (`rewriteRelativeImportExtensions` emits `.js`). No raw control bytes in
   source — write ESC as the literal six characters `\u001b` in string escapes.
-- Only production dependency is `ws`; don't add more without a strong reason
-  (QR uses the system `qrencode`, falling back to a plain URL).
+- Dependencies: the binary's only one is `github.com/coder/websocket`; don't add more without a
+  strong reason (QR uses the system `qrencode`, falling back to a plain URL). Node and TypeScript
+  are development-only, for the web UI's build and tests (`ws` serves only the TS bridge kept
+  for rolling back).
+- herdr's API schema (`herdr api schema --json`, protocol 22 = herdr 0.9.5) is saved in
+  `testdata/herdr-schema/`; `internal/bridge/herdr_schema_test.go` checks every method,
+  parameter, decoded field and event field the bridge uses against it. A new herdr field or
+  event the bridge reads goes into that test too.

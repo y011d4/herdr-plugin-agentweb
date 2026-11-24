@@ -1,12 +1,12 @@
 id = "y011d4.agentweb"
 name = "Herdr Agent Web"
 version = "0.1.0"
-min_herdr_version = "0.8.0"
+min_herdr_version = "0.9.5"
 description = "Monitor and control herdr agents from your phone or browser — a PWA + REST/WS bridge"
 platforms = ["linux", "macos"]
 
 [[build]]
-command = ["sh", "scripts/plugin-build.sh"]
+command = ["sh", "scripts/plugin-build.sh", "release"]
 
 [[actions]]
 id = "start"
