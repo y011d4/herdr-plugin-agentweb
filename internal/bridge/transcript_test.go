@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"os"
 	"os/exec"
+	"runtime"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -365,6 +366,9 @@ func TestTranscript(t *testing.T) {
 // Go-only (no TS test): only CLAUDE_CONFIG_DIR / HOME come back. Reads the environ
 // of this test's own child, never another process.
 func TestProjectsRootForPid(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("reads /proc/<pid>/environ (Linux); elsewhere it is always \"\"")
+	}
 	cfg := t.TempDir()
 	for _, c := range []struct {
 		env  []string
