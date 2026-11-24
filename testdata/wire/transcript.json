@@ -1,0 +1,37 @@
+{
+ "op": "transcript",
+ "http": {
+  "method": "GET",
+  "path": "/api/panes/p1/transcript",
+  "status": 200,
+  "response": {
+   "available": true,
+   "sessionId": "0b9f3c1e-2d4a-4e8b-9c7d-5f6a7b8c9d0e",
+   "items": [
+    {
+     "kind": "user",
+     "text": "fix the bug",
+     "sidechain": false,
+     "ts": 1795478400000
+    },
+    {
+     "kind": "assistant",
+     "text": "Done: fixed it.",
+     "sidechain": false,
+     "ts": 1795478405000
+    }
+   ],
+   "cursor": 249,
+   "reset": true,
+   "truncated": false
+  }
+ },
+ "herdr": [
+  {
+   "method": "pane.get",
+   "params": {
+    "pane_id": "p1"
+   }
+  }
+ ]
+}

@@ -71,3 +71,40 @@ jobs:
 
       - name: Test
         run: npm test
+
+  # The Go port (docs/go-migration-plan.md). Same hardening as above: pinned SHAs,
+  # no persisted token, no scripts from dependencies, read-only permissions.
+  go:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The Go binary will embed the built web UI, and the scenario recorders run
+      # the TypeScript bridge, so the web build is a prerequisite here too.
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+          cache: npm
+
+      - name: Build the web UI
+        run: npm ci --ignore-scripts && npm run build:web
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test (race detector)
+        run: go test -race ./...
+
+      # Known vulnerabilities in the module and its dependencies, pinned version.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...

@@ -1,0 +1,16 @@
+{
+ "op": "ws-watch-transcript",
+ "ws": [
+  "\u003e {\"type\":\"watch_transcript\",\"paneId\":\"p1\"}",
+  "\u003e {\"type\":\"unwatch_transcript\"}",
+  "{\"type\":\"transcript_items\",\"paneId\":\"p1\",\"available\":true,\"sessionId\":\"0b9f3c1e-2d4a-4e8b-9c7d-5f6a7b8c9d0e\",\"items\":[{\"kind\":\"user\",\"text\":\"fix the bug\",\"sidechain\":false,\"ts\":1795478400000},{\"kind\":\"assistant\",\"text\":\"Done: fixed it.\",\"sidechain\":false,\"ts\":1795478405000}],\"cursor\":249,\"reset\":true}"
+ ],
+ "herdr": [
+  {
+   "method": "pane.get",
+   "params": {
+    "pane_id": "p1"
+   }
+  }
+ ]
+}

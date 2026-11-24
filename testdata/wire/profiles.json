@@ -1,0 +1,25 @@
+{
+ "op": "profiles",
+ "http": {
+  "method": "GET",
+  "path": "/api/profiles",
+  "status": 200,
+  "response": {
+   "profiles": [
+    {
+     "name": "claude",
+     "label": "Claude Code"
+    },
+    {
+     "name": "codex",
+     "label": "Codex"
+    },
+    {
+     "name": "opencode",
+     "label": "opencode"
+    }
+   ]
+  }
+ },
+ "herdr": []
+}

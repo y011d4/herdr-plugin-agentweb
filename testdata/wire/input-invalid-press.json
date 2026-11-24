@@ -1,0 +1,18 @@
+{
+ "op": "input-invalid-press",
+ "http": {
+  "method": "POST",
+  "path": "/api/panes/p1/input",
+  "body": {
+   "press": "12"
+  },
+  "status": 400,
+  "response": {
+   "error": {
+    "code": "invalid_params",
+    "message": "press must be a single digit"
+   }
+  }
+ },
+ "herdr": []
+}

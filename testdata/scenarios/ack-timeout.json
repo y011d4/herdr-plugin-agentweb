@@ -1,0 +1,161 @@
+{
+ "scenario": "ack-timeout",
+ "outputs": [
+  {
+   "t": 4,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  },
+  {
+   "t": 10005,
+   "kind": "state",
+   "connected": false,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  },
+  {
+   "t": 11008,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  },
+  {
+   "t": 11009,
+   "kind": "conn",
+   "connected": true
+  },
+  {
+   "t": 11010,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  },
+  {
+   "t": 11413,
+   "kind": "status",
+   "paneId": "p1",
+   "from": "idle",
+   "to": "done"
+  },
+  {
+   "t": 11466,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "done",
+     "seq": 1,
+     "changeSeq": 1
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  },
+  {
+   "t": 11663,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "done",
+     "seq": 1,
+     "changeSeq": 1
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  }
+ ]
+}

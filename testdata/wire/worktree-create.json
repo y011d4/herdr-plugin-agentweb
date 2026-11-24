@@ -1,0 +1,32 @@
+{
+ "op": "worktree-create",
+ "http": {
+  "method": "POST",
+  "path": "/api/worktrees",
+  "body": {
+   "base": "main",
+   "branch": "feat-y",
+   "cwd": "$TMP/repo"
+  },
+  "status": 200,
+  "response": {
+   "ok": true,
+   "workspaceId": "w9",
+   "checkoutPath": "$TMP/repo-wt-feat-y",
+   "branch": "feat-y",
+   "paneId": "p12"
+  }
+ },
+ "herdr": [
+  {
+   "method": "worktree.create",
+   "params": {
+    "focus": false,
+    "cwd": "$TMP/repo",
+    "branch": "feat-y",
+    "base": "main",
+    "path": "$TMP/repo-wt-feat-y"
+   }
+  }
+ ]
+}

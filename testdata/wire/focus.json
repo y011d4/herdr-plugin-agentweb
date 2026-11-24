@@ -1,0 +1,19 @@
+{
+ "op": "focus",
+ "http": {
+  "method": "POST",
+  "path": "/api/panes/p1/focus",
+  "status": 200,
+  "response": {
+   "ok": true
+  }
+ },
+ "herdr": [
+  {
+   "method": "pane.focus",
+   "params": {
+    "pane_id": "p1"
+   }
+  }
+ ]
+}

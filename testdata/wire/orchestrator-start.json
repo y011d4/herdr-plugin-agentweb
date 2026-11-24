@@ -1,0 +1,59 @@
+{
+ "op": "orchestrator-start",
+ "http": {
+  "method": "POST",
+  "path": "/api/orchestrators/test/start",
+  "status": 200,
+  "response": {
+   "ok": true,
+   "paneId": "p10",
+   "name": "orch-test"
+  }
+ },
+ "herdr": [
+  {
+   "method": "agent.list",
+   "params": {}
+  },
+  {
+   "method": "workspace.create",
+   "params": {
+    "cwd": "$TMP/data/herdr-agentweb/orchestrators/test",
+    "env": {
+     "CLAUDE_CONFIG_DIR": "$TMP/claude-b"
+    },
+    "focus": false
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "orch-test",
+    "kind": "claude",
+    "pane_id": "p10",
+    "args": []
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "orch-test",
+    "kind": "claude",
+    "pane_id": "p10",
+    "args": []
+   }
+  },
+  {
+   "method": "agent.get",
+   "params": {
+    "target": "p10"
+   }
+  },
+  {
+   "method": "pane.process_info",
+   "params": {
+    "pane_id": "p10"
+   }
+  }
+ ]
+}

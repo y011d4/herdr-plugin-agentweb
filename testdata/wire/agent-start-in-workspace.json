@@ -1,0 +1,47 @@
+{
+ "op": "agent-start-in-workspace",
+ "http": {
+  "method": "POST",
+  "path": "/api/agents",
+  "body": {
+   "name": "w-ws",
+   "profile": "codex",
+   "workspace": "w1"
+  },
+  "status": 200,
+  "response": {
+   "ok": true,
+   "paneId": "p10",
+   "name": "w-ws",
+   "agent": "claude"
+  }
+ },
+ "herdr": [
+  {
+   "method": "tab.create",
+   "params": {
+    "label": "w-ws",
+    "focus": false,
+    "workspace_id": "w1"
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "w-ws",
+    "kind": "codex",
+    "pane_id": "p10",
+    "args": []
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "w-ws",
+    "kind": "codex",
+    "pane_id": "p10",
+    "args": []
+   }
+  }
+ ]
+}

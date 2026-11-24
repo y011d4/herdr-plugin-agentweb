@@ -1,0 +1,15 @@
+{
+ "op": "read-invalid-source",
+ "http": {
+  "method": "GET",
+  "path": "/api/panes/p1/read?source=bogus",
+  "status": 400,
+  "response": {
+   "error": {
+    "code": "invalid_params",
+    "message": "invalid source: bogus"
+   }
+  }
+ },
+ "herdr": []
+}

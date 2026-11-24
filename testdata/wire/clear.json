@@ -1,0 +1,75 @@
+{
+ "op": "clear",
+ "http": {
+  "method": "POST",
+  "path": "/api/agents/p1/clear",
+  "status": 200,
+  "response": {
+   "ok": true,
+   "paneId": "p11",
+   "name": "claude-<time>",
+   "closedOld": true,
+   "profile": "claude",
+   "oldPaneId": "p1"
+  }
+ },
+ "herdr": [
+  {
+   "method": "agent.get",
+   "params": {
+    "target": "p1"
+   }
+  },
+  {
+   "method": "pane.process_info",
+   "params": {
+    "pane_id": "p1"
+   }
+  },
+  {
+   "method": "pane.split",
+   "params": {
+    "target_pane_id": "p1",
+    "direction": "right",
+    "focus": false,
+    "cwd": "$TMP/repo"
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "claude-<time>",
+    "kind": "claude",
+    "pane_id": "p11",
+    "args": []
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "claude-<time>",
+    "kind": "claude",
+    "pane_id": "p11",
+    "args": []
+   }
+  },
+  {
+   "method": "agent.get",
+   "params": {
+    "target": "p11"
+   }
+  },
+  {
+   "method": "pane.process_info",
+   "params": {
+    "pane_id": "p11"
+   }
+  },
+  {
+   "method": "pane.close",
+   "params": {
+    "pane_id": "p1"
+   }
+  }
+ ]
+}

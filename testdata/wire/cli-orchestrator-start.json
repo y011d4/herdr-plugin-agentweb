@@ -1,0 +1,59 @@
+{
+ "op": "cli-orchestrator-start",
+ "cli": {
+  "args": [
+   "orchestrator",
+   "start",
+   "test"
+  ],
+  "exit": 0,
+  "stdout": "started orchestrator test (pane p10) in $TMP/data/herdr-agentweb/orchestrators/test\n",
+  "stderr": ""
+ },
+ "herdr": [
+  {
+   "method": "agent.list",
+   "params": {}
+  },
+  {
+   "method": "workspace.create",
+   "params": {
+    "cwd": "$TMP/data/herdr-agentweb/orchestrators/test",
+    "env": {
+     "CLAUDE_CONFIG_DIR": "$TMP/claude-b"
+    },
+    "focus": false
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "orch-test",
+    "kind": "claude",
+    "pane_id": "p10",
+    "args": []
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "orch-test",
+    "kind": "claude",
+    "pane_id": "p10",
+    "args": []
+   }
+  },
+  {
+   "method": "agent.get",
+   "params": {
+    "target": "p10"
+   }
+  },
+  {
+   "method": "pane.process_info",
+   "params": {
+    "pane_id": "p10"
+   }
+  }
+ ]
+}

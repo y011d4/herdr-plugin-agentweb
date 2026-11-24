@@ -1,0 +1,28 @@
+{
+ "op": "read-visible",
+ "http": {
+  "method": "GET",
+  "path": "/api/panes/p1/read?source=visible\u0026format=ansi",
+  "status": 200,
+  "response": {
+   "ansi": "\u001b[1m❯\u001b[0m hello 日本語\r\nline two\r\n",
+   "appScroll": false
+  }
+ },
+ "herdr": [
+  {
+   "method": "pane.read",
+   "params": {
+    "pane_id": "p1",
+    "source": "visible",
+    "format": "ansi"
+   }
+  },
+  {
+   "method": "pane.get",
+   "params": {
+    "pane_id": "p1"
+   }
+  }
+ ]
+}

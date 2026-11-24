@@ -1,0 +1,23 @@
+{
+ "op": "read-recent-lines",
+ "http": {
+  "method": "GET",
+  "path": "/api/panes/p1/read?source=recent\u0026lines=2000\u0026format=text\u0026strip_ansi=true",
+  "status": 200,
+  "response": {
+   "text": "\u001b[1m❯\u001b[0m hello 日本語\r\nline two\r\n"
+  }
+ },
+ "herdr": [
+  {
+   "method": "pane.read",
+   "params": {
+    "pane_id": "p1",
+    "source": "recent",
+    "format": "text",
+    "lines": 2000,
+    "strip_ansi": true
+   }
+  }
+ ]
+}

@@ -1,0 +1,15 @@
+{
+ "op": "unauthorized",
+ "http": {
+  "method": "GET",
+  "path": "/api/state (no token)",
+  "status": 401,
+  "response": {
+   "error": {
+    "code": "unauthorized",
+    "message": "missing or invalid token"
+   }
+  }
+ },
+ "herdr": []
+}
