@@ -131,16 +131,41 @@ func readConfig() map[string]any {
 func daemonPidFile() string { return filepath.Join(stateDir(), "bridge.pid") }
 func runPidFile() string    { return filepath.Join(stateDir(), "bridge-run.pid") }
 
+// ownExe is this binary's real path ("" when unknown).
+func ownExe() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		return real
+	}
+	return exe
+}
+
+// legacyRoot is the plugin checkout this binary is part of (<root>/bin/agentwebctl),
+// whose TypeScript bridge it also recognizes until P5 step 6; "" when it isn't in one.
+func legacyRoot(exe string) string {
+	if exe == "" || filepath.Base(filepath.Dir(exe)) != "bin" {
+		return ""
+	}
+	return filepath.Dir(filepath.Dir(exe))
+}
+
 // isBridgeArgv is whether a command line is a bridge: `agentwebctl serve|run`, not
 // another agentwebctl command (an orchestrator's background `agent wait` must not get
 // a SIGTERM through a reused PID), whatever dir the binary lives in. Until the
-// TypeScript bridge is deleted (plan P5 step 6), also its node …/server/main.js|ts.
-func isBridgeArgv(argv []string) bool {
+// TypeScript bridge is deleted (plan P5 step 6), also that bridge when it runs from
+// root, this binary's checkout: the exact entry points the TS checked for.
+func isBridgeArgv(argv []string, root string) bool {
 	if len(argv) >= 2 && path.Base(argv[0]) == "agentwebctl" && (argv[1] == "serve" || argv[1] == "run") {
 		return true
 	}
+	if root == "" {
+		return false
+	}
 	for _, a := range argv[min(1, len(argv)):] {
-		if b := path.Base(a); (b == "main.js" || b == "main.ts") && path.Base(path.Dir(a)) == "server" {
+		if a == filepath.Join(root, "dist", "server", "main.js") || a == filepath.Join(root, "server", "main.ts") {
 			return true
 		}
 	}
@@ -151,12 +176,19 @@ func isBridgeArgv(argv []string) bool {
 // file may be stale and the PID reused by an unrelated process. When the command
 // line can't be read, the PID is trusted rather than risk ignoring a real bridge.
 func looksLikeBridge(pid int) bool {
+	exe := ownExe()
 	if runtime.GOOS == "linux" {
 		b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
 		if err != nil || len(b) == 0 {
 			return true
 		}
-		return isBridgeArgv(strings.Split(strings.TrimSuffix(string(b), "\x00"), "\x00"))
+		argv := strings.Split(strings.TrimSuffix(string(b), "\x00"), "\x00")
+		if isBridgeArgv(argv, legacyRoot(exe)) {
+			return true
+		}
+		// this very binary under another name (a symlink, a renamed file)
+		target, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe")
+		return err == nil && exe != "" && target == exe && len(argv) >= 2 && (argv[1] == "serve" || argv[1] == "run")
 	}
 	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "args=").Output()
 	cmd := strings.TrimSpace(string(out))
@@ -167,7 +199,7 @@ func looksLikeBridge(pid int) bool {
 	if strings.HasSuffix(cmd, "agentwebctl serve") || strings.HasSuffix(cmd, "agentwebctl run") {
 		return true
 	}
-	return isBridgeArgv(append([]string{""}, strings.Fields(cmd)...))
+	return isBridgeArgv(append([]string{""}, strings.Fields(cmd)...), legacyRoot(exe))
 }
 
 func pidAlive(pid int) bool { return syscall.Kill(pid, 0) == nil }
@@ -278,8 +310,12 @@ func (c cli) start() int {
 		return 1
 	}
 	// the mode applies only when the file is created; the bridge writes the tokenized
-	// connect URL to this log, so tighten an existing log too
-	os.Chmod(logPath, 0o600)
+	// connect URL to this log, so tighten an existing log too, or don't start
+	if err := os.Chmod(logPath, 0o600); err != nil {
+		log.Close()
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	fail := func() int {
 		os.Remove(daemonPidFile())
 		fmt.Fprintf(os.Stderr, "bridge failed to start; see %s\n", logPath)
@@ -299,11 +335,20 @@ func (c cli) start() int {
 		return fail()
 	}
 	pid := child.Process.Pid
-	os.WriteFile(daemonPidFile(), []byte(strconv.Itoa(pid)), 0o600)
-	// Give it a moment to bind the port: if it dies at once (e.g. an old bridge still
-	// holds the port) say so instead of a false success and a stale pidfile.
 	exited := make(chan struct{})
 	go func() { child.Wait(); close(exited) }()
+	// without its pidfile, stop and status couldn't find it: don't leave it running
+	if err := os.WriteFile(daemonPidFile(), []byte(strconv.Itoa(pid)), 0o600); err != nil {
+		child.Process.Signal(syscall.SIGTERM)
+		select {
+		case <-exited:
+		case <-time.After(5 * time.Second):
+		}
+		fmt.Fprintln(os.Stderr, err)
+		return fail()
+	}
+	// Give it a moment to bind the port: if it dies at once (e.g. an old bridge still
+	// holds the port) say so instead of a false success and a stale pidfile.
 	select {
 	case <-exited:
 		return fail()
@@ -368,7 +413,10 @@ func (c cli) run() int {
 		return 1
 	}
 	file := runPidFile()
-	os.WriteFile(file, []byte(strconv.Itoa(os.Getpid())), 0o600)
+	if err := os.WriteFile(file, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, err) // stop and status couldn't find it
+		return 1
+	}
 	defer os.Remove(file)
 	if err := Serve(c.web, c.rules); err != nil {
 		fmt.Fprintln(os.Stderr, err)
