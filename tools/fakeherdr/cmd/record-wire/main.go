@@ -17,7 +17,8 @@
 //	go build -o /tmp/record-wire ./tools/fakeherdr/cmd/record-wire && /tmp/record-wire
 //
 // It writes testdata/wire/DONE (or FAILED with the reason) when finished.
-// Delete with the TypeScript server (CLAUDE.md, Follow-ups).
+// Its TypeScript launch goes with the TypeScript server; the harness stays, for the Go
+// comparison tests (CLAUDE.md, Follow-ups).
 package main
 
 import (
