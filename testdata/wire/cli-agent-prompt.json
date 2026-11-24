@@ -1,0 +1,32 @@
+{
+ "op": "cli-agent-prompt",
+ "cli": {
+  "args": [
+   "agent",
+   "prompt",
+   "w-named",
+   "do the thing",
+   "--wait"
+  ],
+  "exit": 0,
+  "stdout": "",
+  "stderr": ""
+ },
+ "herdr": [
+  {
+   "method": "agent.get",
+   "params": {
+    "target": "w-named"
+   }
+  },
+  {
+   "method": "pane.process_info",
+   "params": {
+    "pane_id": "p1"
+   }
+  }
+ ],
+ "herdrCli": [
+  "herdr agent prompt p1 do the thing --wait"
+ ]
+}

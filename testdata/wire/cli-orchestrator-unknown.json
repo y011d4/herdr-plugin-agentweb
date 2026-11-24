@@ -1,0 +1,14 @@
+{
+ "op": "cli-orchestrator-unknown",
+ "cli": {
+  "args": [
+   "orchestrator",
+   "start",
+   "nope"
+  ],
+  "exit": 1,
+  "stdout": "",
+  "stderr": "no orchestrator named nope in config.json\n"
+ },
+ "herdr": []
+}

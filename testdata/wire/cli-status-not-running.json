@@ -1,0 +1,12 @@
+{
+ "op": "cli-status-not-running",
+ "cli": {
+  "args": [
+   "status"
+  ],
+  "exit": 0,
+  "stdout": "bridge is not running\n",
+  "stderr": ""
+ },
+ "herdr": []
+}

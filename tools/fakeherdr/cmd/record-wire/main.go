@@ -6,13 +6,15 @@
 // Everything lives in a fresh temp dir (state, config, data, HOME, a scratch git repo
 // with an origin) and the bridge listens on 127.0.0.1:8392. The account checks read
 // /proc, so two `sleep` processes stand in for agents: one with the default account
-// (HOME's), one with another CLAUDE_CONFIG_DIR. A fake `herdr` and `gh` come first on
-// PATH, so the CLI's pass-through calls are logged instead of run.
+// (HOME's), one with another CLAUDE_CONFIG_DIR. Fake `herdr` and `gh` CLIs come first
+// on PATH, so the CLI's pass-through calls are logged instead of run, and so do fakes
+// of `direnv` (it sources the dir's .envrc), `tailscale` and `qrencode` (both absent),
+// so the recordings don't depend on this machine's setup.
 //
-// Run detached from any claude process: the CLI takes the nearest claude ancestor's
-// account as its own. From the repo root:
+// Each CLI call runs detached (setsid -f), as the CLI takes its nearest claude
+// ancestor's account as its own. From the repo root (needs node >= 23.6 and setsid):
 //
-//	go build -o /tmp/record-wire ./tools/fakeherdr/cmd/record-wire && setsid -f /tmp/record-wire
+//	go build -o /tmp/record-wire ./tools/fakeherdr/cmd/record-wire && /tmp/record-wire
 //
 // It writes testdata/wire/DONE (or FAILED with the reason) when finished.
 // Delete with the TypeScript server (plan P5 step 6).
@@ -30,6 +32,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,9 +48,9 @@ var (
 	outDir = filepath.Join("testdata", "wire")
 )
 
-// bridgeCmd is the bridge to record: nil = the TypeScript one (node server/main.ts).
-// Another bridge (the Go port, in main_test.go) skips the CLI operations.
-var bridgeCmd []string
+// goBin, when set, is recorded instead of the TypeScript bridge and CLI: the Go
+// agentwebctl, as `agentwebctl serve` and its commands (main_test.go).
+var goBin string
 
 func main() {
 	_ = os.MkdirAll(outDir, 0o755)
@@ -257,13 +260,22 @@ func setup(tmp string) error {
 	}
 	// fake herdr / gh CLIs: log their argv, do nothing
 	log := filepath.Join(tmp, "cli.log")
-	for _, name := range []string{"herdr", "gh"} {
-		script := fmt.Sprintf("#!/bin/sh\necho \"%s $*\" >> %s\n", name, log)
+	scripts := map[string]string{
+		"herdr": fmt.Sprintf("#!/bin/sh\necho \"herdr $*\" >> %s\n", log),
+		"gh":    fmt.Sprintf("#!/bin/sh\necho \"gh $*\" >> %s\n", log),
+		// `direnv exec <dir> <cmd…>`: cmd with <dir>/.envrc loaded (no allow list or parent dirs)
+		"direnv":    "#!/bin/sh\n[ \"$1\" = exec ] || exit 1\ncd \"$2\" || exit 1\nshift 2\nif [ -f .envrc ]; then set -a; . ./.envrc; set +a; fi\nexec \"$@\"\n",
+		"tailscale": "#!/bin/sh\nexit 1\n",
+		"qrencode":  "#!/bin/sh\nexit 1\n",
+	}
+	for name, script := range scripts {
 		if err := os.WriteFile(filepath.Join(tmp, "bin", name), []byte(script), 0o755); err != nil {
 			return err
 		}
 	}
-	return nil
+	// a dir whose .envrc picks the other account
+	envrc := "export CLAUDE_CONFIG_DIR=" + filepath.Join(tmp, "claude-b") + "\n"
+	return os.WriteFile(filepath.Join(tmp, "other", ".envrc"), []byte(envrc), 0o644)
 }
 
 func standIn(env []string) (*exec.Cmd, error) {
@@ -351,21 +363,44 @@ func (r *recorder) http(rec *record, method, path string, body any) error {
 	return nil
 }
 
+// cli runs one CLI command detached from this process tree (setsid -f reparents it
+// away from any claude ancestor, whose account the CLI would take as its own) and
+// collects its output and exit code from files.
 func (r *recorder) cli(rec *record, extraEnv []string, args ...string) error {
-	cmd := exec.Command(nodeBin, append([]string{"bin/agentwebctl.ts"}, args...)...)
-	cmd.Env = append(append([]string{}, r.baseEnv...), extraEnv...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
-	code := 0
-	if ee, ok := err.(*exec.ExitError); ok {
-		code = ee.ExitCode()
-	} else if err != nil {
+	argv := []string{nodeBin, filepath.Join(repoDir, "bin", "agentwebctl.ts")}
+	if goBin != "" {
+		argv = []string{goBin}
+	}
+	dir, err := os.MkdirTemp("", "fwcli")
+	if err != nil {
 		return err
 	}
-	rec.CLI = &cliCall{Args: args, Exit: code, Stdout: stdout.String(), Stderr: stderr.String()}
+	defer os.RemoveAll(dir)
+	out, errf, code := filepath.Join(dir, "out"), filepath.Join(dir, "err"), filepath.Join(dir, "code")
+	wrap := `"$@" >"$OUT_" 2>"$ERR_" </dev/null; echo $? >"$CODE_.tmp"; mv "$CODE_.tmp" "$CODE_"`
+	cmd := exec.Command("setsid", append([]string{"-f", "sh", "-c", wrap, "sh"}, append(argv, args...)...)...)
+	cmd.Env = append(append(append([]string{}, r.baseEnv...), extraEnv...), "OUT_="+out, "ERR_="+errf, "CODE_="+code)
+	if err := cmd.Run(); err != nil { // returns at once; the command goes on detached
+		return fmt.Errorf("setsid: %v", err)
+	}
+	var exit []byte
+	for end := time.Now().Add(2 * time.Minute); ; time.Sleep(50 * time.Millisecond) {
+		if exit, err = os.ReadFile(code); err == nil || time.Now().After(end) {
+			break
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("the command never finished: %v", args)
+	}
+	stdout, _ := os.ReadFile(out)
+	stderr, _ := os.ReadFile(errf)
+	n, _ := strconv.Atoi(strings.TrimSpace(string(exit)))
+	rec.CLI = &cliCall{Args: args, Exit: n, Stdout: string(stdout), Stderr: string(stderr)}
 	return nil
 }
+
+// repoDir is the repository root the TypeScript sources are run from (the cwd).
+var repoDir, _ = os.Getwd()
 
 // nodeBin is the real node binary: a version-manager shim (mise, asdf) may not work
 // under the temp HOME the recordings use.
@@ -373,8 +408,8 @@ var nodeBin string
 
 func run() error {
 	var bridge *exec.Cmd
-	if bridgeCmd != nil {
-		bridge = exec.Command(bridgeCmd[0], bridgeCmd[1:]...)
+	if goBin != "" {
+		bridge = exec.Command(goBin, "serve")
 	} else {
 		out, err := exec.Command("node", "-p", "process.execPath").Output()
 		if err != nil {
@@ -447,8 +482,12 @@ func run() error {
 
 	tsRe := regexp.MustCompile(`\b(claude|codex|opencode|agent)-[0-9a-z]{8}\b`)
 	agoRe := regexp.MustCompile(`last activity \d+[smhd] ago`)
+	token := strings.TrimSpace(string(tok))
+	portRe := regexp.MustCompile(`\b` + port + `\b`)
 	norm := func(t string) string {
 		t = strings.ReplaceAll(t, tmp, "$TMP")
+		t = strings.ReplaceAll(t, token, "<token>")
+		t = portRe.ReplaceAllString(t, "<port>")
 		t = tsRe.ReplaceAllString(t, "$1-<time>")
 		return agoRe.ReplaceAllString(t, "last activity <ago>")
 	}
@@ -599,11 +638,40 @@ func recordAll(r *recorder) error {
 			r.s.mu.Unlock()
 			return r.cli(rec, nil, "orchestrator", "start", "test")
 		}},
+		// the rest of the CLI (P3): herdr's own CLI gets the checked pane and the flags as
+		// given; usage errors; the other refusals; the lifecycle commands without a bridge
+		// of their own; the connect link
+		{"cli-agent-read", func(rec *record) error { return r.cli(rec, nil, "agent", "read", "p1", "--lines", "5") }},
+		{"cli-agent-prompt", func(rec *record) error {
+			return r.cli(rec, nil, "agent", "prompt", "w-named", "do the thing", "--wait")
+		}},
+		{"cli-agent-wait", func(rec *record) error {
+			return r.cli(rec, nil, "agent", "wait", "p1", "--status", "done", "--timeout", "5")
+		}},
+		{"cli-agent-get-flag-as-target", func(rec *record) error { return r.cli(rec, nil, "agent", "get", "--json") }},
+		{"cli-agent-start-usage", func(rec *record) error { return r.cli(rec, nil, "agent", "start", "w-x") }},
+		{"cli-agent-start-bad-flag", func(rec *record) error {
+			return r.cli(rec, nil, "agent", "start", "w-x", "--cwd", r.s.repo(), "--command", "sh")
+		}},
+		{"cli-agent-start-other-account", func(rec *record) error {
+			return r.cli(rec, nil, "agent", "start", "w-x", "--cwd", filepath.Join(r.s.tmp, "other"))
+		}},
+		{"cli-worktree-remove-other-account", func(rec *record) error {
+			envrc := filepath.Join(r.s.repo()+"-wt-done", ".envrc")
+			if err := os.WriteFile(envrc, []byte("export CLAUDE_CONFIG_DIR="+filepath.Join(r.s.tmp, "claude-b")+"\n"), 0o644); err != nil {
+				return err
+			}
+			defer os.Remove(envrc)
+			return r.cli(rec, nil, "worktree", "remove", r.s.repo()+"-wt-done")
+		}},
+		{"cli-worktree-usage", func(rec *record) error { return r.cli(rec, nil, "worktree") }},
+		{"cli-orchestrator-unknown", func(rec *record) error { return r.cli(rec, nil, "orchestrator", "start", "nope") }},
+		{"cli-usage", func(rec *record) error { return r.cli(rec, nil) }},
+		{"cli-status-not-running", func(rec *record) error { return r.cli(rec, nil, "status") }},
+		{"cli-stop-not-running", func(rec *record) error { return r.cli(rec, nil, "stop") }},
+		{"cli-qr", func(rec *record) error { return r.cli(rec, nil, "qr") }},
 	}
 	for _, o := range ops {
-		if bridgeCmd != nil && strings.HasPrefix(o.name, "cli-") {
-			continue
-		}
 		if err := r.op(o.name, o.f); err != nil {
 			return err
 		}
