@@ -80,6 +80,23 @@ export const state: AppState = {
        "launchCwd": "/home/u/repo",
        "title": null,
        "agent": null
+      },
+      {
+       "paneId": "p7",
+       "focused": false,
+       "cwd": "/home/u/repo",
+       "launchCwd": "/home/u/repo",
+       "title": null,
+       "agent": {
+        "name": "codex",
+        "displayName": "codex",
+        "status": "unknown",
+        "customStatus": null,
+        "message": null,
+        "sinceUnixMs": 1795478400000,
+        "completionSeq": null,
+        "stateChangeSeq": null
+       }
       }
      ]
     }
@@ -95,7 +112,7 @@ export const state: AppState = {
     "repoRoot": "/home/u/repo",
     "checkoutPath": "/home/u/repo-wt-feat",
     "isLinkedWorktree": true,
-    "branch": "feat/x"
+    "branch": null
    },
    "tabs": [
     {
@@ -117,6 +134,23 @@ export const state: AppState = {
         "sinceUnixMs": 1795478400000,
         "completionSeq": 4,
         "stateChangeSeq": 9
+       }
+      },
+      {
+       "paneId": "p6",
+       "focused": false,
+       "cwd": "/home/u/repo-wt-feat",
+       "launchCwd": "/home/u/repo-wt-feat",
+       "title": null,
+       "agent": {
+        "name": "claude",
+        "displayName": "claude",
+        "status": "blocked",
+        "customStatus": null,
+        "message": null,
+        "sinceUnixMs": 1795478400000,
+        "completionSeq": null,
+        "stateChangeSeq": null
        }
       }
      ]
@@ -246,6 +280,23 @@ export const messages: WsMessage[] = [
          "launchCwd": "/home/u/repo",
          "title": null,
          "agent": null
+        },
+        {
+         "paneId": "p7",
+         "focused": false,
+         "cwd": "/home/u/repo",
+         "launchCwd": "/home/u/repo",
+         "title": null,
+         "agent": {
+          "name": "codex",
+          "displayName": "codex",
+          "status": "unknown",
+          "customStatus": null,
+          "message": null,
+          "sinceUnixMs": 1795478400000,
+          "completionSeq": null,
+          "stateChangeSeq": null
+         }
         }
        ]
       }
@@ -261,7 +312,7 @@ export const messages: WsMessage[] = [
       "repoRoot": "/home/u/repo",
       "checkoutPath": "/home/u/repo-wt-feat",
       "isLinkedWorktree": true,
-      "branch": "feat/x"
+      "branch": null
      },
      "tabs": [
       {
@@ -283,6 +334,23 @@ export const messages: WsMessage[] = [
           "sinceUnixMs": 1795478400000,
           "completionSeq": 4,
           "stateChangeSeq": 9
+         }
+        },
+        {
+         "paneId": "p6",
+         "focused": false,
+         "cwd": "/home/u/repo-wt-feat",
+         "launchCwd": "/home/u/repo-wt-feat",
+         "title": null,
+         "agent": {
+          "name": "claude",
+          "displayName": "claude",
+          "status": "blocked",
+          "customStatus": null,
+          "message": null,
+          "sinceUnixMs": 1795478400000,
+          "completionSeq": null,
+          "stateChangeSeq": null
          }
         }
        ]

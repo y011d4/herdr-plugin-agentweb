@@ -46,14 +46,16 @@ func contractState() ClientState {
 			{PaneID: "p4", TabID: "t1", WorkspaceID: "w1", Agent: "claude", AgentStatus: "idle",
 				Cwd: "/home/u/.local/share/herdr-agentweb/orchestrators/personal"},
 			{PaneID: "p5", TabID: "t4", WorkspaceID: "w3"},
+			{PaneID: "p6", TabID: "t3", WorkspaceID: "w2", Agent: "claude", AgentStatus: "blocked", Cwd: "/home/u/repo-wt-feat"},
+			{PaneID: "p7", TabID: "t2", WorkspaceID: "w1", Agent: "codex", Cwd: "/home/u/repo"}, // no status: unknown
 		},
 	}
 	const now = 1795478400000
 	s := createState(raw, now, nil)
 	seq, change := int64(4), int64(9)
 	s = applyCompletionSeqs(s, []RawAgentSeqs{{PaneID: "p3", AgentStatus: "done", CompletionSeq: &seq, StateChangeSeq: &change}}, now+1)
-	// worktree-resolve adds the branch; one workspace has none (detached)
-	for i, b := range []*string{strp("main"), strp("feat/x")} {
+	// worktree-resolve adds the branch; the linked worktree is detached (null)
+	for i, b := range []*string{strp("main"), nil} {
 		wt := *s.Workspaces[i].Worktree
 		wt.Branch = b
 		ws := *s.Workspaces[i]

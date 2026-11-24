@@ -24,9 +24,9 @@ describe('the Go bridge contract fixtures', () => {
   it('give the dashboard a card per agent, orchestrators and shells left out', () => {
     const state = load<AppState>('client-state.json');
     const cards = dashboardCards(state.workspaces, state.orchestrators.map((o) => o.paneId));
-    assert.deepEqual(cards.map((c) => c.pane.paneId).sort(), ['p1', 'p3']);
+    assert.deepEqual(cards.map((c) => c.pane.paneId).sort(), ['p1', 'p3', 'p6', 'p7']);
     const p3 = cards.find((c) => c.pane.paneId === 'p3')!;
-    assert.equal(p3.branch, 'feat/x');
+    assert.equal(p3.branch, null); // a detached linked worktree
     assert.equal(p3.isWorktree, true);
     assert.equal(p3.pane.agent?.completionSeq, 4);
     assert.equal(state.orchestratorPaneId, 'p4');
