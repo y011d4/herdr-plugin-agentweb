@@ -144,14 +144,17 @@ func TestCLIPort(t *testing.T) {
 func TestIsBridgeCommandLine(t *testing.T) {
 	const root = "/Users/u/my repo"
 	for cmd, want := range map[string]bool{
-		"/Users/u/Library/herdr plugins/bin/agentwebctl serve":        true, // a path with a space
-		"./bin/agentwebctl run":                                       true,
-		"/opt/homebrew/bin/node /Users/u/my repo/dist/server/main.js": true, // a checkout path with a space
-		"node /Users/u/my repo/server/main.ts":                        true,
-		"vim /Users/u/my repo/server/main.ts":                         false,
-		"node /Users/u/repo/dist/server/main.js":                      false,
-		"node /Users/u/other/dist/server/main.js":                     false,
-		"/x/agentwebctl agent wait p1":                                false,
+		"/Users/u/Library/herdr plugins/bin/agentwebctl serve":             true, // a path with a space
+		"./bin/agentwebctl run":                                            true,
+		"/opt/homebrew/bin/node /Users/u/my repo/dist/server/main.js":      true, // a checkout path with a space
+		"node /Users/u/my repo/server/main.ts":                             true,
+		"vim /Users/u/my repo/server/main.ts":                              false,
+		"node -e setInterval(()=>{},1000) /Users/u/my repo/server/main.ts": false,
+		"node --inspect /Users/u/my repo/dist/server/main.js":              false,
+		"/Users/u/my tools/bin/node /Users/u/my repo/dist/server/main.js":  true,
+		"node /Users/u/repo/dist/server/main.js":                           false,
+		"node /Users/u/other/dist/server/main.js":                          false,
+		"/x/agentwebctl agent wait p1":                                     false,
 	} {
 		if got := isBridgeCommandLine(cmd, root); got != want {
 			t.Errorf("isBridgeCommandLine(%q) = %v, want %v", cmd, got, want)

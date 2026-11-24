@@ -206,7 +206,8 @@ func isBridgeCommandLine(cmd, root string) bool {
 		return false
 	}
 	for _, entry := range []string{filepath.Join(root, "dist", "server", "main.js"), filepath.Join(root, "server", "main.ts")} {
-		if node, ok := strings.CutSuffix(cmd, " "+entry); ok && strings.HasPrefix(path.Base(node), "node") {
+		// the prefix is the node binary alone: its name has no space (its dirs may)
+		if node, ok := strings.CutSuffix(cmd, " "+entry); ok && strings.HasPrefix(path.Base(node), "node") && !strings.Contains(path.Base(node), " ") {
 			return true
 		}
 	}
