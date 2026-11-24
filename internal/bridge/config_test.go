@@ -74,3 +74,14 @@ func TestConfig(t *testing.T) {
 		})
 	})
 }
+
+// Remote access is Tailscale's job: with nothing configured the bridge listens on
+// loopback only (CLAUDE.md, security invariants).
+func TestTheDefaultListenAddressIsLoopback(t *testing.T) {
+	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", t.TempDir()) // no config.json
+	t.Setenv("HERDR_AGENTWEB_HOST", "")
+	t.Setenv("HERDR_AGENTWEB_PORT", "")
+	if c := loadConfig(); c.Host != "127.0.0.1" || c.Port != 8390 {
+		t.Errorf("default listen address %s:%d, want 127.0.0.1:8390", c.Host, c.Port)
+	}
+}
