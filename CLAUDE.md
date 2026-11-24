@@ -129,9 +129,9 @@ Re-run `herdr plugin link <repo>` only when `herdr-plugin.toml` changed — herd
 caches the linked manifest.
 
 **Rolling back** the running bridge (the binary of the checkout herdr links, normally main's):
-`stop` (wait for it), check out the last good commit and `sh scripts/plugin-build.sh`
-(without Go: check out a release tag and run `sh scripts/plugin-build.sh release`, which
-downloads that release's binary), `start`, check `/healthz`. The binary path doesn't change, so the orchestrators'
+`stop` (wait for it), check out the last good commit and `sh scripts/plugin-build.sh source`
+(`source` builds from source with every version of the script; without Go, check out a release
+tag and run `sh scripts/plugin-build.sh release`, which downloads that release's binary), `start`, check `/healthz`. The binary path doesn't change, so the orchestrators'
 allowlists still match; Clear them when `orchestrator/rules.md` differs between the versions.
 Return with `git switch main`, rebuild, restart. (The last Node bridge is `423f49d`; going back
 there takes `npm ci && npm run build`, re-linking, and Clearing the orchestrators.)
