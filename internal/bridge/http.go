@@ -433,7 +433,7 @@ const icuASCIIOrder = " _-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$0123456789aAbBcCdDeEfF
 
 // localeLess is a.localeCompare(b) < 0 for ASCII names: the letters compared without
 // case first, then lowercase before uppercase at the first difference. Other
-// characters come after ASCII in code point order (ICU differs; D14).
+// characters come after ASCII in code point order (ICU differs).
 func localeLess(a, b string) bool {
 	rank := func(r rune) int {
 		if r < 0x80 {
