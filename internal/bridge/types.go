@@ -8,7 +8,9 @@ package bridge
 
 import (
 	"encoding/json"
+	"regexp"
 	"strconv"
+	"strings"
 )
 
 // ── normalized state ─────────────────────────────────────────────────────────
@@ -463,3 +465,25 @@ func jsSlice(s string, n int) string {
 // jsSpace is a regexp class body matching what JavaScript's \s matches (RE2's \s
 // is ASCII only). Use it as `[` + jsSpace + `]`.
 const jsSpace = `\t\n\v\f\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}`
+
+var (
+	jsLeadingSpace  = regexp.MustCompile(`^[` + jsSpace + `]+`)
+	jsTrailingSpace = regexp.MustCompile(`[` + jsSpace + `]+$`)
+)
+
+// jsTrimEnd is s.trimEnd() (s.replace(/\s+$/, "")).
+func jsTrimEnd(s string) string { return jsTrailingSpace.ReplaceAllLiteralString(s, "") }
+
+// jsTrim is s.trim(): it strips what JavaScript's \s matches.
+func jsTrim(s string) string { return jsLeadingSpace.ReplaceAllLiteralString(jsTrimEnd(s), "") }
+
+// asciiLower lowercases A-Z only, which is all JavaScript's non-unicode /i folds onto
+// an ASCII pattern.
+func asciiLower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if 'A' <= r && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, s)
+}
