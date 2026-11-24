@@ -390,6 +390,13 @@ function onStateUpdate(): void {
 function onAgentStatus(msg: WsAgentStatusMessage): void {
   const { paneId, agent, from, to, workspaceLabel, tabLabel } = msg;
 
+  // A tapped answer's pane going `working`: these events come one by one, while state
+  // snapshots are debounced and can skip a short `working` (blocked → done).
+  if (to === 'working' && pendingAnswer?.paneId === paneId) {
+    pendingAnswer.resumed = true;
+    settlePendingAnswer();
+  }
+
   const jumpToPane = (): void => navigate(paneRoute(paneId));
 
   const notifyStatuses = new Set(['blocked', 'done']);
