@@ -268,18 +268,11 @@ type Recording struct {
 	Outputs  []Output `json:"outputs"`
 }
 
-// CompareOptions narrow a comparison.
-type CompareOptions struct {
-	// SkipModel leaves the focused pane and the tab labels out: the P0 spike's
-	// status-only state keeps neither. P1 ports state.ts and drops this.
-	SkipModel bool
-}
-
 // Compare reports how got differs from want: each pane's status transitions in
 // order, the connection changes in order, the last state, and (when the scenario
 // allows it) the number of state pushes. Timing and how transitions of different
 // panes interleave are not compared.
-func Compare(sc Scenario, want, got []Output, opt CompareOptions) []string {
+func Compare(sc Scenario, want, got []Output) []string {
 	var diffs []string
 	if a, b := transitions(want), transitions(got); !reflect.DeepEqual(a, b) {
 		diffs = append(diffs, fmt.Sprintf("status transitions: want %v, got %v", a, b))
@@ -287,7 +280,7 @@ func Compare(sc Scenario, want, got []Output, opt CompareOptions) []string {
 	if a, b := conns(want), conns(got); !reflect.DeepEqual(a, b) {
 		diffs = append(diffs, fmt.Sprintf("connection changes: want %v, got %v", a, b))
 	}
-	a, b := lastState(want, opt), lastState(got, opt)
+	a, b := lastState(want), lastState(got)
 	if !reflect.DeepEqual(a, b) {
 		diffs = append(diffs, fmt.Sprintf("last state: want %s, got %s", show(a), show(b)))
 	}
@@ -319,14 +312,11 @@ func conns(outs []Output) []bool {
 	return c
 }
 
-func lastState(outs []Output, opt CompareOptions) *Output {
+func lastState(outs []Output) *Output {
 	for i := len(outs) - 1; i >= 0; i-- {
 		if outs[i].Kind == "state" {
 			o := outs[i]
 			o.T = 0
-			if opt.SkipModel {
-				o.Focused, o.Tabs = "", nil
-			}
 			return &o
 		}
 	}

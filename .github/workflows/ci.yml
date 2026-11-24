@@ -69,6 +69,11 @@ jobs:
       - name: Build (tsc x3)
         run: npm run build
 
+      # The Go bridge's JSON (testdata/contract, as typed literals in
+      # web/test/contract.gen.ts) against the web's hand-written types.
+      - name: Check the JSON contract with the Go port
+        run: npm run check:contract
+
       - name: Test
         run: npm test
 

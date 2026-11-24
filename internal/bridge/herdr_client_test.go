@@ -35,8 +35,7 @@ func TestHerdrClientMatchesTypeScriptRecordings(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := runScenario(t, sc)
-			// the spike's state keeps no focus or tab labels until P1 ports state.ts
-			for _, d := range fakeherdr.Compare(sc, want.Outputs, got, fakeherdr.CompareOptions{SkipModel: true}) {
+			for _, d := range fakeherdr.Compare(sc, want.Outputs, got) {
 				t.Error(d)
 			}
 			if t.Failed() {
@@ -81,8 +80,7 @@ func runScenario(t *testing.T, sc fakeherdr.Scenario) []fakeherdr.Output {
 	}
 	c := NewHerdrClient(srv.Path, HerdrClientCallbacks{
 		OnState: func(s *State) {
-			conn := s.Connected
-			add(fakeherdr.Output{Kind: "state", Connected: &conn, Panes: summarize(s)})
+			add(summarize(s))
 		},
 		OnAgentStatus: func(ch StatusChange, _ *State) {
 			add(fakeherdr.Output{Kind: "status", PaneID: ch.PaneID, From: ch.From, To: ch.To})
@@ -99,17 +97,31 @@ func runScenario(t *testing.T, sc fakeherdr.Scenario) []fakeherdr.Output {
 	return append([]fakeherdr.Output(nil), outs...)
 }
 
-func summarize(s *State) map[string]*fakeherdr.PaneAgent {
+// summarize reduces a state push to what tools/scenario-ts/run.ts prints.
+func summarize(s *State) fakeherdr.Output {
 	m := map[string]*fakeherdr.PaneAgent{}
-	for _, id := range s.order {
-		a := s.panes[id]
+	for _, id := range s.PaneIDs() {
+		a := s.Pane(id).Agent
 		if a == nil {
 			m[id] = nil
 			continue
 		}
 		m[id] = &fakeherdr.PaneAgent{Status: a.Status, Seq: a.CompletionSeq, ChangeSeq: a.StateChangeSeq}
 	}
-	return m
+	tabs := map[string]string{}
+	for id, t := range s.tabByID {
+		tabs[id] = t.Label
+	}
+	val := func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return *p
+	}
+	f := s.Focused
+	conn := s.Connected
+	return fakeherdr.Output{Kind: "state", Connected: &conn, Panes: m, Tabs: tabs,
+		Focused: val(f.WorkspaceID) + "/" + val(f.TabID) + "/" + val(f.PaneID)}
 }
 
 func TestHerdrRPCReturnsHerdrErrorCode(t *testing.T) {

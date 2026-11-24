@@ -1,6 +1,6 @@
 # bridge と agentwebctl を Go に移す計画
 
-- 状態: **承認済み**（2026-11-24。Architect と Critic の合意済み、2 回目で Critic が APPROVE）。P0 完了、K1 通過（docs/go-migration/p0-report.md。残りの見積もりの見直しもそちら）
+- 状態: **承認済み**（2026-11-24。Architect と Critic の合意済み、2 回目で Critic が APPROVE）。P0 完了、K1 通過（docs/go-migration/p0-report.md）。P1 完了、K2 通過（docs/go-migration/p1-report.md。P2 への申し送りと残りの見積もりもそちら）
 - 作成: 2026-11-24、ブランチ `go-migration-plan`。改訂 3（2 回目の細かい指摘まで反映。§12）
 - 対象: `server/*.ts`（bridge、空行を除き約 4,100 行）と `bin/agentwebctl.ts`（CLI、547 行）。`web/` は TypeScript のまま残す。
 
@@ -222,7 +222,9 @@ tools/shadowdiff/           並走の比較（P4）
 
 ### P2 残りの I/O 層（9〜13 日）
 
-移すもの: `herdr-client`（P0 の試作を完成させる。1 回ごとの RPC、購読の張り替え、再接続の待ち時間の倍増、`agent.list` の取得と epoch、worktree の定期更新）、`transcript` の場所の解決（/proc を使う部分）、`account` の /proc と direnv、`http`（全ルート、enum の検査、本文 64 KB の上限、`ReadHeaderTimeout`）、WS（deflate、64 KB の上限、ping と pong、ペインと transcript の監視タイマー、Origin を確かめない）、静的ファイル（embed、明示の MIME 表、`no-cache`、パスの外に出ない検査）、ntfy、`serve`。
+移すもの: `herdr-client`（P0 の試作を完成させる。1 回ごとの RPC、購読の張り替え、再接続の待ち時間の倍増、`agent.list` の取得と epoch、worktree の定期更新）、`http`（全ルート、enum の検査、本文 64 KB の上限、`ReadHeaderTimeout`）、WS（deflate、64 KB の上限、ping と pong、ペインと transcript の監視タイマー、Origin を確かめない）、静的ファイル（embed、明示の MIME 表、`no-cache`、パスの外に出ない検査）、ntfy、`serve`。
+
+（`transcript` の /proc の読み出し、`account` の /proc と direnv、`worktree-resolve` の git の実行は、それを使うテストが対応表にあるため P1 で移した。docs/go-migration/p1-report.md）
 
 - テスト: P0 のシナリオの記録との一致、§5.2 の結合テスト、操作ごとの通信の記録との一致（§5.3）。
 - http.ts（977 行）と herdr-client にはもとからテストがないので、この段階の大半はテストを書く時間になる。
