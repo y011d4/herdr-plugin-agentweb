@@ -304,10 +304,9 @@ type side struct {
 }
 
 type watcher struct {
-	dir      string
-	interval time.Duration
-	sides    [2]side
-	client   *http.Client
+	dir    string
+	sides  [2]side
+	client *http.Client
 
 	mu      sync.Mutex
 	st      status
@@ -328,17 +327,7 @@ func watch(args []string) {
 	if *dir == "" || *goToken == "" {
 		usage()
 	}
-	now := time.Now()
-	w := &watcher{
-		dir:      *dir,
-		interval: *interval,
-		sides:    [2]side{{*nodeURL, *nodeToken}, {*goURL, *goToken}},
-		client:   &http.Client{Timeout: *interval},
-		st: status{StartedAt: now, UpdatedAt: now, Open: map[string]*openDiff{},
-			Sides: map[string]*sideStatus{"node": {URL: *nodeURL}, "go": {URL: *goURL}}},
-		state:   stateTracker{hold: *hold, open: map[string]*openDiff{}},
-		matcher: statusMatcher{hold: *hold, queue: map[string]*[2][]transition{}},
-	}
+	w := newWatcher(*dir, [2]side{{*nodeURL, *nodeToken}, {*goURL, *goToken}}, *interval, *hold)
 	if err := os.WriteFile(filepath.Join(*dir, "watch.pid"), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 		log.Fatal(err)
 	}
@@ -347,6 +336,19 @@ func watch(args []string) {
 	}
 	for range time.Tick(*interval) {
 		w.poll()
+	}
+}
+
+func newWatcher(dir string, s [2]side, interval, hold time.Duration) *watcher {
+	now := time.Now()
+	return &watcher{
+		dir:    dir,
+		sides:  s,
+		client: &http.Client{Timeout: interval},
+		st: status{StartedAt: now, UpdatedAt: now, Open: map[string]*openDiff{},
+			Sides: map[string]*sideStatus{"node": {URL: s[0].url}, "go": {URL: s[1].url}}},
+		state:   stateTracker{hold: hold, open: map[string]*openDiff{}},
+		matcher: statusMatcher{hold: hold, queue: map[string]*[2][]transition{}},
 	}
 }
 
@@ -385,10 +387,13 @@ func (w *watcher) poll() {
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	now := time.Now()
+	w.compare(time.Now(), bodies, errs)
+	w.writeStatus()
+}
+
+// compare takes one poll's states. Called with mu held.
+func (w *watcher) compare(now time.Time, bodies [2][]byte, errs [2]error) {
 	w.st.Polls++
-	var diffs map[string][2]string
-	err := errors.Join(errs[:]...)
 	for i, e := range errs {
 		if e != nil {
 			s := w.st.Sides[sides[i]]
@@ -396,15 +401,18 @@ func (w *watcher) poll() {
 			s.LastFetchError, s.LastFetchErrorAt = e.Error(), now
 		}
 	}
+	err := errors.Join(errs[:]...)
+	var diffs map[string][2]string
 	if err == nil {
-		diffs, err = differing(bodies[0], bodies[1])
-	}
-	if err == nil {
-		// a gap in the comparisons (a side was down, a stalled fetch) breaks every
-		// difference's run: it can't be told to have lasted through the gap
-		if now.Sub(w.st.LastComparedAt) > 3*w.interval {
-			clear(w.state.open)
+		if diffs, err = differing(bodies[0], bodies[1]); err != nil {
+			log.Print(err)
 		}
+	}
+	if err != nil {
+		// a poll that compared nothing breaks every difference's run: it can't be
+		// told to have lasted through it
+		clear(w.state.open)
+	} else {
 		w.st.Compared++
 		w.st.LastComparedAt = now
 		w.record(w.state.observe(now, diffs))
@@ -413,7 +421,6 @@ func (w *watcher) poll() {
 	w.st.TransitionsMatched, w.st.TransitionsPending = w.matcher.matched, w.matcher.pending()
 	w.st.Open = w.state.open
 	w.st.UpdatedAt = now
-	w.writeStatus()
 }
 
 // follow keeps a /ws connection to side i, reconnecting every 5 s.
@@ -515,11 +522,18 @@ func report(out io.Writer, dir string, now time.Time) error {
 	if err := json.Unmarshal(b, &st); err != nil {
 		return err
 	}
+	// findings.jsonl outlives a restart of the watch, as do the earlier runs' findings
 	var findings []finding
+	earlier := 0
 	if b, err := os.ReadFile(filepath.Join(dir, "findings.jsonl")); err == nil {
 		for line := range strings.Lines(string(b)) {
 			var f finding
-			if json.Unmarshal([]byte(line), &f) == nil {
+			if json.Unmarshal([]byte(line), &f) != nil {
+				continue
+			}
+			if f.At.Before(st.StartedAt) {
+				earlier++
+			} else {
 				findings = append(findings, f)
 			}
 		}
@@ -554,7 +568,11 @@ func report(out io.Writer, dir string, now time.Time) error {
 	}
 	fmt.Fprintf(out, "agent_status: %d transitions matched, %d waiting for the other side\n", st.TransitionsMatched, st.TransitionsPending)
 
-	fmt.Fprintf(out, "\nfindings: %d\n", len(findings))
+	fmt.Fprintf(out, "\nfindings since the watch started: %d", len(findings))
+	if earlier > 0 {
+		fmt.Fprintf(out, " (and %d from earlier watches, in findings.jsonl)", earlier)
+	}
+	fmt.Fprintln(out)
 	if n := len(findings) - 50; n > 0 {
 		fmt.Fprintf(out, "  (%d older ones in %s)\n", n, filepath.Join(dir, "findings.jsonl"))
 		findings = findings[n:]

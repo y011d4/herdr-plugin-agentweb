@@ -51,10 +51,15 @@ start)
 	chmod 700 "$dir" "$dir/state"
 	(cd "$repo" && npm run --silent build:web &&
 		go build -o "$dir/bin/agentwebctl" ./cmd/agentwebctl && go build -o "$dir/bin/shadowdiff" ./tools/shadowdiff)
-	jq --arg data "$node_data" '
-		if (.orchestrators | type) != "array" then error("no orchestrators list: the Go bridge would manage its own") else . end
-		| del(.notify_url, .public_url) | .port = 8391
-		| .orchestrators |= map(.dir //= "\($data)/orchestrators/\(.name)")' "$node_config" >"$dir/config/config.json"
+	# each orchestrator's dir as the Node bridge resolves it (server/config.ts). The
+	# legacy setups become orchestrator_dir, which is unmanaged with the same empty label.
+	[ -d "$node_data/dispatcher" ] && dispatcher=true || dispatcher=false
+	jq --arg data "$node_data" --argjson dispatcher "$dispatcher" '
+		del(.notify_url, .public_url) | .port = 8391
+		| if (.orchestrators | type) == "array" and (.orchestrators | length) > 0
+			then .orchestrators |= map(.dir //= "\($data)/orchestrators/\(.name)")
+			else .orchestrator_dir //= (if $dispatcher then "\($data)/dispatcher" else "\($data)/orchestrators/default" end)
+			end' "$node_config" >"$dir/config/config.json"
 	go_env "$dir/bin/agentwebctl" start
 	setsid -f "$dir/bin/shadowdiff" watch -dir "$dir" -node-token "$node_token" -go-token "$dir/state/token" \
 		>>"$dir/watch.log" 2>&1 </dev/null
