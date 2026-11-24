@@ -11,7 +11,7 @@
     "check:contract": "tsc -p tsconfig.contract.json"
   },
   "dependencies": {
-    "ws": "^8.22.0"
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
