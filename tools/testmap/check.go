@@ -77,6 +77,7 @@ func check(mapPath string, r io.Reader) error {
 		return fmt.Errorf("no tests to port in %s", mapPath)
 	}
 	passed := map[string]bool{}
+	var failed []string // any failure fails the run, even with every mapped subtest passed
 	dec := json.NewDecoder(r)
 	for {
 		var ev struct{ Action, Test string }
@@ -84,6 +85,9 @@ func check(mapPath string, r io.Reader) error {
 			break
 		} else if err != nil {
 			return fmt.Errorf("reading go test -json: %w", err)
+		}
+		if ev.Action == "fail" {
+			failed = append(failed, firstNonEmpty(ev.Test, "(the package)"))
 		}
 		if i := strings.IndexByte(ev.Test, '/'); ev.Action == "pass" && i > 0 {
 			passed[ev.Test[i+1:]] = true
@@ -115,5 +119,15 @@ func check(mapPath string, r io.Reader) error {
 	if len(missing) > 0 {
 		return fmt.Errorf("%d tests not ported or failing", len(missing))
 	}
+	if len(failed) > 0 {
+		return fmt.Errorf("go test reported failures: %s", strings.Join(failed, ", "))
+	}
 	return nil
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
