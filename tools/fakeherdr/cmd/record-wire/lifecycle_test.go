@@ -160,10 +160,32 @@ func TestGoLifecycleCommands(t *testing.T) {
 	}
 	expect([]string{"status"}, 0, "bridge running (pid "+runPid+", foreground pane)")
 	expect([]string{"stop"}, 0, "bridge stopped (pid "+runPid+")")
-	if err := <-exited; err != nil {
-		t.Errorf("run after stop: %v, want exit 0", err)
+	select {
+	case err := <-exited:
+		if err != nil {
+			t.Errorf("run after stop: %v, want exit 0", err)
+		}
+	case <-time.After(10 * time.Second):
+		fg.Process.Kill()
+		<-exited
+		t.Fatal("run didn't exit after stop")
 	}
 	if _, err := os.Stat(filepath.Join(state, "bridge-run.pid")); err == nil {
 		t.Error("run left bridge-run.pid")
 	}
+
+	// the same binary under another name is still known by its executable
+	renamed := filepath.Join(dir, "awc")
+	if b, err := os.ReadFile(bin); err != nil || os.WriteFile(renamed, b, 0o755) != nil {
+		t.Fatal("copying the binary:", err)
+	}
+	bin = renamed
+	code, out = ctl("start")
+	if code != 0 {
+		t.Fatalf("start (renamed): exit %d, %q", code, out)
+	}
+	pid = regexp.MustCompile(`pid (\d+)`).FindStringSubmatch(out)[1]
+	waitFor("the renamed bridge answers", healthy)
+	expect([]string{"status"}, 0, "bridge running (pid "+pid+")")
+	expect([]string{"stop"}, 0, "bridge stopped (pid "+pid+")")
 }
