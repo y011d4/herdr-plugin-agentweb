@@ -39,9 +39,15 @@ import (
 	"github.com/y011d4/herdr-plugin-agentweb/tools/fakeherdr"
 )
 
-const port = "8392"
+// the bridge's port and where the recordings go (main_test.go repoints both)
+var (
+	port   = "8392"
+	outDir = filepath.Join("testdata", "wire")
+)
 
-var outDir = filepath.Join("testdata", "wire")
+// bridgeCmd is the bridge to record: nil = the TypeScript one (node server/main.ts).
+// Another bridge (the Go port, in main_test.go) skips the CLI operations.
+var bridgeCmd []string
 
 func main() {
 	_ = os.MkdirAll(outDir, 0o755)
@@ -366,11 +372,17 @@ func (r *recorder) cli(rec *record, extraEnv []string, args ...string) error {
 var nodeBin string
 
 func run() error {
-	out, err := exec.Command("node", "-p", "process.execPath").Output()
-	if err != nil {
-		return fmt.Errorf("finding node: %w", err)
+	var bridge *exec.Cmd
+	if bridgeCmd != nil {
+		bridge = exec.Command(bridgeCmd[0], bridgeCmd[1:]...)
+	} else {
+		out, err := exec.Command("node", "-p", "process.execPath").Output()
+		if err != nil {
+			return fmt.Errorf("finding node: %w", err)
+		}
+		nodeBin = strings.TrimSpace(string(out))
+		bridge = exec.Command(nodeBin, "server/main.ts")
 	}
-	nodeBin = strings.TrimSpace(string(out))
 	tmp, err := os.MkdirTemp("", "fw")
 	if err != nil {
 		return err
@@ -413,7 +425,6 @@ func run() error {
 	} else {
 		ln.Close()
 	}
-	bridge := exec.Command(nodeBin, "server/main.ts")
 	bridge.Env = baseEnv
 	blog, _ := os.Create(filepath.Join(tmp, "bridge.log"))
 	bridge.Stdout, bridge.Stderr = blog, blog
@@ -590,6 +601,9 @@ func recordAll(r *recorder) error {
 		}},
 	}
 	for _, o := range ops {
+		if bridgeCmd != nil && strings.HasPrefix(o.name, "cli-") {
+			continue
+		}
 		if err := r.op(o.name, o.f); err != nil {
 			return err
 		}
