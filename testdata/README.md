@@ -1,7 +1,7 @@
 # testdata
 
-Recordings of the TypeScript bridge, which the Go port (docs/go-migration-plan.md)
-must reproduce. Both are taken against `tools/fakeherdr`, a scriptable fake herdr
+Recordings of the TypeScript bridge, which the Go bridge (its port) must
+reproduce. Both are taken against `tools/fakeherdr`, a scriptable fake herdr
 socket, never against a real herdr.
 
 ## scenarios/
@@ -50,7 +50,7 @@ compares:
   messages received as a set);
 - the CLI's arguments, exit code, stdout and stderr exactly, and the fake
   `herdr`/`gh` calls. The TypeScript's usage lines say `agentwebctl.js` where the Go
-  ones say `agentwebctl` (divergences D15);
+  ones say `agentwebctl`;
 - the herdr requests in order. A run of the same method counts as a set (a fan-out
   the TypeScript sends concurrently). The WS watches poll on a timer, so they are
   compared as the set of distinct requests.

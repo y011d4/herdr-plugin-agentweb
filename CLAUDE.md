@@ -86,8 +86,8 @@ herdr server
   `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `agentwebctl agent …`, waking on background
   `agent prompt --wait`) lives in that dir's `CLAUDE.md`, not in this repo.
 - `herdr-plugin.toml` — actions/panes call `./bin/agentwebctl`, the Go port of the bridge and
-  CLI (`cmd/agentwebctl`, `internal/bridge`; docs/go-migration-plan.md P5). The TS sources
-  stay only for rolling back until P5 step 6. `[[build]]` (`scripts/plugin-build.sh release`) runs on
+  CLI (`cmd/agentwebctl`, `internal/bridge`). The TS sources stay only for rolling back, until
+  they are deleted (Follow-ups below). `[[build]]` (`scripts/plugin-build.sh release`) runs on
   `herdr plugin install`/`update` only — never for a linked plugin (not on link, relink, update,
   enable or a herdr restart; checked on 0.9.5): it downloads the GitHub release binary of the
   manifest's `version` and checks it against the committed `release/checksums.txt` (no line or a
@@ -325,3 +325,35 @@ vendor-neutrality is preserved.
   `testdata/herdr-schema/`; `internal/bridge/herdr_schema_test.go` checks every method,
   parameter, decoded field and event field the bridge uses against it. A new herdr field or
   event the bridge reads goes into that test too.
+
+## Follow-ups (left open by the Go migration)
+
+- **Delete the TypeScript bridge** after the Go one has run 1–2 weeks without trouble (switched
+  2026-11-24 19:13, so from 2026-12-01; the user decides). Until then it is the rollback: Go
+  `stop`, check `/healthz` no longer answers, check out `423f49d` (just before the switch,
+  7ce4080), `npm ci && npm run build`, re-link, `start`, Clear the orchestrators. Never Node's
+  `stop` while Go runs: it can't see the Go bridge. To delete: `server/`, `bin/agentwebctl.ts`,
+  `server/test/` (move `prompt.test.ts`, a web test, to `web/test/`), `tools/scenario-ts` and the
+  TS recorders (`tools/fakeherdr/cmd/record-scenarios`, `record-wire/main.go`; keep `testdata/`
+  and the Go tests comparing against it); `package.json` down to the web build and tests
+  (`typescript` only: drop `ws`, `@types/ws`, `start` and the `tsconfig.json` server build); CI's
+  build-test job to the web; the Go CLI's recognition of the TS bridge (`legacyRoot`, the node
+  branch of `isBridgeArgv`); the TS mentions here and in the READMEs.
+- **herdr-client edge cases kept from the TS** (both clients have them):
+  1. Overlapping snapshots are applied in arrival order, so an older one answering last can
+     overwrite a newer state (a rename, say). Fix: number the requests; for an older answer,
+     only drain the event buffer.
+  2. A snapshot in flight when the subscription drops can publish `connected: true` after the
+     drop, which stays while reconnecting fails. Fix: remember `coverageEpoch` at the request
+     and keep `Connected` false if it changed.
+  3. A worktree filled in from the cwd (herdr sent none) is treated as herdr's on the next fill:
+     if that dir stops being a git checkout, the old worktree and branch show until the next
+     snapshot. Fix: remember which worktrees were filled in and let git's answer replace them.
+- **`custom_status` and `agent_message`**, read from panes and status events, aren't in herdr
+  0.9.5's schema (protocol 22 has `state_labels`), so they are always empty
+  (`notInProtocol22` in `herdr_schema_test.go`).
+- **Not verified before the switch** (watch in production): memory, threads and fds over days;
+  recovery after the machine sleeps; the CLI account checks' allow side and `worktree remove`
+  through a real orchestrator; `blocked` on the folder-trust prompt. Never run against a real
+  herdr: linux/arm64 and macOS. Supporting macOS's account features needs `sysctl`
+  (`kern.procargs2`, via `golang.org/x/sys/unix`) in place of `/proc`.

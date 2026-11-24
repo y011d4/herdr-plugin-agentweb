@@ -1,7 +1,7 @@
 package bridge
 
 // The CLI (cli.go) beyond what the wire recordings compare with the TypeScript
-// (tools/fakeherdr/cmd/record-wire): its own choices, D2 and the X7 bridge check.
+// (tools/fakeherdr/cmd/record-wire): its own choices: the state dir outside herdr and the bridge check.
 
 import (
 	"encoding/json"
@@ -15,7 +15,7 @@ import (
 )
 
 // Only a bridge gets a SIGTERM through a pidfile: agentwebctl serve|run wherever it is
-// installed, or (until P5 step 6) the TypeScript bridge of this binary's own checkout,
+// installed, or (until it is deleted) the TypeScript bridge of this binary's own checkout,
 // at the exact paths the TS checked; never another agentwebctl command, such as an
 // orchestrator's background `agent wait`, nor another project's server/main.js.
 func TestIsBridgeArgv(t *testing.T) {
@@ -49,7 +49,7 @@ func TestIsBridgeArgv(t *testing.T) {
 	}
 }
 
-// Outside herdr the state dir is herdr's own for the plugin (D2), unless only the TS
+// Outside herdr the state dir is herdr's own for the plugin, unless only the TS
 // default (~/.local/state/herdr-agentweb) holds a token: a paired phone keeps working.
 func TestDefaultStateDir(t *testing.T) {
 	home := t.TempDir()
@@ -141,7 +141,7 @@ func TestCLIPort(t *testing.T) {
 }
 
 // Without /proc, ps prints the command line in one piece: only agentwebctl serve|run
-// counts (a path with spaces too); the TS bridge isn't guessed at (Linux only, D15).
+// counts (a path with spaces too); the TS bridge isn't guessed at (Linux only).
 func TestIsBridgeCommandLine(t *testing.T) {
 	for cmd, want := range map[string]bool{
 		"/Users/u/Library/herdr plugins/bin/agentwebctl serve":     true,

@@ -1,8 +1,8 @@
 package bridge
 
-// The HTTP and WS server (http.go, ws.go) against a fake herdr: what the plan
-// (docs/go-migration-plan.md §5.2, §5.5) asks of it beyond the wire recordings,
-// which tools/fakeherdr/cmd/record-wire compares.
+// The HTTP and WS server (http.go, ws.go) against a fake herdr: the token on every
+// route, input limits, static files, WS behavior and the security invariants, beyond
+// the wire recordings, which tools/fakeherdr/cmd/record-wire compares.
 
 import (
 	"bytes"
@@ -437,7 +437,7 @@ func TestWSTranscriptWatch(t *testing.T) {
 }
 
 // A client that stops reading is dropped once its queue is full; the others keep
-// getting every message (D3).
+// getting every message.
 func TestAStuckWSClientIsDroppedAndOthersAreNot(t *testing.T) {
 	b := startBridge(t, Config{}, nil, nil)
 	newClient := func() *wsClient {
