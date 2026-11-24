@@ -1,6 +1,6 @@
 # bridge と agentwebctl を Go に移す計画
 
-- 状態: **承認済み**（2026-11-24。Architect と Critic の合意済み、2 回目で Critic が APPROVE）。P0 完了、K1 通過（docs/go-migration/p0-report.md）。P1 完了、K2 通過（docs/go-migration/p1-report.md）。P2 完了、K3 通過（docs/go-migration/p2-report.md）。P3 完了（docs/go-migration/p3-report.md。P4 で利用者にしてもらうことと残りの見積もりもそちら）。P4 進行中: 4a は 2026-11-24 15:43 から、4b は同日 17:19 から前倒しで 4a と重ねて（docs/go-migration/p4-report.md）
+- 状態: **承認済み**（2026-11-24。Architect と Critic の合意済み、2 回目で Critic が APPROVE）。P0 完了、K1 通過（docs/go-migration/p0-report.md）。P1 完了、K2 通過（docs/go-migration/p1-report.md）。P2 完了、K3 通過（docs/go-migration/p2-report.md）。P3 完了（docs/go-migration/p3-report.md。P4 で利用者にしてもらうことと残りの見積もりもそちら）。P4 完了。K4 は 2026-11-24 に利用者の判断で前倒しで通過（未確認のまま進めた項目は docs/go-migration/p4-report.md）。P5 進行中
 - 作成: 2026-11-24、ブランチ `go-migration-plan`。改訂 3（2 回目の細かい指摘まで反映。§12）
 - 対象: `server/*.ts`（bridge、空行を除き約 4,100 行）と `bin/agentwebctl.ts`（CLI、547 行）。`web/` は TypeScript のまま残す。
 
@@ -285,6 +285,8 @@ tools/shadowdiff/           並走の比較（P4）
 ### P6 配布（4〜6 日）
 
 §8 のとおり。LICENSE（MIT）、リリースの手順、`plugin-build.sh` の置き換え（リリースから落として検証する形。§8.2）、ほかの人向けの README、対応表（OS、CPU、herdr、Claude Code のバージョン）、herdr の schema とのずれを見るテスト（§6）、X5（QR）と X6 の決定。何も入っていない Linux（herdr だけ入れ、Node は入れない）で `herdr plugin install` から携帯の接続までを通す。
+
+P6 の終わりに、移行の資料（`docs/go-migration-plan.md` と `docs/go-migration/` の下すべて）をまとめて消す PR を作る。移行が終わると要らなくなるため。消す前に、まだ片づいていない項目（`divergences.md` の「切り替えの後に直す候補」K1〜K3 など）を issue か CLAUDE.md に移す。資料を指しているコメントや道具（`tools/testmap` は `test-map.md` を読む。ほかに CI の設定、`internal/bridge` のコメント、`testdata/README.md`、`tools/shadowdiff`。`git grep go-migration` で探す）も、一緒に直すか消す。
 
 ## 5. テストの計画
 
