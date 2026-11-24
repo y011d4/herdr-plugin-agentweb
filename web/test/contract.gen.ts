@@ -378,7 +378,7 @@ export const messages: WsMessage[] = [
    },
    {
     "kind": "assistant",
-    "text": "Done: **fixed** it.",
+    "text": "Done: **fixed** <it> & more.",
     "sidechain": true,
     "ts": null
    },
@@ -485,7 +485,7 @@ export const items: TimelineItem[] = [
  },
  {
   "kind": "assistant",
-  "text": "Done: **fixed** it.",
+  "text": "Done: **fixed** <it> & more.",
   "sidechain": true,
   "ts": null
  },

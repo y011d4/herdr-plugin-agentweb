@@ -7,10 +7,11 @@ package bridge
 // A TS `T | null` field is a pointer (or a nil slice) with no omitempty.
 
 import (
+	"bytes"
 	"encoding/json"
-	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // ── normalized state ─────────────────────────────────────────────────────────
@@ -369,7 +370,7 @@ type AskQuestion struct {
 func (t TimelineItem) MarshalJSON() ([]byte, error) {
 	switch t.Kind {
 	case "thinking":
-		return json.Marshal(struct {
+		return marshalRaw(struct {
 			Kind      string `json:"kind"`
 			Text      string `json:"text"`
 			Truncated bool   `json:"truncated"`
@@ -377,7 +378,7 @@ func (t TimelineItem) MarshalJSON() ([]byte, error) {
 			TS        *int64 `json:"ts"`
 		}{t.Kind, t.Text, t.Truncated, t.Sidechain, t.TS})
 	case "tool_use":
-		return json.Marshal(struct {
+		return marshalRaw(struct {
 			Kind      string        `json:"kind"`
 			ID        string        `json:"id"`
 			Name      string        `json:"name"`
@@ -388,7 +389,7 @@ func (t TimelineItem) MarshalJSON() ([]byte, error) {
 			TS        *int64        `json:"ts"`
 		}{t.Kind, t.ID, t.Name, t.Summary, t.Todos, t.Ask, t.Sidechain, t.TS})
 	case "tool_result":
-		return json.Marshal(struct {
+		return marshalRaw(struct {
 			Kind      string  `json:"kind"`
 			ForID     *string `json:"forId"`
 			Text      string  `json:"text"`
@@ -398,7 +399,7 @@ func (t TimelineItem) MarshalJSON() ([]byte, error) {
 			TS        *int64  `json:"ts"`
 		}{t.Kind, t.ForID, t.Text, t.Truncated, t.IsError, t.Sidechain, t.TS})
 	default: // user, assistant
-		return json.Marshal(struct {
+		return marshalRaw(struct {
 			Kind      string `json:"kind"`
 			Text      string `json:"text"`
 			Sidechain bool   `json:"sidechain"`
@@ -466,16 +467,15 @@ func jsSlice(s string, n int) string {
 // is ASCII only). Use it as `[` + jsSpace + `]`.
 const jsSpace = `\t\n\v\f\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}`
 
-var (
-	jsLeadingSpace  = regexp.MustCompile(`^[` + jsSpace + `]+`)
-	jsTrailingSpace = regexp.MustCompile(`[` + jsSpace + `]+$`)
-)
+// isJSSpace is what JavaScript's \s, trim() and parseInt count as white space, the
+// same set as jsSpace: unicode.IsSpace plus U+FEFF, minus U+0085.
+func isJSSpace(r rune) bool { return r == '\ufeff' || r != '\u0085' && unicode.IsSpace(r) }
 
 // jsTrimEnd is s.trimEnd() (s.replace(/\s+$/, "")).
-func jsTrimEnd(s string) string { return jsTrailingSpace.ReplaceAllLiteralString(s, "") }
+func jsTrimEnd(s string) string { return strings.TrimRightFunc(s, isJSSpace) }
 
-// jsTrim is s.trim(): it strips what JavaScript's \s matches.
-func jsTrim(s string) string { return jsLeadingSpace.ReplaceAllLiteralString(jsTrimEnd(s), "") }
+// jsTrim is s.trim().
+func jsTrim(s string) string { return strings.TrimFunc(s, isJSSpace) }
 
 // asciiLower lowercases A-Z only, which is all JavaScript's non-unicode /i folds onto
 // an ASCII pattern.
@@ -486,4 +486,17 @@ func asciiLower(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// marshalRaw is json.Marshal without HTML escaping, as JSON.stringify writes <, >
+// and &. A MarshalJSON method must use it: an encoder's SetEscapeHTML(false) does
+// not undo escaping already done inside a Marshaler's output.
+func marshalRaw(v any) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
 }

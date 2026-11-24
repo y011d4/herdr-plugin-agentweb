@@ -34,7 +34,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 )
 
 var defaultLaunchProfiles = map[string]LaunchProfile{
@@ -61,10 +60,6 @@ func badRequest(message string) *LifecycleError {
 }
 
 // ── JavaScript semantics ─────────────────────────────────────────────────────
-
-// isJSSpace is what JavaScript's parseInt (and trim, see jsTrim in types.go) counts as white space
-// (unicode.IsSpace also counts U+0085, and not U+FEFF).
-func isJSSpace(r rune) bool { return r == '\ufeff' || r != '\u0085' && unicode.IsSpace(r) }
 
 // jsLower is s.toLowerCase(): Go lowercases İ to a plain i, JavaScript to i plus a
 // combining dot.
