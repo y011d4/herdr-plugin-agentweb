@@ -230,8 +230,17 @@ func TestGoLifecycleCommands(t *testing.T) {
 		})
 		waitFor("the old-named bridge answers", healthy)
 		expect([]string{"status"}, 0, "bridge running (pid "+pid+")\nstarted before the plugin's rename")
-		if _, out := ctl("status"); strings.Contains(out, "url:") {
-			t.Errorf("status showed our URL for the old bridge: %q", out)
+		// neither printed nor notified: our URL and token file may not be the old bridge's
+		notified := filepath.Join(dir, "notified")
+		fakeHerdr := filepath.Join(dir, "fake-herdr")
+		os.WriteFile(fakeHerdr, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >>'"+notified+"'\n"), 0o755)
+		os.Remove(notified)
+		status := exec.Command(bin, "status")
+		status.Env = append(slices.Clone(env), "HERDR_BIN_PATH="+fakeHerdr)
+		out, _ := status.CombinedOutput()
+		sent, _ := os.ReadFile(notified)
+		if strings.Contains(string(out), "url:") || !strings.Contains(string(sent), "the old bridge is running") || strings.Contains(string(sent), "http") {
+			t.Errorf("status for the old bridge printed %q and notified %q: want neither to carry our URL", out, sent)
 		}
 		expect([]string{"start"}, 1, "a bridge the plugin started before its rename (agentwebctl) is running (pid "+pid+")")
 		expect([]string{"stop"}, 0, "bridge stopped (pid "+pid+")")
