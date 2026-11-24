@@ -1,0 +1,71 @@
+{
+ "scenario": "gap-before-ack",
+ "outputs": [
+  {
+   "t": 4,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   }
+  },
+  {
+   "t": 406,
+   "kind": "conn",
+   "connected": true
+  },
+  {
+   "t": 407,
+   "kind": "status",
+   "paneId": "p1",
+   "from": "idle",
+   "to": "done"
+  },
+  {
+   "t": 407,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "done",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   }
+  },
+  {
+   "t": 459,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "done",
+     "seq": 1,
+     "changeSeq": 1
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   }
+  }
+ ]
+}

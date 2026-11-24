@@ -1,0 +1,125 @@
+{
+ "scenario": "ack-timeout",
+ "outputs": [
+  {
+   "t": 5,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   }
+  },
+  {
+   "t": 10007,
+   "kind": "state",
+   "connected": false,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   }
+  },
+  {
+   "t": 11011,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   }
+  },
+  {
+   "t": 11013,
+   "kind": "conn",
+   "connected": true
+  },
+  {
+   "t": 11014,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   }
+  },
+  {
+   "t": 11425,
+   "kind": "status",
+   "paneId": "p1",
+   "from": "idle",
+   "to": "done"
+  },
+  {
+   "t": 11478,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "done",
+     "seq": 1,
+     "changeSeq": 1
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   }
+  },
+  {
+   "t": 11676,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "done",
+     "seq": 1,
+     "changeSeq": 1
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   }
+  }
+ ]
+}
