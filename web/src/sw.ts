@@ -14,7 +14,7 @@ const sw = self as unknown as ServiceWorkerGlobalScope;
 
 // Bump on every release that changes any static asset: cached assets are only
 // refreshed when the service worker itself changes.
-const CACHE_VERSION = 'herdr-agentweb-v119';
+const CACHE_VERSION = 'herdr-agentweb-v120';
 
 const STATIC_ASSETS = [
   '/',
@@ -26,6 +26,7 @@ const STATIC_ASSETS = [
   '/dashboard-group.js',
   '/watch.js',
   '/kept-tasks.js',
+  '/composer-keys.js',
   '/style.css',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
