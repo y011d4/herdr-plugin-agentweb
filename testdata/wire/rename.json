@@ -1,0 +1,32 @@
+{
+ "op": "rename",
+ "http": {
+  "method": "POST",
+  "path": "/api/panes/p1/rename",
+  "body": {
+   "name": "Renamed One"
+  },
+  "status": 200,
+  "response": {
+   "ok": true,
+   "name": "renamed-one"
+  }
+ },
+ "herdr": [
+  {
+   "method": "agent.rename",
+   "params": {
+    "target": "p1",
+    "name": "renamed-one"
+   }
+  },
+  {
+   "method": "session.snapshot",
+   "params": {}
+  },
+  {
+   "method": "agent.list",
+   "params": {}
+  }
+ ]
+}

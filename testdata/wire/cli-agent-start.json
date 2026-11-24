@@ -1,0 +1,60 @@
+{
+ "op": "cli-agent-start",
+ "cli": {
+  "args": [
+   "agent",
+   "start",
+   "w-cli",
+   "--cwd",
+   "$TMP/repo"
+  ],
+  "exit": 0,
+  "stdout": "started w-cli (pane p10) in $TMP/repo\n",
+  "stderr": ""
+ },
+ "herdr": [
+  {
+   "method": "session.snapshot",
+   "params": {}
+  },
+  {
+   "method": "tab.create",
+   "params": {
+    "label": "w-cli",
+    "focus": false,
+    "cwd": "$TMP/repo",
+    "workspace_id": "w1"
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "w-cli",
+    "kind": "claude",
+    "pane_id": "p10",
+    "args": []
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "w-cli",
+    "kind": "claude",
+    "pane_id": "p10",
+    "args": []
+   }
+  },
+  {
+   "method": "agent.get",
+   "params": {
+    "target": "p10"
+   }
+  },
+  {
+   "method": "pane.process_info",
+   "params": {
+    "pane_id": "p10"
+   }
+  }
+ ]
+}

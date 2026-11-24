@@ -1,0 +1,27 @@
+{
+ "op": "cli-agent-get-other-account",
+ "cli": {
+  "args": [
+   "agent",
+   "get",
+   "w-other"
+  ],
+  "exit": 1,
+  "stdout": "",
+  "stderr": "refused: w-other is not an agent of this Claude account (or its account can't be told)\n"
+ },
+ "herdr": [
+  {
+   "method": "agent.get",
+   "params": {
+    "target": "w-other"
+   }
+  },
+  {
+   "method": "pane.process_info",
+   "params": {
+    "pane_id": "p5"
+   }
+  }
+ ]
+}

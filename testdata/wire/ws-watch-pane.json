@@ -1,0 +1,70 @@
+{
+ "op": "ws-watch-pane",
+ "ws": [
+  "\u003e {\"type\":\"watch_pane\",\"paneId\":\"p1\"}",
+  "\u003e {\"type\":\"unwatch_pane\"}",
+  "{\"type\":\"pane_output\",\"paneId\":\"p1\",\"ansi\":\"\\u001b[1m❯\\u001b[0m hello 日本語\\r\\nline two\\r\\n\",\"appScroll\":false}"
+ ],
+ "herdr": [
+  {
+   "method": "pane.read",
+   "params": {
+    "pane_id": "p1",
+    "source": "visible",
+    "lines": 200,
+    "format": "ansi"
+   }
+  },
+  {
+   "method": "pane.get",
+   "params": {
+    "pane_id": "p1"
+   }
+  },
+  {
+   "method": "pane.read",
+   "params": {
+    "pane_id": "p1",
+    "source": "visible",
+    "lines": 200,
+    "format": "ansi"
+   }
+  },
+  {
+   "method": "pane.get",
+   "params": {
+    "pane_id": "p1"
+   }
+  },
+  {
+   "method": "pane.read",
+   "params": {
+    "pane_id": "p1",
+    "source": "visible",
+    "lines": 200,
+    "format": "ansi"
+   }
+  },
+  {
+   "method": "pane.get",
+   "params": {
+    "pane_id": "p1"
+   }
+  },
+  {
+   "method": "pane.read",
+   "params": {
+    "pane_id": "p1",
+    "source": "visible",
+    "lines": 200,
+    "format": "ansi"
+   }
+  },
+  {
+   "method": "pane.get",
+   "params": {
+    "pane_id": "p1"
+   }
+  }
+ ]
+}

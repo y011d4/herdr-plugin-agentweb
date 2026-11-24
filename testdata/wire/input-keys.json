@@ -1,0 +1,27 @@
+{
+ "op": "input-keys",
+ "http": {
+  "method": "POST",
+  "path": "/api/panes/p1/input",
+  "body": {
+   "keys": [
+    "escape"
+   ]
+  },
+  "status": 200,
+  "response": {
+   "ok": true
+  }
+ },
+ "herdr": [
+  {
+   "method": "pane.send_input",
+   "params": {
+    "pane_id": "p1",
+    "keys": [
+     "escape"
+    ]
+   }
+  }
+ ]
+}

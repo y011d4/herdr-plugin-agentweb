@@ -1,0 +1,61 @@
+{
+ "op": "cli-agent-start-worktree",
+ "cli": {
+  "args": [
+   "agent",
+   "start",
+   "w-cli-wt",
+   "--cwd",
+   "$TMP/repo",
+   "--worktree",
+   "cli-branch",
+   "--base",
+   "origin/main"
+  ],
+  "exit": 0,
+  "stdout": "started w-cli-wt (pane p12) in $TMP/repo-wt-cli-branch\n",
+  "stderr": ""
+ },
+ "herdr": [
+  {
+   "method": "worktree.create",
+   "params": {
+    "focus": false,
+    "cwd": "$TMP/repo",
+    "branch": "cli-branch",
+    "base": "origin/main",
+    "path": "$TMP/repo-wt-cli-branch"
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "w-cli-wt",
+    "kind": "claude",
+    "pane_id": "p12",
+    "args": []
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "w-cli-wt",
+    "kind": "claude",
+    "pane_id": "p12",
+    "args": []
+   }
+  },
+  {
+   "method": "agent.get",
+   "params": {
+    "target": "p12"
+   }
+  },
+  {
+   "method": "pane.process_info",
+   "params": {
+    "pane_id": "p12"
+   }
+  }
+ ]
+}

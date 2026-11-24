@@ -1,0 +1,35 @@
+{
+ "op": "input-clear-multi-line",
+ "http": {
+  "method": "POST",
+  "path": "/api/panes/p1/input",
+  "body": {
+   "clear": true,
+   "enter": true,
+   "text": "line one\nline two\n日本語"
+  },
+  "status": 200,
+  "response": {
+   "ok": true
+  }
+ },
+ "herdr": [
+  {
+   "method": "pane.send_text",
+   "params": {
+    "pane_id": "p1",
+    "text": "\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015\u0015"
+   }
+  },
+  {
+   "method": "pane.send_input",
+   "params": {
+    "pane_id": "p1",
+    "text": "line one\nline two\n日本語",
+    "keys": [
+     "enter"
+    ]
+   }
+  }
+ ]
+}

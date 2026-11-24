@@ -1,0 +1,39 @@
+{
+ "op": "cli-overview",
+ "cli": {
+  "args": [
+   "overview"
+  ],
+  "exit": 0,
+  "stdout": "p1  idle  (pane p1 in $TMP/repo, last activity <ago>)\n  task: fix the bug\n  last: Done: fixed it.\n",
+  "stderr": ""
+ },
+ "herdr": [
+  {
+   "method": "agent.list",
+   "params": {}
+  },
+  {
+   "method": "session.snapshot",
+   "params": {}
+  },
+  {
+   "method": "pane.process_info",
+   "params": {
+    "pane_id": "p1"
+   }
+  },
+  {
+   "method": "pane.process_info",
+   "params": {
+    "pane_id": "p5"
+   }
+  },
+  {
+   "method": "pane.process_info",
+   "params": {
+    "pane_id": "p2"
+   }
+  }
+ ]
+}

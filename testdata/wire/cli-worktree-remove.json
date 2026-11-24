@@ -1,0 +1,25 @@
+{
+ "op": "cli-worktree-remove",
+ "cli": {
+  "args": [
+   "worktree",
+   "remove",
+   "$TMP/repo-wt-done"
+  ],
+  "exit": 0,
+  "stdout": "removed $TMP/repo-wt-done (branch done kept: error: cannot delete branch 'done' used by worktree at '$TMP/repo-wt-done')\n",
+  "stderr": ""
+ },
+ "herdr": [
+  {
+   "method": "session.snapshot",
+   "params": {}
+  },
+  {
+   "method": "worktree.remove",
+   "params": {
+    "workspace_id": "w3"
+   }
+  }
+ ]
+}

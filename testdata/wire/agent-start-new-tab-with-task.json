@@ -1,0 +1,68 @@
+{
+ "op": "agent-start-new-tab-with-task",
+ "http": {
+  "method": "POST",
+  "path": "/api/agents",
+  "body": {
+   "cwd": "$TMP/repo",
+   "name": "w-tab",
+   "profile": "claude",
+   "task": "do it"
+  },
+  "status": 200,
+  "response": {
+   "ok": true,
+   "paneId": "p10",
+   "name": "w-tab",
+   "agent": "claude",
+   "taskDelivered": true
+  }
+ },
+ "herdr": [
+  {
+   "method": "tab.create",
+   "params": {
+    "label": "w-tab",
+    "focus": false,
+    "cwd": "$TMP/repo"
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "w-tab",
+    "kind": "claude",
+    "pane_id": "p10",
+    "args": []
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "w-tab",
+    "kind": "claude",
+    "pane_id": "p10",
+    "args": []
+   }
+  },
+  {
+   "method": "agent.get",
+   "params": {
+    "target": "p10"
+   }
+  },
+  {
+   "method": "agent.get",
+   "params": {
+    "target": "p10"
+   }
+  },
+  {
+   "method": "agent.prompt",
+   "params": {
+    "target": "p10",
+    "text": "do it"
+   }
+  }
+ ]
+}
