@@ -298,15 +298,27 @@ func livePidFiles() (daemonFile, runFile string, daemon, fg int) {
 	return
 }
 
-// runningPid is the live bridge's PID; old is whether the plugin before the rename
-// started it.
+// runningPid is the live bridge's PID; old is whether it runs as agentwebctl, the
+// binary's name before the rename (it serves the old plugin's config and token),
+// wherever its pidfile is.
 func runningPid() (pid int, foreground, old bool) {
-	daemonFile, _, daemon, fg := livePidFiles()
-	old = (daemon != 0 || fg != 0) && filepath.Dir(daemonFile) != stateDir()
-	if daemon != 0 {
-		return daemon, fg != 0, old
+	_, _, daemon, fg := livePidFiles()
+	if pid = daemon; pid == 0 {
+		pid = fg
 	}
-	return fg, fg != 0, old
+	return pid, fg != 0, pid != 0 && isOldBridge(pid)
+}
+
+// isOldBridge is whether bridge pid runs as agentwebctl (see runningPid).
+func isOldBridge(pid int) bool {
+	if runtime.GOOS == "linux" {
+		b, _ := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
+		argv0, _, _ := strings.Cut(string(b), "\x00")
+		return path.Base(argv0) == "agentwebctl"
+	}
+	out, _ := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "args=").Output()
+	cmd := strings.TrimSpace(string(out))
+	return strings.HasSuffix(cmd, "agentwebctl serve") || strings.HasSuffix(cmd, "agentwebctl run")
 }
 
 func pidLabel(pid int, foreground bool) string {
@@ -422,10 +434,11 @@ func (c cli) stop() int {
 func (c cli) status() int {
 	if pid, fg, old := runningPid(); pid != 0 {
 		fmt.Printf("bridge running (%s)\n", pidLabel(pid, fg))
-		if old {
+		if old { // its URL and token are the old plugin's: ours could mislead
 			fmt.Println("started before the plugin's rename (agentwebctl): stop and start it to run this version")
+		} else {
+			printConnectInfo()
 		}
-		printConnectInfo()
 		notify("yoicks running", baseURL(readConfig()))
 	} else {
 		fmt.Println("bridge is not running")
