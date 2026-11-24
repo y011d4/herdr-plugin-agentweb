@@ -408,9 +408,12 @@ func (w *watcher) compare(now time.Time, bodies [2][]byte, errs [2]error) {
 			log.Print(err)
 		}
 	}
+	// A poll that compared nothing breaks every difference's run: it can't be told to
+	// have lasted through it. Successful polls are at most two intervals apart (each
+	// fetch times out after one), and a suspend of the machine adds nothing to a run:
+	// the times carry Go's monotonic reading, which stands still while suspended
+	// (CLOCK_MONOTONIC on Linux), as do both bridges.
 	if err != nil {
-		// a poll that compared nothing breaks every difference's run: it can't be
-		// told to have lasted through it
 		clear(w.state.open)
 	} else {
 		w.st.Compared++
