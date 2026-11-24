@@ -1,0 +1,58 @@
+[
+  {
+    "name": "active menu",
+    "input": "● Pick\n❯ 1. Red\n  2. Green\nEnter to select · ↑/↓ to navigate · Esc to cancel",
+    "want": {
+      "question": null,
+      "options": [
+        {
+          "send": "1",
+          "label": "Red"
+        },
+        {
+          "send": "2",
+          "label": "Green"
+        }
+      ],
+      "selected": 1
+    }
+  },
+  {
+    "name": "unhighlighted prose",
+    "input": "1. step one\n2. step two\ndone",
+    "want": null
+  },
+  {
+    "name": "stale menu above boxed text prompt",
+    "input": "❯ 1. Yes\n  2. No\n\n ──────── \n ☐ Confirm\n   Type a reason:\nEnter to select · ↑/↓ to navigate · Esc to cancel",
+    "want": null
+  },
+  {
+    "name": "menu with an indented ✓ description on its last option",
+    "input": "● Pick one\n❯ 1. Keep\n  2. Replace\n     ✓ recommended\nEnter to select · ↑/↓ to navigate · Esc to cancel",
+    "want": {
+      "question": null,
+      "options": [
+        {
+          "send": "1",
+          "label": "Keep"
+        },
+        {
+          "send": "2",
+          "label": "Replace"
+        }
+      ],
+      "selected": 1
+    }
+  },
+  {
+    "name": "stale menu above a hint-less boxed prompt",
+    "input": "❯ 1. Yes\n  2. No\n\n ────── \n ☐ Provide input\n   Enter a value:",
+    "want": null
+  },
+  {
+    "name": "no menu",
+    "input": "just some output\nnothing to answer",
+    "want": null
+  }
+]

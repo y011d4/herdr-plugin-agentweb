@@ -55,11 +55,6 @@ var (
 	gitSem = make(chan struct{}, maxGitConcurrency)
 )
 
-// jsTrim is String.prototype.trim: it strips what JavaScript's \s matches.
-var jsTrimRe = regexp.MustCompile(`^[` + jsSpace + `]+|[` + jsSpace + `]+$`)
-
-func jsTrim(s string) string { return jsTrimRe.ReplaceAllString(s, "") }
-
 func parseGit(stdout string) *WorktreeInfo {
 	var lines []string
 	for _, l := range strings.Split(stdout, "\n") {
