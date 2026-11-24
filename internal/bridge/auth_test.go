@@ -170,3 +170,32 @@ func TestExtractTokenReadsLikeNode(t *testing.T) {
 		}
 	}
 }
+
+// Go-only (d10): a new token never sits in a file other users can read, even when
+// an invalid old token file had a loose mode: it is written to a fresh 0600 file
+// that replaces the old one.
+func TestInitAuthReplacesALooseInvalidTokenFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "token")
+	if err := os.WriteFile(path, []byte("not a token"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.Stat(path)
+	tok, err := initAuth(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.Stat(path)
+	if os.SameFile(before, after) {
+		t.Error("the new token was written into the old (0644) file")
+	}
+	if after.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v, want 0600", after.Mode().Perm())
+	}
+	if b, _ := os.ReadFile(path); string(b) != tok {
+		t.Errorf("file holds %q, want the new token", b)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("left %d entries in the state dir, want only the token", len(entries))
+	}
+}
