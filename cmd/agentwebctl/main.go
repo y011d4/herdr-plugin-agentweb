@@ -1,10 +1,9 @@
-// Command agentwebctl is the herdr-agentweb bridge and its CLI. For now (the Go
-// migration's P2, docs/go-migration-plan.md) it has only `serve`, the bridge itself
-// (server/main.ts); the other subcommands come with P3.
+// Command agentwebctl is the herdr-agentweb bridge and its CLI (internal/bridge/cli.go):
+// run | start | stop | status | qr | overview | agent | worktree | orchestrator, and
+// serve, the bridge itself.
 package main
 
 import (
-	"fmt"
 	"io/fs"
 	"os"
 
@@ -13,14 +12,7 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 || os.Args[1] != "serve" {
-		fmt.Fprintln(os.Stderr, "usage: agentwebctl serve")
-		os.Exit(2)
-	}
-	if err := bridge.Serve(webFS(), agentweb.Rules); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	os.Exit(bridge.CLI(os.Args[1:], webFS(), agentweb.Rules))
 }
 
 // webFS is the embedded web UI, or AGENTWEB_WEB_DIR's files when set (development:

@@ -169,7 +169,7 @@ func loadConfig() Config {
 		Port:           port,
 		NotifyURL:      notifyURL,
 		PublicURL:      publicURL,
-		StateDir:       firstNonEmpty(os.Getenv("HERDR_PLUGIN_STATE_DIR"), filepath.Join(home, ".local", "state", "herdr-agentweb")),
+		StateDir:       firstNonEmpty(os.Getenv("HERDR_PLUGIN_STATE_DIR"), defaultStateDir()),
 		SocketPath:     firstNonEmpty(os.Getenv("HERDR_SOCKET_PATH"), filepath.Join(home, ".config", "herdr", "herdr.sock")),
 		LaunchProfiles: parseLaunchProfiles(file["launch_profiles"]),
 		Orchestrators: parseOrchestrators(file["orchestrators"], file["orchestrator_dir"], home, dataDir(home),
