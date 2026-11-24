@@ -14,6 +14,7 @@
 | D6 | 文字数で切り詰めるとき、絵文字などの 2 単位の文字を半分に割らない（`jsSlice`）。TS 版は割った片方を残す | 割った片方は不正な文字で、JSON にすると壊れる。日本語などほかの文字では TS 版と同じ結果になる | P1 |
 | D7 | 型の崩れたイベントの扱い: `tab_renamed` の `label` が文字列でなければ無視する（TS 版は数値をそのままラベルにする）。`pane_focused` に `pane_id` がなければ `focused.paneId` を null にする（TS 版は JSON からその項目が消える） | herdr はどちらも文字列で送る（schema）。壊れた入力でだけ起きる | P1 |
 | D8 | 検出した agent の種類が launch profile の名前に完全には一致しないとき、部分一致で選ぶ順番: 既定の 3 つ（claude、codex、opencode）の次は名前順。TS 版は config.json に書いた順 | Go の map には順番がない。部分一致が 2 つ以上の独自 profile に当たるときだけ違う | P1 |
+| D9 | 壊れた入力や珍しい環境でだけ出る細かい差: JSON の中の U+2028・U+2029 は Go が必ずエスケープする（TS はしない。読めば同じ値）。transcript の時刻は RFC 3339 だけ読む（Claude Code が書く形。`Date.parse` はほかの形も読む）。JSON の入れ子が 1 万段を超える transcript の行は飛ばす。rules.md の置換で `$` を特別扱いしない（TS の `replaceAll` は `$&` などを置き換え、許可リストとずれていた）。`.envrc` が残した子が管を握ったままのとき、`dirAccount` は 1 秒で諦める（TS は 15 秒）。agentwebctl の場所がわからないときは何にも当たらない空の許可を書く | どれも実際の herdr と Claude Code の出力では起きない。比べるときは JSON を読んでから比べる | P1 |
 
 ## TS 版のまま残す（切り替えの後に直す候補）
 
