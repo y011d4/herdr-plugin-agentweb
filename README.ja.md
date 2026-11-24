@@ -4,7 +4,7 @@
 
 [herdr](https://herdr.dev) で動いているすべてのコーディングエージェントを、スマホから
 モニタリング・操作するための herdr プラグインです。小さなローカルブリッジサーバー
-(Node.js) を起動し、モバイル向けの PWA を配信します。
+(Go のバイナリ) を起動し、モバイル向けの PWA を配信します。
 
 - すべてのワークスペースにまたがる全エージェントのダッシュボード。ライブなステータス表示
   (idle / working / **blocked** / done) で、blocked のエージェントは先頭にソートされます。
@@ -31,7 +31,8 @@ herdr サーバー
 ## 必要要件
 
 - herdr >= 0.8.0 (Linux / macOS)
-- Node.js >= 20
+- ビルドに: Go >= 1.27 と、web UI のための Node.js >= 20 と `npm`。ビルド済みのバイナリを
+  配るリリースができるまでは、ソースからビルドします。バイナリ自体はどちらも要りません。
 - スマホからブリッジに到達する手段 — リバースプロキシ、トンネル、または VPN
   (「スマホへの公開」の節を参照)。Tailscale は手軽な選択肢の一つで、必須ではありません。
 
@@ -45,8 +46,25 @@ herdr plugin install y011d4/herdr-plugin-agentweb
 ```
 
 clone も手動ビルドも不要です。`herdr plugin install` はマニフェストの `[[build]]`
-(`npm ci` → `npm run build`) を実行するため、`PATH` に Node.js と `npm` が必要です。ローカルの
+(`scripts/plugin-build.sh`: `npm ci` → web のビルド → `go build`) を実行するため、`PATH` に
+Go、Node.js、`npm` が必要です。ローカルの
 チェックアウトで開発したい場合は「開発」の節を参照してください。
+
+**Go の bridge より前の版から更新するとき** (action が `node dist/...` を動かしていた版): 先に
+bridge を止めてから更新し、それから起動します。新しい `stop` は前のインストールから起動した
+Node の bridge を見分けられないので、pidfile だけを消し、その bridge がポートを握ったまま残ります:
+
+```bash
+herdr plugin action invoke y011d4.agentweb.stop   # 終わるまで待つ
+herdr plugin update
+herdr plugin action invoke y011d4.agentweb.start
+```
+
+続いて、動いている orchestrator をそれぞれ起動し直します (Home の **Clear**)。bridge は起動のときに
+rules と許可リストを新しい `agentwebctl` のパスに書き直しますが、動いている orchestrator は古いパスを呼び続けます。
+以前の、管理されない orchestrator のディレクトリ (`orchestrator_dir`、または古い `dispatcher`) は利用者のもので、
+書き直されません。その `CLAUDE.md` と `.claude/settings.json` の `node …/dist/bin/agentwebctl.js` を
+`<plugin dir>/bin/agentwebctl` に自分で直すか、管理される `orchestrators` に移ってください。
 
 ブリッジを起動する (いずれかの方法):
 
@@ -216,8 +234,9 @@ herdr plugin config-dir y011d4.agentweb
 ついて `config.json` より優先されます (`public_url` と `notify_url` は config ファイルのみ)。
 優先順位は 環境変数 → `config.json` → 組み込みデフォルト です。
 
-> 開発用にサーバーを直接実行する場合 (`node server/main.ts`)、`config.json` が読み込まれるのは
-> `HERDR_PLUGIN_CONFIG_DIR` が config ディレクトリを指しているときだけです。herdr はプラグインの
+> 開発用に bridge を直接実行する場合 (`./bin/agentwebctl run`)、`config.json` が読み込まれるのは
+> `HERDR_PLUGIN_CONFIG_DIR` が config ディレクトリを指しているときだけです
+> (`HERDR_PLUGIN_CONFIG_DIR="$(herdr plugin config-dir y011d4.agentweb)" ./bin/agentwebctl run`)。herdr はプラグインの
 > アクションやペインに対してこれを自動設定するため、herdr 経由で起動する分にはそのまま動作します。
 
 ## セキュリティモデル
@@ -263,25 +282,24 @@ herdr plugin config-dir y011d4.agentweb
 ```bash
 git clone https://github.com/y011d4/herdr-plugin-agentweb
 cd herdr-plugin-agentweb
-npm install && npm run build     # 依存は ws のみ
+./scripts/plugin-build.sh      # web UI、続いて bin/agentwebctl (Go)
 herdr plugin link "$(pwd)"
 ```
 
-ソースは TypeScript で、`server/`、`bin/`、`web/src/` にあります。ビルド済みの JS ディストリ
-ビューションは `dist/` (server と bin) と `web/` (PWA アセット) に配置されます。
+bridge と CLI は Go (`cmd/agentwebctl`、`internal/bridge`) です。PWA は `web/src/` の TypeScript で、
+`web/` にビルドされ、バイナリに埋め込まれます。以前の TypeScript の bridge (`server/`、`bin/`) は、
+戻すときのためだけに当面残しています。
 
 ```bash
-npm run build                  # 変更後に TS → JS を再コンパイル
-npm test                       # ユニットテスト (node --test。.ts をネイティブ実行するため Node >= 23.6 が必要)
-node server/main.ts            # ライブの herdr に対しフォアグラウンドで実行 (開発用、Node >= 23.6)
+./scripts/plugin-build.sh      # 変更後に再ビルド。web の変更も (バイナリが web UI を埋め込むため)
+go test ./...                  # Go のテスト
+npm test                       # TypeScript のテスト (node --test。Node >= 23.6 が必要)
+./bin/agentwebctl run          # ライブの herdr に対しフォアグラウンドで実行 (config は「設定」の節を参照)
 ```
 
-`herdr plugin link` は build コマンドを実行**しません** — 編集後は `npm run build` で再ビルド
-してください (`herdr plugin link` の再実行は `herdr-plugin.toml` を変更したときだけ)。
+`herdr plugin link` は build コマンドを実行**しません** — 編集後は `./scripts/plugin-build.sh` で
+再ビルドしてください (`herdr plugin link` の再実行は `herdr-plugin.toml` を変更したときだけ)。
 `herdr plugin install` はマニフェストの build コマンドを自動で実行します。
-
-ビルド済みの `dist/` を実行するには Node >= 20 が必要です。TS ソースを直接実行する (開発モード)
-場合は、ネイティブの型ストリッピングのために Node >= 23.6 が必要です。
 
 デタッチしたデーモンのログは `<state dir>/bridge.log` に出力されます
 (`herdr plugin config-dir y011d4.agentweb` が config ディレクトリを表示します。state ディレクトリは

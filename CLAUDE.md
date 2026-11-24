@@ -85,7 +85,9 @@ herdr server
   `pane.agent_detected` (fires on detect *and* release) is rebuild-triggering, so agent presence and
   `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `agentwebctl agent …`, waking on background
   `agent prompt --wait`) lives in that dir's `CLAUDE.md`, not in this repo.
-- `herdr-plugin.toml` — actions/panes call `dist/bin/agentwebctl.js`; `[[build]]` runs on
+- `herdr-plugin.toml` — actions/panes call `./bin/agentwebctl`, the Go port of the bridge and
+  CLI (`cmd/agentwebctl`, `internal/bridge`; docs/go-migration-plan.md P5). The TS sources
+  stay only for rolling back until P5 step 6. `[[build]]` (`scripts/plugin-build.sh`) runs on
   `herdr plugin install` but NOT on `herdr plugin link`
 
 The REST/WS/State JSON contract is documented in README "API surface". Server
@@ -100,10 +102,12 @@ npm test                       # node --test server/test/ — runs .ts natively 
 node server/main.ts            # foreground dev run against the live herdr
 ```
 
-Deploying a change to the running bridge:
+Deploying a change to the running bridge. The Go binary embeds the built web UI, so a web
+change needs this rebuild too. `herdr plugin action invoke` returns before the action ends:
+let `stop` finish before `start`.
 
 ```bash
-npm run build
+./scripts/plugin-build.sh   # web build + go build -o bin/agentwebctl
 herdr plugin action invoke y011d4.agentweb.stop
 herdr plugin action invoke y011d4.agentweb.start
 curl -s http://127.0.0.1:8390/healthz   # expect {"ok":true,"herdrConnected":true}
