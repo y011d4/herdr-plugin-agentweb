@@ -1,6 +1,6 @@
 # bridge と agentwebctl を Go に移す計画
 
-- 状態: **pending approval**（計画のみ。コードはまだ書いていない）。Architect と Critic の合意済み（2 回目で Critic が APPROVE）
+- 状態: **承認済み**（2026-11-24。Architect と Critic の合意済み、2 回目で Critic が APPROVE）。P0 完了、K1 通過（docs/go-migration/p0-report.md。残りの見積もりの見直しもそちら）
 - 作成: 2026-11-24、ブランチ `go-migration-plan`。改訂 3（2 回目の細かい指摘まで反映。§12）
 - 対象: `server/*.ts`（bridge、空行を除き約 4,100 行）と `bin/agentwebctl.ts`（CLI、547 行）。`web/` は TypeScript のまま残す。
 
@@ -125,12 +125,12 @@
 | # | 内容 | 場所 | Go での扱い |
 |---|---|---|---|
 | P-1 | `package.json` を探して上にたどり、プラグインのルートを決める | `server/orchestrator.ts:24`、`bin/agentwebctl.ts:23` | 不要になる。rules.md と web は embed、自分の場所は `os.Executable()` と `filepath.EvalSymlinks` |
-| P-2 | `AGENTWEBCTL = node <root>/dist/bin/agentwebctl.js` を orchestrator の `rules.md` と `.claude/settings.json` の許可リストに書く | `server/orchestrator.ts:35,49` | Go の実行ファイルの絶対パスにする（`shellWord` はそのまま）。今の 3 つの管理ディレクトリ（side、personal、work）には `node /home/y011d4/ghq/github.com/y011d4/herdr-plugin-mobile/dist/bin/agentwebctl.js` が書かれていて、bridge の起動時に書き直される。GitHub からのインストールでは、更新でインストール先（`<id>-<hash>`）が変わりうるので、bridge の起動のたびに書き直す今の仕組みが効く |
+| P-2 | `AGENTWEBCTL = node <root>/dist/bin/agentwebctl.js` を orchestrator の `rules.md` と `.claude/settings.json` の許可リストに書く | `server/orchestrator.ts:35,49` | Go の実行ファイルの絶対パスにする（`shellWord` はそのまま）。今の 3 つの管理ディレクトリ（side、personal、work）には `node /home/y011d4/ghq/github.com/y011d4/herdr-plugin-mobile/dist/bin/agentwebctl.js` が書かれていて、bridge の起動時に書き直される。GitHub からのインストールでは、インストール先（herdr 0.9.5 では `~/.config/herdr/plugins/github-installations/<id>-<hash>/<世代>/checkout/`）が更新のたびに変わる（P0 で確認）。bridge の起動のたびに書き直す今の仕組みで追いつくが、動いている orchestrator は再起動するまで古いパスのままなので、README の更新の手順に orchestrator の再起動を入れる |
 | P-3 | 古い非管理ディレクトリ `~/.local/share/herdr-agentweb/dispatcher` の `CLAUDE.md:37` と `.claude/settings.json:15` に、同じ node のパスが手で書かれている | 利用者のファイル | プラグインは書き換えない（今の約束）。P5 で利用者が直すか、使っていなければ消す |
 | P-4 | web のルートを `__dirname/../web` か `../../web` から探す | `server/main.ts:12-19` | embed にする。web は凍結していないのでファイルが増えうる。そのため名前を並べず、拡張子のパターン（`web/*.js` など）で指定する。古いビルドの残りは、リリースを一時的な worktree でビルドすることで防ぐ（§8.3）。開発用に `AGENTWEB_WEB_DIR` を指定するとディスクから配る |
 | P-5 | `dist/server/main.js` がなければ `server/main.ts` を使う | `bin/agentwebctl.ts:35` | 不要になる。`agentwebctl serve` がサーバー本体 |
 | P-6 | manifest のコマンドが `node dist/bin/agentwebctl.js …`、`[[build]]` が `npm ci` と `npm run build` | `herdr-plugin.toml` | herdr-pluck と同じ `["./bin/agentwebctl", …]` にする。`[[build]]` は §8 |
-| P-7 | 既定のパス: state `~/.local/state/herdr-agentweb`、socket `~/.config/herdr/herdr.sock`、data `$XDG_DATA_HOME` または `~/.local/share/herdr-agentweb`、ポート 8390、`127.0.0.1` | `server/config.ts`、`bin/agentwebctl.ts:41,331` | そのまま。macOS での herdr の socket の場所は確かめられないので、README で `HERDR_SOCKET_PATH` を案内する |
+| P-7 | 既定のパス: state `~/.local/state/herdr-agentweb`、socket `~/.config/herdr/herdr.sock`、data `$XDG_DATA_HOME` または `~/.local/share/herdr-agentweb`、ポート 8390、`127.0.0.1` | `server/config.ts`、`bin/agentwebctl.ts:41,331` | macOS での herdr の socket の場所は確かめられないので、README で `HERDR_SOCKET_PATH` を案内する。state は直す（P0 で発見）: herdr から起動すると `HERDR_PLUGIN_STATE_DIR` は `~/.local/state/herdr/plugins/<id>` で、herdr の外から CLI を動かしたときの既定 `~/.local/state/herdr-agentweb` と食い違う（この機械には両方に token がある）。Go 版は herdr の外でも herdr と同じ場所を既定にし（herdr の決め方は P1 で確かめる）、違いの記録に書く |
 | P-8 | Claude の transcript の場所: `~/.claude/projects` と `~/.config/claude/<name>/projects` | `server/transcript.ts:22-40` | そのまま。後者はこの利用者の複数アカウントの置き方に合わせたもので、ほかの人には `CLAUDE_CONFIG_DIR` が任意の場所にある。Linux では E2 が補うが、macOS では補えない。README に書く |
 | P-9 | 利用者が書く `local.md` の `~/ghq/...` | 利用者のファイル | 利用者の文章なので触らない |
 
@@ -199,7 +199,7 @@ tools/shadowdiff/           並走の比較（P4）
    - `[[build]]` が動くときのカレントディレクトリ、`PATH`、ネットワークに出られるか（GitHub からの使い捨てのインストールで確かめる。リポジトリは空のテスト用のものを使う）。
    - `--ref` で入れたチェックアウトにタグがあるか（この機械の herdr-pluck のチェックアウトには `.git` はあるがタグがない。§8.2 はタグに頼らない作りにしてある）。
 4. **凍結を始め、TS 版で記録を取る。** この worktree でビルドした Node の bridge と CLI を、偽の herdr に向けて動かす（`HERDR_SOCKET_PATH=<偽>`、ポート 8392、一時的な state、config、data のディレクトリ）。
-   - 操作ごとの通信の記録: §5.3 の操作を REST、WS、CLI で 1 つずつ行い、その操作で herdr に届いたリクエストの列を `testdata/wire/<操作>.ndjson` に保存する。CLI の `worktree remove` などは、偽の snapshot の `repo_root` に対して本物の `git fetch` や `git branch -D` を実行するので、使い捨てのリポジトリを指すようにする。
+   - 操作ごとの通信の記録: §5.3 の操作を REST、WS、CLI で 1 つずつ行い、その操作で herdr に届いたリクエストの列を、HTTP の応答、WS のメッセージ、CLI の出力と一緒に `testdata/wire/<操作>.json` に保存する。CLI の `worktree remove` などは、偽の snapshot の `repo_root` に対して本物の `git fetch` や `git branch -D` を実行するので、使い捨てのリポジトリを指すようにする。
    - herdr-client のシナリオの記録: `tools/scenario-ts/`（`server/herdr-client.ts` を import して `onState` と `onAgentStatus` を記録するスクリプト）で、§5.2 のシナリオ（snapshot 中の状態変化など）を偽の herdr で起こし、`testdata/scenarios/*.json` に保存する。これが Go 版の期待値になる。
    - 「一致」の定義: ペインごとの `agent_status` の遷移の列（from→to）と、最後の State が同じであること。`onState` の回数は、イベントの間隔が 250 ms（配信をまとめる時間）より長い場面でだけ比べる。
 5. **herdr-client の設計の試作。** §3.7 の actor を Go で試作し（購読、ack、snapshot の重なり、バッファの再生まで）、手順 4 のシナリオの記録と一致することを確かめる。P2 でそのまま育てる。
@@ -235,7 +235,7 @@ tools/shadowdiff/           並走の比較（P4）
 移すもの: `run`（子を起動せずにサーバーを同じプロセスで動かし、自分の PID を pidfile に書く）、`start`（自分自身を `serve` で切り離して起動する）、`stop`、`status`、`qr`、`overview`、`agent get/read/prompt/wait/start`、`worktree remove`、`orchestrator start`。
 
 - pidfile の名前と置き場所（`bridge.pid`、`bridge-run.pid`）は変えない。bridge かどうかの判定は X7 のとおり。
-- テスト: Node 版と Go 版の CLI を同じ偽の herdr に向けて、標準出力、標準エラー、終了コード、herdr に送ったリクエストを比べる（overview、拒否の経路、使い方の誤り、`agent get/read/prompt/wait` が herdr の CLI に渡す引数）。偽の herdr にはアカウントの判定の材料（本物の `claude` の親プロセスや /proc）がないので、ここで確かめられるのは「判定できないときに拒否する」側だけである。許す側は P4 で確かめる。
+- テスト: Node 版と Go 版の CLI を同じ偽の herdr に向けて、標準出力、標準エラー、終了コード、herdr に送ったリクエストを比べる（overview、拒否の経路、使い方の誤り、`agent get/read/prompt/wait` が herdr の CLI に渡す引数）。アカウントの判定は、P0 の record-wire と同じく、本物の /proc を持つ代わりのプロセス（2 つのアカウントの `sleep`）を偽の herdr が返すことで、許す側と拒否する側の両方を確かめる。CLI は親をたどって最初の `claude` のアカウントを自分のものとするので、Claude Code の中から動かすテストは `setsid` で切り離すか、判定の入口を差し替えられるようにする（P0 で確認）。本物の claude での確認は P4b で行う。
 
 本番: Node のまま。
 完了の条件: CLI の比較がすべて一致する（違いの記録にあるものは除く）。
@@ -451,7 +451,7 @@ herdr の schema（protocol 22 で、リクエストの定義が 118、応答が
 - `LICENSE`（MIT）を置く。
 - README（英語と日本語）を書き直す:
   - 要るもの: herdr（確かめた版）、Linux（amd64、arm64）、macOS は試験的。任意で git 2.31 以上（ブランチ表示と worktree）、direnv（ディレクトリごとのアカウント）、gh、tailscale、qrencode（X5 の決定による）。Node は要らない。
-  - インストール。更新は「`stop` → `herdr plugin update` → `start`」の順にする（更新でインストール先が変わると、古いバイナリで動く bridge を新しい方が止められないことがあるため）。アンインストールでは、state、config、data のディレクトリの場所を書く。
+  - インストール。更新は「`stop` → `herdr plugin update` → `start`」の順にする（更新でインストール先が変わると、古いバイナリで動く bridge を新しい方が止められないことがあるため）。アンインストールでは、state、config、data のディレクトリの場所を書く。`herdr plugin uninstall` はインストール先のディレクトリを残す（P0 で確認）ので、その消し方も書く。
   - 携帯からつなぐ方法、設定の一覧、セキュリティの考え方、対応表、既知の制限（macOS のアカウント機能、npm で入れた claude、`~/.config/claude/<name>` の置き方の前提）。
   - 困ったとき: `/healthz`、bridge.log の場所、herdr の protocol の警告。
 - `status` の出力に、herdr のバージョンと protocol、見つかった任意のコマンド（git、direnv、gh、tailscale）を足す（トークンは出さない）。新しいサブコマンドは作らない。
