@@ -192,27 +192,15 @@ func looksLikeBridge(pid int) bool {
 	if err != nil || cmd == "" {
 		return true
 	}
-	return isBridgeCommandLine(cmd, legacyRoot(exe))
+	return isBridgeCommandLine(cmd)
 }
 
-// isBridgeCommandLine is isBridgeArgv for a command line as ps prints it, with no
-// argument boundaries, so paths are matched as suffixes (they may hold spaces): it
-// ends in `agentwebctl serve|run`, or in root's entry point after a node binary.
-func isBridgeCommandLine(cmd, root string) bool {
-	if strings.HasSuffix(cmd, "agentwebctl serve") || strings.HasSuffix(cmd, "agentwebctl run") {
-		return true
-	}
-	if root == "" {
-		return false
-	}
-	for _, entry := range []string{filepath.Join(root, "dist", "server", "main.js"), filepath.Join(root, "server", "main.ts")} {
-		// the prefix is the node binary alone; ps marks no argument boundaries, so a node
-		// path with any space is refused rather than guessed (macOS only; D15)
-		if node, ok := strings.CutSuffix(cmd, " "+entry); ok && !strings.ContainsAny(node, " \t") && strings.HasPrefix(path.Base(node), "node") {
-			return true
-		}
-	}
-	return false
+// isBridgeCommandLine is the check for a command line as ps prints it (no /proc): it
+// ends in `agentwebctl serve|run` (plan X7; a binary path may hold spaces). ps marks no
+// argument boundaries, so the TypeScript bridge, whose node and entry paths would have
+// to be told apart, is recognized on Linux only: the switch from it (P5) happens there.
+func isBridgeCommandLine(cmd string) bool {
+	return strings.HasSuffix(cmd, "agentwebctl serve") || strings.HasSuffix(cmd, "agentwebctl run")
 }
 
 func pidAlive(pid int) bool { return syscall.Kill(pid, 0) == nil }
