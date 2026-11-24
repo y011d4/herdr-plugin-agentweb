@@ -2,7 +2,7 @@
 // JSON line each (the fakeherdr Output shape), for tools/fakeherdr/cmd/record-scenarios.
 // stdin takes commands: "refresh" (client.refresh()) and "exit".
 // Usage: node tools/scenario-ts/run.ts <socket path>
-// Delete with the TypeScript server (plan P5 step 6).
+// Delete with the TypeScript server (CLAUDE.md, Follow-ups).
 import { createInterface } from 'node:readline';
 import { createHerdrClient } from '../../server/herdr-client.ts';
 import type { NormalizedState } from '../../server/types.ts';

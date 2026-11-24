@@ -447,7 +447,7 @@ func jsLen(s string) int {
 
 // jsSlice is s.slice(0, n) for n >= 0, except that it never splits a surrogate
 // pair: a character that would be cut in half is left out (JavaScript keeps a lone
-// surrogate, which JSON then can't carry intact; see docs/go-migration/divergences.md).
+// surrogate, which JSON then can't carry intact).
 func jsSlice(s string, n int) string {
 	units := 0
 	for i, r := range s {

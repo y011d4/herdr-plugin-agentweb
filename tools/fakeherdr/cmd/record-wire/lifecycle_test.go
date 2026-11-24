@@ -19,7 +19,7 @@ import (
 
 // The commands herdr's actions and panes run (start, status, stop, run), on the Go
 // binary with throwaway dirs and a free port: they work, their output never carries
-// the token (herdr keeps action output in its plugin logs; plan §5.5), and a pidfile
+// the token (herdr keeps action output in its plugin logs), and a pidfile
 // whose PID now belongs to another process never gets it signalled.
 func TestGoLifecycleCommands(t *testing.T) {
 	if testing.Short() {
@@ -203,7 +203,7 @@ func TestGoLifecycleCommands(t *testing.T) {
 	}
 
 	if runtime.GOOS != "linux" {
-		return // a renamed binary is recognized through /proc only (D15)
+		return // a renamed binary is recognized through /proc only
 	}
 	// the same binary under another name is still known by its executable
 	renamed := filepath.Join(dir, "awc")

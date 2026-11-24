@@ -2,7 +2,7 @@
 // client (tools/scenario-ts/run.ts) and writes what it reported to
 // testdata/scenarios/<name>.json: the behavior the Go client must reproduce.
 // Run from the repo root: go run ./tools/fakeherdr/cmd/record-scenarios [name...]
-// Delete with the TypeScript server (plan P5 step 6).
+// Delete with the TypeScript server (CLAUDE.md, Follow-ups).
 package main
 
 import (
