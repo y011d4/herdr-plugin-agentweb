@@ -74,6 +74,8 @@ export interface AppState {
   /** the configured orchestrators (config orchestrators / orchestrator_dir), in order: the
    *  agent running in each one's dir (paneId) is shown as a Home (#/home/<name>) */
   orchestrators: OrchestratorView[];
+  /** the first running orchestrator's pane, kept for clients older than `orchestrators` */
+  orchestratorPaneId: string | null;
 }
 
 export interface OrchestratorView {

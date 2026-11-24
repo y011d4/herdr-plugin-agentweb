@@ -1,0 +1,342 @@
+[
+ {
+  "type": "state",
+  "state": {
+   "connected": true,
+   "herdr": {
+    "version": "0.9.5",
+    "protocol": 22
+   },
+   "focused": {
+    "workspaceId": "w1",
+    "tabId": "t1",
+    "paneId": "p1"
+   },
+   "workspaces": [
+    {
+     "workspaceId": "w1",
+     "label": "repo",
+     "cwd": "/home/u/repo/sub",
+     "worktree": {
+      "repoKey": "/home/u/repo/.git",
+      "repoName": "repo",
+      "repoRoot": "/home/u/repo",
+      "checkoutPath": "/home/u/repo",
+      "isLinkedWorktree": false,
+      "branch": "main"
+     },
+     "tabs": [
+      {
+       "tabId": "t1",
+       "label": "one",
+       "panes": [
+        {
+         "paneId": "p1",
+         "focused": true,
+         "cwd": "/home/u/repo/sub",
+         "launchCwd": "/home/u/repo",
+         "title": "one",
+         "agent": {
+          "name": "claude",
+          "displayName": "claude",
+          "status": "working",
+          "customStatus": null,
+          "message": null,
+          "sinceUnixMs": 1795478400000,
+          "completionSeq": null,
+          "stateChangeSeq": null
+         }
+        },
+        {
+         "paneId": "p4",
+         "focused": false,
+         "cwd": "/home/u/.local/share/herdr-agentweb/orchestrators/personal",
+         "launchCwd": "/home/u/.local/share/herdr-agentweb/orchestrators/personal",
+         "title": null,
+         "agent": {
+          "name": "claude",
+          "displayName": "claude",
+          "status": "idle",
+          "customStatus": null,
+          "message": null,
+          "sinceUnixMs": 1795478400000,
+          "completionSeq": null,
+          "stateChangeSeq": null
+         }
+        }
+       ]
+      },
+      {
+       "tabId": "t2",
+       "label": "2",
+       "panes": [
+        {
+         "paneId": "p2",
+         "focused": false,
+         "cwd": "/home/u/repo",
+         "launchCwd": "/home/u/repo",
+         "title": null,
+         "agent": null
+        },
+        {
+         "paneId": "p7",
+         "focused": false,
+         "cwd": "/home/u/repo",
+         "launchCwd": "/home/u/repo",
+         "title": null,
+         "agent": {
+          "name": "codex",
+          "displayName": "codex",
+          "status": "unknown",
+          "customStatus": null,
+          "message": null,
+          "sinceUnixMs": 1795478400000,
+          "completionSeq": null,
+          "stateChangeSeq": null
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "workspaceId": "w2",
+     "label": "repo-wt-feat",
+     "cwd": "/home/u/repo-wt-feat",
+     "worktree": {
+      "repoKey": "/home/u/repo/.git",
+      "repoName": "repo",
+      "repoRoot": "/home/u/repo",
+      "checkoutPath": "/home/u/repo-wt-feat",
+      "isLinkedWorktree": true,
+      "branch": null
+     },
+     "tabs": [
+      {
+       "tabId": "t3",
+       "label": "feat",
+       "panes": [
+        {
+         "paneId": "p3",
+         "focused": false,
+         "cwd": "/home/u/repo-wt-feat",
+         "launchCwd": "/home/u/repo-wt-feat",
+         "title": null,
+         "agent": {
+          "name": "claude",
+          "displayName": "Claude Code",
+          "status": "done",
+          "customStatus": "reviewing",
+          "message": null,
+          "sinceUnixMs": 1795478400000,
+          "completionSeq": 4,
+          "stateChangeSeq": 9
+         }
+        },
+        {
+         "paneId": "p6",
+         "focused": false,
+         "cwd": "/home/u/repo-wt-feat",
+         "launchCwd": "/home/u/repo-wt-feat",
+         "title": null,
+         "agent": {
+          "name": "claude",
+          "displayName": "claude",
+          "status": "blocked",
+          "customStatus": null,
+          "message": null,
+          "sinceUnixMs": 1795478400000,
+          "completionSeq": null,
+          "stateChangeSeq": null
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "workspaceId": "w3",
+     "label": "w3",
+     "cwd": null,
+     "worktree": null,
+     "tabs": [
+      {
+       "tabId": "t4",
+       "label": "t4",
+       "panes": [
+        {
+         "paneId": "p5",
+         "focused": false,
+         "cwd": null,
+         "launchCwd": null,
+         "title": null,
+         "agent": null
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "orchestrators": [
+    {
+     "name": "personal",
+     "label": "Personal",
+     "paneId": "p4",
+     "agents": [
+      "p1",
+      "p3",
+      "p4"
+     ]
+    },
+    {
+     "name": "work",
+     "label": "",
+     "paneId": null,
+     "agents": null
+    }
+   ],
+   "orchestratorPaneId": "p4"
+  }
+ },
+ {
+  "type": "agent_status",
+  "paneId": "p3",
+  "agent": "Claude Code",
+  "from": "working",
+  "to": "done",
+  "workspaceLabel": "repo-wt-feat",
+  "tabLabel": "feat"
+ },
+ {
+  "type": "agent_status",
+  "paneId": "p9",
+  "agent": null,
+  "from": "unknown",
+  "to": "blocked",
+  "workspaceLabel": null,
+  "tabLabel": null
+ },
+ {
+  "type": "pong"
+ },
+ {
+  "type": "pane_output",
+  "paneId": "p1",
+  "ansi": "\u001b[1m❯\u001b[0m hi <b>&",
+  "appScroll": true
+ },
+ {
+  "type": "pane_gone",
+  "paneId": "p2"
+ },
+ {
+  "type": "transcript_items",
+  "paneId": "p1",
+  "available": true,
+  "sessionId": "0b9f3c1e-2d4a-4e8b-9c7d-5f6a7b8c9d0e",
+  "items": [
+   {
+    "kind": "user",
+    "text": "fix the bug",
+    "sidechain": false,
+    "ts": 1795478400000
+   },
+   {
+    "kind": "assistant",
+    "text": "Done: **fixed** <it> & more.",
+    "sidechain": true,
+    "ts": null
+   },
+   {
+    "kind": "thinking",
+    "text": "let me look",
+    "truncated": true,
+    "sidechain": false,
+    "ts": 1795478400000
+   },
+   {
+    "kind": "tool_use",
+    "id": "toolu_01",
+    "name": "Bash",
+    "summary": "npm test",
+    "todos": null,
+    "ask": null,
+    "sidechain": false,
+    "ts": 1795478400000
+   },
+   {
+    "kind": "tool_use",
+    "id": "toolu_02",
+    "name": "TodoWrite",
+    "summary": "2 todos",
+    "todos": [
+     {
+      "content": "port state",
+      "status": "completed"
+     },
+     {
+      "content": "port http",
+      "status": "pending"
+     }
+    ],
+    "ask": null,
+    "sidechain": false,
+    "ts": null
+   },
+   {
+    "kind": "tool_use",
+    "id": "toolu_03",
+    "name": "AskUserQuestion",
+    "summary": "Which fruit?",
+    "todos": null,
+    "ask": [
+     {
+      "question": "Which fruit?",
+      "header": "Fruit",
+      "multiSelect": false,
+      "options": [
+       {
+        "label": "apple",
+        "description": "red"
+       },
+       {
+        "label": "cherry",
+        "description": ""
+       }
+      ]
+     }
+    ],
+    "sidechain": false,
+    "ts": null
+   },
+   {
+    "kind": "tool_result",
+    "forId": "toolu_01",
+    "text": "ok",
+    "truncated": false,
+    "isError": false,
+    "sidechain": false,
+    "ts": 1795478400000
+   },
+   {
+    "kind": "tool_result",
+    "forId": null,
+    "text": "boom",
+    "truncated": true,
+    "isError": true,
+    "sidechain": false,
+    "ts": null
+   }
+  ],
+  "cursor": 249,
+  "reset": true
+ },
+ {
+  "type": "transcript_items",
+  "paneId": "p2",
+  "available": false,
+  "items": [],
+  "cursor": 0,
+  "reset": true
+ }
+]

@@ -37,11 +37,6 @@ const (
 
 var logf = log.Printf
 
-// HerdrError is an error answer from herdr, with its code (e.g. agent_pane_busy).
-type HerdrError struct{ Code, Message string }
-
-func (e *HerdrError) Error() string { return e.Message }
-
 var rpcSeq atomic.Int64
 
 // Only non-sensitive identifiers reach the logs, never text/keys/prompts.
@@ -108,12 +103,6 @@ func herdrRPC(socketPath, method string, params map[string]any) (json.RawMessage
 		}
 		return msg.Result, nil
 	}
-}
-
-// StatusChange is an agent's status transition.
-type StatusChange struct {
-	PaneID, From, To string
-	Agent            *AgentInfo
 }
 
 // HerdrClientCallbacks run on the client's actor goroutine, so they must not call
@@ -304,8 +293,8 @@ func (c *HerdrClient) fetchSnapshot(replay bool, coverage map[string]bool, done 
 		if c.cur != nil {
 			// a baseline for every pane (agentless as unknown), so a pane that gains
 			// an agent while events are held replays its real transition
-			for _, id := range c.cur.order {
-				c.preBufferStatus[id] = statusOf(c.cur.panes[id])
+			for _, id := range c.cur.paneOrder {
+				c.preBufferStatus[id] = statusOf(c.cur.paneByID[id].Agent)
 			}
 		}
 	}
@@ -340,7 +329,7 @@ func (c *HerdrClient) applySnapshot(res json.RawMessage, replay bool, coverage m
 	if snap == nil {
 		snap = res
 	}
-	var raw rawSnapshot
+	var raw RawSnapshot
 	if err := json.Unmarshal(snap, &raw); err != nil {
 		return err
 	}
@@ -348,12 +337,15 @@ func (c *HerdrClient) applySnapshot(res json.RawMessage, replay bool, coverage m
 	next := createState(raw, nowMs(), prev)
 	c.setState(next)
 	if replay && prev != nil {
-		for _, id := range next.order {
-			a := next.panes[id]
+		for _, id := range next.paneOrder {
+			a := next.paneByID[id].Agent
 			if a == nil || coverage[id] {
 				continue
 			}
-			from := statusOf(prev.panes[id])
+			from := "unknown"
+			if pp := prev.paneByID[id]; pp != nil {
+				from = statusOf(pp.Agent)
+			}
 			if from != a.Status {
 				c.cb.OnAgentStatus(StatusChange{PaneID: id, From: from, To: a.Status, Agent: a}, next)
 				c.replayedPanes[id] = true // the drain must not emit this one again
@@ -617,7 +609,7 @@ func (c *HerdrClient) schedulePaneRebuild() {
 					oldConn.destroy()
 				}
 			}
-			newConn := c.openSubscription(c.cur.paneIDs(), func() { newAcked = true; dropOld() })
+			newConn := c.openSubscription(c.cur.PaneIDs(), func() { newAcked = true; dropOld() })
 			c.subConn = newConn
 			if newConn != nil {
 				newConn.onClose(dropOld)
@@ -666,7 +658,7 @@ func (c *HerdrClient) refreshCompletionSeqsSoon() {
 					return
 				}
 				var r struct {
-					Agents []rawAgent `json:"agents"`
+					Agents []RawAgentSeqs `json:"agents"`
 				}
 				if json.Unmarshal(res, &r) != nil {
 					return
@@ -706,6 +698,6 @@ func (c *HerdrClient) connect() {
 		if c.subConn != nil {
 			c.subConn.destroy()
 		}
-		c.subConn = c.openSubscription(c.cur.paneIDs(), nil)
+		c.subConn = c.openSubscription(c.cur.PaneIDs(), nil)
 	})
 }

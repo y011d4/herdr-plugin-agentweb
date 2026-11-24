@@ -11,6 +11,11 @@
 | D3 | WS の送信が詰まった接続は閉じる。Node は際限なく溜める | coder/websocket の `Write` は止まるため、接続ごとに上限つきのバッファを持つ（計画 §3.7）。携帯は再接続して最新の State を受け取る | P2 |
 | D4 | ntfy への送信で `HTTP_PROXY` などを使う。Node の fetch は使わない | Go の HTTP クライアントの既定。外に出るのは `notify_url` だけなのは変わらない | P2 |
 | D5 | herdr の CLI を、どこでも「`HERDR_BIN_PATH` があればそれ、なければ PATH」で探す（計画 X6） | TS 版は通知と agent のコマンドで探し方が違う | P6 |
+| D6 | 文字数で切り詰めるとき、絵文字などの 2 単位の文字を半分に割らない（`jsSlice`）。TS 版は割った片方を残す | 割った片方は不正な文字で、JSON にすると壊れる。日本語などほかの文字では TS 版と同じ結果になる | P1 |
+| D7 | 型の崩れたイベントの扱い: `tab_renamed` の `label` が文字列でなければ無視する（TS 版は数値をそのままラベルにする）。`pane_focused` に `pane_id` がなければ `focused.paneId` を null にする（TS 版は JSON からその項目が消える） | herdr はどちらも文字列で送る（schema）。壊れた入力でだけ起きる | P1 |
+| D8 | 検出した agent の種類が launch profile の名前に完全には一致しないとき、部分一致で選ぶ順番: 既定の 3 つ（claude、codex、opencode）の次は名前順。TS 版は config.json に書いた順 | Go の map には順番がない。部分一致が 2 つ以上の独自 profile に当たるときだけ違う | P1 |
+| D9 | 壊れた入力や珍しい環境でだけ出る細かい差: JSON の中の U+2028・U+2029 は Go が必ずエスケープする（TS はしない。読めば同じ値）。transcript の時刻は RFC 3339 だけ読む（Claude Code が書く形。`Date.parse` はほかの形も読む）。JSON の入れ子が 1 万段を超える transcript の行は飛ばす。rules.md の置換で `$` を特別扱いしない（TS の `replaceAll` は `$&` などを置き換え、許可リストとずれていた）。`.envrc` が残した子が管を握ったままのとき、`dirAccount` は 1 秒で諦める（TS は 15 秒）。agentwebctl の場所がわからないときは何にも当たらない空の許可を書く | どれも実際の herdr と Claude Code の出力では起きない。比べるときは JSON を読んでから比べる | P1 |
+| D10 | token を作り直すとき、0600 の一時ファイルに書いてから置き換える。TS 版は古いファイルに書いてから 0600 にする | 古い token ファイルが壊れていて、しかもほかの人が読める権限だった場合に、新しい token が一瞬読める（roborev の指摘）。bridge は自分ではそういうファイルを作らないので、TS 版は凍結の決まりにより直さず、切り替えの後の堅牢化とする | P1 |
 
 ## TS 版のまま残す（切り替えの後に直す候補）
 
@@ -20,3 +25,4 @@
 |---|---|---|---|
 | K1 | 重なった snapshot の応答を、届いた順に当てる。先に頼んだ snapshot の応答が後に届くと、新しい State（例: agent の名前の変更）を古いもので上書きしうる | 2 つの snapshot が同時に出ていて、応答の順番が入れ替わる | 応答に番号を振り、古い番号の応答はバッファの処理だけして State には当てない |
 | K2 | 購読が切れたときに出ていた snapshot が、切断の後に「つながっている」State を出す。再接続が失敗し続けると、古いデータがつながっている扱いのまま残る | 購読の切断と snapshot の応答が重なる | snapshot を頼んだときの `coverageEpoch` を覚え、変わっていたら `Connected` を false のままにする |
+| K3 | herdr が worktree を付けていないワークスペースに cwd から補った worktree が、次の補完では herdr が付けたものと同じ扱いになる。そのディレクトリが git でなくなっても、次の snapshot までは古い worktree とブランチが表示に残る | 補ったワークスペースのディレクトリが、snapshot と snapshot の間に git のリポジトリでなくなる | worktree が herdr のものか補ったものかを覚えておき、補ったものは git の結果で上書きする（roborev の指摘） |
