@@ -1,0 +1,82 @@
+[
+  {
+    "text": "fix the bug",
+    "injected": false
+  },
+  {
+    "text": "<task-notification>agent w-x finished</task-notification>",
+    "injected": true
+  },
+  {
+    "text": "<system-reminder>be brief</system-reminder>",
+    "injected": true
+  },
+  {
+    "text": "<local-command-stdout>ok</local-command-stdout>",
+    "injected": true
+  },
+  {
+    "text": "<local-command-caveat>x</local-command-caveat>",
+    "injected": true
+  },
+  {
+    "text": "<command-name>/clear</command-name>",
+    "injected": true
+  },
+  {
+    "text": "<command-message>clear</command-message>",
+    "injected": true
+  },
+  {
+    "text": "<command-args></command-args>",
+    "injected": true
+  },
+  {
+    "text": "<bash-input>ls</bash-input>",
+    "injected": true
+  },
+  {
+    "text": "<bash-stdout>a</bash-stdout>",
+    "injected": true
+  },
+  {
+    "text": "<bash-stderr>e</bash-stderr>",
+    "injected": true
+  },
+  {
+    "text": "  \n<system-reminder>indented</system-reminder>",
+    "injected": true
+  },
+  {
+    "text": "　<task-notification>ideographic space first</task-notification>",
+    "injected": true
+  },
+  {
+    "text": " <bash-input>no-break space first</bash-input>",
+    "injected": true
+  },
+  {
+    "text": "<pasted_content>the user's own paste</pasted_content>",
+    "injected": false
+  },
+  {
+    "text": "see <system-reminder> later in the text",
+    "injected": false
+  },
+  {
+    "text": "<System-Reminder>case matters</System-Reminder>",
+    "injected": false
+  },
+  {
+    "text": "<command-namex>not a known tag</command-namex>",
+    "injected": false
+  },
+  {
+    "text": "<bash-output>not a known tag</bash-output>",
+    "injected": false
+  },
+  {
+    "text": "",
+    "injected": false
+  }
+]
