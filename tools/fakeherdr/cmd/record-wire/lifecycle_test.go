@@ -193,7 +193,7 @@ func TestGoLifecycleCommands(t *testing.T) {
 		os.Mkdir(filepath.Join(state, c.file), 0o700)
 		expect([]string{c.cmd}, 1, "is a directory")
 		// the launched child itself is gone, not just not serving yet (start waited for it)
-		if pids := serving(bin); len(pids) > 0 {
+		if pids := serving(t, bin); len(pids) > 0 {
 			t.Errorf("a failed %s left %s serve running: %v", c.cmd, bin, pids)
 		}
 		if healthy() {
@@ -227,13 +227,17 @@ func TestGoLifecycleCommands(t *testing.T) {
 	expect([]string{"stop"}, 0, "bridge stopped (pid "+pid+")")
 }
 
-// serving is the pids of `<bin> serve` processes (Linux /proc; nil elsewhere).
-func serving(bin string) []string {
+// serving is the pids of `<bin> serve` processes, from ps (Linux and macOS alike).
+func serving(t *testing.T, bin string) []string {
+	t.Helper()
+	out, err := exec.Command("ps", "-A", "-o", "pid=,args=").Output()
+	if err != nil {
+		t.Fatalf("listing processes: %v", err)
+	}
 	var pids []string
-	dirs, _ := os.ReadDir("/proc")
-	for _, d := range dirs {
-		if b, err := os.ReadFile(filepath.Join("/proc", d.Name(), "cmdline")); err == nil && strings.HasPrefix(string(b), bin+"\x00serve\x00") {
-			pids = append(pids, d.Name())
+	for _, line := range strings.Split(string(out), "\n") {
+		if pid, args, ok := strings.Cut(strings.TrimSpace(line), " "); ok && strings.TrimSpace(args) == bin+" serve" {
+			pids = append(pids, pid)
 		}
 	}
 	return pids
