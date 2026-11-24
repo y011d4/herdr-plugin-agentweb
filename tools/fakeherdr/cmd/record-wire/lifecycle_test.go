@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -174,6 +175,30 @@ func TestGoLifecycleCommands(t *testing.T) {
 		t.Error("run left bridge-run.pid")
 	}
 
+	// start refuses when it can't make the log, which gets the token, private: here a
+	// log that is a symlink to /dev/null, whose mode we can't change (as root we could)
+	logPath := filepath.Join(state, "bridge.log")
+	if os.Geteuid() != 0 {
+		os.Rename(logPath, logPath+".kept")
+		os.Symlink("/dev/null", logPath)
+		expect([]string{"start"}, 1, "operation not permitted")
+		if healthy() {
+			t.Error("start served although the log couldn't be made private")
+		}
+		os.Remove(logPath)
+		os.Rename(logPath+".kept", logPath)
+	}
+	// a pidfile that can't be written: start stops what it launched, run doesn't serve
+	for _, c := range []struct{ file, cmd string }{{"bridge.pid", "start"}, {"bridge-run.pid", "run"}} {
+		os.Mkdir(filepath.Join(state, c.file), 0o700)
+		expect([]string{c.cmd}, 1, "is a directory")
+		waitFor("no bridge is left after a failed "+c.cmd, func() bool { return !healthy() })
+		os.Remove(filepath.Join(state, c.file))
+	}
+
+	if runtime.GOOS != "linux" {
+		return // a renamed binary is recognized through /proc only (D15)
+	}
 	// the same binary under another name is still known by its executable
 	renamed := filepath.Join(dir, "awc")
 	if b, err := os.ReadFile(bin); err != nil || os.WriteFile(renamed, b, 0o755) != nil {
@@ -185,6 +210,12 @@ func TestGoLifecycleCommands(t *testing.T) {
 		t.Fatalf("start (renamed): exit %d, %q", code, out)
 	}
 	pid = regexp.MustCompile(`pid (\d+)`).FindStringSubmatch(out)[1]
+	t.Cleanup(func() { // if status or stop lost it: only this test's bridge
+		if b, _ := os.ReadFile("/proc/" + pid + "/cmdline"); strings.HasPrefix(string(b), renamed+"\x00serve") {
+			n, _ := strconv.Atoi(pid)
+			syscall.Kill(n, syscall.SIGTERM)
+		}
+	})
 	waitFor("the renamed bridge answers", healthy)
 	expect([]string{"status"}, 0, "bridge running (pid "+pid+")")
 	expect([]string{"stop"}, 0, "bridge stopped (pid "+pid+")")
