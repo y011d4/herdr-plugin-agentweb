@@ -11,7 +11,7 @@ toolchain=go1.27.4 # go.mod's toolchain line; a local Go may differ (a distro bu
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
-if [ -n "$(git status --porcelain)" ]; then
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
 	echo "release: commit your changes first (the binaries are built from HEAD)" >&2
 	exit 1
 fi
@@ -28,7 +28,7 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
 	arch=${target#*/}
 	(cd "$work/src" && GOTOOLCHAIN=$toolchain CGO_ENABLED=0 GOOS=$os GOARCH=$arch GOAMD64=v1 GOARM64=v8.0 \
 		go build -trimpath -buildvcs=false \
-		-ldflags "-X github.com/y011d4/herdr-plugin-agentweb/internal/bridge.Version=$version" \
+		-ldflags "-s -w -X github.com/y011d4/herdr-plugin-agentweb/internal/bridge.Version=$version" \
 		-o "$out/agentwebctl_${version}_${os}_${arch}" ./cmd/agentwebctl)
 done
 (cd "$out" && sha256sum agentwebctl_*) >"$out/checksums.txt"
