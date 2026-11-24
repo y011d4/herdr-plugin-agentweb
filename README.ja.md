@@ -299,7 +299,7 @@ herdr plugin config-dir y011d4.agentweb
 | --- | --- |
 | Linux amd64 | 対応。日常的に使っています |
 | Linux arm64 | 対応。CI が arm64 でテスト (偽の herdr を相手にしたブリッジの動作を含む) を回しています。本物の herdr ではまだ動かしていません |
-| macOS arm64 / amd64 | 試験的。CI でビルドと単体テストを回していますが、本物の herdr ではまだ動かしていません。「既知の制限」を参照 |
+| macOS arm64 / amd64 | 試験的。両方ともビルドしますが、CI で単体テストを回しているのは arm64 だけです。本物の herdr ではまだ動かしていません。「既知の制限」を参照 |
 | herdr | 0.9.5 (ソケットの protocol 22) で確認。ほかの protocol では、ブリッジが `bridge.log` に警告を出し、`status` にも表示します |
 | Claude Code | 2.1.322 で確認: orchestrator の権限の規則と、チャット表示が読む transcript の形 |
 
