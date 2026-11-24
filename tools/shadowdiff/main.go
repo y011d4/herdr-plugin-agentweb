@@ -13,13 +13,16 @@
 //
 // Usage:
 //
+//	shadowdiff config -from NODE_CONFIG -data NODE_DATA_DIR
 //	shadowdiff watch -dir DIR -go-token FILE [-node URL] [-node-token FILE] [-go URL]
 //	shadowdiff report -dir DIR
 //
-// watch runs until killed: counted differences are appended to DIR/findings.jsonl,
-// and DIR/status.json holds the totals and what differs right now. report prints
-// them. It only reads both bridges (GET /api/state, a /ws that never asks to watch
-// anything). tools/shadowdiff/shadow.sh starts and stops the whole P4a setup.
+// config prints the Go bridge's config: the Node one's, without ntfy, on 8391,
+// with each orchestrator unmanaged at the dir Node uses. watch runs until killed:
+// counted differences are appended to DIR/findings.jsonl, and DIR/status.json holds
+// the totals and what differs right now. report prints them. It only reads both
+// bridges (GET /api/state, a /ws that never asks to watch anything).
+// tools/shadowdiff/shadow.sh starts and stops the whole P4a setup.
 package main
 
 import (
@@ -34,6 +37,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -51,6 +55,27 @@ func main() {
 		usage()
 	}
 	switch os.Args[1] {
+	case "config":
+		fs := flag.NewFlagSet("config", flag.ExitOnError)
+		from := fs.String("from", "", "the Node bridge's config.json")
+		data := fs.String("data", "", "the Node bridge's data dir (…/herdr-agentweb)")
+		fs.Parse(os.Args[2:])
+		if *from == "" || *data == "" {
+			usage()
+		}
+		b, err := os.ReadFile(*from)
+		if err != nil {
+			log.Fatal(err)
+		}
+		var cfg map[string]any
+		dec := json.NewDecoder(bytes.NewReader(b))
+		dec.UseNumber()
+		if err := dec.Decode(&cfg); err != nil || cfg == nil {
+			log.Fatalf("%s: not a JSON object", *from)
+		}
+		_, err = os.Stat(filepath.Join(*data, "dispatcher"))
+		out, _ := json.MarshalIndent(shadowConfig(cfg, *data, err == nil), "", "  ")
+		fmt.Println(string(out))
 	case "watch":
 		watch(os.Args[2:])
 	case "report":
@@ -70,8 +95,45 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: shadowdiff watch -dir DIR -go-token FILE [-node URL] [-node-token FILE] [-go URL]\n       shadowdiff report -dir DIR")
+	fmt.Fprintln(os.Stderr, `usage: shadowdiff config -from NODE_CONFIG -data NODE_DATA_DIR
+       shadowdiff watch -dir DIR -go-token FILE [-node URL] [-node-token FILE] [-go URL]
+       shadowdiff report -dir DIR`)
 	os.Exit(2)
+}
+
+var slug = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// shadowConfig turns the Node bridge's config into the Go one's: no ntfy (notify_url)
+// and no public_url, port 8391, and each orchestrator at the dir the Node bridge
+// resolves for it (parseOrchestrators in server/config.ts), given as its own dir so
+// the Go bridge leaves it unmanaged and writes nothing there. A dir counts when it is
+// a string with more than spaces, an entry when its name is a slug. Without one, the
+// legacy setups become orchestrator_dir, unmanaged with the same empty label.
+func shadowConfig(cfg map[string]any, data string, dispatcherExists bool) map[string]any {
+	set := func(v any) bool { s, ok := v.(string); return ok && strings.TrimSpace(s) != "" }
+	delete(cfg, "notify_url")
+	delete(cfg, "public_url")
+	cfg["port"] = 8391
+	entries, _ := cfg["orchestrators"].([]any)
+	valid := slices.ContainsFunc(entries, func(e any) bool {
+		m, _ := e.(map[string]any)
+		name, _ := m["name"].(string)
+		return slug.MatchString(name)
+	})
+	switch {
+	case valid:
+		for _, e := range entries {
+			if m, ok := e.(map[string]any); ok && !set(m["dir"]) {
+				m["dir"] = filepath.Join(data, "orchestrators", fmt.Sprint(m["name"]))
+			}
+		}
+	case set(cfg["orchestrator_dir"]):
+	case dispatcherExists:
+		cfg["orchestrator_dir"] = filepath.Join(data, "dispatcher")
+	default:
+		cfg["orchestrator_dir"] = filepath.Join(data, "orchestrators", "default")
+	}
+	return cfg
 }
 
 // ── comparing states ─────────────────────────────────────────────────────────
@@ -307,6 +369,7 @@ type watcher struct {
 	dir    string
 	sides  [2]side
 	client *http.Client
+	maxGap time.Duration // between comparisons, beyond which a run breaks
 
 	mu      sync.Mutex
 	st      status
@@ -345,6 +408,7 @@ func newWatcher(dir string, s [2]side, interval, hold time.Duration) *watcher {
 		dir:    dir,
 		sides:  s,
 		client: &http.Client{Timeout: interval},
+		maxGap: 3 * interval,
 		st: status{StartedAt: now, UpdatedAt: now, Open: map[string]*openDiff{},
 			Sides: map[string]*sideStatus{"node": {URL: s[0].url}, "go": {URL: s[1].url}}},
 		state:   stateTracker{hold: hold, open: map[string]*openDiff{}},
@@ -409,13 +473,14 @@ func (w *watcher) compare(now time.Time, bodies [2][]byte, errs [2]error) {
 		}
 	}
 	// A poll that compared nothing breaks every difference's run: it can't be told to
-	// have lasted through it. Successful polls are at most two intervals apart (each
-	// fetch times out after one), and a suspend of the machine adds nothing to a run:
-	// the times carry Go's monotonic reading, which stands still while suspended
-	// (CLOCK_MONOTONIC on Linux), as do both bridges.
-	if err != nil {
+	// have lasted through it. So does a gap between comparisons (each fetch times out
+	// after an interval, so only a paused watch makes one). A suspend of the machine
+	// adds nothing to a run: the times carry Go's monotonic reading, which stands
+	// still while suspended (CLOCK_MONOTONIC on Linux), as do both bridges.
+	if err != nil || now.Sub(w.st.LastComparedAt) > w.maxGap {
 		clear(w.state.open)
-	} else {
+	}
+	if err == nil {
 		w.st.Compared++
 		w.st.LastComparedAt = now
 		w.record(w.state.observe(now, diffs))

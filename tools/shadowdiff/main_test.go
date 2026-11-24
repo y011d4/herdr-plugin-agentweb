@@ -142,7 +142,7 @@ func TestReport(t *testing.T) {
 }
 
 func TestAFailedPollBreaksTheRun(t *testing.T) {
-	w := newWatcher(t.TempDir(), [2]side{}, time.Second, 70*time.Second)
+	w := newWatcher(t.TempDir(), [2]side{}, 30*time.Second, 70*time.Second) // a gap over 90 s breaks a run
 	a, b := []byte(`{"x":1}`), []byte(`{"x":2}`)
 	t0 := time.Now()
 	w.compare(t0, [2][]byte{a, b}, [2]error{})
@@ -156,5 +156,37 @@ func TestAFailedPollBreaksTheRun(t *testing.T) {
 	w.compare(t0.Add(180*time.Second), [2][]byte{a, b}, [2]error{})
 	if w.st.Findings != 1 || w.st.Sides["go"].FetchErrors != 1 || w.st.Compared != 4 || w.st.Polls != 6 {
 		t.Fatalf("%+v", w.st)
+	}
+
+	// no comparison for 120 s (a paused watch): the run since 110 s breaks, and a new
+	// one is counted once it lasts
+	w.compare(t0.Add(300*time.Second), [2][]byte{a, b}, [2]error{})
+	w.compare(t0.Add(370*time.Second), [2][]byte{a, b}, [2]error{})
+	if w.st.Findings != 2 {
+		t.Fatal("a run continued across a gap")
+	}
+}
+
+func TestShadowConfig(t *testing.T) {
+	for _, c := range []struct{ name, in, want string }{
+		{"orchestrators get the dir Node uses, a set dir stays, blank counts as unset",
+			`{"port":8390,"notify_url":"https://ntfy.sh/x","public_url":"https://p","launch_profiles":{},"orchestrators":[{"name":"a","env":{"K":"v"}},{"name":"b","dir":"~/x"},{"name":"c","dir":"  "},"junk"]}`,
+			`{"launch_profiles":{},"orchestrators":[{"dir":"/D/orchestrators/a","env":{"K":"v"},"name":"a"},{"dir":"~/x","name":"b"},{"dir":"/D/orchestrators/c","name":"c"},"junk"],"port":8391}`},
+		{"no valid entry: the legacy dispatcher", `{"orchestrators":[{"name":"bad name"},{"name":1}]}`,
+			`{"orchestrator_dir":"/D/dispatcher","orchestrators":[{"name":"bad name"},{"name":1}],"port":8391}`},
+		{"a blank orchestrator_dir is unset", `{"orchestrators":[],"orchestrator_dir":" "}`,
+			`{"orchestrator_dir":"/D/dispatcher","orchestrators":[],"port":8391}`},
+		{"a set orchestrator_dir stays", `{"orchestrator_dir":"~/mine"}`, `{"orchestrator_dir":"~/mine","port":8391}`},
+	} {
+		var cfg map[string]any
+		json.Unmarshal([]byte(c.in), &cfg)
+		got, _ := json.Marshal(shadowConfig(cfg, "/D", true))
+		if string(got) != c.want {
+			t.Errorf("%s:\n got %s\nwant %s", c.name, got, c.want)
+		}
+	}
+	got, _ := json.Marshal(shadowConfig(map[string]any{}, "/D", false))
+	if want := `{"orchestrator_dir":"/D/orchestrators/default","port":8391}`; string(got) != want {
+		t.Errorf("no dispatcher: got %s", got)
 	}
 }

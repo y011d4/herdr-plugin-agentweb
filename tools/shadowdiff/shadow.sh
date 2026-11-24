@@ -51,19 +51,7 @@ start)
 	chmod 700 "$dir" "$dir/state"
 	(cd "$repo" && npm run --silent build:web &&
 		go build -o "$dir/bin/agentwebctl" ./cmd/agentwebctl && go build -o "$dir/bin/shadowdiff" ./tools/shadowdiff)
-	# each orchestrator's dir as the Node bridge resolves it (parseOrchestrators in
-	# server/config.ts: a dir is set when it is a string with more than spaces; an entry
-	# counts when its name is a slug). The legacy setups become orchestrator_dir, which
-	# is unmanaged with the same empty label.
-	[ -d "$node_data/dispatcher" ] && dispatcher=true || dispatcher=false
-	jq --arg data "$node_data" --argjson dispatcher "$dispatcher" '
-		def set: type == "string" and test("\\S");
-		del(.notify_url, .public_url) | .port = 8391
-		| if any(.orchestrators | arrays | .[]; type == "object" and (.name | type == "string" and test("^[A-Za-z0-9_-]+$")))
-			then .orchestrators |= map(if type == "object" and (.dir | set | not) then .dir = "\($data)/orchestrators/\(.name)" else . end)
-			elif .orchestrator_dir | set then .
-			else .orchestrator_dir = (if $dispatcher then "\($data)/dispatcher" else "\($data)/orchestrators/default" end)
-			end' "$node_config" >"$dir/config/config.json"
+	"$dir/bin/shadowdiff" config -from "$node_config" -data "$node_data" >"$dir/config/config.json"
 	go_env "$dir/bin/agentwebctl" start
 	setsid -f "$dir/bin/shadowdiff" watch -dir "$dir" -node-token "$node_token" -go-token "$dir/state/token" \
 		>>"$dir/watch.log" 2>&1 </dev/null
