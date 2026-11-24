@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 // The live-prompt parser is DOM-free, so it runs under node --test.
-import { parsePrompt, stripAnsi } from '../src/prompt.ts';
+import { parsePrompt, stripAnsi, answerOutcome } from '../src/prompt.ts';
 
 const HINT = 'Enter to select · ↑/↓ to navigate · Esc to cancel';
 
@@ -302,5 +302,22 @@ describe('parsePrompt — with ANSI', () => {
     const p = parsePrompt(stripAnsi(ansi));
     assert.equal(p!.options.length, 2);
     assert.equal(p!.selected, 1);
+  });
+});
+
+describe('answerOutcome — going back after a tapped answer', () => {
+  it('waits until the press is confirmed', () => {
+    assert.equal(answerOutcome(false, true, 'working'), 'wait');
+  });
+  it('goes back once the agent has resumed work, even if it already finished', () => {
+    assert.equal(answerOutcome(true, true, 'working'), 'back');
+    assert.equal(answerOutcome(true, true, 'done'), 'back'); // `working` came before the POST's response
+  });
+  it('waits while the pane stays blocked (the next question of several)', () => {
+    assert.equal(answerOutcome(true, false, 'blocked'), 'wait');
+  });
+  it('stays when the agent left the prompt without working (a permission No)', () => {
+    assert.equal(answerOutcome(true, false, 'done'), 'stay');
+    assert.equal(answerOutcome(true, false, 'idle'), 'stay');
   });
 });

@@ -14,7 +14,7 @@
 import { ansiToHtml } from './ansi.ts';
 import { renderItems, conversationItems, latestActivity } from './transcript.ts';
 import type { TimelineItem } from './transcript.ts';
-import { stripAnsi, parsePrompt, promptIdentity, displayCols } from './prompt.ts';
+import { stripAnsi, parsePrompt, promptIdentity, displayCols, answerOutcome } from './prompt.ts';
 import type { PromptOption, ParsedPrompt } from './prompt.ts';
 import { dashboardCards, homeSummary, markSeen, shownStatus } from './dashboard-group.ts';
 import type { DashboardCard, SeenDone } from './dashboard-group.ts';
@@ -99,6 +99,14 @@ let promptPollActive = 0; // reqId of the poll currently in flight (0 = none) �
 let promptAnswerInFlight = false; // true while/just after a tapped answer is sent — blocks re-taps
 let answerCooldownTimer: ReturnType<typeof setTimeout> | null = null; // floors the post-send re-tap block
 let answerGen = 0; // per-answer token so a stale POST/timer can't clear the guard for a newer answer
+// A tapped answer until it is seen landing (settlePendingAnswer). `back`: where to go
+// once the agent resumes work ('' = stay); `prompt`: the identity of the prompt it answers.
+interface PendingAnswer {
+  paneId: string; gen: number; prompt: string; back: string;
+  sent: boolean; resumed: boolean; timer: ReturnType<typeof setTimeout> | null;
+}
+let pendingAnswer: PendingAnswer | null = null;
+const ANSWER_CONFIRM_MS = 10_000; // still on the same prompt this long after the press → say so
 
 /** source toggle: 'visible' | 'recent' */
 
@@ -358,6 +366,7 @@ function onStateUpdate(): void {
     // Pane detail auto-refreshes via its own poller; header may need updating
     updatePaneDetailHeader();
     updatePromptPanel(); // agent may have just become (un)blocked
+    settlePendingAnswer(); // ...because a tapped answer landed
   } else if (hash.startsWith('#/home/')) {
     const id = homeOf(hash)?.paneId ?? null;
     if (id !== activePaneId) {
@@ -372,6 +381,7 @@ function onStateUpdate(): void {
     renderHomeStatus();
     renderHomeActivity();
     updatePromptPanel();
+    settlePendingAnswer();
   }
 }
 
@@ -711,6 +721,7 @@ function handleRoute(e?: Event): void {
   stopPaneRefresh();
   activePaneId = null;
   homeMode = false;
+  dropPendingAnswer(); // left the pane: nothing to go back from
 
   const hash = location.hash || '#/agents';
   const fromHash = e instanceof HashChangeEvent ? new URL(e.oldURL).hash : null;
@@ -2196,6 +2207,9 @@ function renderPromptPanel(parsed: ParsedPrompt | null, sid: string): void {
   if (!optsEl) return;
   if (sid === promptScreenId) return; // same prompt still on screen — don't rebuild (keeps a tap from being wiped)
   promptScreenId = sid;
+  // The answer moved the agent on to another prompt (the next question, the Submit tab
+  // of several): it landed, and the user stays for that one.
+  if (parsed && pendingAnswer && sid !== pendingAnswer.prompt) dropPendingAnswer();
   const qEl = document.getElementById('chat-prompt-q');
   if (qEl) qEl.textContent = parsed?.question ?? '';
   optsEl.innerHTML = (parsed?.options ?? []).map((o) =>
@@ -2262,6 +2276,30 @@ async function readPromptScreen(paneId: string): Promise<{ parsed: ParsedPrompt 
   } catch { return null; }
 }
 
+function dropPendingAnswer(): void {
+  if (pendingAnswer?.timer) clearTimeout(pendingAnswer.timer);
+  pendingAnswer = null;
+}
+
+// After a tapped answer: the pane going `working` shows it reached the agent and the
+// agent moved on, so the view goes Back to where the pane was opened from
+// (answerOutcome). Several questions only get there after the Submit tab: each earlier
+// answer leaves the pane blocked on the next prompt (renderPromptPanel drops the
+// pending answer). A permission prompt is treated the same: Yes resumes work, while No
+// leaves the agent waiting for the user's instructions (blocked → done, no `working`,
+// seen live), so the user stays to type them.
+function settlePendingAnswer(): void {
+  const a = pendingAnswer;
+  if (!a) return;
+  if (a.paneId !== activePaneId) { dropPendingAnswer(); return; }
+  const status = findPane(a.paneId)?.pane?.agent?.status;
+  if (status === 'working') a.resumed = true; // may come before the press is confirmed
+  const outcome = answerOutcome(a.sent, a.resumed, status);
+  if (outcome === 'wait') return;
+  dropPendingAnswer();
+  if (outcome === 'back' && a.back) navigate(a.back);
+}
+
 // Answer by selecting the tapped option. Pressing an option's digit in a numbered
 // menu selects AND submits it in one atomic keystroke — verified live: sending "3"
 // to an AskUserQuestion answered "cherry" with no Enter and no cursor movement. The
@@ -2292,9 +2330,28 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   const panel = document.getElementById('chat-prompt');
   panel?.classList.add('chat-prompt-sending'); // disable the buttons while the answer settles
   btn.classList.add('ask-opt-sent');
+  // Go Back once the agent resumes work — not from Home, and not for "Chat about this",
+  // which hands the turn back to the user in this pane. Tracked before the POST: the
+  // `working` push can beat its response.
+  const chat = /^Chat about this/i.test(btn.querySelector('.ask-opt-label')?.textContent ?? '');
+  dropPendingAnswer();
+  const pending: PendingAnswer = {
+    paneId, gen: myGen, prompt: expectedId, back: homeMode || chat ? '' : paneBackRoute,
+    sent: false, resumed: false, timer: null,
+  };
+  pendingAnswer = pending;
   try {
     await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { press: String(to), expect_prompt: expectedId });
     if (myGen !== answerGen) return; // a newer tap already superseded this — don't touch shared state
+    if (pendingAnswer === pending) {
+      pending.sent = true;
+      pending.timer = setTimeout(() => {
+        if (pendingAnswer !== pending) return;
+        dropPendingAnswer();
+        if (paneId === activePaneId) showToast('Answer not confirmed', 'The prompt is still waiting. Check the terminal.');
+      }, ANSWER_CONFIRM_MS);
+      settlePendingAnswer();
+    }
     // The digit already submitted this prompt, but the panel keeps showing it (with
     // tappable buttons) until the pane's status refreshes. Hold the guard through
     // that window so a double-tap can't fire the same digit again into the *next*
@@ -2305,6 +2362,7 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
     answerCooldownTimer = setTimeout(() => { if (myGen === answerGen) endAnswerCooldown(); }, 1500);
   } catch (err) {
     if (myGen !== answerGen) return; // superseded — the newer answer owns the guard now
+    if (pendingAnswer === pending) dropPendingAnswer(); // not pressed: stay
     btn.classList.remove('ask-opt-sent');
     endAnswerCooldown();
     if ((err as { code?: string }).code === 'prompt_changed') {
