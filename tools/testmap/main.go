@@ -2,8 +2,12 @@
 // every TypeScript test, the server ones the Go port must reproduce (one t.Run with
 // the same name each) and the ones that stay in TypeScript with the web UI.
 //
+//	set -o pipefail
 //	node --test --test-reporter=junit 'server/test/*.test.ts' 'web/test/*.test.ts' \
-//	  | go run ./tools/testmap > docs/go-migration/test-map.md
+//	  | go run ./tools/testmap > /tmp/test-map.md && mv /tmp/test-map.md docs/go-migration/test-map.md
+//
+// It refuses a report with no tests or with failures, so a broken run never
+// replaces the map.
 //
 // The reporter, unlike a grep of the sources, sees names built in loops.
 package main
@@ -21,6 +25,9 @@ type test struct{ file, path string }
 
 func main() {
 	tests, err := parse(os.Stdin)
+	if err == nil && len(tests) == 0 {
+		err = fmt.Errorf("no tests in the report")
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -46,11 +53,14 @@ func main() {
 	table(keep)
 }
 
+// cell escapes what Markdown table cells would otherwise render as markup
+var cell = strings.NewReplacer("|", `\|`, "&", "&amp;", "<", "&lt;", ">", "&gt;")
+
 func table(ts []test) {
 	fmt.Println("| # | file | test |")
 	fmt.Println("|---|---|---|")
 	for i, t := range ts {
-		fmt.Printf("| %d | %s | %s |\n", i+1, t.file, strings.ReplaceAll(t.path, "|", `\|`))
+		fmt.Printf("| %d | %s | %s |\n", i+1, t.file, cell.Replace(t.path))
 	}
 }
 
@@ -74,6 +84,8 @@ func parse(r io.Reader) ([]test, error) {
 			switch t.Name.Local {
 			case "testsuite":
 				stack = append(stack, attr(t, "name"))
+			case "failure", "error":
+				return nil, fmt.Errorf("the report has a failing test (%s)", strings.Join(stack, " › "))
 			case "testcase":
 				file, _ := filepath.Rel(wd, attr(t, "file"))
 				out = append(out, test{file: file, path: strings.Join(append(append([]string{}, stack...), attr(t, "name")), " › ")})
