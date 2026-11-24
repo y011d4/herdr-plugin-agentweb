@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -23,6 +24,10 @@ const repoRoot = "../../../.."
 func TestGoBridgeMatchesWireRecordings(t *testing.T) {
 	if testing.Short() {
 		t.Skip("drives a real bridge for ~30 s")
+	}
+	if runtime.GOOS != "linux" {
+		// recorded on Linux, where the account checks read /proc (elsewhere a clear skips them)
+		t.Skip("the recordings and the stand-in agents need Linux /proc")
 	}
 	// go test caches a pass by the files the test itself looked at, and the build
 	// below reads the bridge's sources in another process: stat them here, so a
@@ -55,17 +60,23 @@ func TestGoBridgeMatchesWireRecordings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wantFiles, _ := filepath.Glob(filepath.Join(repoRoot, "testdata", "wire", "*.json"))
-	if len(wantFiles) == 0 {
-		t.Fatal("no recordings in testdata/wire")
-	}
-	for _, wf := range wantFiles {
-		name := strings.TrimSuffix(filepath.Base(wf), ".json")
-		if strings.HasPrefix(name, "cli-") {
-			continue
+	// the same operations on both sides: none recorded only for one bridge
+	ops := func(dir string) (names []string) {
+		files, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+		for _, f := range files {
+			if name := strings.TrimSuffix(filepath.Base(f), ".json"); !strings.HasPrefix(name, "cli-") {
+				names = append(names, name)
+			}
 		}
+		return names
+	}
+	wantOps, gotOps := ops(filepath.Join(repoRoot, "testdata", "wire")), ops(outDir)
+	if len(wantOps) == 0 || !slices.Equal(wantOps, gotOps) {
+		t.Fatalf("operations recorded:\n TypeScript %v\n Go         %v", wantOps, gotOps)
+	}
+	for _, name := range wantOps {
 		t.Run(name, func(t *testing.T) {
-			want, err := loadRecord(wf)
+			want, err := loadRecord(filepath.Join(repoRoot, "testdata", "wire", name+".json"))
 			if err != nil {
 				t.Fatal(err)
 			}
