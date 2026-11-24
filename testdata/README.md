@@ -23,27 +23,37 @@ Regenerate (about 40 s; needs node ≥ 23.6 and `npm ci`):
 
 Per operation (REST, WS, CLI): the requests herdr received, in order, and the HTTP
 answer, WS messages or CLI output. Paths under the recording's temp dir read `$TMP`,
-and generated agent names `claude-<time>`.
+generated agent names `claude-<time>`, and the bridge's token and port `<token>` and
+`<port>`.
 
 The recorder runs the bridge on 127.0.0.1:8392 with every directory (state, config,
 data, HOME, a scratch git repo with an origin) in a fresh temp dir, two `sleep`
-processes standing in for agents of two Claude accounts, and fake `herdr`/`gh` CLIs
-first on PATH (their calls are listed under `herdrCli`). The CLI ones need `direnv`
-on PATH, as `agentwebctl agent start` asks it for a directory's account. It must run
-detached from any `claude` process, since the CLI takes its nearest claude ancestor's
-account as its own:
+processes standing in for agents of two Claude accounts, and fakes first on PATH:
+`herdr` and `gh` log their calls (listed under `herdrCli`), `direnv` runs a command
+with the dir's `.envrc` loaded (no allow list), and `tailscale` and `qrencode` act as
+absent, so nothing depends on this machine's own setup. Each CLI command runs under
+`setsid -f`, detached from any `claude` process, since the CLI takes its nearest
+claude ancestor's account as its own. From the repo root (needs node >= 23.6):
 
-    go build -o /tmp/record-wire ./tools/fakeherdr/cmd/record-wire && setsid -f /tmp/record-wire
+    go build -o /tmp/record-wire ./tools/fakeherdr/cmd/record-wire && /tmp/record-wire
 
-It writes `wire/DONE` (or `wire/FAILED`) when finished; two runs give identical files.
+It writes `wire/DONE` (or `wire/FAILED`) when finished. Two runs give the same files,
+except the order of a fan-out the TypeScript sends concurrently (`cli-overview`'s
+account lookups).
 
-`TestGoBridgeMatchesWireRecordings` (`tools/fakeherdr/cmd/record-wire/main_test.go`,
-part of `go test ./...`) records the Go bridge (`agentwebctl serve`, built by the
-test; build the web UI first) through the same REST and WS operations, on a free
-port, and compares: the HTTP exchange and WS messages as JSON values (key order
-doesn't count; WS messages received as a set), and the herdr requests in order,
-except for the WS watches, which poll on a timer and so are compared as the set of
-distinct requests. The `cli-` operations wait for the Go CLI (P3).
+`TestGoMatchesWireRecordings` (`tools/fakeherdr/cmd/record-wire/main_test.go`, part of
+`go test ./...`; build the web UI first) builds the Go `agentwebctl`, records it
+(`agentwebctl serve` and its CLI commands) through every operation on a free port, and
+compares:
+
+- the HTTP exchange and WS messages as JSON values (key order doesn't count; WS
+  messages received as a set);
+- the CLI's arguments, exit code, stdout and stderr exactly, and the fake
+  `herdr`/`gh` calls. The TypeScript's usage lines say `agentwebctl.js` where the Go
+  ones say `agentwebctl` (divergences D15);
+- the herdr requests in order. A run of the same method counts as a set (a fan-out
+  the TypeScript sends concurrently). The WS watches poll on a timer, so they are
+  compared as the set of distinct requests.
 
 `agent.list`, `pane.process_info` and `session.snapshot` may also come from the
 bridge's background work (completion seqs, the account cache, rebuilds), so a

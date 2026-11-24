@@ -1,0 +1,19 @@
+{
+ "op": "cli-worktree-remove-other-account",
+ "cli": {
+  "args": [
+   "worktree",
+   "remove",
+   "$TMP/repo-wt-done"
+  ],
+  "exit": 1,
+  "stdout": "",
+  "stderr": "refused: it is not under this Claude account; $TMP/repo-wt-done was left as it is\n"
+ },
+ "herdr": [
+  {
+   "method": "session.snapshot",
+   "params": {}
+  }
+ ]
+}
