@@ -91,6 +91,8 @@ func jsTruthy(v any) bool {
 	case json.Number:
 		f, _ := strconv.ParseFloat(string(x), 64) // out of range: ±Inf (truthy) or 0
 		return f != 0
+	case float64: // encoding/json's numbers (config.json)
+		return x != 0 && x == x
 	}
 	return true // objects and arrays
 }

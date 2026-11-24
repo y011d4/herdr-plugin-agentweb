@@ -1,0 +1,12 @@
+{
+ "op": "cli-worktree-usage",
+ "cli": {
+  "args": [
+   "worktree"
+  ],
+  "exit": 2,
+  "stdout": "",
+  "stderr": "usage: agentwebctl.js worktree remove \u003ccheckout path\u003e\n"
+ },
+ "herdr": []
+}

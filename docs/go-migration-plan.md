@@ -1,6 +1,6 @@
 # bridge と agentwebctl を Go に移す計画
 
-- 状態: **承認済み**（2026-11-24。Architect と Critic の合意済み、2 回目で Critic が APPROVE）。P0 完了、K1 通過（docs/go-migration/p0-report.md）。P1 完了、K2 通過（docs/go-migration/p1-report.md）。P2 完了、K3 通過（docs/go-migration/p2-report.md。P3 への申し送りと残りの見積もりもそちら）
+- 状態: **承認済み**（2026-11-24。Architect と Critic の合意済み、2 回目で Critic が APPROVE）。P0 完了、K1 通過（docs/go-migration/p0-report.md）。P1 完了、K2 通過（docs/go-migration/p1-report.md）。P2 完了、K3 通過（docs/go-migration/p2-report.md）。P3 完了（docs/go-migration/p3-report.md。P4 で利用者にしてもらうことと残りの見積もりもそちら）
 - 作成: 2026-11-24、ブランチ `go-migration-plan`。改訂 3（2 回目の細かい指摘まで反映。§12）
 - 対象: `server/*.ts`（bridge、空行を除き約 4,100 行）と `bin/agentwebctl.ts`（CLI、547 行）。`web/` は TypeScript のまま残す。
 
