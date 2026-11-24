@@ -196,10 +196,21 @@ func looksLikeBridge(pid int) bool {
 }
 
 // isBridgeCommandLine is isBridgeArgv for a command line as ps prints it, with no
-// argument boundaries: a binary path with spaces still ends in `agentwebctl serve|run`.
+// argument boundaries, so paths are matched as suffixes (they may hold spaces): it
+// ends in `agentwebctl serve|run`, or in root's entry point after a node binary.
 func isBridgeCommandLine(cmd, root string) bool {
-	return strings.HasSuffix(cmd, "agentwebctl serve") || strings.HasSuffix(cmd, "agentwebctl run") ||
-		isBridgeArgv(strings.Fields(cmd), root)
+	if strings.HasSuffix(cmd, "agentwebctl serve") || strings.HasSuffix(cmd, "agentwebctl run") {
+		return true
+	}
+	if root == "" {
+		return false
+	}
+	for _, entry := range []string{filepath.Join(root, "dist", "server", "main.js"), filepath.Join(root, "server", "main.ts")} {
+		if node, ok := strings.CutSuffix(cmd, " "+entry); ok && strings.HasPrefix(path.Base(node), "node") {
+			return true
+		}
+	}
+	return false
 }
 
 func pidAlive(pid int) bool { return syscall.Kill(pid, 0) == nil }
