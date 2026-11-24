@@ -174,6 +174,8 @@ func TestShadowConfig(t *testing.T) {
 			`{"launch_profiles":{},"orchestrators":[{"dir":"/D/orchestrators/a","env":{"K":"v"},"name":"a"},{"dir":"~/x","name":"b"},{"dir":"/D/orchestrators/c","name":"c"},"junk"],"port":8391}`},
 		{"no valid entry: the legacy dispatcher", `{"orchestrators":[{"name":"bad name"},{"name":1}]}`,
 			`{"orchestrator_dir":"/D/dispatcher","orchestrators":[{"name":"bad name"},{"name":1}],"port":8391}`},
+		{"blank as JavaScript trims: U+FEFF is, U+0085 is not", `{"orchestrators":[{"name":"a","dir":"\ufeff"},{"name":"b","dir":"\u0085"}]}`,
+			`{"orchestrators":[{"dir":"/D/orchestrators/a","name":"a"},{"dir":"\u0085","name":"b"}],"port":8391}`},
 		{"a blank orchestrator_dir is unset", `{"orchestrators":[],"orchestrator_dir":" "}`,
 			`{"orchestrator_dir":"/D/dispatcher","orchestrators":[],"port":8391}`},
 		{"a set orchestrator_dir stays", `{"orchestrator_dir":"~/mine"}`, `{"orchestrator_dir":"~/mine","port":8391}`},
@@ -181,7 +183,10 @@ func TestShadowConfig(t *testing.T) {
 		var cfg map[string]any
 		json.Unmarshal([]byte(c.in), &cfg)
 		got, _ := json.Marshal(shadowConfig(cfg, "/D", true))
-		if string(got) != c.want {
+		var g, w any // decoded, so an escape in want (\u0085) equals the character
+		json.Unmarshal(got, &g)
+		json.Unmarshal([]byte(c.want), &w)
+		if !reflect.DeepEqual(g, w) {
 			t.Errorf("%s:\n got %s\nwant %s", c.name, got, c.want)
 		}
 	}
