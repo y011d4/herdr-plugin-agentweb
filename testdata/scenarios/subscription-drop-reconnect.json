@@ -2,7 +2,7 @@
  "scenario": "subscription-drop-reconnect",
  "outputs": [
   {
-   "t": 3,
+   "t": 4,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -17,6 +17,12 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
@@ -25,7 +31,7 @@
    "connected": true
   },
   {
-   "t": 4,
+   "t": 5,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -40,15 +46,21 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
-   "t": 412,
+   "t": 416,
    "kind": "conn",
    "connected": false
   },
   {
-   "t": 412,
+   "t": 417,
    "kind": "state",
    "connected": false,
    "panes": {
@@ -63,17 +75,23 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
-   "t": 1414,
+   "t": 1418,
    "kind": "status",
    "paneId": "p2",
    "from": "working",
    "to": "blocked"
   },
   {
-   "t": 1414,
+   "t": 1418,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -88,15 +106,21 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
-   "t": 1415,
+   "t": 1419,
    "kind": "conn",
    "connected": true
   },
   {
-   "t": 1416,
+   "t": 1420,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -111,10 +135,16 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
-   "t": 1468,
+   "t": 1470,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -129,6 +159,12 @@
      "changeSeq": 1
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   }
  ]

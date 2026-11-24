@@ -265,11 +265,13 @@ func (s *Server) subscribe(c net.Conn, r *bufio.Reader, id, params json.RawMessa
 		if delay > 0 {
 			time.Sleep(delay)
 		}
+		// registered before the ack goes out, but holding the write lock: an event
+		// emitted meanwhile waits and follows the ack instead of being lost
 		x.wmu.Lock()
-		writeReply(c, id, Reply{Result: map[string]any{"type": "subscription_started"}})
 		s.mu.Lock()
 		s.subs[x] = struct{}{}
 		s.mu.Unlock()
+		writeReply(c, id, Reply{Result: map[string]any{"type": "subscription_started"}})
 		x.wmu.Unlock()
 	}
 	_, _ = r.ReadBytes('\n') // until either side closes

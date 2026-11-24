@@ -81,6 +81,7 @@ func record(sc fakeherdr.Scenario) (*fakeherdr.Recording, error) {
 		return nil, err
 	}
 	var outs []fakeherdr.Output
+	var readErr error
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -88,9 +89,16 @@ func record(sc fakeherdr.Scenario) (*fakeherdr.Recording, error) {
 		sc.Buffer(make([]byte, 1<<20), 1<<20)
 		for sc.Scan() {
 			var o fakeherdr.Output
-			if json.Unmarshal(sc.Bytes(), &o) == nil {
-				outs = append(outs, o)
+			if err := json.Unmarshal(sc.Bytes(), &o); err != nil {
+				if readErr == nil {
+					readErr = fmt.Errorf("malformed output %q: %w", sc.Text(), err)
+				}
+				continue // keep draining, so the runner can't block on a full pipe
 			}
+			outs = append(outs, o)
+		}
+		if err := sc.Err(); err != nil {
+			readErr = err
 		}
 	}()
 	env.Client = tsClient{stdin}
@@ -98,7 +106,13 @@ func record(sc fakeherdr.Scenario) (*fakeherdr.Recording, error) {
 	env.Sleep(int(fakeherdr.Settle.Milliseconds()))
 	fmt.Fprintln(stdin, "exit")
 	<-done
-	_ = cmd.Wait()
+	// a runner that died early leaves a partial recording: never store one
+	if err := cmd.Wait(); err != nil {
+		return nil, fmt.Errorf("runner: %w", err)
+	}
+	if readErr != nil {
+		return nil, readErr
+	}
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("%v", errs)
 	}

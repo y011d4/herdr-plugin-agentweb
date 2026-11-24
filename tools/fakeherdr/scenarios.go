@@ -3,6 +3,7 @@ package fakeherdr
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"time"
 )
 
@@ -249,7 +250,9 @@ type Output struct {
 	From      string                `json:"from,omitempty"`
 	To        string                `json:"to,omitempty"`
 	Connected *bool                 `json:"connected,omitempty"`
-	Panes     map[string]*PaneAgent `json:"panes,omitempty"` // nil value: no agent in the pane
+	Panes     map[string]*PaneAgent `json:"panes,omitempty"`   // nil value: no agent in the pane
+	Focused   string                `json:"focused,omitempty"` // workspace/tab/pane ids
+	Tabs      map[string]string     `json:"tabs,omitempty"`    // tab id → label
 }
 
 // PaneAgent is a pane's agent in a state push.
@@ -265,11 +268,18 @@ type Recording struct {
 	Outputs  []Output `json:"outputs"`
 }
 
+// CompareOptions narrow a comparison.
+type CompareOptions struct {
+	// SkipModel leaves the focused pane and the tab labels out: the P0 spike's
+	// status-only state keeps neither. P1 ports state.ts and drops this.
+	SkipModel bool
+}
+
 // Compare reports how got differs from want: each pane's status transitions in
 // order, the connection changes in order, the last state, and (when the scenario
 // allows it) the number of state pushes. Timing and how transitions of different
 // panes interleave are not compared.
-func Compare(sc Scenario, want, got []Output) []string {
+func Compare(sc Scenario, want, got []Output, opt CompareOptions) []string {
 	var diffs []string
 	if a, b := transitions(want), transitions(got); !reflect.DeepEqual(a, b) {
 		diffs = append(diffs, fmt.Sprintf("status transitions: want %v, got %v", a, b))
@@ -277,7 +287,7 @@ func Compare(sc Scenario, want, got []Output) []string {
 	if a, b := conns(want), conns(got); !reflect.DeepEqual(a, b) {
 		diffs = append(diffs, fmt.Sprintf("connection changes: want %v, got %v", a, b))
 	}
-	a, b := lastState(want), lastState(got)
+	a, b := lastState(want, opt), lastState(got, opt)
 	if !reflect.DeepEqual(a, b) {
 		diffs = append(diffs, fmt.Sprintf("last state: want %s, got %s", show(a), show(b)))
 	}
@@ -309,11 +319,14 @@ func conns(outs []Output) []bool {
 	return c
 }
 
-func lastState(outs []Output) *Output {
+func lastState(outs []Output, opt CompareOptions) *Output {
 	for i := len(outs) - 1; i >= 0; i-- {
 		if outs[i].Kind == "state" {
 			o := outs[i]
 			o.T = 0
+			if opt.SkipModel {
+				o.Focused, o.Tabs = "", nil
+			}
 			return &o
 		}
 	}
@@ -335,7 +348,13 @@ func show(o *Output) string {
 		return "none"
 	}
 	s := fmt.Sprintf("connected=%v", o.Connected != nil && *o.Connected)
-	for id, p := range o.Panes {
+	ids := make([]string, 0, len(o.Panes))
+	for id := range o.Panes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		p := o.Panes[id]
 		if p == nil {
 			s += fmt.Sprintf(" %s:-", id)
 			continue
@@ -347,6 +366,9 @@ func show(o *Output) string {
 		if p.ChangeSeq != nil {
 			s += fmt.Sprintf("@%d", *p.ChangeSeq)
 		}
+	}
+	if o.Focused != "" || o.Tabs != nil {
+		s += fmt.Sprintf(" focused=%s tabs=%v", o.Focused, o.Tabs)
 	}
 	return s
 }
