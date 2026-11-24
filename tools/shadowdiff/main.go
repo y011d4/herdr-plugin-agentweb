@@ -68,9 +68,9 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		var cfg map[string]any // Unmarshal, like JSON.parse, refuses data after the object
-		if err := json.Unmarshal(b, &cfg); err != nil || cfg == nil {
-			log.Fatalf("%s: not a JSON object", *from)
+		cfg, err := parseConfig(b)
+		if err != nil {
+			log.Fatalf("%s: %v", *from, err)
 		}
 		_, err = os.Stat(filepath.Join(*data, "dispatcher"))
 		out, _ := json.MarshalIndent(shadowConfig(cfg, *data, err == nil), "", "  ")
@@ -98,6 +98,21 @@ func usage() {
        shadowdiff watch -dir DIR -go-token FILE [-node URL] [-node-token FILE] [-go URL]
        shadowdiff report -dir DIR`)
 	os.Exit(2)
+}
+
+// parseConfig reads config.json as JSON.parse does: one object and nothing after it,
+// any number (1e400 too; the bridges ignore a number where they want a string).
+func parseConfig(b []byte) (map[string]any, error) {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	var cfg map[string]any
+	if err := dec.Decode(&cfg); err != nil || cfg == nil {
+		return nil, errors.New("not a JSON object")
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, errors.New("data after the JSON object")
+	}
+	return cfg, nil
 }
 
 var slug = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)

@@ -195,3 +195,14 @@ func TestShadowConfig(t *testing.T) {
 		t.Errorf("no dispatcher: got %s", got)
 	}
 }
+
+func TestParseConfigLikeJSONParse(t *testing.T) {
+	for in, ok := range map[string]bool{
+		`{"port":8390}`: true, " {\"notify_url\":1e400}\n": true,
+		`{"a":1} x`: false, `{"a":1}{}`: false, `null`: false, `[]`: false, ``: false,
+	} {
+		if _, err := parseConfig([]byte(in)); (err == nil) != ok {
+			t.Errorf("%q: %v", in, err)
+		}
+	}
+}
