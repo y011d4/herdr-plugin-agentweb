@@ -5,7 +5,7 @@ package bridge
 //
 // Each connection has its own sender goroutine behind a bounded queue (coder/websocket
 // writes block until written, where Node's ws.send just queues). A client that stops
-// reading until its queue fills is dropped (divergences.md D3); the phone reconnects
+// reading until its queue fills is dropped (Node's ws queued without limit); the phone reconnects
 // and gets the latest state.
 //
 // broadcastState reads the client's latest published State, builds the message,

@@ -1,6 +1,6 @@
 package bridge
 
-// The JSON contract with the web UI (docs/go-migration-plan.md §6): this test writes
+// The JSON contract with the web UI: this test writes
 // what the Go bridge sends, for a representative state, every WS message type and
 // every timeline item kind, to testdata/contract/*.json, and the same values as
 // typed TypeScript literals to web/test/contract.gen.ts. `npm run check:contract`

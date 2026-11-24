@@ -93,7 +93,7 @@ func (c cli) arg(i int) string {
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 // defaultStateDir is where herdr keeps this plugin's state (what it passes as
-// HERDR_PLUGIN_STATE_DIR), also when agentwebctl runs outside herdr (D2): the TS
+// HERDR_PLUGIN_STATE_DIR), also when agentwebctl runs outside herdr: the TS
 // used ~/.local/state/herdr-agentweb there, so a token found only in that old place
 // keeps being used rather than unpairing a phone.
 func defaultStateDir() string {
@@ -152,7 +152,7 @@ func ownExe() string {
 }
 
 // legacyRoot is the plugin checkout this binary is part of (<root>/bin/agentwebctl),
-// whose TypeScript bridge it also recognizes until P5 step 6; "" when it isn't in one.
+// whose TypeScript bridge it also recognizes until that is deleted; "" when it isn't in one.
 func legacyRoot(exe string) string {
 	if exe == "" || filepath.Base(filepath.Dir(exe)) != "bin" {
 		return ""
@@ -163,7 +163,7 @@ func legacyRoot(exe string) string {
 // isBridgeArgv is whether a command line is a bridge: `agentwebctl serve|run`, not
 // another agentwebctl command (an orchestrator's background `agent wait` must not get
 // a SIGTERM through a reused PID), whatever dir the binary lives in. Until the
-// TypeScript bridge is deleted (plan P5 step 6), also that bridge when it runs from
+// TypeScript bridge is deleted (CLAUDE.md, Follow-ups), also that bridge when it runs from
 // root, this binary's checkout, exactly as the TS CLI launched it: node with the entry
 // point as its first argument (an editor open on that file doesn't count).
 func isBridgeArgv(argv []string, root string) bool {
@@ -204,9 +204,9 @@ func looksLikeBridge(pid int) bool {
 }
 
 // isBridgeCommandLine is the check for a command line as ps prints it (no /proc): it
-// ends in `agentwebctl serve|run` (plan X7; a binary path may hold spaces). ps marks no
+// ends in `agentwebctl serve|run` (a binary path may hold spaces). ps marks no
 // argument boundaries, so the TypeScript bridge, whose node and entry paths would have
-// to be told apart, is recognized on Linux only: the switch from it (P5) happens there.
+// to be told apart, is recognized on Linux only: the switch from it happened there.
 func isBridgeCommandLine(cmd string) bool {
 	return strings.HasSuffix(cmd, "agentwebctl serve") || strings.HasSuffix(cmd, "agentwebctl run")
 }

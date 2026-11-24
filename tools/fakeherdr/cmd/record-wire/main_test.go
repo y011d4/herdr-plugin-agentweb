@@ -140,7 +140,7 @@ func requests(r record) []string {
 }
 
 // tsUsage is how the TypeScript CLI names itself in usage lines; the Go one says
-// agentwebctl (divergences.md D15).
+// agentwebctl.
 var tsUsage = strings.NewReplacer("agentwebctl.js", "agentwebctl")
 
 func distinct(xs []string) []string {
@@ -271,7 +271,7 @@ func TestCompareRecordsCatchesCLIDifferences(t *testing.T) {
 				{Method: "pane.process_info", Params: json.RawMessage(`{"pane_id":"p5"}`)}}}
 	}
 	same := base()
-	same.CLI.Stderr = "usage: agentwebctl agent …\n"            // D15
+	same.CLI.Stderr = "usage: agentwebctl agent …\n"            // the Go CLI's name
 	same.Herdr[1], same.Herdr[2] = same.Herdr[2], same.Herdr[1] // a fan-out in another order
 	if d := compareRecords(base(), same); len(d) != 0 {
 		t.Errorf("equal records differ: %v", d)
