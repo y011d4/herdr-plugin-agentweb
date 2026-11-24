@@ -192,7 +192,13 @@ func TestGoLifecycleCommands(t *testing.T) {
 	for _, c := range []struct{ file, cmd string }{{"bridge.pid", "start"}, {"bridge-run.pid", "run"}} {
 		os.Mkdir(filepath.Join(state, c.file), 0o700)
 		expect([]string{c.cmd}, 1, "is a directory")
-		waitFor("no bridge is left after a failed "+c.cmd, func() bool { return !healthy() })
+		// the launched child itself is gone, not just not serving yet (start waited for it)
+		if pids := serving(bin); len(pids) > 0 {
+			t.Errorf("a failed %s left %s serve running: %v", c.cmd, bin, pids)
+		}
+		if healthy() {
+			t.Errorf("a failed %s left a bridge serving", c.cmd)
+		}
 		os.Remove(filepath.Join(state, c.file))
 	}
 
@@ -219,4 +225,16 @@ func TestGoLifecycleCommands(t *testing.T) {
 	waitFor("the renamed bridge answers", healthy)
 	expect([]string{"status"}, 0, "bridge running (pid "+pid+")")
 	expect([]string{"stop"}, 0, "bridge stopped (pid "+pid+")")
+}
+
+// serving is the pids of `<bin> serve` processes (Linux /proc; nil elsewhere).
+func serving(bin string) []string {
+	var pids []string
+	dirs, _ := os.ReadDir("/proc")
+	for _, d := range dirs {
+		if b, err := os.ReadFile(filepath.Join("/proc", d.Name(), "cmdline")); err == nil && strings.HasPrefix(string(b), bin+"\x00serve\x00") {
+			pids = append(pids, d.Name())
+		}
+	}
+	return pids
 }
