@@ -183,8 +183,16 @@ func compareRecords(want, got record) []string {
 		if !slices.Equal(w.Args, g.Args) || w.Exit != g.Exit {
 			differ("command and exit", fmt.Sprint(w.Args, " → ", w.Exit), fmt.Sprint(g.Args, " → ", g.Exit))
 		}
-		if ws := tsUsage.Replace(w.Stdout); ws != g.Stdout {
-			differ("stdout", fmt.Sprintf("%q", ws), fmt.Sprintf("%q", g.Stdout))
+		gotStdout := g.Stdout
+		if len(g.Args) > 0 && g.Args[0] == "status" {
+			// the Go status adds troubleshooting lines (version, herdr, optional
+			// commands) after the TypeScript's output; printEnvironment in cli.go
+			if i := strings.Index(gotStdout, "agentwebctl "); i >= 0 {
+				gotStdout = gotStdout[:i]
+			}
+		}
+		if ws := tsUsage.Replace(w.Stdout); ws != gotStdout {
+			differ("stdout", fmt.Sprintf("%q", ws), fmt.Sprintf("%q", gotStdout))
 		}
 		if ws := tsUsage.Replace(w.Stderr); ws != g.Stderr {
 			differ("stderr", fmt.Sprintf("%q", ws), fmt.Sprintf("%q", g.Stderr))
@@ -212,6 +220,9 @@ func compareRecords(want, got record) []string {
 		differ("ws received", wr, gr)
 	}
 	wq, gq := requests(want), requests(got)
+	if got.CLI != nil && len(got.CLI.Args) > 0 && got.CLI.Args[0] == "status" {
+		gq = slices.DeleteFunc(gq, func(r string) bool { return strings.HasPrefix(r, "ping ") })
+	}
 	if strings.HasPrefix(want.Op, "ws-") {
 		wq, gq = distinct(wq), distinct(gq)
 	}
