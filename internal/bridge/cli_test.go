@@ -139,3 +139,21 @@ func TestCLIPort(t *testing.T) {
 		t.Errorf("the environment wins: %s", got)
 	}
 }
+
+// The same on systems without /proc, where ps prints the command line in one piece.
+func TestIsBridgeCommandLine(t *testing.T) {
+	const root = "/Users/u/repo"
+	for cmd, want := range map[string]bool{
+		"/Users/u/Library/herdr plugins/bin/agentwebctl serve":     true, // a path with a space
+		"./bin/agentwebctl run":                                    true,
+		"/opt/homebrew/bin/node /Users/u/repo/dist/server/main.js": true,
+		"node /Users/u/repo/server/main.ts":                        true,
+		"vim /Users/u/repo/server/main.ts":                         false,
+		"node /Users/u/other/dist/server/main.js":                  false,
+		"/x/agentwebctl agent wait p1":                             false,
+	} {
+		if got := isBridgeCommandLine(cmd, root); got != want {
+			t.Errorf("isBridgeCommandLine(%q) = %v, want %v", cmd, got, want)
+		}
+	}
+}
