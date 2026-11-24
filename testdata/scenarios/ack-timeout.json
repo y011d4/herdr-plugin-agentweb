@@ -2,7 +2,7 @@
  "scenario": "ack-timeout",
  "outputs": [
   {
-   "t": 5,
+   "t": 4,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -17,10 +17,16 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
-   "t": 10007,
+   "t": 10005,
    "kind": "state",
    "connected": false,
    "panes": {
@@ -35,10 +41,16 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
-   "t": 11011,
+   "t": 11008,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -53,15 +65,21 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
-   "t": 11013,
+   "t": 11009,
    "kind": "conn",
    "connected": true
   },
   {
-   "t": 11014,
+   "t": 11010,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -76,17 +94,23 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
-   "t": 11425,
+   "t": 11413,
    "kind": "status",
    "paneId": "p1",
    "from": "idle",
    "to": "done"
   },
   {
-   "t": 11478,
+   "t": 11466,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -101,10 +125,16 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
-   "t": 11676,
+   "t": 11663,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -119,6 +149,12 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   }
  ]

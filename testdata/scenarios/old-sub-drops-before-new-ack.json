@@ -2,7 +2,7 @@
  "scenario": "old-sub-drops-before-new-ack",
  "outputs": [
   {
-   "t": 3,
+   "t": 4,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -17,6 +17,12 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
@@ -40,17 +46,23 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
-   "t": 660,
+   "t": 661,
    "kind": "status",
    "paneId": "p4",
    "from": "unknown",
    "to": "idle"
   },
   {
-   "t": 660,
+   "t": 662,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -70,17 +82,24 @@
      "seq": null,
      "changeSeq": null
     }
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3",
+    "t4": "t4"
    }
   },
   {
-   "t": 1265,
+   "t": 1267,
    "kind": "status",
    "paneId": "p2",
    "from": "working",
    "to": "done"
   },
   {
-   "t": 1265,
+   "t": 1267,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -100,10 +119,17 @@
      "seq": null,
      "changeSeq": null
     }
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3",
+    "t4": "t4"
    }
   },
   {
-   "t": 1318,
+   "t": 1320,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -123,10 +149,17 @@
      "seq": null,
      "changeSeq": null
     }
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3",
+    "t4": "t4"
    }
   },
   {
-   "t": 1719,
+   "t": 1728,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -146,10 +179,17 @@
      "seq": null,
      "changeSeq": null
     }
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3",
+    "t4": "t4"
    }
   },
   {
-   "t": 2322,
+   "t": 2331,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -169,6 +209,13 @@
      "seq": null,
      "changeSeq": null
     }
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3",
+    "t4": "t4"
    }
   }
  ]

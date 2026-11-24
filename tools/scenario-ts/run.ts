@@ -20,9 +20,19 @@ function panes(state: NormalizedState): Record<string, unknown> {
   return m;
 }
 
+function tabs(state: NormalizedState): Record<string, string> {
+  return Object.fromEntries([...state._tabById].map(([id, t]) => [id, t.label]));
+}
+
 const client = createHerdrClient({
   socketPath: process.argv[2],
-  onState(state) { out({ kind: 'state', connected: state.connected, panes: panes(state) }); },
+  onState(state) {
+    const f = state.focused;
+    out({
+      kind: 'state', connected: state.connected, panes: panes(state),
+      focused: `${f.workspaceId ?? ''}/${f.tabId ?? ''}/${f.paneId ?? ''}`, tabs: tabs(state),
+    });
+  },
   onAgentStatus(change) { out({ kind: 'status', paneId: change.paneId, from: change.from, to: change.to }); },
   onConnectionChange(connected) { out({ kind: 'conn', connected }); },
 });

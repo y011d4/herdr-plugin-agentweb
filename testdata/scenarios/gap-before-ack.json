@@ -17,22 +17,28 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
-   "t": 406,
+   "t": 407,
    "kind": "conn",
    "connected": true
   },
   {
-   "t": 407,
+   "t": 410,
    "kind": "status",
    "paneId": "p1",
    "from": "idle",
    "to": "done"
   },
   {
-   "t": 407,
+   "t": 410,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -47,10 +53,16 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
-   "t": 459,
+   "t": 463,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -65,6 +77,12 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   }
  ]

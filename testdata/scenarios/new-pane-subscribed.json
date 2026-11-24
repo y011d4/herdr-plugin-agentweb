@@ -2,29 +2,6 @@
  "scenario": "new-pane-subscribed",
  "outputs": [
   {
-   "t": 3,
-   "kind": "state",
-   "connected": true,
-   "panes": {
-    "p1": {
-     "status": "idle",
-     "seq": null,
-     "changeSeq": null
-    },
-    "p2": {
-     "status": "working",
-     "seq": null,
-     "changeSeq": null
-    },
-    "p3": null
-   }
-  },
-  {
-   "t": 4,
-   "kind": "conn",
-   "connected": true
-  },
-  {
    "t": 5,
    "kind": "state",
    "connected": true,
@@ -40,17 +17,52 @@
      "changeSeq": null
     },
     "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
    }
   },
   {
-   "t": 662,
+   "t": 5,
+   "kind": "conn",
+   "connected": true
+  },
+  {
+   "t": 6,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  },
+  {
+   "t": 666,
    "kind": "status",
    "paneId": "p4",
    "from": "unknown",
    "to": "working"
   },
   {
-   "t": 662,
+   "t": 666,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -70,10 +82,17 @@
      "seq": null,
      "changeSeq": null
     }
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3",
+    "t4": "t4"
    }
   },
   {
-   "t": 663,
+   "t": 667,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -93,17 +112,24 @@
      "seq": null,
      "changeSeq": null
     }
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3",
+    "t4": "t4"
    }
   },
   {
-   "t": 967,
+   "t": 970,
    "kind": "status",
    "paneId": "p4",
    "from": "working",
    "to": "done"
   },
   {
-   "t": 1020,
+   "t": 1021,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -123,10 +149,17 @@
      "seq": 1,
      "changeSeq": 1
     }
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3",
+    "t4": "t4"
    }
   },
   {
-   "t": 1218,
+   "t": 1220,
    "kind": "state",
    "connected": true,
    "panes": {
@@ -146,6 +179,13 @@
      "seq": 1,
      "changeSeq": 1
     }
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3",
+    "t4": "t4"
    }
   }
  ]
