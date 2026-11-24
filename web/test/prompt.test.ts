@@ -51,7 +51,7 @@ describe('parsePrompt — option descriptions', () => {
 
   it('reads each description, rejoining its wrapped lines', () => {
     const p = parsePrompt([
-      rule(60),
+      rule(25),
       ' ☐ Color',
       'Pick a color',
       '',
@@ -62,10 +62,10 @@ describe('parsePrompt — option descriptions', () => {
       '     落ち着いた印象の色で',
       '     す。',
       '  3. Type something.',
-      rule(60),
+      rule(25),
       '  4. Chat about this',
       '',
-      'Enter to select · Esc to cancel',
+      'Esc to cancel',
     ].join('\n'));
     assert.equal(p!.question, 'Pick a color');
     assert.deepEqual(p!.options.map((o) => [o.label, o.description]), [
@@ -112,6 +112,25 @@ describe('parsePrompt — option descriptions', () => {
       ' Esc to cancel',
     ].join('\n'));
     assert.equal(p!.options[1].label, 'Yes, allow /home/me/projects/a-very-long-repository-name/src');
+  });
+
+  it('keeps the spaces of a label word-wrapped next to a long path', () => {
+    const p = parsePrompt([
+      rule(40),
+      ' ❯ 1. Yes',
+      '   2. Yes, allow reading from',
+      '      /home/me/projects/herdr-plugin/',
+      '      during this session',
+      '   3. No',
+      '',
+      ' Esc to cancel',
+    ].join('\n'));
+    assert.equal(p!.options[1].label, 'Yes, allow reading from /home/me/projects/herdr-plugin/ during this session');
+  });
+
+  it('keeps a space a CJK description wrapped at', () => {
+    const p = parsePrompt([rule(40), '❯ 1. 안정', '     이 옵션은 가장 안정적인 선택이며', '     팀이 이미 잘 알고 있습니다', '  2. 실험', HINT].join('\n'));
+    assert.equal(p!.options[0].description, '이 옵션은 가장 안정적인 선택이며 팀이 이미 잘 알고 있습니다');
   });
 
   it('keeps a description line that reads like an option in the description', () => {

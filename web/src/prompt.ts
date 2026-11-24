@@ -22,20 +22,25 @@ export function displayCols(line: string): number {
 // Whether `next` is the terminal's wrap of `prev` on a screen `width` cells wide: `prev`
 // left no room for next's first word. The room is capped so a long first word (a path,
 // a run of CJK text) under a short line still reads as a line of its own.
+// ponytail: positions only, so a label ending within a word of the right edge takes its
+// description as its own tail (rare: labels are short); Claude Code dims descriptions,
+// so the ANSI style of the two lines would tell them apart if that ever matters.
 function isWrap(prev: string, next: string, width: number): boolean {
   const room = width - displayCols(prev);
   return room <= 12 && room <= displayCols(next.match(/\S+/)?.[0] ?? '');
 }
 
 // Rejoin line `next` to `text`, which ends with line `prev`. A word wrap dropped a
-// space there; a word too long for a whole line (a path) was split mid-word, and CJK
-// text breaks between any two glyphs, so those dropped none.
+// space there. A word too long for a whole line (a path) was split mid-word, and CJK
+// text breaks between any two glyphs; those dropped none, and filled `prev` (a wide
+// glyph that didn't fit leaves one cell).
 function joinWrap(text: string, prev: string, next: string, width: number): string {
   const t = next.trim();
   const tail = prev.match(/\S+$/)?.[0] ?? '';
   const head = t.match(/^\S+/)?.[0] ?? '';
-  const split = displayCols(tail + head) > width - next.search(/\S/) ||
-    (WIDE_CHAR.test(tail.slice(-1)) && WIDE_CHAR.test(head[0] ?? ''));
+  const room = width - displayCols(prev);
+  const split = (room === 0 && displayCols(tail + head) > width - next.search(/\S/)) ||
+    (room <= 1 && WIDE_CHAR.test(tail.slice(-1)) && WIDE_CHAR.test(head[0] ?? ''));
   return split ? text + t : `${text} ${t}`;
 }
 
