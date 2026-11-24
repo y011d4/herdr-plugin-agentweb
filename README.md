@@ -408,7 +408,7 @@ listers above instead. To move to managed orchestrators:
 | --- | --- |
 | Linux amd64 | Supported, used daily |
 | Linux arm64 | Supported: CI runs the tests (including a bridge against a fake herdr) on arm64; not yet run against a real herdr |
-| macOS arm64 / amd64 | Experimental: built and unit-tested in CI, not yet run against a real herdr; see [Known limitations](#known-limitations) |
+| macOS arm64 / amd64 | Experimental: both are built; CI runs the unit tests on arm64 only. Not yet run against a real herdr; see [Known limitations](#known-limitations) |
 | herdr | 0.9.5 (socket protocol 22) verified. With another protocol the bridge logs a warning in `bridge.log`, and `status` shows it |
 | Claude Code | 2.1.322 verified: the orchestrator permission rules and the chat view's transcript format |
 
