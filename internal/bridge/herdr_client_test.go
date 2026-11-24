@@ -153,3 +153,92 @@ func TestHerdrRPCReturnsHerdrErrorCode(t *testing.T) {
 		t.Errorf("pane.get: got %s %v", res, err)
 	}
 }
+
+// actorValue reads something the client's actor owns.
+func actorValue[T any](c *HerdrClient, f func() T) T {
+	ch := make(chan T, 1)
+	c.post(func() { ch <- f() })
+	return <-ch
+}
+
+// The wait before a reconnect doubles after each failure, up to 30 s, and starts over
+// once a subscription is acknowledged.
+func TestHerdrClientReconnectBackoff(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "fh")
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "h.sock") // nothing listens yet
+	c := NewHerdrClient(sock, HerdrClientCallbacks{})
+	defer c.Destroy()
+	c.post(func() { c.backoff = 5 * time.Millisecond })
+	c.Start()
+	time.Sleep(150 * time.Millisecond)
+	backoff := func() time.Duration { return actorValue(c, func() time.Duration { return c.backoff }) }
+	if b := backoff(); b < 40*time.Millisecond || b%(5*time.Millisecond) != 0 || (b/(5*time.Millisecond))&(b/(5*time.Millisecond)-1) != 0 {
+		t.Errorf("after ~150 ms of failures the wait is %v, want 5 ms doubled at least 3 times", b)
+	}
+	srv, err := fakeherdr.Start(sock, fakeherdr.NewWorld().Handler())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	for end := time.Now().Add(5 * time.Second); !c.IsConnected(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("never connected")
+		}
+	}
+	if b := backoff(); b != backoffInitial {
+		t.Errorf("connected, the wait is %v, want it back at %v", b, backoffInitial)
+	}
+
+	capped := NewHerdrClient(filepath.Join(dir, "none.sock"), HerdrClientCallbacks{})
+	defer capped.Destroy()
+	capped.post(func() { capped.backoff = 20 * time.Second })
+	capped.Start()
+	time.Sleep(100 * time.Millisecond)
+	if b := actorValue(capped, func() time.Duration { return capped.backoff }); b != backoffMax {
+		t.Errorf("doubling 20 s gave %v, want the %v cap", b, backoffMax)
+	}
+}
+
+// An agent.list answer to a request sent before the subscription dropped may predate
+// changes the bridge never saw: it is ignored, even when it lands after the reconnect
+// (coverageEpoch).
+func TestHerdrClientIgnoresAnAgentListFromBeforeADrop(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "fh")
+	defer os.RemoveAll(dir)
+	world := fakeherdr.NewWorld()
+	worldH := world.Handler()
+	var mu sync.Mutex
+	calls := 0
+	srv, err := fakeherdr.Start(filepath.Join(dir, "h.sock"), func(m string, p json.RawMessage) fakeherdr.Reply {
+		if m != "agent.list" {
+			return worldH(m, p)
+		}
+		mu.Lock()
+		calls++
+		first := calls == 1
+		mu.Unlock()
+		seq, delay := 2, time.Duration(0)
+		if first { // answered after the drop and the reconnect
+			seq, delay = 1, 1500*time.Millisecond
+		}
+		return fakeherdr.Reply{Delay: delay, Result: map[string]any{"agents": []any{
+			map[string]any{"pane_id": "p1", "agent": "claude", "agent_status": "idle", "completion_seq": seq}}}}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	c := NewHerdrClient(srv.Path, HerdrClientCallbacks{})
+	defer c.Destroy()
+	c.Start()
+	env := &fakeherdr.Env{Srv: srv, World: world, Errorf: t.Errorf}
+	env.WaitCount("agent.list", 1, 5*time.Second)
+	if srv.DropSubscriptions() != 1 {
+		t.Fatal("expected to drop one subscription")
+	}
+	time.Sleep(2500 * time.Millisecond) // the reconnect (1 s), then the stale answer (1.5 s)
+	if s := c.State(); s == nil || s.Pane("p1").Agent.CompletionSeq == nil || *s.Pane("p1").Agent.CompletionSeq != 2 {
+		t.Errorf("p1's completion seq: want 2 from after the reconnect, got %+v", s.Pane("p1").Agent)
+	}
+}
