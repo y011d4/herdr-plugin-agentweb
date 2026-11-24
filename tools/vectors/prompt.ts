@@ -1,6 +1,5 @@
-// Writes testdata/vectors/prompt.json: web/src/prompt.ts's parsePrompt on the screens of
-// the "server parsePrompt matches the client copy" suite (server/test/prompt-identity.test.ts),
-// null where it finds no prompt. The Go bridge's parsePrompt is tested against it
+// Writes testdata/vectors/prompt.json: web/src/prompt.ts's parsePrompt on the screens
+// below, null where it finds no prompt. The Go bridge's parsePrompt is tested against it
 // (internal/bridge/prompt_identity_test.go), and web/test/prompt-vectors.test.ts keeps the
 // web copy producing it, so changing either side alone fails a test.
 // Usage: node tools/vectors/prompt.ts

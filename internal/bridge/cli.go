@@ -151,30 +151,11 @@ func ownExe() string {
 	return exe
 }
 
-// legacyRoot is the plugin checkout this binary is part of (<root>/bin/agentwebctl),
-// whose TypeScript bridge it also recognizes until that is deleted; "" when it isn't in one.
-func legacyRoot(exe string) string {
-	if exe == "" || filepath.Base(filepath.Dir(exe)) != "bin" {
-		return ""
-	}
-	return filepath.Dir(filepath.Dir(exe))
-}
-
 // isBridgeArgv is whether a command line is a bridge: `agentwebctl serve|run`, not
 // another agentwebctl command (an orchestrator's background `agent wait` must not get
-// a SIGTERM through a reused PID), whatever dir the binary lives in. Until the
-// TypeScript bridge is deleted (CLAUDE.md, Follow-ups), also that bridge when it runs from
-// root, this binary's checkout, exactly as the TS CLI launched it: node with the entry
-// point as its first argument (an editor open on that file doesn't count).
-func isBridgeArgv(argv []string, root string) bool {
-	if len(argv) >= 2 && path.Base(argv[0]) == "agentwebctl" && (argv[1] == "serve" || argv[1] == "run") {
-		return true
-	}
-	if root == "" {
-		return false
-	}
-	return len(argv) >= 2 && strings.HasPrefix(path.Base(argv[0]), "node") &&
-		(argv[1] == filepath.Join(root, "dist", "server", "main.js") || argv[1] == filepath.Join(root, "server", "main.ts"))
+// a SIGTERM through a reused PID), whatever dir the binary lives in.
+func isBridgeArgv(argv []string) bool {
+	return len(argv) >= 2 && path.Base(argv[0]) == "agentwebctl" && (argv[1] == "serve" || argv[1] == "run")
 }
 
 // looksLikeBridge checks that a live pid from a pidfile still runs the bridge: the
@@ -188,7 +169,7 @@ func looksLikeBridge(pid int) bool {
 			return true
 		}
 		argv := strings.Split(strings.TrimSuffix(string(b), "\x00"), "\x00")
-		if isBridgeArgv(argv, legacyRoot(exe)) {
+		if isBridgeArgv(argv) {
 			return true
 		}
 		// this very binary under another name (a symlink, a renamed file)
@@ -204,9 +185,7 @@ func looksLikeBridge(pid int) bool {
 }
 
 // isBridgeCommandLine is the check for a command line as ps prints it (no /proc): it
-// ends in `agentwebctl serve|run` (a binary path may hold spaces). ps marks no
-// argument boundaries, so the TypeScript bridge, whose node and entry paths would have
-// to be told apart, is recognized on Linux only: the switch from it happened there.
+// ends in `agentwebctl serve|run` (a binary path may hold spaces).
 func isBridgeCommandLine(cmd string) bool {
 	return strings.HasSuffix(cmd, "agentwebctl serve") || strings.HasSuffix(cmd, "agentwebctl run")
 }

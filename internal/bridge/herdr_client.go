@@ -8,8 +8,8 @@ package bridge
 // Nothing else touches that state: socket reads, RPCs and timers run on their own
 // goroutines and post a closure back to the actor. The actor never blocks on I/O.
 // The State last handed to a callback is also published through an atomic pointer
-// for readers: what server/main.ts keeps as its currentState (a focus event updates
-// the model but not that, until the next push).
+// for readers: the state the server reads (a focus event updates the model but not
+// that, until the next push).
 
 import (
 	"bufio"
