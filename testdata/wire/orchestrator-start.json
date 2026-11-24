@@ -18,7 +18,7 @@
   {
    "method": "workspace.create",
    "params": {
-    "cwd": "$TMP/data/herdr-agentweb/orchestrators/test",
+    "cwd": "$TMP/data/herdr-yoicks/orchestrators/test",
     "env": {
      "CLAUDE_CONFIG_DIR": "$TMP/claude-b"
     },

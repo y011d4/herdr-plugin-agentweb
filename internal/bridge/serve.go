@@ -85,7 +85,7 @@ func Serve(web fs.FS, rules string) error {
 		return err
 	}
 	base := fmt.Sprintf("http://%s:%d", cfg.Host, cfg.Port)
-	fmt.Printf("herdr-agentweb %s listening on %s\n", Version, base)
+	fmt.Printf("yoicks %s listening on %s\n", Version, base)
 	fmt.Printf("connect: %s?token=%s\n", base, token)
 	client.Start()
 
@@ -107,7 +107,7 @@ func Serve(web fs.FS, rules string) error {
 		return err
 	case <-ctx.Done():
 	}
-	fmt.Println("[herdr-agentweb] shutting down")
+	fmt.Println("[yoicks] shutting down")
 	client.Destroy()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

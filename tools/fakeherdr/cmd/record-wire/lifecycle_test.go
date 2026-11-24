@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/y011d4/herdr-plugin-agentweb/tools/fakeherdr"
+	"github.com/y011d4/herdr-plugin-yoicks/tools/fakeherdr"
 )
 
 // The commands herdr's actions and panes run (start, status, stop, run), on the Go
@@ -25,7 +25,7 @@ func TestGoLifecycleCommands(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts and stops real bridges")
 	}
-	bin := buildAgentwebctl(t)
+	bin := buildYoicks(t)
 	dir := t.TempDir()
 	sockDir, err := os.MkdirTemp("", "fh") // unix socket paths must stay short
 	if err != nil {
@@ -43,7 +43,7 @@ func TestGoLifecycleCommands(t *testing.T) {
 	state, port := filepath.Join(dir, "state"), freePort(t)
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(dir, "home"),
 		"HERDR_PLUGIN_STATE_DIR=" + state, "HERDR_PLUGIN_CONFIG_DIR=" + filepath.Join(dir, "config"),
-		"XDG_DATA_HOME=" + filepath.Join(dir, "data"), "HERDR_AGENTWEB_PORT=" + port, "HERDR_SOCKET_PATH=" + fake.Path}
+		"XDG_DATA_HOME=" + filepath.Join(dir, "data"), "HERDR_YOICKS_PORT=" + port, "HERDR_SOCKET_PATH=" + fake.Path}
 	var printed []string // everything the action commands printed
 	ctl := func(args ...string) (int, string) {
 		t.Helper()
@@ -63,7 +63,7 @@ func TestGoLifecycleCommands(t *testing.T) {
 	expect := func(args []string, wantCode int, wantOut string) {
 		t.Helper()
 		if code, out := ctl(args...); code != wantCode || !strings.Contains(out, wantOut) {
-			t.Errorf("agentwebctl %v: exit %d, %q; want exit %d with %q", args, code, out, wantCode, wantOut)
+			t.Errorf("yoicks %v: exit %d, %q; want exit %d with %q", args, code, out, wantCode, wantOut)
 		}
 	}
 	healthy := func() bool {

@@ -1,8 +1,8 @@
-// Package agentweb holds the files the agentwebctl binary carries: the built web UI
+// Package yoicks holds the files the yoicks binary carries: the built web UI
 // and the orchestrator rules. Build the web UI first (npm run build:web): the
 // patterns below fail the Go build when it is missing, so a binary never ships
 // without it.
-package agentweb
+package yoicks
 
 import "embed"
 

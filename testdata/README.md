@@ -33,7 +33,7 @@ with the dir's `.envrc` loaded (no allow list), and `tailscale` and `qrencode` a
 absent, so nothing depends on this machine's own setup. Each CLI command runs under
 `setsid -f`, detached from any `claude` process, since the CLI takes its nearest
 claude ancestor's account as its own. It records the current build
-(`./cmd/agentwebctl`; build the web UI first), so re-record only for an intended change
+(`./cmd/yoicks`; build the web UI first), so re-record only for an intended change
 of behavior, and review the diff. From the repo root:
 
     go build -o /tmp/record-wire ./tools/fakeherdr/cmd/record-wire && /tmp/record-wire
@@ -42,15 +42,15 @@ It writes `wire/DONE` (or `wire/FAILED`) when finished. Two runs give the same f
 except the order of a fan-out sent concurrently (`cli-overview`'s account lookups).
 
 `TestGoMatchesWireRecordings` (`tools/fakeherdr/cmd/record-wire/main_test.go`, part of
-`go test ./...`; build the web UI first) builds the Go `agentwebctl`, records it
-(`agentwebctl serve` and its CLI commands) through every operation on a free port, and
+`go test ./...`; build the web UI first) builds the Go `yoicks`, records it
+(`yoicks serve` and its CLI commands) through every operation on a free port, and
 compares:
 
 - the HTTP exchange and WS messages as JSON values (key order doesn't count; WS
   messages received as a set);
 - the CLI's arguments, exit code, stdout and stderr exactly, and the fake
-  `herdr`/`gh` calls. Usage lines recorded from the TypeScript say `agentwebctl.js`
-  where the Go ones say `agentwebctl`; `status`'s trailing troubleshooting lines and its
+  `herdr`/`gh` calls. Usage lines recorded from the TypeScript say `yoicks.js` (renamed from `agentwebctl.js`)
+  where the Go ones say `yoicks`; `status`'s trailing troubleshooting lines and its
   `ping` aren't compared (they depend on the machine);
 - the herdr requests in order. A run of the same method counts as a set (a fan-out
   sent concurrently). The WS watches poll on a timer, so they are

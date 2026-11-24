@@ -44,7 +44,7 @@ func contractState() ClientState {
 			{PaneID: "p3", TabID: "t3", WorkspaceID: "w2", Agent: "claude", DisplayAgent: "Claude Code", AgentStatus: "done",
 				CustomStatus: "reviewing", Cwd: "/home/u/repo-wt-feat"},
 			{PaneID: "p4", TabID: "t1", WorkspaceID: "w1", Agent: "claude", AgentStatus: "idle",
-				Cwd: "/home/u/.local/share/herdr-agentweb/orchestrators/personal"},
+				Cwd: "/home/u/.local/share/herdr-yoicks/orchestrators/personal"},
 			{PaneID: "p5", TabID: "t4", WorkspaceID: "w3"},
 			{PaneID: "p6", TabID: "t3", WorkspaceID: "w2", Agent: "claude", AgentStatus: "blocked", Cwd: "/home/u/repo-wt-feat"},
 			{PaneID: "p7", TabID: "t2", WorkspaceID: "w1", Agent: "codex", Cwd: "/home/u/repo"}, // no status: unknown
@@ -64,8 +64,8 @@ func contractState() ClientState {
 	}
 	account := "/home/u/.claude/projects"
 	defs := []OrchestratorDef{
-		{Name: "personal", Label: "Personal", Dir: "/home/u/.local/share/herdr-agentweb/orchestrators/personal", Managed: true},
-		{Name: "work", Label: "", Dir: "/home/u/.local/share/herdr-agentweb/orchestrators/work", Managed: true},
+		{Name: "personal", Label: "Personal", Dir: "/home/u/.local/share/herdr-yoicks/orchestrators/personal", Managed: true},
+		{Name: "work", Label: "", Dir: "/home/u/.local/share/herdr-yoicks/orchestrators/work", Managed: true},
 	}
 	views := findOrchestrators(s, defs, map[string]*string{"p1": &account, "p3": &account, "p4": &account})
 	return ClientState{State: s, Orchestrators: views, OrchestratorPaneID: views[0].PaneID}

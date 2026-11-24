@@ -12,7 +12,7 @@
   ],
   "exit": 2,
   "stdout": "",
-  "stderr": "usage: agentwebctl.js agent get|read|prompt|wait \u003ctarget\u003e [herdr agent flags]\n       agentwebctl.js agent start \u003cname\u003e --cwd \u003cdir\u003e [--profile \u003claunch profile\u003e] [--worktree \u003cbranch\u003e [--base \u003cref\u003e]]\n"
+  "stderr": "usage: yoicks.js agent get|read|prompt|wait \u003ctarget\u003e [herdr agent flags]\n       yoicks.js agent start \u003cname\u003e --cwd \u003cdir\u003e [--profile \u003claunch profile\u003e] [--worktree \u003cbranch\u003e [--base \u003cref\u003e]]\n"
  },
  "herdr": []
 }

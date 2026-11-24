@@ -1,6 +1,9 @@
-# herdr-plugin-agentweb
+# herdr-plugin-yoicks
 
 [English](./README.md) | **日本語**
+
+*Yoicks* は、狩人が猟犬の群れを先へ駆り立てる掛け声です。以前の名前は `herdr-plugin-agentweb` です
+([agentweb からの改名](#agentweb-からの改名) を参照)。
 
 [herdr](https://herdr.dev) で動いているすべてのコーディングエージェントを、スマホから
 モニタリング・操作するための herdr プラグインです。小さなローカルブリッジサーバー
@@ -49,12 +52,12 @@ herdr サーバー
 リリースを GitHub から直接インストールします:
 
 ```bash
-herdr plugin install y011d4/herdr-plugin-agentweb --ref v0.1.0
+herdr plugin install y011d4/herdr-plugin-yoicks --ref v0.1.0
 ```
 
 clone もビルドも不要です。`herdr plugin install` はマニフェストの `[[build]]`
 (`scripts/plugin-build.sh release`) を実行します。これは、その版の OS と CPU に合うバイナリを
-[GitHub のリリース](https://github.com/y011d4/herdr-plugin-agentweb/releases) から取得し、そのタグの
+[GitHub のリリース](https://github.com/y011d4/herdr-plugin-yoicks/releases) から取得し、そのタグの
 リポジトリにコミットされた `release/checksums.txt` の SHA-256 と照らし合わせます。合わないバイナリは
 インストールしません。(`--ref` を付けないと herdr は既定のブランチを入れ、その `herdr-plugin.toml` に
 書かれた版のリリースを取得します。) ローカルのチェックアウトで開発したい場合は「開発」の節を参照してください。
@@ -65,27 +68,45 @@ clone もビルドも不要です。`herdr plugin install` はマニフェスト
 変わるので、新しい `stop` は古いバイナリが起動したブリッジを見つけられないことがあります:
 
 ```bash
-herdr plugin action invoke y011d4.agentweb.stop   # 終わるまで待つ
+herdr plugin action invoke y011d4.yoicks.stop   # 終わるまで待つ
 herdr plugin update                               # または: herdr plugin install … --ref v<新しい版>
-herdr plugin action invoke y011d4.agentweb.start
+herdr plugin action invoke y011d4.yoicks.start
 ```
 
 続いて、動いている orchestrator をそれぞれ起動し直します (Home の **Clear**)。bridge は起動のときに
-rules と許可リストを新しい `agentwebctl` のパスに書き直しますが、動いている orchestrator は古いパスを呼び続けます。
+rules と許可リストを新しい `yoicks` のパスに書き直しますが、動いている orchestrator は古いパスを呼び続けます。
 以前の、管理されない orchestrator のディレクトリ (`orchestrator_dir`、または古い `dispatcher`) は利用者のもので、
-書き直されません。その `CLAUDE.md` と `.claude/settings.json` の `agentwebctl` のパス (Go の bridge より前の版
-からなら `node …/dist/bin/agentwebctl.js`) を `<plugin dir>/bin/agentwebctl` に自分で直すか、管理される
-`orchestrators` に移ってください。
+書き直されません。その `CLAUDE.md` と `.claude/settings.json` の古いパス (改名より前なら
+`…/bin/agentwebctl`、Go の bridge より前なら `node …/dist/bin/agentwebctl.js`) を
+`<plugin dir>/bin/yoicks` に自分で直すか、管理される `orchestrators` に移ってください。
+
+### agentweb からの改名
+
+v0.1.0 より前、このプラグインの ID は `y011d4.agentweb`、バイナリは `agentwebctl` でした。herdr は
+新しい ID を別のプラグインとして扱うので、改名より前のインストールは手で移します:
+
+1. 古いブリッジを止め、終わるまで待つ: `herdr plugin action invoke y011d4.agentweb.stop`
+2. この版をインストール (またはリンク) する。`config.json` を `herdr plugin config-dir y011d4.agentweb`
+   から `herdr plugin config-dir y011d4.yoicks` へ、`token` と `pane-profiles.json` を
+   `~/.local/state/herdr/plugins/y011d4.agentweb/` から `~/.local/state/herdr/plugins/y011d4.yoicks/`
+   へコピーする。トークンを移せば、ペアリング済みのスマホは同じ URL のまま使えます。
+3. 起動し (`herdr plugin action invoke y011d4.yoicks.start`)、動いている orchestrator を Clear して
+   から、`herdr plugin uninstall y011d4.agentweb` (または `unlink`) する。
+
+`~/.local/share/herdr-agentweb` は、あるあいだ使い続けます。orchestrator のディレクトリが動かないので、
+Claude Code のメモリ、会話の履歴、フォルダの信頼設定もそのまま残ります。新しい `stop` は
+`agentwebctl` として起動したブリッジも見分けます。`HERDR_AGENTWEB_HOST`/`_PORT` は
+`HERDR_YOICKS_HOST`/`_PORT` になりました。
 
 ### 前の版に戻す
 
 前のリリースに戻すときは、ブリッジを止め、その版を入れ直して起動します:
 
 ```bash
-herdr plugin action invoke y011d4.agentweb.stop   # 終わるまで待つ
-herdr plugin uninstall y011d4.agentweb            # トークン、config、orchestrator のディレクトリは残る
-herdr plugin install y011d4/herdr-plugin-agentweb --ref v<前の版>
-herdr plugin action invoke y011d4.agentweb.start
+herdr plugin action invoke y011d4.yoicks.stop   # 終わるまで待つ
+herdr plugin uninstall y011d4.yoicks            # トークン、config、orchestrator のディレクトリは残る
+herdr plugin install y011d4/herdr-plugin-yoicks --ref v<前の版>
+herdr plugin action invoke y011d4.yoicks.start
 ```
 
 そのあと、更新のときと同じく、動いている orchestrator を Clear してください。
@@ -93,19 +114,20 @@ herdr plugin action invoke y011d4.agentweb.start
 ### アンインストール
 
 ```bash
-herdr plugin action invoke y011d4.agentweb.stop
-herdr plugin config-dir y011d4.agentweb            # アンインストールの前に config ディレクトリを控える
-herdr plugin uninstall y011d4.agentweb
+herdr plugin action invoke y011d4.yoicks.stop
+herdr plugin config-dir y011d4.yoicks            # アンインストールの前に config ディレクトリを控える
+herdr plugin uninstall y011d4.yoicks
 ```
 
 `herdr plugin uninstall` はファイルを残します。要らないものを消してください:
 
-- インストールしたチェックアウト: `~/.config/herdr/plugins/github-installations/y011d4.agentweb-*`
-  (古い herdr では `~/.config/herdr/plugins/github/y011d4.agentweb-*`)
-- state ディレクトリ `~/.local/state/herdr/plugins/y011d4.agentweb` (`$XDG_STATE_HOME` があればその下):
+- インストールしたチェックアウト: `~/.config/herdr/plugins/github-installations/y011d4.yoicks-*`
+  (古い herdr では `~/.config/herdr/plugins/github/y011d4.yoicks-*`)
+- state ディレクトリ `~/.local/state/herdr/plugins/y011d4.yoicks` (`$XDG_STATE_HOME` があればその下):
   アクセストークン、`bridge.log`、`pane-profiles.json`
 - 上で控えた config ディレクトリ (`config.json`)
-- `~/.local/share/herdr-agentweb` (`$XDG_DATA_HOME` があればその下): orchestrator のディレクトリ。
+- `~/.local/share/herdr-yoicks` (改名より前からなら `herdr-agentweb`。`$XDG_DATA_HOME` があればその下):
+  orchestrator のディレクトリ。
   自分で書いた `local.md` も含みます
 
 ### 起動
@@ -113,15 +135,15 @@ herdr plugin uninstall y011d4.agentweb
 ブリッジを起動する (いずれかの方法):
 
 ```bash
-herdr plugin action invoke y011d4.agentweb.start   # デタッチしたデーモンとして起動
-herdr plugin pane open --plugin y011d4.agentweb --entrypoint server  # ペイン内で可視化して起動
+herdr plugin action invoke y011d4.yoicks.start   # デタッチしたデーモンとして起動
+herdr plugin pane open --plugin y011d4.yoicks --entrypoint server  # ペイン内で可視化して起動
 ```
 
 続いて、QR コードをスキャンしてスマホを接続します (システムパッケージ `qrencode` が必要。
 無い場合は URL の表示にフォールバックします):
 
 ```bash
-herdr plugin pane open --plugin y011d4.agentweb --entrypoint connect
+herdr plugin pane open --plugin y011d4.yoicks --entrypoint connect
 ```
 
 このオーバーレイペインには、接続 URL の QR がアクセストークン付きで表示されます — 設定した
@@ -136,14 +158,14 @@ state ディレクトリ (`token` ファイル。パスはアクションの出�
 
 | エントリポイント | 種別 | 内容 |
 | --- | --- | --- |
-| `y011d4.agentweb.start` | action | ブリッジをデタッチしたデーモンとして起動 |
-| `y011d4.agentweb.stop` | action | 動作中のブリッジを停止 |
-| `y011d4.agentweb.status` | action | 動作状況、URL (トークンなし)、プラグインと herdr の版、見つかった任意のコマンドを表示 |
+| `y011d4.yoicks.start` | action | ブリッジをデタッチしたデーモンとして起動 |
+| `y011d4.yoicks.stop` | action | 動作中のブリッジを停止 |
+| `y011d4.yoicks.status` | action | 動作状況、URL (トークンなし)、プラグインと herdr の版、見つかった任意のコマンドを表示 |
 | `server` | pane | ブリッジを可視ペインで起動 (フォアグラウンド。トークン付き URL はここに表示) |
 | `connect` | pane | 接続用の QR / URL をオーバーレイ表示 |
 
 アクションは `herdr plugin action invoke <id>` で実行し、ペインは
-`herdr plugin pane open --plugin y011d4.agentweb --entrypoint <id>` で開きます。デタッチした
+`herdr plugin pane open --plugin y011d4.yoicks --entrypoint <id>` で開きます。デタッチした
 デーモンとフォアグラウンドの `server` ペインは排他です — どちらか一方だけを起動してください。
 
 ### スマホへの公開
@@ -228,8 +250,8 @@ tailscale serve --bg 8390                        # tailnet 内限定の HTTPS、
 [[keys.command]]
 key = "prefix+m"
 type = "plugin_action"
-command = "y011d4.agentweb.status"
-description = "agent web bridge status"
+command = "y011d4.yoicks.status"
+description = "yoicks bridge status"
 ```
 
 ## 設定 (config)
@@ -239,7 +261,7 @@ description = "agent web bridge status"
 次のコマンドで表示できます:
 
 ```bash
-herdr plugin config-dir y011d4.agentweb
+herdr plugin config-dir y011d4.yoicks
 ```
 
 すべてのキーは任意で、上書きしたいものだけを含めれば OK です。デフォルトを含めた全体の形は
@@ -272,15 +294,15 @@ herdr plugin config-dir y011d4.agentweb
   アプリを同じトピックに向けてください。
 
 **変更の反映:** 設定は起動時に一度だけ読み込まれるため、編集後はブリッジを再起動してください
-— `herdr plugin action invoke y011d4.agentweb.stop` の後に `…start`。
+— `herdr plugin action invoke y011d4.yoicks.stop` の後に `…start`。
 
-**環境変数による上書き:** `HERDR_AGENTWEB_HOST` と `HERDR_AGENTWEB_PORT` は `host` / `port` に
+**環境変数による上書き:** `HERDR_YOICKS_HOST` と `HERDR_YOICKS_PORT` は `host` / `port` に
 ついて `config.json` より優先されます (`public_url` と `notify_url` は config ファイルのみ)。
 優先順位は 環境変数 → `config.json` → 組み込みデフォルト です。
 
-> 開発用に bridge を直接実行する場合 (`./bin/agentwebctl run`)、`config.json` が読み込まれるのは
+> 開発用に bridge を直接実行する場合 (`./bin/yoicks run`)、`config.json` が読み込まれるのは
 > `HERDR_PLUGIN_CONFIG_DIR` が config ディレクトリを指しているときだけです
-> (`HERDR_PLUGIN_CONFIG_DIR="$(herdr plugin config-dir y011d4.agentweb)" ./bin/agentwebctl run`)。herdr はプラグインの
+> (`HERDR_PLUGIN_CONFIG_DIR="$(herdr plugin config-dir y011d4.yoicks)" ./bin/yoicks run`)。herdr はプラグインの
 > アクションやペインに対してこれを自動設定するため、herdr 経由で起動する分にはそのまま動作します。
 
 ## セキュリティモデル
@@ -326,7 +348,7 @@ glibc でも musl でも、どの Linux ディストリビューションでも�
   `worktree remove`) は断られ、orchestrator の Home にはそのアカウントのものではなく全エージェントが並び、
   **Clear** はアカウントを確かめずに起動し直し、CLI は自分の `CLAUDE_CONFIG_DIR` を呼び出し元のアカウントと
   みなします。
-- **npm で入れた Claude Code** は `node` として動くので、`agentwebctl` はそれを呼び出し元の orchestrator の
+- **npm で入れた Claude Code** は `node` として動くので、`yoicks` はそれを呼び出し元の orchestrator の
   Claude のプロセスと見分けられず、自分の `CLAUDE_CONFIG_DIR` で代わりにします。orchestrator には
   Claude Code のネイティブインストーラーで入れたものを使ってください。
 - **チャット表示の transcript** は `~/.claude/projects` と `~/.config/claude/<name>/projects` から探します。
@@ -338,10 +360,10 @@ glibc でも musl でも、どの Linux ディストリビューションでも�
 - `curl -s http://127.0.0.1:8390/healthz` が `{"ok":true,"herdrConnected":true}` を返すはずです。応答が
   なければブリッジが動いていません (起動して `bridge.log` を読んでください)。`"herdrConnected":false` なら、
   herdr のソケット (`$HERDR_SOCKET_PATH`、既定は `~/.config/herdr/herdr.sock`) につながっていません。
-- `herdr plugin action invoke y011d4.agentweb.status` は、プラグインと herdr の版、herdr の protocol
+- `herdr plugin action invoke y011d4.yoicks.status` は、プラグインと herdr の版、herdr の protocol
   (確認済みでなければ警告つき)、herdr がプラグインに渡す PATH で見つかった任意のコマンドを表示します。
-  出力は `herdr plugin log list --plugin y011d4.agentweb` の `stdout` で読めます。
-- デタッチしたブリッジのログは state ディレクトリ (`~/.local/state/herdr/plugins/y011d4.agentweb`) の
+  出力は `herdr plugin log list --plugin y011d4.yoicks` の `stdout` で読めます。
+- デタッチしたブリッジのログは state ディレクトリ (`~/.local/state/herdr/plugins/y011d4.yoicks`) の
   `bridge.log` です。動いている版、つながった herdr、エラーが出ます。トークン付きの接続 URL も
   書かれているので、ほかの人に見せないでください。
 - 更新した後もスマホに古いアプリが出るときは、閉じて開き直してください (service worker が裏で新しい版を
@@ -369,20 +391,20 @@ glibc でも musl でも、どの Linux ディストリビューションでも�
 Node.js 23.6 以上と `npm` が要ります。
 
 ```bash
-git clone https://github.com/y011d4/herdr-plugin-agentweb
-cd herdr-plugin-agentweb
-sh scripts/plugin-build.sh          # web UI、続いて bin/agentwebctl (Go)。このチェックアウトから
+git clone https://github.com/y011d4/herdr-plugin-yoicks
+cd herdr-plugin-yoicks
+sh scripts/plugin-build.sh          # web UI、続いて bin/yoicks (Go)。このチェックアウトから
 herdr plugin link "$(pwd)"
 ```
 
-bridge と CLI は Go (`cmd/agentwebctl`、`internal/bridge`) です。PWA は `web/src/` の TypeScript で、
+bridge と CLI は Go (`cmd/yoicks`、`internal/bridge`) です。PWA は `web/src/` の TypeScript で、
 `web/` にビルドされ、バイナリに埋め込まれます。
 
 ```bash
 sh scripts/plugin-build.sh          # 変更後に再ビルド。web の変更も (バイナリが web UI を埋め込むため)
 go test ./...                       # Go のテスト
 npm test                            # web UI のテスト (node --test)
-./bin/agentwebctl run               # ライブの herdr に対しフォアグラウンドで実行 (config は「設定」の節を参照)
+./bin/yoicks run               # ライブの herdr に対しフォアグラウンドで実行 (config は「設定」の節を参照)
 ```
 
 herdr は link したプラグインの build コマンドを実行**しません** (`herdr plugin link` でも、link したものを
@@ -392,7 +414,7 @@ herdr は link したプラグインの build コマンドを実行**しませ�
 リリースのバイナリを取得します。
 
 デタッチしたデーモンのログは `<state dir>/bridge.log` に出力されます
-(`~/.local/state/herdr/plugins/y011d4.agentweb`、プラグインコマンド内では `$HERDR_PLUGIN_STATE_DIR`)。
+(`~/.local/state/herdr/plugins/y011d4.yoicks`、プラグインコマンド内では `$HERDR_PLUGIN_STATE_DIR`)。
 
 ### リリース
 

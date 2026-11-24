@@ -30,7 +30,7 @@ func TestPluginBuildModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	name := fmt.Sprintf("agentwebctl_9.9.9_%s_%s", runtime.GOOS, runtime.GOARCH)
+	name := fmt.Sprintf("yoicks_9.9.9_%s_%s", runtime.GOOS, runtime.GOARCH)
 	release := []byte("release-binary")
 
 	// setup is a plugin checkout at version 9.9.9 whose checksums.txt says sum, a
@@ -56,7 +56,7 @@ func TestPluginBuildModes(t *testing.T) {
 			cmd := exec.Command("sh", append([]string{"scripts/plugin-build.sh"}, args...)...)
 			cmd.Dir = root
 			cmd.Env = append(os.Environ(), "PATH="+filepath.Join(root, "stubs")+":"+os.Getenv("PATH"),
-				"LOG="+filepath.Join(root, "log"), "AGENTWEB_RELEASE_URL=file://"+filepath.Join(root, "rel"))
+				"LOG="+filepath.Join(root, "log"), "YOICKS_RELEASE_URL=file://"+filepath.Join(root, "rel"))
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				return fmt.Errorf("%v: %s", err, out)
@@ -71,14 +71,14 @@ func TestPluginBuildModes(t *testing.T) {
 	if err := run(); err != nil {
 		t.Fatal("by hand:", err)
 	}
-	if got := read(filepath.Join(root, "bin", "agentwebctl")); got != "source-binary" {
-		t.Errorf("by hand, bin/agentwebctl = %q, want the source build", got)
+	if got := read(filepath.Join(root, "bin", "yoicks")); got != "source-binary" {
+		t.Errorf("by hand, bin/yoicks = %q, want the source build", got)
 	}
 	if err := run("release"); err != nil {
 		t.Fatal("release:", err)
 	}
-	if got := read(filepath.Join(root, "bin", "agentwebctl")); got != string(release) {
-		t.Errorf("release, bin/agentwebctl = %q, want the release binary", got)
+	if got := read(filepath.Join(root, "bin", "yoicks")); got != string(release) {
+		t.Errorf("release, bin/yoicks = %q, want the release binary", got)
 	}
 	if log := read(filepath.Join(root, "log")); strings.Count(log, "go build") != 1 {
 		t.Errorf("go build ran %d times, want only by hand:\n%s", strings.Count(log, "go build"), log)
@@ -88,7 +88,7 @@ func TestPluginBuildModes(t *testing.T) {
 	if err := run("release"); err == nil {
 		t.Error("release installed a binary whose checksum doesn't match")
 	}
-	if _, err := os.Stat(filepath.Join(root, "bin", "agentwebctl")); err == nil {
+	if _, err := os.Stat(filepath.Join(root, "bin", "yoicks")); err == nil {
 		t.Error("a mismatching binary was left in bin/")
 	}
 }
