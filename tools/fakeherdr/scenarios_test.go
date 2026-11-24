@@ -15,18 +15,16 @@ func TestCompare(t *testing.T) {
 	cases := []struct {
 		name  string
 		got   []Output
-		opt   CompareOptions
 		diffs int
 	}{
-		{"same", want, CompareOptions{}, 0},
-		{"missing transition", []Output{state("done", "w1/t1/p1", "one")}, CompareOptions{}, 1},
-		{"focus and label differ", []Output{status("idle", "done"), state("done", "w1/t1/p2", "two")}, CompareOptions{}, 1},
-		{"focus and label differ, model skipped", []Output{status("idle", "done"), state("done", "", "")}, CompareOptions{SkipModel: true}, 0},
-		{"status differs, model skipped", []Output{status("idle", "done"), state("idle", "", "")}, CompareOptions{SkipModel: true}, 1},
-		{"extra state push", []Output{status("idle", "done"), state("done", "w1/t1/p1", "one"), state("done", "w1/t1/p1", "one")}, CompareOptions{}, 1},
+		{"same", want, 0},
+		{"missing transition", []Output{state("done", "w1/t1/p1", "one")}, 1},
+		{"focus and label differ", []Output{status("idle", "done"), state("done", "w1/t1/p2", "two")}, 1},
+		{"status differs", []Output{status("idle", "done"), state("idle", "w1/t1/p1", "one")}, 1},
+		{"extra state push", []Output{status("idle", "done"), state("done", "w1/t1/p1", "one"), state("done", "w1/t1/p1", "one")}, 1},
 	}
 	for _, c := range cases {
-		if d := Compare(sc, want, c.got, c.opt); len(d) != c.diffs {
+		if d := Compare(sc, want, c.got); len(d) != c.diffs {
 			t.Errorf("%s: want %d differences, got %v", c.name, c.diffs, d)
 		}
 	}
