@@ -14,6 +14,9 @@ const screens: Array<[string, string]> = [
   ['menu with an indented ✓ description on its last option', ['● Pick one', '❯ 1. Keep', '  2. Replace', '     ✓ recommended', H].join('\n')],
   ['stale menu above a hint-less boxed prompt', ['❯ 1. Yes', '  2. No', '', ' ────── ', ' ☐ Provide input', '   Enter a value:'].join('\n')],
   ['no menu', ['just some output', 'nothing to answer'].join('\n')],
+  ['a description line that reads like an option', ['● Pick', '❯ 1. Red', '     2. is not an option', '  2. Green', '  3. Blue', H].join('\n')],
+  ['a label wrapped in the middle of a path', ['─'.repeat(40), ' ❯ 1. Yes', '   2. Yes, allow /home/me/projects/a-ver',
+    '      y-long-repository-name/src', '   3. No', '', ' Esc to cancel'].join('\n')],
   // Real Claude Code screens (v2.1.322, a 74-column pane):
   ['AskUserQuestion whose description wraps over six lines', [
     '──────────────────────────────────────────────────────────────────────────',

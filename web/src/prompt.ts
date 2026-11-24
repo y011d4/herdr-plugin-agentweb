@@ -27,9 +27,16 @@ function isWrap(prev: string, next: string, width: number): boolean {
   return room <= 12 && room <= displayCols(next.match(/\S+/)?.[0] ?? '');
 }
 
-// Rejoin wrapped text: a break between two wide glyphs dropped no space.
-function joinWrap(a: string, b: string): string {
-  return WIDE_CHAR.test(a.slice(-1)) && WIDE_CHAR.test(b[0] ?? '') ? a + b : `${a} ${b}`;
+// Rejoin line `next` to `text`, which ends with line `prev`. A word wrap dropped a
+// space there; a word too long for a whole line (a path) was split mid-word, and CJK
+// text breaks between any two glyphs, so those dropped none.
+function joinWrap(text: string, prev: string, next: string, width: number): string {
+  const t = next.trim();
+  const tail = prev.match(/\S+$/)?.[0] ?? '';
+  const head = t.match(/^\S+/)?.[0] ?? '';
+  const split = displayCols(tail + head) > width - next.search(/\S/) ||
+    (WIDE_CHAR.test(tail.slice(-1)) && WIDE_CHAR.test(head[0] ?? ''));
+  return split ? text + t : `${text} ${t}`;
 }
 
 // A menu's navigation hint line. Deliberately menu-specific ("Enter to select /
@@ -76,18 +83,19 @@ export function parsePrompt(text: string): ParsedPrompt | null {
     cur = []; sel = 0; first = -1; last = -1; gap = 0;
   };
   for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    // A line indented to the current option's text continues it, even one that reads
+    // like an option ("2. …" in a description), and is no gap.
+    if (cur.length && cont && t && lines[i].search(/\S/) >= col) {
+      const o = cur[cur.length - 1];
+      const prev = lines[i - 1];
+      if (inLabel && isWrap(prev, lines[i], width)) o.label = joinWrap(o.label, prev, lines[i], width);
+      else { inLabel = false; o.description = o.description ? joinWrap(o.description, prev, lines[i], width) : t; }
+      continue;
+    }
     const m = lines[i].match(/^\s*([❯➤▶►])?\s*(\d+)[.)]\s+(\S.*)$/);
     if (!m) {
-      if (!cur.length) continue;
-      const t = lines[i].trim();
-      if (cont && t && lines[i].search(/\S/) >= col) { // not a gap: it continues the option
-        const o = cur[cur.length - 1];
-        if (inLabel && isWrap(lines[i - 1], lines[i], width)) o.label = joinWrap(o.label, t);
-        else { inLabel = false; o.description = o.description ? joinWrap(o.description, t) : t; }
-        continue;
-      }
-      cont = false;
-      if (++gap > 4) commit();
+      if (cur.length) { cont = false; if (++gap > 4) commit(); }
       continue;
     }
     gap = 0;
