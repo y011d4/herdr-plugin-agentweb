@@ -209,6 +209,11 @@ Verified live against herdr 0.7.3 / protocol 16:
   without a response** (surfaces as opaque "connection closed"). The bridge
   validates enums in REST routes and returns a clear 400 instead.
 - `recent` reads cap at 1000 lines regardless of the requested count.
+- **`visible` is the desktop's viewport, not the live screen** (herdr 0.9.5 source + live): scrolled
+  up in herdr (`pane.get` `scroll.offset_from_bottom > 0`), it keeps returning that old text while a
+  prompt waits at the bottom — the phone then found no menu at all. `recent` (and `detection`,
+  text only) stay at the bottom, so the bridge reads a scrolled pane as `recent` with
+  `lines = viewport_rows` (`screenRead` in http.go, for every screen read).
 - **A workspace's `worktree` object is only sometimes present.** herdr attaches
   `worktree = { repo_key, repo_name, repo_root, checkout_path, is_linked_worktree }`
   to workspaces it opened via its worktree flow — including linked worktrees — but

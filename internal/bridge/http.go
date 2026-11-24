@@ -581,6 +581,11 @@ func (s *server) readPane(w http.ResponseWriter, r *http.Request, paneID string)
 	if queryParam(q, "strip_ansi") == "true" {
 		params["strip_ansi"] = true
 	}
+	var info *rawPaneInfo
+	if source == "visible" {
+		info, _ = s.paneInfo(paneID) // best-effort
+		screenRead(params, info)
+	}
 	raw, err := s.rpc("pane.read", params)
 	if err != nil {
 		herdrFailure(w, err)
@@ -595,11 +600,9 @@ func (s *server) readPane(w http.ResponseWriter, r *http.Request, paneID string)
 	}
 	// The live screen carries the same app-scroll decision the WS watch pushes, so the
 	// HTTP fallback (used while the socket is down) keeps wheel forwarding right.
-	if source == "visible" {
-		if info, err := s.paneInfo(paneID); err == nil { // best-effort
-			str, _ := text.(string)
-			out["appScroll"] = computeAppScroll(info, str)
-		}
+	if info != nil {
+		str, _ := text.(string)
+		out["appScroll"] = computeAppScroll(info, str)
 	}
 	jsonOK(w, out)
 }
@@ -611,6 +614,7 @@ type rawPaneInfo struct {
 	Scroll *struct {
 		MaxOffsetFromBottom *float64 `json:"max_offset_from_bottom"`
 		ViewportRows        *float64 `json:"viewport_rows"`
+		OffsetFromBottom    *float64 `json:"offset_from_bottom"`
 	} `json:"scroll"`
 	// the claude session identity and cwd, which locate the transcript
 	AgentSession *struct {
@@ -619,6 +623,25 @@ type rawPaneInfo struct {
 	} `json:"agent_session"`
 	Cwd           string `json:"cwd"`
 	ForegroundCwd string `json:"foreground_cwd"`
+}
+
+// screenRead makes a visible read (params) read the pane's live screen. herdr's
+// visible is the desktop's viewport: scrolled up there (to read a long reply, say), it
+// keeps returning that old text while a new prompt waits at the bottom, so the phone
+// would show no prompt at all. A scrolled pane is read from the bottom instead
+// (recent, one viewport tall). info nil (pane.get failed): left as visible.
+func screenRead(params map[string]any, info *rawPaneInfo) {
+	if info == nil || info.Scroll == nil {
+		return
+	}
+	off, rows := info.Scroll.OffsetFromBottom, info.Scroll.ViewportRows
+	if off == nil || *off == 0 || rows == nil || *rows < 1 {
+		return
+	}
+	params["source"] = "recent"
+	if lines, ok := params["lines"].(int); !ok || float64(lines) > *rows {
+		params["lines"] = int(*rows)
+	}
 }
 
 func (s *server) paneInfo(paneID string) (*rawPaneInfo, error) {
@@ -704,12 +727,22 @@ func (s *server) inputPane(w http.ResponseWriter, r *http.Request, paneID string
 			jsonError(w, http.StatusBadRequest, "invalid_params", "expect_prompt must be a string")
 			return
 		}
-		// Verify-and-send: read the visible screen and confirm its prompt identity still
+		// Verify-and-send: read the live screen and confirm its prompt identity still
 		// matches what the client last rendered, THEN press, back to back. herdr has no
-		// conditional input (and is never modified), so this is two RPCs; the window
-		// left is the local compute between them.
+		// conditional input (and is never modified), so this is a pane.get (to find the
+		// live screen), then the read and the press back to back; the window left is
+		// the local compute between those two.
 		if hasExpect {
-			raw, err := s.rpc("pane.read", map[string]any{"pane_id": paneID, "source": "visible", "format": "ansi"})
+			// Unlike the display reads, no best-effort here: without the scroll state,
+			// visible could be a stale menu on a scrolled-up desktop, which would verify.
+			info, err := s.paneInfo(paneID)
+			if err != nil {
+				herdrFailure(w, err)
+				return
+			}
+			params := map[string]any{"pane_id": paneID, "source": "visible", "format": "ansi"}
+			screenRead(params, info)
+			raw, err := s.rpc("pane.read", params)
 			if err != nil {
 				herdrFailure(w, err)
 				return
