@@ -1,4 +1,4 @@
-# bridge と agentwebctl を Go に移す計画
+（herdr の決め方は P1 で確かめる）、違いの記録に書く。herdr の場所に token がなく古い既定の場所にだけあるときは、古い方を使い続ける（herdr の外から動かしていた人の携帯の接続を切らないため）。切り替えのときの扱いは P5 の手順 2 |# bridge と agentwebctl を Go に移す計画
 
 - 状態: **承認済み**（2026-11-24。Architect と Critic の合意済み、2 回目で Critic が APPROVE）。P0 完了、K1 通過（docs/go-migration/p0-report.md。残りの見積もりの見直しもそちら）
 - 作成: 2026-11-24、ブランチ `go-migration-plan`。改訂 3（2 回目の細かい指摘まで反映。§12）
@@ -166,7 +166,7 @@ C1 から C4 は Go に移しても変わらない（Go 版は同じバイトを
 - snapshot の重なりを扱う。名前の変更から呼ばれる `refresh()`（`server/http.ts:661`）と、ack の後の照合（`server/herdr-client.ts:253`）が重なると、深さが 2 になる。`snapshotDepth`、`preBufferStatus` によるリセット、`replayedPanes`（`server/herdr-client.ts:130-141,343-354`）はそのまま移す。これを省いて「snapshot の後にたまったイベントを流すだけ」にすると、snapshot がすでに `done` を示しているペインのイベントが done→done になって通知が消える。
 - 外に見せる State は不変の値として `atomic.Pointer` で渡す（`getState` は actor を待たない）。
 - WS は接続ごとに送信用の goroutine とバッファを持つ（`ws.send` は溜めて返るが、coder/websocket の `Write` は書き終わるまで止まるため）。バッファがあふれた接続は閉じる（Node は際限なく溜めるので、違いの記録に書く。携帯は再接続して最新の State を受け取る）。
-- `broadcastState` は 3 か所から呼ばれる（`onState`、60 秒のタイマー `server/http.ts:273`、アカウントのキャッシュの `onChange` `server/http.ts:272`）。「State から送る JSON を作る → 直前の JSON と比べる → 全接続のバッファに積む」を 1 つのロックの中で行う。分けると古い State が後に届き、重複の抑止（`server/http.ts:961`）のせいで携帯が古いまま止まる。
+- `broadcastState` は 3 か所から呼ばれる（`onState`、60 秒のタイマー `server/http.ts:273`、アカウントのキャッシュの `onChange` `server/http.ts:272`）。「その時点の最新の State を読む → 送る JSON を作る → 直前の JSON と比べる → 全接続のバッファに積む」を 1 つのロックの中で行う。State は呼び出し元から受け取らず、ロックを取ってから herdr-client の公開中の値（`atomic.Pointer`）を読む（受け取った State だと、ロックを待つ間に新しい State が先に送られ、古い方が後から届きうる）。古い State が後に届くと、重複の抑止（`server/http.ts:961`）のせいで携帯が古いまま止まる。
 - `startedProfiles` と `paneAccountCache` は mutex で守る。
 - ロックの順番: `broadcastState` は配信のロックを持ったまま `paneAccounts.refresh`（`server/http.ts:955`）を呼び、その中でキャッシュのロックを取る。逆向きに、調べ終わったときの `onChange` は `broadcastState` を呼ぶ。そこで、`onChange` はキャッシュのロックを放してから呼ぶ（JS が `.then` の中で呼んでいるのと同じ。`server/account.ts:116-124`）。逆の順でロックを取ると止まる。
 
@@ -218,7 +218,7 @@ tools/shadowdiff/           並走の比較（P4）
 - 契約のテストデータを作る（§6）。web の型に、サーバーが送っているのに書かれていない `orchestratorPaneId`（`server/http.ts:283`）を足す（web は凍結していない）。
 
 本番: Node のまま。Go はライブラリとテストだけ。
-完了の条件: 対応表で N/N（移さないものは理由つきで列挙）。`go test -race` が通る。契約のテスト（§6）が Go と web の両方で通る。
+完了の条件: 対応表で N/N（移さないものは理由つきで列挙）。`go test -race` が通る。契約のテスト（§6）が Go と web の両方で通る（WS のメッセージは型と JSON の形だけで、送る仕組みは P2）。
 
 ### P2 残りの I/O 層（9〜13 日）
 
@@ -228,7 +228,7 @@ tools/shadowdiff/           並走の比較（P4）
 - http.ts（977 行）と herdr-client にはもとからテストがないので、この段階の大半はテストを書く時間になる。
 
 本番: Node のまま。Go の `serve` は偽の herdr 相手に手元で動く。
-完了の条件: シナリオの記録と通信の記録の両方に一致する（ただし違いの記録にあるものは除く）。§5.2 と §5.5 のテストが通る。サイズと RSS を測って記録する（判断には使わない）。
+完了の条件: シナリオの記録と、通信の記録のうち REST と WS の操作（`testdata/wire/` の `cli-` 以外）に一致する（ただし違いの記録にあるものは除く）。§5.2 の CLI 以外のテストと、§5.5 のうちサーバー側の項目（トークン、待ち受け、静的ファイル、transcript、アカウント、`launch_profiles`）が通る。サイズと RSS を測って記録する（判断には使わない）。
 
 ### P3 CLI（3〜4 日）
 
@@ -238,7 +238,7 @@ tools/shadowdiff/           並走の比較（P4）
 - テスト: Node 版と Go 版の CLI を同じ偽の herdr に向けて、標準出力、標準エラー、終了コード、herdr に送ったリクエストを比べる（overview、拒否の経路、使い方の誤り、`agent get/read/prompt/wait` が herdr の CLI に渡す引数）。アカウントの判定は、P0 の record-wire と同じく、本物の /proc を持つ代わりのプロセス（2 つのアカウントの `sleep`）を偽の herdr が返すことで、許す側と拒否する側の両方を確かめる。CLI は親をたどって最初の `claude` のアカウントを自分のものとするので、Claude Code の中から動かすテストは `setsid` で切り離すか、判定の入口を差し替えられるようにする（P0 で確認）。本物の claude での確認は P4b で行う。
 
 本番: Node のまま。
-完了の条件: CLI の比較がすべて一致する（違いの記録にあるものは除く）。
+完了の条件: CLI の比較と、通信の記録の `cli-` の操作がすべて一致する（違いの記録にあるものは除く）。§5.5 の残り（action の出力にトークンを出さない）が通る。
 
 ### P4 並走と試用（作業 3〜4 日と、暦日 7 日）
 
@@ -256,7 +256,8 @@ tools/shadowdiff/           並走の比較（P4）
 
 1. 携帯から Go 版に入れるよう、tailscale に 2 つ目のポートを足す: `tailscale serve --bg --https=8443 8391`。**`--https` を付けずに `tailscale serve --bg 8391` とすると、443 の割り当て（本番の Node 版）が置き換わる。** 実行の前後に `tailscale serve status` で 443 が 8390 のままであることを確かめる。4b の終わりに 8443 の割り当てを消す。
 2. §5.4 の実機確認を、Go 版から使い捨てのタブに対して行う。
-3. **CLI のアカウントの判定と worktree の削除を本物で確かめる。** 試験用の orchestrator を、一時的な `XDG_DATA_HOME` と、試験用の項目だけを持つ config で、Go 版の `agentwebctl orchestrator start test` から起動する（許可リストは Go のバイナリを指す）。試験用の項目の `env` には、その一時的な `HERDR_PLUGIN_CONFIG_DIR` と `XDG_DATA_HOME` も入れる（herdr が開くシェルには渡らないので、入れないと orchestrator の中の CLI が本物の config を読む）。その orchestrator に次をさせる:
+3. **clear の launch profile を引き継ぐ。** Go 版の state は一時ディレクトリなので、`pane-profiles.json` が空のまま本物の agent を clear すると、独自の profile（例: `claude-yolo`）で起動された agent が素の `claude` で起動し直される。4b の始めに本番の `pane-profiles.json` を Go 版の state にコピーする。試用中に Go 版から独自の profile で起動した agent は、Node 版の記録に載らないので、4b の終わりに閉じる。
+4. **CLI のアカウントの判定と worktree の削除を本物で確かめる。** 試験用の orchestrator を、一時的な `XDG_DATA_HOME` と、試験用の項目だけを持つ config で、Go 版の `agentwebctl orchestrator start test` から起動する（許可リストは Go のバイナリを指す）。試験用の項目の `env` には、その一時的な `HERDR_PLUGIN_CONFIG_DIR` と `XDG_DATA_HOME` も入れる（herdr が開くシェルには渡らないので、入れないと orchestrator の中の CLI が本物の config を読む）。その orchestrator に次をさせる:
    - `overview` に自分のアカウントの agent だけが出る。
    - ほかのアカウントのペインへの `agent get` が断られる。
    - 使い捨てのリポジトリで `agent start --worktree` ができる。
@@ -265,14 +266,15 @@ tools/shadowdiff/           並走の比較（P4）
    - マージ済みの worktree の `worktree remove` で、checkout とブランチが両方消える（`bin/agentwebctl.ts:540-548` の経路。P3 では偽の herdr のせいで通らないので、ここで初めて確かめる）。
 
    終わったら試験用の orchestrator、ワークスペース、リポジトリを片づける。
-4. 携帯で Go 版を普段どおり何日か使う（別のトークン、別のポートなので service worker のキャッシュも別になる）。
+5. 携帯で Go 版を普段どおり何日か使う（別のトークン、別のポートなので service worker のキャッシュも別になる）。
 
-完了の条件: 4a の 3 日と 4b の 4 日を通して、説明のつかない違いがない。§5.4 と 4b の 3 がすべて通る。§5.5 が通る。
+完了の条件: 4a の 3 日と 4b の 4 日を通して、説明のつかない違いがない。§5.4 と 4b の 4 がすべて通る。§5.5 が通る。
 
 ### P5 切り替え（2 日）
 
 1. `herdr-plugin.toml` のコマンドを `["./bin/agentwebctl", …]` にする。`[[build]]` は `scripts/plugin-build.sh` にする。この段階ではまだリリースがないので、スクリプトはソースからビルドするだけ（`npm ci --ignore-scripts && npm run build:web && go build`。Go と npm が要る）にする。リリースから落として検証する形には P6 で置き換える。インストールの道を段階ごとに 1 つにして、確かめるものを増やさないため。P5 から P6 までの間に GitHub から入れる人はまだいない想定である。
 2. 手元では `npm ci && npm run build:web && go build -o bin/agentwebctl ./cmd/agentwebctl` でビルドし、`herdr plugin link` をやり直す（manifest が変わったので必須）。本体のチェックアウトにリンクしていることを確かめる。
+   - その前に、動いている Node の bridge の state（token と `pane-profiles.json`）がどちらのディレクトリにあるかを、その pidfile の場所で確かめる。herdr から起動していれば `~/.local/state/herdr/plugins/y011d4.agentweb` で、Go 版も同じ場所を使うので何もしなくてよい。herdr の外から起動していた（`~/.local/state/herdr-agentweb`）なら、その token と `pane-profiles.json` を herdr の場所にコピーしてから切り替える（携帯の接続と clear の profile を保つため）。戻すときは逆向きに同じことをする。
 3. **今の Node の bridge を Node の `stop` で止め、`/healthz` が応答しないことを確かめてから**、Go の bridge を起動する（Go 版は main.js の bridge も見分けられるが、Node 版は Go の bridge を見分けられない。戻すときに Go を止めずに Node の `stop` を使うと、pidfile だけ消えて Go の bridge がポートを握ったまま残る。だから、どちらの向きでも「今動いている側の `stop` で止めて、`/healthz` が応答しないことを確かめる」を守る）。`/healthz`、`/api/state`、携帯での表示、通知を確かめる。凍結はここで終わる。
 4. orchestrator: bridge の起動で 3 つの管理ディレクトリの `rules.md` と `settings.json` が新しいパスに書き直されたことを、`grep -rE 'node |dist/bin' ~/.local/share/herdr-agentweb/orchestrators` が何も返さないことで確かめる。動いている orchestrator は再起動する。`dispatcher`（P-3）は利用者に直してもらうか、使っていなければ消す。
 5. **戻す練習を一度する。** Go の `stop` で止め、`/healthz` が応答しないことを確かめ、切り替えのコミットを revert し、ビルドしてリンクし直し、Node で起動して orchestrator のパスが戻ることを確かめる。そのあと同じ手順でもう一度 Go に切り替える。
@@ -348,7 +350,7 @@ CLAUDE.md にある herdr の細かい挙動は、herdr と Claude Code の性�
 - 既定の待ち受けは loopback だけ。
 - 静的ファイルがパスの外に出ない。
 - transcript の読み出しが projects のルートの中に限られる（シンボリックリンクを含む）。
-- アカウントが違う、または判定できないときは拒否する（overview、agent、worktree、clear）。許す側は P4b の 3 で確かめる。
+- アカウントが違う、または判定できないときは拒否する（overview、agent、worktree、clear）。許す側は P4b の 4 で確かめる。
 - `launch_profiles` の許可リストにないものは起動しない。
 
 ### 5.6 観測
@@ -477,7 +479,7 @@ herdr の schema（protocol 22 で、リクエストの定義が 118、応答が
 ### 9.2 事前の失敗想定（3 つ）
 
 1. **切り替えの翌日、携帯に一部の完了通知が来ない。** 原因の候補: snapshot 中に届いたイベントの再生を移し損ねた。防ぐもの: P0 のシナリオの記録と actor の試作、並走での `agent_status` の比較。起きたら: P5 の手順 5 で戻し、記録から再現するシナリオを足す。
-2. **切り替えた後、orchestrator が `agentwebctl` を実行するたびに断られる。** 原因の候補: settings.json に古い node のパスが残っている（bridge が起動の前に書き換えなかった、`dispatcher` を使っていた、動いていた orchestrator が古い設定を読んだまま）。防ぐもの: P4b の 3（Go のバイナリを指す許可リストで本物の orchestrator を動かす）と P5 の手順 4。起きたら: orchestrator を再起動する。それでもだめなら戻す。
+2. **切り替えた後、orchestrator が `agentwebctl` を実行するたびに断られる。** 原因の候補: settings.json に古い node のパスが残っている（bridge が起動の前に書き換えなかった、`dispatcher` を使っていた、動いていた orchestrator が古い設定を読んだまま）。防ぐもの: P4b の 4（Go のバイナリを指す許可リストで本物の orchestrator を動かす）と P5 の手順 4。起きたら: orchestrator を再起動する。それでもだめなら戻す。
 3. **公開後、別の版の herdr を使う人が「agent を起動できない」と報告する。** 原因の候補: protocol の違いで `agent.start` の形や enum が違う。防ぐもの: 起動時の protocol の警告、README の対応表、P6 の schema のずれのテスト。起きたら: その人の `herdr api schema --json` をもらい、ずれのテストで違いを特定する。
 
 ### 9.3 途中でやめる判断の基準
