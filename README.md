@@ -470,8 +470,8 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   `stateChangeSeq` is herdr's `state_change_seq` (herdr's order of status changes, which the app
   lists by; `null` until fetched)
 - `GET /api/panes/:paneId/read?source=visible|recent&lines=N&format=text|ansi` — `visible` is the
-  pane's live screen: when the desktop has the pane scrolled up, herdr's own `visible` would be that
-  old view, so the bridge reads the bottom screen (`recent`, one viewport tall) instead
+  pane's live screen: the bridge reads the bottom screen (`recent`, one viewport tall), since
+  herdr's own `visible` follows the desktop's view, which may be scrolled up
 - `POST /api/panes/:paneId/input` `{"text": "ls", "enter": true}` or `{"keys": ["ctrl+c"]}`
   — add `"clear": true` to wipe the pane's composer (repeated Ctrl+U) before the
   text lands, so a message composed here submits alone instead of being appended

@@ -614,7 +614,6 @@ type rawPaneInfo struct {
 	Scroll *struct {
 		MaxOffsetFromBottom *float64 `json:"max_offset_from_bottom"`
 		ViewportRows        *float64 `json:"viewport_rows"`
-		OffsetFromBottom    *float64 `json:"offset_from_bottom"`
 	} `json:"scroll"`
 	// the claude session identity and cwd, which locate the transcript
 	AgentSession *struct {
@@ -625,22 +624,22 @@ type rawPaneInfo struct {
 	ForegroundCwd string `json:"foreground_cwd"`
 }
 
-// screenRead makes a visible read (params) read the pane's live screen. herdr's
-// visible is the desktop's viewport: scrolled up there (to read a long reply, say), it
-// keeps returning that old text while a new prompt waits at the bottom, so the phone
-// would show no prompt at all. A scrolled pane is read from the bottom instead
-// (recent, one viewport tall). info nil (pane.get failed): left as visible.
+// screenRead makes a visible read (params) read the pane's live screen: the bottom
+// viewport_rows rows (recent). herdr's visible is the desktop's viewport: scrolled up
+// there (to read a long reply, say), it keeps returning that old text while a new
+// prompt waits at the bottom, so the phone found no prompt at all. Reading the bottom
+// whatever the scroll, not only when pane.get says scrolled, leaves no gap for a
+// scroll between the two calls. Never more lines than the screen has, so herdr's
+// alt-screen history capture (which scrolls the app) can't start. info nil (pane.get
+// failed): left as visible.
 func screenRead(params map[string]any, info *rawPaneInfo) {
-	if info == nil || info.Scroll == nil {
+	if info == nil || info.Scroll == nil || info.Scroll.ViewportRows == nil || *info.Scroll.ViewportRows < 1 {
 		return
 	}
-	off, rows := info.Scroll.OffsetFromBottom, info.Scroll.ViewportRows
-	if off == nil || *off == 0 || rows == nil || *rows < 1 {
-		return
-	}
+	rows := *info.Scroll.ViewportRows
 	params["source"] = "recent"
-	if lines, ok := params["lines"].(int); !ok || float64(lines) > *rows {
-		params["lines"] = int(*rows)
+	if lines, ok := params["lines"].(int); !ok || float64(lines) > rows {
+		params["lines"] = int(rows)
 	}
 }
 
@@ -733,8 +732,8 @@ func (s *server) inputPane(w http.ResponseWriter, r *http.Request, paneID string
 		// live screen), then the read and the press back to back; the window left is
 		// the local compute between those two.
 		if hasExpect {
-			// Unlike the display reads, no best-effort here: without the scroll state,
-			// visible could be a stale menu on a scrolled-up desktop, which would verify.
+			// Unlike the display reads, no best-effort here: without the screen's size
+			// it would read visible, which can be a stale menu on a scrolled-up desktop.
 			info, err := s.paneInfo(paneID)
 			if err != nil {
 				herdrFailure(w, err)
