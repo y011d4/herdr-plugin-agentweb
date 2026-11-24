@@ -41,7 +41,9 @@ func TestGoLifecycleCommands(t *testing.T) {
 	for _, d := range []string{"home", "config", "data"} {
 		os.MkdirAll(filepath.Join(dir, d), 0o755)
 	}
-	state, port := filepath.Join(dir, "state"), freePort(t)
+	// herdr's own state dir for the plugin (HOME is ours): the old plugin's bridge is
+	// looked for only from there
+	state, port := filepath.Join(dir, "home", ".local", "state", "herdr", "plugins", "y011d4.yoicks"), freePort(t)
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(dir, "home"),
 		"HERDR_PLUGIN_STATE_DIR=" + state, "HERDR_PLUGIN_CONFIG_DIR=" + filepath.Join(dir, "config"),
 		"XDG_DATA_HOME=" + filepath.Join(dir, "data"), "HERDR_YOICKS_PORT=" + port, "HERDR_SOCKET_PATH=" + fake.Path}
@@ -240,6 +242,25 @@ func TestGoLifecycleCommands(t *testing.T) {
 			t.Error("stop left the old bridge.pid")
 		}
 	}
+	// from a throwaway state dir (a dev run, a preview bridge) the old plugin's bridge is
+	// someone else's: not seen, never stopped
+	oldStart := exec.Command(oldBin, "start")
+	oldStart.Env = append(slices.Clone(env), "HERDR_PLUGIN_STATE_DIR="+filepath.Join(dir, "home", ".local", "state", "herdr", "plugins", "y011d4.agentweb"))
+	if out, err := oldStart.CombinedOutput(); err != nil {
+		t.Fatalf("start (old name): %v, %q", err, out)
+	}
+	waitFor("the old-named bridge answers", healthy)
+	for _, args := range []string{"status", "stop"} {
+		c := exec.Command(bin, args)
+		c.Env = append(slices.Clone(env), "HERDR_PLUGIN_STATE_DIR="+filepath.Join(dir, "throwaway"))
+		if out, _ := c.CombinedOutput(); !strings.Contains(string(out), "bridge is not running") {
+			t.Errorf("%s from a throwaway state dir: %q, want it not to see the old bridge", args, out)
+		}
+	}
+	if !healthy() {
+		t.Error("stop from a throwaway state dir stopped the old plugin's bridge")
+	}
+	expect([]string{"stop"}, 0, "bridge stopped")
 
 	if runtime.GOOS != "linux" {
 		return // a renamed binary is recognized through /proc only

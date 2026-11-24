@@ -284,10 +284,15 @@ func herdrStateDir(id string) string {
 
 // livePidFiles is the bridge's pidfiles and their live PIDs: this plugin's, or while
 // those have none, the ones of the plugin before the rename (herdr's state dir for
-// y011d4.agentweb), whose bridge, agentwebctl, is still ours to find and stop.
+// y011d4.agentweb), whose bridge, agentwebctl, is still ours to find and stop. Only
+// from the plugin's own state dir (herdr's, or the default): a throwaway one (a dev
+// run, a preview bridge, a test) must never reach, let alone stop, the real bridge.
 func livePidFiles() (daemonFile, runFile string, daemon, fg int) {
 	daemonFile, runFile = daemonPidFile(), runPidFile()
 	if daemon, fg = alivePid(daemonFile), alivePid(runFile); daemon != 0 || fg != 0 {
+		return
+	}
+	if d := os.Getenv("HERDR_PLUGIN_STATE_DIR"); d != "" && filepath.Clean(d) != herdrStateDir(pluginID) {
 		return
 	}
 	old := herdrStateDir("y011d4.agentweb")
