@@ -156,7 +156,8 @@ func legacyRoot(exe string) string {
 // another agentwebctl command (an orchestrator's background `agent wait` must not get
 // a SIGTERM through a reused PID), whatever dir the binary lives in. Until the
 // TypeScript bridge is deleted (plan P5 step 6), also that bridge when it runs from
-// root, this binary's checkout: the exact entry points the TS checked for.
+// root, this binary's checkout, exactly as the TS CLI launched it: node with the entry
+// point as its first argument (an editor open on that file doesn't count).
 func isBridgeArgv(argv []string, root string) bool {
 	if len(argv) >= 2 && path.Base(argv[0]) == "agentwebctl" && (argv[1] == "serve" || argv[1] == "run") {
 		return true
@@ -164,12 +165,8 @@ func isBridgeArgv(argv []string, root string) bool {
 	if root == "" {
 		return false
 	}
-	for _, a := range argv[min(1, len(argv)):] {
-		if a == filepath.Join(root, "dist", "server", "main.js") || a == filepath.Join(root, "server", "main.ts") {
-			return true
-		}
-	}
-	return false
+	return len(argv) >= 2 && strings.HasPrefix(path.Base(argv[0]), "node") &&
+		(argv[1] == filepath.Join(root, "dist", "server", "main.js") || argv[1] == filepath.Join(root, "server", "main.ts"))
 }
 
 // looksLikeBridge checks that a live pid from a pidfile still runs the bridge: the

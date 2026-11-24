@@ -26,6 +26,8 @@ func TestIsBridgeArgv(t *testing.T) {
 		"agentwebctl serve --extra":                                    true,
 		"/usr/bin/node /home/u/repo/dist/server/main.js":               true,
 		"node /home/u/repo/server/main.ts":                             true,
+		"vim /home/u/repo/server/main.ts":                              false,
+		"node --inspect /home/u/repo/dist/server/main.js":              false,
 		"node /home/u/other/dist/server/main.js":                       false,
 		"node server/main.ts":                                          false,
 		"/x/agentwebctl agent wait p1 --status done":                   false,
