@@ -84,7 +84,7 @@ func newPane(id, status string) Pane {
 }
 
 // Scenarios are the situations recorded from the TypeScript client (P0) and replayed
-// against the Go one. Each targets a path of server/herdr-client.ts.
+// against the Go one. Each targets a path of the client.
 var Scenarios = []Scenario{
 	{
 		// plain live events, and agent.list's completion/state-change seqs after each

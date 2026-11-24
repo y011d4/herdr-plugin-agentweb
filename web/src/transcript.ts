@@ -3,9 +3,8 @@
  * chat view. Pure string-building; no DOM state. app.ts owns the container and
  * live updates.
  *
- * TimelineItem is duplicated from server/transcript-normalize.ts — the web and
- * server are separate tsc projects that share only the wire contract (same rule
- * as types.ts). Keep the two in sync.
+ * TimelineItem mirrors the Go bridge's (internal/bridge/types.go): the two share
+ * only the wire contract (same rule as types.ts). Keep the two in sync.
  */
 
 export interface TodoEntry {

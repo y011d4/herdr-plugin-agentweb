@@ -77,6 +77,19 @@ rules と許可リストを新しい `agentwebctl` のパスに書き直しま�
 からなら `node …/dist/bin/agentwebctl.js`) を `<plugin dir>/bin/agentwebctl` に自分で直すか、管理される
 `orchestrators` に移ってください。
 
+### 前の版に戻す
+
+前のリリースに戻すときは、ブリッジを止め、その版を入れ直して起動します:
+
+```bash
+herdr plugin action invoke y011d4.agentweb.stop   # 終わるまで待つ
+herdr plugin uninstall y011d4.agentweb            # トークン、config、orchestrator のディレクトリは残る
+herdr plugin install y011d4/herdr-plugin-agentweb --ref v<前の版>
+herdr plugin action invoke y011d4.agentweb.start
+```
+
+そのあと、更新のときと同じく、動いている orchestrator を Clear してください。
+
 ### アンインストール
 
 ```bash
@@ -363,13 +376,12 @@ herdr plugin link "$(pwd)"
 ```
 
 bridge と CLI は Go (`cmd/agentwebctl`、`internal/bridge`) です。PWA は `web/src/` の TypeScript で、
-`web/` にビルドされ、バイナリに埋め込まれます。以前の TypeScript の bridge (`server/`、`bin/`) は、
-戻すときのためだけに当面残しています。
+`web/` にビルドされ、バイナリに埋め込まれます。
 
 ```bash
 sh scripts/plugin-build.sh          # 変更後に再ビルド。web の変更も (バイナリが web UI を埋め込むため)
 go test ./...                       # Go のテスト
-npm test                            # TypeScript のテスト (node --test)
+npm test                            # web UI のテスト (node --test)
 ./bin/agentwebctl run               # ライブの herdr に対しフォアグラウンドで実行 (config は「設定」の節を参照)
 ```
 

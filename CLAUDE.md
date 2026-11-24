@@ -1,7 +1,7 @@
 # herdr-plugin-agentweb
 
-herdr plugin: a Node.js bridge server that translates the herdr unix-socket API
-into HTTP/WebSocket, plus a mobile-first PWA it serves. Lets a phone monitor
+herdr plugin: a bridge server (one Go binary, `agentwebctl`) that translates the herdr
+unix-socket API into HTTP/WebSocket, plus a mobile-first PWA it serves. Lets a phone monitor
 and control every coding agent running in herdr. herdr itself is never
 modified — everything goes through its public socket API.
 
@@ -10,38 +10,42 @@ modified — everything goes through its public socket API.
 ```
 phone (PWA: web/src/*.ts → built to web/*.js)
   │ REST /api/* + WS /ws (bearer token)
-bridge (server/*.ts → built to dist/server/*.js, binds 127.0.0.1:8390)
+bridge (Go: cmd/agentwebctl + internal/bridge, web/ embedded; binds 127.0.0.1:8390)
   │ ndjson over $HERDR_SOCKET_PATH
 herdr server
 ```
 
-- `server/herdr-client.ts` — socket RPC + persistent event subscription + reconnect
-- `server/state.ts` — pure snapshot/event → normalized State (unit-tested; keep it I/O-free)
-- `server/worktree-resolve.ts` — git context herdr omits (esp. the branch), resolved
-  from a workspace's cwd via `git rev-parse` (I/O + TTL cache; runs in herdr-client
-  after createState so state.ts stays pure)
-- `server/transcript-normalize.ts` — pure JSONL line → chat TimelineItem[] (unit-tested; I/O-free)
-- `server/transcript.ts` — resolve + tail a claude pane's transcript file (I/O)
-- `server/http.ts` — REST routes, WS (state pushes, per-client pane + transcript watch), static files
-- `server/agent-lifecycle.ts` — pure start/stop/rename/clear/create-worktree orchestration over an
+All in `internal/bridge/` (one package):
+
+- `herdr_client.go` — socket RPC + persistent event subscription + reconnect (one actor goroutine)
+- `state.go` — pure snapshot/event → normalized State (unit-tested; keep it I/O-free)
+- `worktree_resolve.go` — git context herdr omits (esp. the branch), resolved
+  from a workspace's cwd via `git rev-parse` (I/O + TTL cache; runs in herdr_client
+  after createState so state.go stays pure)
+- `transcript_normalize.go` — pure JSONL line → chat TimelineItem[] (unit-tested; I/O-free)
+- `transcript.go` — resolve + tail a claude pane's transcript file (I/O)
+- `http.go` — REST routes, static files (embedded web UI); `ws.go` — WS (state pushes,
+  per-client pane + transcript watch); `serve.go` — the bridge process
+- `agent_lifecycle.go` — pure start/stop/rename/clear/create-worktree orchestration over an
   injected herdr `rpc` (unit-tested, I/O-free like worktree-resolve's injectable git). Uses herdr's own
   `tab.create`/`pane.split`/`agent.start`/`agent.prompt`/`pane.close`/`agent.rename`/`agent.get`/`worktree.create`;
   agents launch only from a
-  fixed `launch_profiles` allowlist (never a caller-supplied command). http.ts wires the routes
+  fixed `launch_profiles` allowlist (never a caller-supplied command). http.go wires the routes
   (`POST /api/agents`, `DELETE /api/panes/:id`, `POST /api/panes/:id/rename`, `POST /api/agents/:target/clear`,
   `POST /api/worktrees`). The New agent UI's "＋ New worktree…" option creates a worktree, then starts
   the agent in its checkout. Every new worktree (phone, API, `agentwebctl agent start --worktree`) goes
-  next to its repo as `<repo>-wt-<branch>` (`placeWorktreeNextToRepo` in worktree-resolve.ts), so a
+  next to its repo as `<repo>-wt-<branch>` (`placeWorktreeNextToRepo` in worktree_resolve.go), so a
   parent-dir `.envrc` (e.g. the Claude account per org dir) covers it; herdr's own default dir wouldn't.
-- `server/auth.ts` / `notify.ts` / `config.ts` — token, agent-status fanout + optional ntfy, config
+- `auth.go` / `notify.go` / `config.go` — token, agent-status fanout + optional ntfy, config
   (config also parses `launch_profiles`, merged over built-in defaults)
-- `bin/agentwebctl.ts` — plugin entrypoints: run | start | stop | status | qr, plus the
+- `cli.go` (`cmd/agentwebctl` is its main) — plugin entrypoints: serve (the bridge) | run |
+  start | stop | status | qr, plus the
   orchestrator's commands: `overview` (read-only text summary of the other agents; pure part in
-  `server/overview.ts`), `agent get|read|prompt|wait|start` and `worktree remove` (plus
+  `overview.go`), `agent get|read|prompt|wait|start` and `worktree remove` (plus
   `orchestrator start <name>` for people; an orchestrator's allowlist doesn't include it). `agent
   start` gives the new tab the caller's account as env (`accountEnv`), so workers need no direnv;
   it refuses only where direnv positively reports another account. All of them are
-  confined to the caller's Claude account (`server/account.ts`: an account = the agent process's
+  confined to the caller's Claude account (`account.go`: an account = the agent process's
   `CLAUDE_CONFIG_DIR`/projects, read from /proc of the pane's foreground process group leader; the
   caller's = its nearest `claude` ancestor's; a dir's = `direnv exec` with our own account/direnv
   vars stripped; unknown = refused). get/read/prompt/wait shell out to the herdr CLI on the resolved
@@ -52,7 +56,7 @@ herdr server
 - `web/src/app.ts` — SPA (hash routing), `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker
 - **Orchestrator homes**: config `orchestrators: [{name,label,env}]` — each is *managed*:
-  `server/orchestrator.ts` writes `<data>/orchestrators/<name>/` (data = `$XDG_DATA_HOME` or
+  `orchestrator.go` writes `<data>/orchestrators/<name>/` (data = `$XDG_DATA_HOME` or
   `~/.local/share`, + `herdr-agentweb`) at bridge start and before each start: CLAUDE.md
   (imports rules.md, then the user's local.md, which is created once and never overwritten),
   rules.md (the bundled `orchestrator/rules.md` with the real agentwebctl command filled in) and
@@ -85,9 +89,7 @@ herdr server
   `pane.agent_detected` (fires on detect *and* release) is rebuild-triggering, so agent presence and
   `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `agentwebctl agent …`, waking on background
   `agent prompt --wait`) lives in that dir's `CLAUDE.md`, not in this repo.
-- `herdr-plugin.toml` — actions/panes call `./bin/agentwebctl`, the Go port of the bridge and
-  CLI (`cmd/agentwebctl`, `internal/bridge`). The TS sources stay only for rolling back, until
-  they are deleted (Follow-ups below). `[[build]]` (`scripts/plugin-build.sh release`) runs on
+- `herdr-plugin.toml` — actions/panes call `./bin/agentwebctl`. `[[build]]` (`scripts/plugin-build.sh release`) runs on
   `herdr plugin install`/`update` only — never for a linked plugin (not on link, relink, update,
   enable or a herdr restart; checked on 0.9.5): it downloads the GitHub release binary of the
   manifest's `version` and checks it against the committed `release/checksums.txt` (no line or a
@@ -97,16 +99,19 @@ herdr server
   (linux/darwin × amd64/arm64, pinned toolchain, stripped, `-X …/internal/bridge.Version`) and writes the
   checksums + manifest version; README "Releasing" has the rest
 
-The REST/WS/State JSON contract is documented in README "API surface". Server
-and web are separate tsc projects that only share this contract — change both
-sides together.
+The REST/WS/State JSON contract is documented in README "API surface". The Go bridge
+and the TypeScript web share only this contract — change both sides together
+(`internal/bridge/contract_test.go` writes `testdata/contract/` and
+`web/test/contract.gen.ts`; `npm run check:contract` type-checks it against the web's types).
 
 ## Build / test / deploy loop
 
 ```bash
-npm install && npm run build   # tsc ×3 (server+bin → dist/, web/src → web/, sw)
-npm test                       # node --test server/test/ — runs .ts natively (dev needs Node >= 23.6)
-node server/main.ts            # foreground dev run against the live herdr
+npm ci && npm run build:web   # tsc ×2 (web/src → web/, sw); the binary embeds web/
+npm test                      # web tests (node --test runs .ts natively: Node >= 23.6)
+go test ./...                 # bridge + CLI (CI: go test -race ./...)
+go build -o bin/agentwebctl ./cmd/agentwebctl
+HERDR_PLUGIN_STATE_DIR=$(mktemp -d) HERDR_AGENTWEB_PORT=8392 ./bin/agentwebctl run   # dev run
 ```
 
 Deploying a change to the running bridge. The Go binary embeds the built web UI, so a web
@@ -122,6 +127,14 @@ curl -s http://127.0.0.1:8390/healthz   # expect {"ok":true,"herdrConnected":tru
 
 Re-run `herdr plugin link <repo>` only when `herdr-plugin.toml` changed — herdr
 caches the linked manifest.
+
+**Rolling back** the running bridge (the binary of the checkout herdr links, normally main's):
+`stop` (wait for it), check out the last good commit and `sh scripts/plugin-build.sh source`
+(`source` builds from source with every version of the script; without Go, check out a release
+tag and run `sh scripts/plugin-build.sh release`, which downloads that release's binary), `start`, check `/healthz`. The binary path doesn't change, so the orchestrators'
+allowlists still match; Clear them when `orchestrator/rules.md` differs between the versions.
+Return with `git switch main`, rebuild, restart. (The last Node bridge is `423f49d`; going back
+there takes `npm ci && npm run build`, re-linking, and Clearing the orchestrators.)
 
 **Service worker cache**: bump `CACHE_VERSION` in `web/src/sw.ts` on every
 change to any web asset. Cached assets refresh only when sw.js itself changes;
@@ -201,7 +214,7 @@ Verified live against herdr 0.7.3 / protocol 16:
   to workspaces it opened via its worktree flow — including linked worktrees — but
   plain checkouts often arrive with no `worktree` field, and it **never carries the
   branch** (verified live: `worktree` has repo_key/paths/is_linked_worktree only). So
-  `server/worktree-resolve.ts` resolves git with `git rev-parse` to fill in the branch.
+  `internal/bridge/worktree_resolve.go` resolves git with `git rev-parse` to fill in the branch.
   For a herdr-tagged worktree it resolves the **stable `checkout_path`** (not the pane's
   mutable `foreground_cwd`, which an agent `cd` can move) and layers only the branch onto
   herdr's authoritative identity — so a wandering pane can't repoint or clear the repo; an
@@ -286,7 +299,7 @@ vendor-neutrality is preserved.
 
 - Every `/api` and `/ws` request requires the bearer token
   (`timingSafeEqual`); `/healthz` is the only open endpoint.
-- The tokenized connect URL is printed only by `server/main.js` startup (run
+- The tokenized connect URL is printed only by the bridge's startup (`agentwebctl serve`/`run`: run
   pane + 0600 bridge.log) and the `qr` entrypoint. **Never print the token in
   action stdout** — herdr captures action output into its plugin logs.
 - Bind stays loopback-only by default; remote access is Tailscale's job
@@ -299,10 +312,14 @@ vendor-neutrality is preserved.
 
 ## Testing
 
-- Unit tests: `server/test/*.test.ts` (state normalization/event routing/
-  immutability, auth, ndjson, notify shapes). The routing-table test asserts
-  every subscribed lifecycle event is either rebuild-triggering or applied —
-  keep it in sync with `buildSubscriptions`.
+- Unit tests: `internal/bridge/*_test.go` (state normalization/event routing/
+  immutability, auth, ndjson, notify shapes, HTTP/WS, CLI) and `web/test/*.test.ts`. The
+  routing-table test (`state_test.go`) asserts every subscribed lifecycle event is either
+  rebuild-triggering or applied — keep it in sync with `buildSubscriptions`.
+- Against recordings (`testdata/README.md`): the herdr client replays `testdata/scenarios`, and
+  the bridge + CLI are driven through `testdata/wire` (`tools/fakeherdr`, a fake herdr socket).
+  Both were first recorded from the TypeScript bridge the Go one was ported from; `record-wire`
+  re-records the wire ones from the current build (only for an intended change; review the diff).
 - Live verification is expected before claiming completion: healthz, an
   `/api/state` sanity check, and (for input paths) a scratch-tab round trip
   (`herdr tab create` → POST input → read back → close the tab).
@@ -319,8 +336,7 @@ vendor-neutrality is preserved.
   source — write ESC as the literal six characters `\u001b` in string escapes.
 - Dependencies: the binary's only one is `github.com/coder/websocket`; don't add more without a
   strong reason (QR uses the system `qrencode`, falling back to a plain URL). Node and TypeScript
-  are development-only, for the web UI's build and tests (`ws` serves only the TS bridge kept
-  for rolling back).
+  (the only npm dependency) are development-only, for the web UI's build and tests.
 - herdr's API schema (`herdr api schema --json`, protocol 22 = herdr 0.9.5) is saved in
   `testdata/herdr-schema/`; `internal/bridge/herdr_schema_test.go` checks every method,
   parameter, decoded field and event field the bridge uses against it. A new herdr field or
@@ -328,19 +344,7 @@ vendor-neutrality is preserved.
 
 ## Follow-ups (left open by the Go migration)
 
-- **Delete the TypeScript bridge** after the Go one has run 1–2 weeks without trouble (switched
-  2026-11-24 19:13, so from 2026-12-01; the user decides). Until then it is the rollback: Go
-  `stop`, check `/healthz` no longer answers, check out `423f49d` (just before the switch,
-  7ce4080), `npm ci && npm run build`, re-link, `start`, Clear the orchestrators. Never Node's
-  `stop` while Go runs: it can't see the Go bridge. To delete: `server/`, `bin/agentwebctl.ts`,
-  `server/test/` (move `prompt.test.ts`, a web test, to `web/test/`), `tools/scenario-ts`,
-  `tools/fakeherdr/cmd/record-scenarios` (all TS-only; keep `testdata/`, which the Go tests compare
-  against), and in `record-wire/main.go` only the TS launch (`nodeBin`, `node server/main.ts`, the
-  TS CLI): its harness runs the Go comparison tests; `package.json` down to the web build and tests
-  (`typescript` only: drop `ws`, `@types/ws`, `start` and the `tsconfig.json` server build); CI's
-  build-test job to the web; the Go CLI's recognition of the TS bridge (`legacyRoot`, the node
-  branch of `isBridgeArgv`); the TS mentions here and in the READMEs.
-- **herdr-client edge cases kept from the TS** (both clients have them):
+- **herdr-client edge cases** (kept from the TypeScript client it was ported from):
   1. Overlapping snapshots are applied in arrival order, so an older one answering last can
      overwrite a newer state (a rename, say). Fix: number the requests; for an older answer,
      only drain the event buffer.
