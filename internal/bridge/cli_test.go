@@ -151,7 +151,8 @@ func TestIsBridgeCommandLine(t *testing.T) {
 		"vim /Users/u/my repo/server/main.ts":                              false,
 		"node -e setInterval(()=>{},1000) /Users/u/my repo/server/main.ts": false,
 		"node --inspect /Users/u/my repo/dist/server/main.js":              false,
-		"/Users/u/my tools/bin/node /Users/u/my repo/dist/server/main.js":  true,
+		"node -e x /tmp/node /Users/u/my repo/server/main.ts":              false,
+		"/Users/u/my tools/bin/node /Users/u/my repo/dist/server/main.js":  false, // ambiguous without boundaries: refused
 		"node /Users/u/repo/dist/server/main.js":                           false,
 		"node /Users/u/other/dist/server/main.js":                          false,
 		"/x/agentwebctl agent wait p1":                                     false,
