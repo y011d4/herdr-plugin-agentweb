@@ -37,8 +37,14 @@ account as its own:
 
 It writes `wire/DONE` (or `wire/FAILED`) when finished; two runs give identical files.
 
-Comparing a Go run with these (P2/P3): only the requests an operation itself sends.
+`TestGoBridgeMatchesWireRecordings` (`tools/fakeherdr/cmd/record-wire/main_test.go`,
+part of `go test ./...`) records the Go bridge (`agentwebctl serve`, built by the
+test; build the web UI first) through the same REST and WS operations, on a free
+port, and compares: the HTTP exchange and WS messages as JSON values (key order
+doesn't count; WS messages received as a set), and the herdr requests in order,
+except for the WS watches, which poll on a timer and so are compared as the set of
+distinct requests. The `cli-` operations wait for the Go CLI (P3).
+
 `agent.list`, `pane.process_info` and `session.snapshot` may also come from the
 bridge's background work (completion seqs, the account cache, rebuilds), so a
-comparison that differs only in those needs a look before it counts. The WS watch
-recordings poll on a timer: compare the distinct requests, not their count.
+comparison that differs only in those needs a look before it counts.
