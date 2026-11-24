@@ -42,8 +42,11 @@ trap 'rm -f "$tmp"' EXIT
 echo "plugin-build: downloading $url"
 if command -v curl >/dev/null 2>&1; then
 	curl -fsSL -o "$tmp" "$url"
-else
+elif command -v wget >/dev/null 2>&1; then
 	wget -q -O "$tmp" "$url"
+else
+	echo "plugin-build: needs curl or wget to download $url" >&2
+	exit 1
 fi
 if command -v sha256sum >/dev/null 2>&1; then
 	got=$(sha256sum "$tmp" | cut -d' ' -f1)
