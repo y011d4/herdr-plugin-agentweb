@@ -19,7 +19,7 @@
 | 条件 | 結果 |
 |---|---|
 | CLI の比較と、通信の記録の `cli-` の操作がすべて一致する | 23/23（REST と WS を合わせて 51/51）。標準出力、標準エラー、終了コード、herdr へのリクエスト、herdr と gh の CLI に渡した引数を比べる。違いとして読み替えるのは、使い方の行の `agentwebctl.js` と `agentwebctl` の差（D15）だけ。わざと prompt でペイン ID の代わりに名前を herdr に渡すと、その 1 件だけが落ちる |
-| §5.5 の残り（action の出力にトークンを出さない） | `TestGoLifecycleCommands`: 一時的なディレクトリと空いたポートで `status`、`start`、`start`（2 回目）、`status`、`run`（断られる）、`stop`、`stop` を順に動かす。どの出力にもトークンがないこと、`bridge.log` が 0600 であることを確かめる。あわせて、別のプロセスの PID が書かれた pidfile を `status` が消し、`stop` がそのプロセスにシグナルを送らないこと、`run` が自分の PID を書いて `stop` で 0 で終わることも確かめる |
+| §5.5 の残り（action の出力にトークンを出さない） | `TestGoLifecycleCommands`: 一時的なディレクトリと空いたポートで `status`、`start`、`start`（2 回目）、`status`、`run`（断られる）、`stop`、`stop` を順に動かす。どの出力にもトークンがないこと、`bridge.log` が 0600 であることを確かめる。あわせて、別のプロセスの PID が書かれた pidfile を `status` が消し、`stop` がそのプロセスにシグナルを送らないこと、`run` が自分の PID を書いて `stop` で 0 で終わること、名前を変えたバイナリで起動した bridge も `status` と `stop` が見つけることも確かめる |
 
 ほかに次も通る。
 
@@ -32,7 +32,7 @@
 
 ## 計画からずれたこと、見つかったこと
 
-1. **Go の `stop` を本物の state ディレクトリで動かすと、動いている Node の bridge を止める。** Go の CLI は、P5 の切り替えのために Node の bridge（`main.js`）も bridge と認める（計画 X7）。そのため `HERDR_PLUGIN_STATE_DIR` を付けずに動かすと、herdr の本物の state ディレクトリの pidfile を読み、本番の bridge に SIGTERM を送る。
+1. **Go の CLI を本物の state ディレクトリで動かすと、本番の Node の bridge に手を出す。** Go の CLI は、P5 の切り替えのために同じチェックアウトの Node の bridge（`<root>/dist/server/main.js`）も bridge と認める（計画 X7。D15）。`HERDR_PLUGIN_STATE_DIR` を付けずに動かすと、herdr の本物の state ディレクトリの pidfile を読む。そのとき、同じチェックアウトのバイナリなら本番の bridge に SIGTERM を送る。別のチェックアウト（worktree など）のバイナリなら「動いていない」とみなして pidfile を消し、その後 Node の `stop` が本番の bridge を見つけられなくなる。
    - ライフサイクルのテストを書いたとき、後片づけの `stop` に一時的な環境を渡し忘れていた。実行の前に Claude Code の安全確認が止めたので、本番の bridge には何も起きていない（8390 の PID は最初から同じ）。テストは直し、テストがバイナリを起動するすべての所で一時的な環境を渡すことを確かめた。
    - P4 では、Go の CLI を動かすとき必ず一時的な `HERDR_PLUGIN_STATE_DIR` を付ける（下の「P4 で利用者にしてもらうこと」にも書いた）。
 2. **テストの中の `run` はゾンビになる。** テストが `run` の親なので、SIGTERM の後もテストが回収するまで PID が残り、`stop` が 5 秒待って失敗した。本番では herdr が pane のプロセスを回収するので起きない。テストですぐに回収するようにした。
@@ -60,12 +60,12 @@ P4 は計画 §4 のとおり、4a（読むだけの並走、暦日 3 日）と 
   - AskUserQuestion の選択肢を数字で選べる
   - 画面全体を使うペインのスクロール
   - 完了の印（見た記録）、ブランチの表示、日本語の表示
-  - 通知が来る
+  - アプリを開いている間の通知（WS の `agent_status` から出る）。ntfy（アプリを閉じているときの通知）は、二重に届かないよう 4a から Go 版の config で `notify_url` を消しているので、試用の間は Node 版からだけ届く。Go 版の ntfy は P5 の切り替えの後で確かめる（計画 P5 の手順 3）
 - clear は、試用を始めた時点でもうあった agent と、Go 版から起動した agent にだけ使う（それ以外は今までの携帯の接続で clear する。計画 4b の 3）。
 - 試験用の orchestrator（一時的な場所と試験用の config）での確認に付き合う（計画 4b の 4）: `overview`、ほかのアカウントの拒否、worktree の作成と削除、`agent prompt --wait` で起こされること。
 
 **戻し方（P4 の間は本番を何も変えないので、止めて片づけるだけ）**
-- Go の bridge を止める: Go の `agentwebctl stop` を、**起動したときと同じ一時的な `HERDR_PLUGIN_STATE_DIR` を付けて**動かす。付けないと、上の 1 のとおり本番の Node の bridge を止める。
+- Go の bridge を止める: Go の `agentwebctl stop` を、**起動したときと同じ一時的な `HERDR_PLUGIN_STATE_DIR` を付けて**動かす。付けないと、上の 1 のとおり本番の Node の bridge を止めるか、その pidfile を消す。
 - 8443 の割り当てを消す: `tailscale serve --https=8443 off`。`tailscale serve reset` は使わない（本番の 443 の割り当ても消える）。消した後で `tailscale serve status` を見て、443 が 8390 のまま残っていることを確かめる。
 - 一時的なディレクトリを消す。本番の Node の bridge、config、orchestrator のディレクトリ、herdr のプラグインの設定は、P4 の間は一度も変えない。
 
