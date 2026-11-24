@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -123,18 +124,37 @@ func TestReport(t *testing.T) {
 	b, _ := json.Marshal(st)
 	os.WriteFile(filepath.Join(dir, "status.json"), b, 0o600)
 	f, _ := json.Marshal(finding{At: since.Add(70 * time.Second), Kind: "state", Path: "workspaces[0].worktree.branch", Since: since, Node: `"main"`, Go: "null"})
-	os.WriteFile(filepath.Join(dir, "findings.jsonl"), append(f, '\n'), 0o600)
+	old, _ := json.Marshal(finding{At: st.StartedAt.Add(-time.Minute), Kind: "agent_status", Pane: "p9", Since: st.StartedAt.Add(-2 * time.Minute)})
+	os.WriteFile(filepath.Join(dir, "findings.jsonl"), append(append(old, '\n'), append(f, '\n')...), 0o600)
 	os.WriteFile(filepath.Join(dir, "watch.pid"), []byte("999999999"), 0o600)
 
 	var out strings.Builder
 	if err := report(&out, dir, now); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"watch: NOT RUNNING", "compared 719 of 720", "findings: 1",
+	for _, want := range []string{"watch: NOT RUNNING", "compared 719 of 720", "findings since the watch started: 1 (and 1 from earlier watches",
 		`state workspaces[0].worktree.branch: node="main" go=null`, "[still differs]",
 		"not yet counted: 1", "connected: node=true go=false (for 10s)"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("no %q in:\n%s", want, out.String())
 		}
+	}
+}
+
+func TestAFailedPollBreaksTheRun(t *testing.T) {
+	w := newWatcher(t.TempDir(), [2]side{}, time.Second, 70*time.Second)
+	a, b := []byte(`{"x":1}`), []byte(`{"x":2}`)
+	t0 := time.Now()
+	w.compare(t0, [2][]byte{a, b}, [2]error{})
+	w.compare(t0.Add(35*time.Second), [2][]byte{a, nil}, [2]error{nil, errors.New("down")})
+	w.compare(t0.Add(70*time.Second), [2][]byte{a, b}, [2]error{})
+	if w.st.Findings != 0 {
+		t.Fatal("counted across a poll that compared nothing")
+	}
+	w.compare(t0.Add(100*time.Second), [2][]byte{a, []byte(`{`)}, [2]error{}) // undecodable counts as a failure too
+	w.compare(t0.Add(110*time.Second), [2][]byte{a, b}, [2]error{})
+	w.compare(t0.Add(180*time.Second), [2][]byte{a, b}, [2]error{})
+	if w.st.Findings != 1 || w.st.Sides["go"].FetchErrors != 1 || w.st.Compared != 4 || w.st.Polls != 6 {
+		t.Fatalf("%+v", w.st)
 	}
 }
