@@ -7,11 +7,13 @@
       "options": [
         {
           "send": "1",
-          "label": "Red"
+          "label": "Red",
+          "description": ""
         },
         {
           "send": "2",
-          "label": "Green"
+          "label": "Green",
+          "description": ""
         }
       ],
       "selected": 1
@@ -35,11 +37,13 @@
       "options": [
         {
           "send": "1",
-          "label": "Keep"
+          "label": "Keep",
+          "description": ""
         },
         {
           "send": "2",
-          "label": "Replace"
+          "label": "Replace",
+          "description": "✓ recommended"
         }
       ],
       "selected": 1
@@ -54,5 +58,155 @@
     "name": "no menu",
     "input": "just some output\nnothing to answer",
     "want": null
+  },
+  {
+    "name": "a description line that reads like an option",
+    "input": "● Pick\n❯ 1. Red\n     2. is not an option\n  2. Green\n  3. Blue\nEnter to select · ↑/↓ to navigate · Esc to cancel",
+    "want": {
+      "question": null,
+      "options": [
+        {
+          "send": "1",
+          "label": "Red",
+          "description": "2. is not an option"
+        },
+        {
+          "send": "2",
+          "label": "Green",
+          "description": ""
+        },
+        {
+          "send": "3",
+          "label": "Blue",
+          "description": ""
+        }
+      ],
+      "selected": 1
+    }
+  },
+  {
+    "name": "a label wrapped in the middle of a path",
+    "input": "────────────────────────────────────────\n ❯ 1. Yes\n   2. Yes, allow /home/me/projects/a-ver\n      y-long-repository-name/src\n   3. No\n\n Esc to cancel",
+    "want": {
+      "question": null,
+      "options": [
+        {
+          "send": "1",
+          "label": "Yes",
+          "description": ""
+        },
+        {
+          "send": "2",
+          "label": "Yes, allow /home/me/projects/a-very-long-repository-name/src",
+          "description": ""
+        },
+        {
+          "send": "3",
+          "label": "No",
+          "description": ""
+        }
+      ],
+      "selected": 1
+    }
+  },
+  {
+    "name": "AskUserQuestion whose description wraps over six lines",
+    "input": "──────────────────────────────────────────────────────────────────────────\n←  ☐ Color  ☐ Size  ✔ Submit  →\n\nWhich color should the button use?\n\n❯ 1. Red\n     A warm, high-contrast color that draws attention.\n  2. Blue\n     落ち着いた印象の色です。説明がとても長い場合にどう折り返されるかを確\n     かめるため、この説明文はわざと長くしてあります。スマートフォンの狭い\n     画面でも読みやすく表示されるかどうか、ボタンの押しやすさが損なわれな\n     いかどうかを確認します。さらにもう少し文章を足して、端末の幅を超えて\n     二行以上に折り返されるようにします。ここまで書けば十分な長さになるは\n     ずです。\n  3. Green\n     Short.\n  4. Type something.\n──────────────────────────────────────────────────────────────────────────\n  5. Chat about this\n\nEnter to select · Tab/Arrow keys to navigate · Esc to cancel",
+    "want": {
+      "question": "Which color should the button use?",
+      "options": [
+        {
+          "send": "1",
+          "label": "Red",
+          "description": "A warm, high-contrast color that draws attention."
+        },
+        {
+          "send": "2",
+          "label": "Blue",
+          "description": "落ち着いた印象の色です。説明がとても長い場合にどう折り返されるかを確かめるため、この説明文はわざと長くしてあります。スマートフォンの狭い画面でも読みやすく表示されるかどうか、ボタンの押しやすさが損なわれないかどうかを確認します。さらにもう少し文章を足して、端末の幅を超えて二行以上に折り返されるようにします。ここまで書けば十分な長さになるはずです。"
+        },
+        {
+          "send": "3",
+          "label": "Green",
+          "description": "Short."
+        },
+        {
+          "send": "4",
+          "label": "Type something.",
+          "description": ""
+        },
+        {
+          "send": "5",
+          "label": "Chat about this",
+          "description": ""
+        }
+      ],
+      "selected": 1
+    }
+  },
+  {
+    "name": "permission prompt whose option label wraps",
+    "input": "──────────────────────────────────────────────────────────────────────────\n Bash command\n Tip: auto mode handles these prompts for you — choose \"switch to auto\n mode\" below\n Create a deeply nested test directory\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n │ mkdir -p some/really/long/directory/name/that/keeps/going/and/going/fo\n │ r/a/while/so/the/permission/prompt/wraps && echo done\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don’t ask again for: mkdir *\n   3. Yes, and switch to auto mode · auto mode handles these prompts for\n      you\n   4. No\n\n Esc to cancel · Tab to amend",
+    "want": {
+      "question": "Bash command Tip: auto mode handles these prompts for you — choose \"switch to auto mode\" below Create a deeply nested test directory ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ mkdir -p some/really/long/directory/name/that/keeps/going/and/going/fo r/a/while/so/the/permission/prompt/wraps && echo done ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ Do you want to proceed?",
+      "options": [
+        {
+          "send": "1",
+          "label": "Yes",
+          "description": ""
+        },
+        {
+          "send": "2",
+          "label": "Yes, and don’t ask again for: mkdir *",
+          "description": ""
+        },
+        {
+          "send": "3",
+          "label": "Yes, and switch to auto mode · auto mode handles these prompts for you",
+          "description": ""
+        },
+        {
+          "send": "4",
+          "label": "No",
+          "description": ""
+        }
+      ],
+      "selected": 1
+    }
+  },
+  {
+    "name": "multi-select AskUserQuestion with its Submit row",
+    "input": "──────────────────────────────────────────────────────────────────────────\n←  ☐ Toppings  ✔ Submit  →\n\nWhich toppings?\n\n❯ 1. [ ] Cheese\n         Melted mozzarella on top, added generously across the whole pizza\n         so every slice gets some of it\n  2. [ ] Olives\n         黒オリーブ\n  3. [ ] Basil\n         Fresh leaves\n  4. [ ] Type something\n     Submit\n──────────────────────────────────────────────────────────────────────────\n  5. Chat about this\n\nEnter to select · ↑/↓ to navigate · Esc to cancel",
+    "want": {
+      "question": "Which toppings?",
+      "options": [
+        {
+          "send": "1",
+          "label": "[ ] Cheese",
+          "description": "Melted mozzarella on top, added generously across the whole pizza so every slice gets some of it"
+        },
+        {
+          "send": "2",
+          "label": "[ ] Olives",
+          "description": "黒オリーブ"
+        },
+        {
+          "send": "3",
+          "label": "[ ] Basil",
+          "description": "Fresh leaves"
+        },
+        {
+          "send": "4",
+          "label": "[ ] Type something",
+          "description": ""
+        },
+        {
+          "send": "5",
+          "label": "Chat about this",
+          "description": ""
+        }
+      ],
+      "selected": 1
+    }
   }
 ]
