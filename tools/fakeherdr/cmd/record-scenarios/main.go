@@ -45,6 +45,9 @@ func main() {
 	}
 }
 
+// runner is the command that runs the TypeScript client; the socket path is appended.
+var runner = []string{"node", "tools/scenario-ts/run.ts"}
+
 type tsClient struct{ stdin io.Writer }
 
 func (c tsClient) Refresh() { fmt.Fprintln(c.stdin, "refresh") }
@@ -73,7 +76,7 @@ func record(sc fakeherdr.Scenario) (*fakeherdr.Recording, error) {
 		sc.Setup(env)
 	}
 
-	cmd := exec.Command("node", "tools/scenario-ts/run.ts", srv.Path)
+	cmd := exec.Command(runner[0], append(runner[1:], srv.Path)...)
 	cmd.Stderr = os.Stderr
 	stdin, _ := cmd.StdinPipe()
 	stdout, _ := cmd.StdoutPipe()
