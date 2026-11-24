@@ -20,13 +20,14 @@ import { dashboardCards, homeSummary, markSeen, shownStatus } from './dashboard-
 import type { DashboardCard, SeenDone } from './dashboard-group.ts';
 import { watchMessages } from './watch.ts';
 import { KeptTasks, taskToKeep } from './kept-tasks.ts';
+import { DESKTOP_QUERY, enterSends } from './composer-keys.ts';
 import type { AppState, OrchestratorView, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 
 // ── App version ──────────────────────────────────────────────────────────────
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v105';
+const BUILD = 'v106';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -1399,9 +1400,17 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     if (send) void sendAskAnswer(send, btn);
   });
 
-  // Send button. Enter in the field inserts a newline — sending happens only
-  // via the button, so the phone keyboard can't fire off half-typed commands.
+  // Send button. On a touch device Enter in the field inserts a newline — sending
+  // happens only via the button, so the phone keyboard can't fire off half-typed
+  // commands. On a PC Enter sends and Shift+Enter inserts a newline (composer-keys.ts).
+  // This is the one composer: an agent's pane and an orchestrator's Home alike.
   const paneInput = document.getElementById('pane-input') as HTMLTextAreaElement;
+  const sendBtn = document.getElementById('btn-send-enter') as HTMLButtonElement;
+  paneInput.addEventListener('keydown', (e) => {
+    if (!enterSends(e, matchMedia(DESKTOP_QUERY).matches)) return;
+    e.preventDefault();
+    if (!e.repeat) sendBtn.click(); // a held Enter sends once, not once per auto-repeat
+  });
 
   const autoGrow = (): void => {
     paneInput.style.height = 'auto';
@@ -1424,7 +1433,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     autoGrow();
   };
 
-  document.getElementById('btn-send-enter')!.addEventListener('click', async () => {
+  sendBtn.addEventListener('click', async () => {
     const text = paneInput.value;
     if (!text || keptTasks.sending(paneId)) return;
     const kept = keptTasks.beginSend(paneId, text); // false unless the pane has a kept task
