@@ -44,6 +44,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/coder/websocket"
 )
@@ -67,10 +68,8 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		var cfg map[string]any
-		dec := json.NewDecoder(bytes.NewReader(b))
-		dec.UseNumber()
-		if err := dec.Decode(&cfg); err != nil || cfg == nil {
+		var cfg map[string]any // Unmarshal, like JSON.parse, refuses data after the object
+		if err := json.Unmarshal(b, &cfg); err != nil || cfg == nil {
 			log.Fatalf("%s: not a JSON object", *from)
 		}
 		_, err = os.Stat(filepath.Join(*data, "dispatcher"))
@@ -110,7 +109,10 @@ var slug = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // a string with more than spaces, an entry when its name is a slug. Without one, the
 // legacy setups become orchestrator_dir, unmanaged with the same empty label.
 func shadowConfig(cfg map[string]any, data string, dispatcherExists bool) map[string]any {
-	set := func(v any) bool { s, ok := v.(string); return ok && strings.TrimSpace(s) != "" }
+	// the bridges trim as JavaScript does (isJSSpace in internal/bridge): U+FEFF is a
+	// space there, U+0085 is not
+	jsSpace := func(r rune) bool { return r == '\ufeff' || r != '\u0085' && unicode.IsSpace(r) }
+	set := func(v any) bool { s, ok := v.(string); return ok && strings.TrimFunc(s, jsSpace) != "" }
 	delete(cfg, "notify_url")
 	delete(cfg, "public_url")
 	cfg["port"] = 8391
