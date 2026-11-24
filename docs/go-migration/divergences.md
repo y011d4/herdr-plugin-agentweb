@@ -12,6 +12,7 @@
 | D4 | ntfy への送信で `HTTP_PROXY` などを使う。Node の fetch は使わない | Go の HTTP クライアントの既定。外に出るのは `notify_url` だけなのは変わらない | P2 |
 | D5 | herdr の CLI を、どこでも「`HERDR_BIN_PATH` があればそれ、なければ PATH」で探す（計画 X6） | TS 版は通知と agent のコマンドで探し方が違う | P6 |
 | D6 | 文字数で切り詰めるとき、絵文字などの 2 単位の文字を半分に割らない（`jsSlice`）。TS 版は割った片方を残す | 割った片方は不正な文字で、JSON にすると壊れる。日本語などほかの文字では TS 版と同じ結果になる | P1 |
+| D7 | 型の崩れたイベントの扱い: `tab_renamed` の `label` が文字列でなければ無視する（TS 版は数値をそのままラベルにする）。`pane_focused` に `pane_id` がなければ `focused.paneId` を null にする（TS 版は JSON からその項目が消える） | herdr はどちらも文字列で送る（schema）。壊れた入力でだけ起きる | P1 |
 
 ## TS 版のまま残す（切り替えの後に直す候補）
 
