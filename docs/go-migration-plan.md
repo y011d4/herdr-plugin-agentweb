@@ -1,4 +1,4 @@
-（herdr の決め方は P1 で確かめる）、違いの記録に書く。herdr の場所に token がなく古い既定の場所にだけあるときは、古い方を使い続ける（herdr の外から動かしていた人の携帯の接続を切らないため）。切り替えのときの扱いは P5 の手順 2 |# bridge と agentwebctl を Go に移す計画
+# bridge と agentwebctl を Go に移す計画
 
 - 状態: **承認済み**（2026-11-24。Architect と Critic の合意済み、2 回目で Critic が APPROVE）。P0 完了、K1 通過（docs/go-migration/p0-report.md。残りの見積もりの見直しもそちら）
 - 作成: 2026-11-24、ブランチ `go-migration-plan`。改訂 3（2 回目の細かい指摘まで反映。§12）
@@ -130,7 +130,7 @@
 | P-4 | web のルートを `__dirname/../web` か `../../web` から探す | `server/main.ts:12-19` | embed にする。web は凍結していないのでファイルが増えうる。そのため名前を並べず、拡張子のパターン（`web/*.js` など）で指定する。古いビルドの残りは、リリースを一時的な worktree でビルドすることで防ぐ（§8.3）。開発用に `AGENTWEB_WEB_DIR` を指定するとディスクから配る |
 | P-5 | `dist/server/main.js` がなければ `server/main.ts` を使う | `bin/agentwebctl.ts:35` | 不要になる。`agentwebctl serve` がサーバー本体 |
 | P-6 | manifest のコマンドが `node dist/bin/agentwebctl.js …`、`[[build]]` が `npm ci` と `npm run build` | `herdr-plugin.toml` | herdr-pluck と同じ `["./bin/agentwebctl", …]` にする。`[[build]]` は §8 |
-| P-7 | 既定のパス: state `~/.local/state/herdr-agentweb`、socket `~/.config/herdr/herdr.sock`、data `$XDG_DATA_HOME` または `~/.local/share/herdr-agentweb`、ポート 8390、`127.0.0.1` | `server/config.ts`、`bin/agentwebctl.ts:41,331` | macOS での herdr の socket の場所は確かめられないので、README で `HERDR_SOCKET_PATH` を案内する。state は直す（P0 で発見）: herdr から起動すると `HERDR_PLUGIN_STATE_DIR` は `~/.local/state/herdr/plugins/<id>` で、herdr の外から CLI を動かしたときの既定 `~/.local/state/herdr-agentweb` と食い違う（この機械には両方に token がある）。Go 版は herdr の外でも herdr と同じ場所を既定にし（herdr の決め方は P1 で確かめる）、違いの記録に書く |
+| P-7 | 既定のパス: state `~/.local/state/herdr-agentweb`、socket `~/.config/herdr/herdr.sock`、data `$XDG_DATA_HOME` または `~/.local/share/herdr-agentweb`、ポート 8390、`127.0.0.1` | `server/config.ts`、`bin/agentwebctl.ts:41,331` | macOS での herdr の socket の場所は確かめられないので、README で `HERDR_SOCKET_PATH` を案内する。state は直す（P0 で発見）: herdr から起動すると `HERDR_PLUGIN_STATE_DIR` は `~/.local/state/herdr/plugins/<id>` で、herdr の外から CLI を動かしたときの既定 `~/.local/state/herdr-agentweb` と食い違う（この機械には両方に token がある）。Go 版は herdr の外でも herdr と同じ場所を既定にし（herdr の決め方は P1 で確かめる）、違いの記録に書く。ただし、herdr の場所に token がなく古い既定の場所にだけあるときは、古い方を使い続ける（herdr の外から動かしていた人の携帯の接続を切らないため）。切り替えのときの扱いは P5 の手順 2 |
 | P-8 | Claude の transcript の場所: `~/.claude/projects` と `~/.config/claude/<name>/projects` | `server/transcript.ts:22-40` | そのまま。後者はこの利用者の複数アカウントの置き方に合わせたもので、ほかの人には `CLAUDE_CONFIG_DIR` が任意の場所にある。Linux では E2 が補うが、macOS では補えない。README に書く |
 | P-9 | 利用者が書く `local.md` の `~/ghq/...` | 利用者のファイル | 利用者の文章なので触らない |
 
@@ -256,7 +256,7 @@ tools/shadowdiff/           並走の比較（P4）
 
 1. 携帯から Go 版に入れるよう、tailscale に 2 つ目のポートを足す: `tailscale serve --bg --https=8443 8391`。**`--https` を付けずに `tailscale serve --bg 8391` とすると、443 の割り当て（本番の Node 版）が置き換わる。** 実行の前後に `tailscale serve status` で 443 が 8390 のままであることを確かめる。4b の終わりに 8443 の割り当てを消す。
 2. §5.4 の実機確認を、Go 版から使い捨てのタブに対して行う。
-3. **clear の launch profile を引き継ぐ。** Go 版の state は一時ディレクトリなので、`pane-profiles.json` が空のまま本物の agent を clear すると、独自の profile（例: `claude-yolo`）で起動された agent が素の `claude` で起動し直される。4b の始めに本番の `pane-profiles.json` を Go 版の state にコピーする。試用中に Go 版から独自の profile で起動した agent は、Node 版の記録に載らないので、4b の終わりに閉じる。
+3. **clear の launch profile を引き継ぐ。** Go 版の state は一時ディレクトリなので、`pane-profiles.json` が空のまま本物の agent を clear すると、独自の profile（例: `claude-yolo`）で起動された agent が素の `claude` で起動し直される。4b の始めに、本番の `pane-profiles.json` を Go 版の state にコピーしてから Go 版を起動し直す（この記録は起動のときにしか読まれない。`server/pane-profile-store.ts`）。本物の agent を clear するのはその後だけにする。並走の比較は続けるが、起動し直しで 4a の 3 日を数え直すことはしない。試用中に Go 版から独自の profile で起動した agent は、Node 版の記録に載らないので、4b の終わりに閉じる。
 4. **CLI のアカウントの判定と worktree の削除を本物で確かめる。** 試験用の orchestrator を、一時的な `XDG_DATA_HOME` と、試験用の項目だけを持つ config で、Go 版の `agentwebctl orchestrator start test` から起動する（許可リストは Go のバイナリを指す）。試験用の項目の `env` には、その一時的な `HERDR_PLUGIN_CONFIG_DIR` と `XDG_DATA_HOME` も入れる（herdr が開くシェルには渡らないので、入れないと orchestrator の中の CLI が本物の config を読む）。その orchestrator に次をさせる:
    - `overview` に自分のアカウントの agent だけが出る。
    - ほかのアカウントのペインへの `agent get` が断られる。
@@ -274,8 +274,8 @@ tools/shadowdiff/           並走の比較（P4）
 
 1. `herdr-plugin.toml` のコマンドを `["./bin/agentwebctl", …]` にする。`[[build]]` は `scripts/plugin-build.sh` にする。この段階ではまだリリースがないので、スクリプトはソースからビルドするだけ（`npm ci --ignore-scripts && npm run build:web && go build`。Go と npm が要る）にする。リリースから落として検証する形には P6 で置き換える。インストールの道を段階ごとに 1 つにして、確かめるものを増やさないため。P5 から P6 までの間に GitHub から入れる人はまだいない想定である。
 2. 手元では `npm ci && npm run build:web && go build -o bin/agentwebctl ./cmd/agentwebctl` でビルドし、`herdr plugin link` をやり直す（manifest が変わったので必須）。本体のチェックアウトにリンクしていることを確かめる。
-   - その前に、動いている Node の bridge の state（token と `pane-profiles.json`）がどちらのディレクトリにあるかを、その pidfile の場所で確かめる。herdr から起動していれば `~/.local/state/herdr/plugins/y011d4.agentweb` で、Go 版も同じ場所を使うので何もしなくてよい。herdr の外から起動していた（`~/.local/state/herdr-agentweb`）なら、その token と `pane-profiles.json` を herdr の場所にコピーしてから切り替える（携帯の接続と clear の profile を保つため）。戻すときは逆向きに同じことをする。
-3. **今の Node の bridge を Node の `stop` で止め、`/healthz` が応答しないことを確かめてから**、Go の bridge を起動する（Go 版は main.js の bridge も見分けられるが、Node 版は Go の bridge を見分けられない。戻すときに Go を止めずに Node の `stop` を使うと、pidfile だけ消えて Go の bridge がポートを握ったまま残る。だから、どちらの向きでも「今動いている側の `stop` で止めて、`/healthz` が応答しないことを確かめる」を守る）。`/healthz`、`/api/state`、携帯での表示、通知を確かめる。凍結はここで終わる。
+   - このとき、動いている Node の bridge の state（token と `pane-profiles.json`）がどちらのディレクトリにあるかを、その pidfile の場所で確かめておく。herdr から起動していれば `~/.local/state/herdr/plugins/y011d4.agentweb` で、Go 版も同じ場所を使う。herdr の外から起動していた（`~/.local/state/herdr-agentweb`）なら、手順 3 でコピーする。
+3. **今の Node の bridge を Node の `stop` で止め、`/healthz` が応答しないことを確かめてから**、Go の bridge を起動する。手順 2 で herdr の外の state だとわかっていたら、止めた後、起動の前に、その token と `pane-profiles.json` を herdr の場所にコピーする（携帯の接続と clear の profile を保つため。止める前にコピーすると、その間の agent の起動や clear の記録が抜ける）。戻すときは逆向きに同じことをする。どちらの向きでも「今動いている側の `stop` で止めて、`/healthz` が応答しないことを確かめる」を守る（Go 版は main.js の bridge も見分けられるが、Node 版は Go の bridge を見分けられない。戻すときに Go を止めずに Node の `stop` を使うと、pidfile だけ消えて Go の bridge がポートを握ったまま残る）。`/healthz`、`/api/state`、携帯での表示、通知を確かめる。凍結はここで終わる。
 4. orchestrator: bridge の起動で 3 つの管理ディレクトリの `rules.md` と `settings.json` が新しいパスに書き直されたことを、`grep -rE 'node |dist/bin' ~/.local/share/herdr-agentweb/orchestrators` が何も返さないことで確かめる。動いている orchestrator は再起動する。`dispatcher`（P-3）は利用者に直してもらうか、使っていなければ消す。
 5. **戻す練習を一度する。** Go の `stop` で止め、`/healthz` が応答しないことを確かめ、切り替えのコミットを revert し、ビルドしてリンクし直し、Node で起動して orchestrator のパスが戻ることを確かめる。そのあと同じ手順でもう一度 Go に切り替える。
 6. 1〜2 週間問題がなければ、`server/*.ts`、`bin/*.ts`、`server/test/` を消す。`package.json` は web のビルドとテストだけにする（`typescript` だけ。`ws` と `@types/ws` は消す）。CLAUDE.md と README を書き直す。`server/test/prompt.test.ts`（中身は web の `prompt.ts` のテスト）は `web/test/` に移す。この期間に新しい機能を足すときは Go 側に入れ、TS 版は戻すためだけに残す。
