@@ -92,7 +92,7 @@ herdr server
   binary of the manifest's `version` and checks it against the committed `release/checksums.txt`
   (no line or a mismatch fails; never a fallback to a source build). `plugin-build.sh source`
   builds from source instead. `scripts/release.sh <version>` builds the 4 release binaries
-  (linux/darwin × amd64/arm64, pinned toolchain, `-X …/internal/bridge.Version`) and writes the
+  (linux/darwin × amd64/arm64, pinned toolchain, stripped, `-X …/internal/bridge.Version`) and writes the
   checksums + manifest version; README "Releasing" has the rest
 
 The REST/WS/State JSON contract is documented in README "API surface". Server
