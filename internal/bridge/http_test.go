@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -363,6 +364,78 @@ func TestWSPaneWatch(t *testing.T) {
 	write(t, c, `{"type":"watch_pane","paneId":"gone"}`)
 	if m := readUntil(t, c, "pane_gone"); m["paneId"] != "gone" {
 		t.Errorf("pane_gone: %v", m)
+	}
+}
+
+// A pane scrolled up on the desktop (to read a long reply, say): herdr's visible read
+// is that old viewport, not the prompt waiting at the bottom. Every screen read (REST,
+// the press verify, the WS watch) takes the bottom viewport_rows rows instead, also
+// when pane.get said unscrolled (the desktop may scroll between the two calls).
+func TestScrolledPaneReadsTheBottomScreen(t *testing.T) {
+	for _, offset := range []int{30, 0} {
+		t.Run(strconv.Itoa(offset), func(t *testing.T) { testBottomScreen(t, offset) })
+	}
+}
+
+func testBottomScreen(t *testing.T, offset int) {
+	menu := " ☐ Pick\n\nWhich?\n\n❯ 1. apple\n  2. banana\n\nEnter to select · Esc to cancel"
+	b := startBridge(t, Config{}, func(m string, p json.RawMessage) (fakeherdr.Reply, bool) {
+		switch m {
+		case "pane.get":
+			return fakeherdr.Reply{Result: map[string]any{"pane": map[string]any{"pane_id": "p1", "agent": "claude",
+				"scroll": map[string]any{"offset_from_bottom": offset, "max_offset_from_bottom": 69, "viewport_rows": 8}}}}, true
+		case "pane.read":
+			text := "| row 12 of a long table |" // the scrolled-up viewport
+			if strings.Contains(string(p), `"source":"recent"`) && strings.Contains(string(p), `"lines":8`) && strings.Contains(string(p), `"format":"ansi"`) ||
+				strings.Contains(string(p), `"source":"detection"`) {
+				text = menu
+			}
+			return fakeherdr.Reply{Result: map[string]any{"read": map[string]any{"text": text}}}, true
+		}
+		return fakeherdr.Reply{}, false
+	}, nil)
+	if _, body, _ := b.do(t, "GET", "/api/panes/p1/read?source=visible&format=ansi", b.token, nil); !strings.Contains(body, "Which?") {
+		t.Errorf("read: %s, want the bottom screen", body)
+	}
+	// text: herdr's detection, never a recent text read (which can capture history)
+	if _, body, _ := b.do(t, "GET", "/api/panes/p1/read?source=visible", b.token, nil); !strings.Contains(body, "Which?") {
+		t.Errorf("text read: %s, want the bottom screen", body)
+	}
+	press, _ := json.Marshal(map[string]any{"press": "1", "expect_prompt": promptIdentity(menu)})
+	if status, body, _ := b.do(t, "POST", "/api/panes/p1/input", b.token, press); status != 200 {
+		t.Errorf("press: %d %s, want the bottom screen's prompt verified", status, body)
+	}
+	c, _, err := b.dial(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	write(t, c, `{"type":"watch_pane","paneId":"p1"}`)
+	if m := readUntil(t, c, "pane_output"); m["ansi"] != menu {
+		t.Errorf("pane_output: %v, want the bottom screen", m["ansi"])
+	}
+}
+
+// Without pane.get (the screen's size) the press can't read the live screen, and
+// visible may be a stale viewport, so it refuses instead of verifying against that.
+func TestPressRefusedWithoutScrollState(t *testing.T) {
+	menu := " ☐ Pick\n\nWhich?\n\n❯ 1. apple\n  2. banana\n\nEnter to select · Esc to cancel"
+	b := startBridge(t, Config{}, func(m string, p json.RawMessage) (fakeherdr.Reply, bool) {
+		switch m {
+		case "pane.get":
+			return fakeherdr.Reply{Code: "internal", Message: "boom"}, true
+		case "pane.read":
+			return fakeherdr.Reply{Result: map[string]any{"read": map[string]any{"text": menu}}}, true
+		}
+		return fakeherdr.Reply{}, false
+	}, nil)
+	n := len(b.fake.Requests())
+	press, _ := json.Marshal(map[string]any{"press": "1", "expect_prompt": promptIdentity(menu)})
+	if status, _, _ := b.do(t, "POST", "/api/panes/p1/input", b.token, press); status == 200 {
+		t.Error("press verified without the pane's scroll state")
+	}
+	if slices.Contains(b.sent(n), "pane.send_text") {
+		t.Error("the digit went out")
 	}
 }
 

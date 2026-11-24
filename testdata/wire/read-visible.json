@@ -11,17 +11,17 @@
  },
  "herdr": [
   {
-   "method": "pane.read",
-   "params": {
-    "pane_id": "p1",
-    "source": "visible",
-    "format": "ansi"
-   }
-  },
-  {
    "method": "pane.get",
    "params": {
     "pane_id": "p1"
+   }
+  },
+  {
+   "method": "pane.read",
+   "params": {
+    "format": "ansi",
+    "pane_id": "p1",
+    "source": "visible"
    }
   }
  ]
