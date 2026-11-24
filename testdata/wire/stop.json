@@ -1,0 +1,20 @@
+{
+ "op": "stop",
+ "http": {
+  "method": "DELETE",
+  "path": "/api/panes/p2",
+  "status": 200,
+  "response": {
+   "ok": true,
+   "paneId": "p2"
+  }
+ },
+ "herdr": [
+  {
+   "method": "pane.close",
+   "params": {
+    "pane_id": "p2"
+   }
+  }
+ ]
+}

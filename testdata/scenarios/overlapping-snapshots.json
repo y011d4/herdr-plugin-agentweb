@@ -1,0 +1,113 @@
+{
+ "scenario": "overlapping-snapshots",
+ "outputs": [
+  {
+   "t": 306,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  },
+  {
+   "t": 308,
+   "kind": "conn",
+   "connected": true
+  },
+  {
+   "t": 610,
+   "kind": "status",
+   "paneId": "p1",
+   "from": "idle",
+   "to": "working"
+  },
+  {
+   "t": 610,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  },
+  {
+   "t": 611,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  },
+  {
+   "t": 664,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": 1
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  }
+ ]
+}

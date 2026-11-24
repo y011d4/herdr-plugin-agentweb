@@ -1,0 +1,89 @@
+{
+ "scenario": "gap-before-ack",
+ "outputs": [
+  {
+   "t": 4,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  },
+  {
+   "t": 407,
+   "kind": "conn",
+   "connected": true
+  },
+  {
+   "t": 410,
+   "kind": "status",
+   "paneId": "p1",
+   "from": "idle",
+   "to": "done"
+  },
+  {
+   "t": 410,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "done",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  },
+  {
+   "t": 463,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "done",
+     "seq": 1,
+     "changeSeq": 1
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  }
+ ]
+}

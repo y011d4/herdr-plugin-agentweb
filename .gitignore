@@ -10,3 +10,6 @@ web/transcript.js
 web/types.js
 web/watch.js
 web/kept-tasks.js
+bin/agentwebctl
+testdata/wire/DONE
+testdata/wire/FAILED

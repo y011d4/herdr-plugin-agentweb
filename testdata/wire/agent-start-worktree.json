@@ -1,0 +1,51 @@
+{
+ "op": "agent-start-worktree",
+ "http": {
+  "method": "POST",
+  "path": "/api/agents",
+  "body": {
+   "name": "w-wt",
+   "profile": "claude",
+   "worktree": {
+    "branch": "feat/x",
+    "repo": "$TMP/repo"
+   }
+  },
+  "status": 200,
+  "response": {
+   "ok": true,
+   "paneId": "p12",
+   "name": "w-wt",
+   "agent": "claude"
+  }
+ },
+ "herdr": [
+  {
+   "method": "worktree.create",
+   "params": {
+    "focus": false,
+    "cwd": "$TMP/repo",
+    "branch": "feat/x",
+    "path": "$TMP/repo-wt-feat-x"
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "w-wt",
+    "kind": "claude",
+    "pane_id": "p12",
+    "args": []
+   }
+  },
+  {
+   "method": "agent.start",
+   "params": {
+    "name": "w-wt",
+    "kind": "claude",
+    "pane_id": "p12",
+    "args": []
+   }
+  }
+ ]
+}

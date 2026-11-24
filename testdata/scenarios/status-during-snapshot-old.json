@@ -1,0 +1,192 @@
+{
+ "scenario": "status-during-snapshot-old",
+ "outputs": [
+  {
+   "t": 3,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  },
+  {
+   "t": 4,
+   "kind": "conn",
+   "connected": true
+  },
+  {
+   "t": 4,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3"
+   }
+  },
+  {
+   "t": 1066,
+   "kind": "status",
+   "paneId": "p4",
+   "from": "unknown",
+   "to": "idle"
+  },
+  {
+   "t": 1066,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null,
+    "p4": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    }
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3",
+    "t4": "t4"
+   }
+  },
+  {
+   "t": 1067,
+   "kind": "status",
+   "paneId": "p1",
+   "from": "idle",
+   "to": "working"
+  },
+  {
+   "t": 1119,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": 1
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null,
+    "p4": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    }
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3",
+    "t4": "t4"
+   }
+  },
+  {
+   "t": 1318,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": 1
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null,
+    "p4": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    }
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3",
+    "t4": "t4"
+   }
+  },
+  {
+   "t": 1472,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": 1
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null,
+    "p4": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    }
+   },
+   "focused": "//",
+   "tabs": {
+    "t1": "t1",
+    "t2": "t2",
+    "t3": "t3",
+    "t4": "t4"
+   }
+  }
+ ]
+}

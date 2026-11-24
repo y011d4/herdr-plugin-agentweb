@@ -1,0 +1,23 @@
+{
+ "op": "agent-send",
+ "http": {
+  "method": "POST",
+  "path": "/api/agents/p1/send",
+  "body": {
+   "text": "next task"
+  },
+  "status": 200,
+  "response": {
+   "ok": true
+  }
+ },
+ "herdr": [
+  {
+   "method": "agent.prompt",
+   "params": {
+    "target": "p1",
+    "text": "next task"
+   }
+  }
+ ]
+}
