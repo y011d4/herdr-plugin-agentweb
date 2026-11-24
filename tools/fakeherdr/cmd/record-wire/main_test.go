@@ -18,8 +18,8 @@ import (
 const repoRoot = "../../../.."
 
 // The Go agentwebctl (its bridge, `serve`, and its CLI commands), driven through every
-// operation the TypeScript bridge and CLI were recorded doing, must send herdr the same
-// requests and answer, print and exit the same (testdata/wire, compared as in
+// operation recorded in testdata/wire (first from the TypeScript bridge), must send
+// herdr the same requests and answer, print and exit the same (compared as in
 // testdata/README.md).
 func TestGoMatchesWireRecordings(t *testing.T) {
 	if testing.Short() {
@@ -46,7 +46,7 @@ func TestGoMatchesWireRecordings(t *testing.T) {
 	}
 	wantOps, gotOps := ops(filepath.Join(repoRoot, "testdata", "wire")), ops(outDir)
 	if len(wantOps) == 0 || !slices.Equal(wantOps, gotOps) {
-		t.Fatalf("operations recorded:\n TypeScript %v\n Go         %v", wantOps, gotOps)
+		t.Fatalf("operations recorded:\n testdata %v\n this build %v", wantOps, gotOps)
 	}
 	for _, name := range wantOps {
 		t.Run(name, func(t *testing.T) {
@@ -124,7 +124,7 @@ func canonical(raw json.RawMessage) string {
 }
 
 // requests is r's herdr requests in order, except that a run of the same method (a
-// fan-out, which the TypeScript sends concurrently) is sorted.
+// fan-out, sent concurrently) is sorted.
 func requests(r record) []string {
 	var out []string
 	start := 0
@@ -139,9 +139,17 @@ func requests(r record) []string {
 	return out
 }
 
-// tsUsage is how the TypeScript CLI names itself in usage lines; the Go one says
-// agentwebctl.
+// tsUsage: the recordings taken from the TypeScript CLI name it agentwebctl.js in
+// usage lines; the Go one says agentwebctl.
 var tsUsage = strings.NewReplacer("agentwebctl.js", "agentwebctl")
+
+// beforeEnvironment is status output up to its troubleshooting lines.
+func beforeEnvironment(stdout string) string {
+	if i := strings.Index(stdout, "agentwebctl "); i >= 0 {
+		return stdout[:i]
+	}
+	return stdout
+}
 
 func distinct(xs []string) []string {
 	var out []string
@@ -183,15 +191,14 @@ func compareRecords(want, got record) []string {
 		if !slices.Equal(w.Args, g.Args) || w.Exit != g.Exit {
 			differ("command and exit", fmt.Sprint(w.Args, " → ", w.Exit), fmt.Sprint(g.Args, " → ", g.Exit))
 		}
-		gotStdout := g.Stdout
+		wantStdout, gotStdout := w.Stdout, g.Stdout
 		if len(g.Args) > 0 && g.Args[0] == "status" {
-			// the Go status adds troubleshooting lines (version, herdr, optional
-			// commands) after the TypeScript's output; printEnvironment in cli.go
-			if i := strings.Index(gotStdout, "agentwebctl "); i >= 0 {
-				gotStdout = gotStdout[:i]
-			}
+			// status ends with troubleshooting lines (version, herdr, optional commands;
+			// printEnvironment in cli.go) that depend on the machine, and that the
+			// TypeScript recordings lack
+			wantStdout, gotStdout = beforeEnvironment(wantStdout), beforeEnvironment(gotStdout)
 		}
-		if ws := tsUsage.Replace(w.Stdout); ws != gotStdout {
+		if ws := tsUsage.Replace(wantStdout); ws != gotStdout {
 			differ("stdout", fmt.Sprintf("%q", ws), fmt.Sprintf("%q", gotStdout))
 		}
 		if ws := tsUsage.Replace(w.Stderr); ws != g.Stderr {
@@ -221,7 +228,8 @@ func compareRecords(want, got record) []string {
 	}
 	wq, gq := requests(want), requests(got)
 	if got.CLI != nil && len(got.CLI.Args) > 0 && got.CLI.Args[0] == "status" {
-		gq = slices.DeleteFunc(gq, func(r string) bool { return strings.HasPrefix(r, "ping ") })
+		isPing := func(r string) bool { return strings.HasPrefix(r, "ping ") }
+		wq, gq = slices.DeleteFunc(wq, isPing), slices.DeleteFunc(gq, isPing)
 	}
 	if strings.HasPrefix(want.Op, "ws-") {
 		wq, gq = distinct(wq), distinct(gq)

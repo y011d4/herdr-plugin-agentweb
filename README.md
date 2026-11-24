@@ -84,6 +84,19 @@ is never rewritten: change its `agentwebctl` path (from a version before the Go 
 `node …/dist/bin/agentwebctl.js`) to `<plugin dir>/bin/agentwebctl` in its `CLAUDE.md` and
 `.claude/settings.json` yourself, or move to managed `orchestrators`.
 
+### Rolling back
+
+To go back to an earlier release, stop the bridge, reinstall that version, start again:
+
+```bash
+herdr plugin action invoke y011d4.agentweb.stop   # wait until it has finished
+herdr plugin uninstall y011d4.agentweb            # keeps the token, config and orchestrator dirs
+herdr plugin install y011d4/herdr-plugin-agentweb --ref v<earlier version>
+herdr plugin action invoke y011d4.agentweb.start
+```
+
+Then Clear the running orchestrators, as after an update.
+
 ### Uninstalling
 
 ```bash
@@ -516,13 +529,12 @@ herdr plugin link "$(pwd)"
 ```
 
 The bridge and CLI are Go (`cmd/agentwebctl`, `internal/bridge`). The PWA is TypeScript
-under `web/src/`, built to `web/` and embedded in the binary. The earlier TypeScript bridge
-(`server/`, `bin/`) stays for now, only to roll back to.
+under `web/src/`, built to `web/` and embedded in the binary.
 
 ```bash
 sh scripts/plugin-build.sh          # rebuild after changes, web ones too (the binary embeds the web UI)
 go test ./...                       # Go tests
-npm test                            # TypeScript tests (node --test)
+npm test                            # web UI tests (node --test)
 ./bin/agentwebctl run               # run against your live herdr in the foreground (config: see Configuration)
 ```
 

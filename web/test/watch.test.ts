@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { watchMessages } from '../src/watch.ts';
 import type { WatchMessage } from '../src/watch.ts';
 
-// What the bridge ends up watching for one socket (server/http.ts semantics:
+// What the bridge ends up watching for one socket (internal/bridge/ws.go semantics:
 // watch_* replaces that watch, unwatch_* clears it). A reconnect is a fresh socket.
 type Watches = { pane: string | null; transcript: string | null };
 const fresh = (): Watches => ({ pane: null, transcript: null });

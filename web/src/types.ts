@@ -1,6 +1,7 @@
 /**
  * Shared type definitions for the web PWA client.
- * Duplicated from server shapes — the two builds are separate; do not cross-import server code.
+ * They mirror the Go bridge's JSON (internal/bridge/types.go);
+ * internal/bridge/contract_test.go and `npm run check:contract` keep the two in step.
  */
 
 import type { TimelineItem } from './transcript.ts';

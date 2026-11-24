@@ -1,9 +1,10 @@
 /**
  * prompt.ts — pure parsing/identity for a live TUI prompt on a pane's screen.
  *
- * DOM-free so it can be unit-tested (server/test/prompt.test.ts). stripAnsi and
- * promptIdentity are duplicated byte-for-byte in server/prompt-identity.ts (the
- * bridge recomputes the identity to verify answers); keep the two in sync.
+ * DOM-free so it can be unit-tested (web/test/prompt.test.ts). stripAnsi and
+ * promptIdentity are duplicated in the Go bridge (internal/bridge/prompt_identity.go,
+ * which recomputes the identity to verify answers); testdata/vectors/prompt.json keeps
+ * the two in sync.
  */
 
 export interface PromptOption { send: string; label: string }

@@ -153,7 +153,7 @@ func TestPromptIdentity(t *testing.T) {
 }
 
 // Not in the TypeScript suite: none of the vectors has a question, so this covers
-// the question walk with the screen of server/test/prompt.test.ts's first test.
+// the question walk with the screen of web/test/prompt.test.ts's first test.
 func TestParsePromptReadsTheBoxedQuestion(t *testing.T) {
 	screen := strings.Join([]string{
 		"────────────────────────────",

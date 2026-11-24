@@ -15,7 +15,7 @@ updates:
     cooldown:
       default-days: 7
 
-  # npm dependency + lockfile updates (ws, typescript, @types/*).
+  # npm dependency + lockfile updates (typescript, for the web UI).
   - package-ecosystem: npm
     directory: /
     schedule:

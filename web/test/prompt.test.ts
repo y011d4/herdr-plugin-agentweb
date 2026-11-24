@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-// The live-prompt parser lives in the web module; it is DOM-free so it runs here.
-import { parsePrompt, stripAnsi } from '../../web/src/prompt.ts';
+// The live-prompt parser is DOM-free, so it runs under node --test.
+import { parsePrompt, stripAnsi } from '../src/prompt.ts';
 
 const HINT = 'Enter to select · ↑/↓ to navigate · Esc to cancel';
 
