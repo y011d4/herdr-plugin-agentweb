@@ -1,0 +1,152 @@
+{
+ "scenario": "status-during-snapshot-new",
+ "outputs": [
+  {
+   "t": 3,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   }
+  },
+  {
+   "t": 4,
+   "kind": "conn",
+   "connected": true
+  },
+  {
+   "t": 5,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   }
+  },
+  {
+   "t": 1062,
+   "kind": "status",
+   "paneId": "p4",
+   "from": "unknown",
+   "to": "idle"
+  },
+  {
+   "t": 1062,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null,
+    "p4": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    }
+   }
+  },
+  {
+   "t": 1062,
+   "kind": "status",
+   "paneId": "p1",
+   "from": "idle",
+   "to": "working"
+  },
+  {
+   "t": 1114,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": 1
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null,
+    "p4": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    }
+   }
+  },
+  {
+   "t": 1313,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": 1
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null,
+    "p4": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    }
+   }
+  },
+  {
+   "t": 1464,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": 1
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null,
+    "p4": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    }
+   }
+  }
+ ]
+}

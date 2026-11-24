@@ -1,0 +1,175 @@
+{
+ "scenario": "old-sub-drops-before-new-ack",
+ "outputs": [
+  {
+   "t": 3,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   }
+  },
+  {
+   "t": 4,
+   "kind": "conn",
+   "connected": true
+  },
+  {
+   "t": 5,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null
+   }
+  },
+  {
+   "t": 660,
+   "kind": "status",
+   "paneId": "p4",
+   "from": "unknown",
+   "to": "idle"
+  },
+  {
+   "t": 660,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "working",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null,
+    "p4": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    }
+   }
+  },
+  {
+   "t": 1265,
+   "kind": "status",
+   "paneId": "p2",
+   "from": "working",
+   "to": "done"
+  },
+  {
+   "t": 1265,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "done",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p3": null,
+    "p4": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    }
+   }
+  },
+  {
+   "t": 1318,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "done",
+     "seq": 1,
+     "changeSeq": 1
+    },
+    "p3": null,
+    "p4": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    }
+   }
+  },
+  {
+   "t": 1719,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "done",
+     "seq": 1,
+     "changeSeq": 1
+    },
+    "p3": null,
+    "p4": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    }
+   }
+  },
+  {
+   "t": 2322,
+   "kind": "state",
+   "connected": true,
+   "panes": {
+    "p1": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    },
+    "p2": {
+     "status": "done",
+     "seq": 1,
+     "changeSeq": 1
+    },
+    "p3": null,
+    "p4": {
+     "status": "idle",
+     "seq": null,
+     "changeSeq": null
+    }
+   }
+  }
+ ]
+}
