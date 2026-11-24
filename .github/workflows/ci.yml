@@ -37,9 +37,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Node >= 23.6 is required: the suite runs .ts files natively via
-        # `node --test` (unflagged type stripping). 24 = current LTS floor,
-        # 26 = the release line this repo's @types/node targets.
+        # The web UI's build and tests. Node >= 23.6 is required: the suite runs
+        # .ts files natively via `node --test` (unflagged type stripping).
+        # 24 = current LTS floor, 26 = current.
         node-version: ['24', '26']
     steps:
       # Pinned to a full commit SHA — a moved/retagged release cannot silently
@@ -60,21 +60,21 @@ jobs:
       # is interpolated into any run step, so there is no shell-injection
       # surface. All commands below are static.
       # --ignore-scripts: a fork PR's dependency lifecycle scripts (pre/post
-      # install) never execute in the runner. This repo needs none (ws +
-      # typescript + @types/* ship no build step). Drop this flag if you ever
+      # install) never execute in the runner. This repo needs none
+      # (typescript ships no build step). Drop this flag if you ever
       # add a dependency that legitimately requires a postinstall.
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      - name: Build (tsc x3)
-        run: npm run build
+      - name: Build the web UI (tsc x2)
+        run: npm run build:web
 
       # The Go bridge's JSON (testdata/contract, as typed literals in
       # web/test/contract.gen.ts) against the web's hand-written types.
-      - name: Check the JSON contract with the Go port
+      - name: Check the JSON contract with the Go bridge
         run: npm run check:contract
 
-      - name: Test
+      - name: Test the web UI
         run: npm test
 
   # The Go bridge and CLI, on each released OS/CPU family: linux/amd64 and linux/arm64
@@ -94,8 +94,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # The Go binary will embed the built web UI, and the scenario recorders run
-      # the TypeScript bridge, so the web build is a prerequisite here too.
+      # The Go binary embeds the built web UI, so the web build comes first.
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:

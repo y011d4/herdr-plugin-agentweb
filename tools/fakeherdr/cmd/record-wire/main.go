@@ -1,7 +1,9 @@
-// Command record-wire drives the TypeScript bridge (node server/main.ts) and CLI
-// (node bin/agentwebctl.ts) through one operation at a time against a fake herdr and
-// writes, per operation, what herdr received plus the HTTP answer or the CLI output to
-// testdata/wire/<op>.json. The Go bridge and CLI must send herdr the same requests.
+// Command record-wire drives the bridge (agentwebctl serve) and its CLI through one
+// operation at a time against a fake herdr and writes, per operation, what herdr
+// received plus the HTTP answer or the CLI output to testdata/wire/<op>.json, which
+// TestGoMatchesWireRecordings compares the current build with. The recordings were
+// taken from the TypeScript bridge the Go one was ported from (since deleted):
+// re-record only for an intended change of behavior, and review the diff.
 //
 // Everything lives in a fresh temp dir (state, config, data, HOME, a scratch git repo
 // with an origin) and the bridge listens on 127.0.0.1:8392. The account checks read
@@ -12,13 +14,12 @@
 // so the recordings don't depend on this machine's setup.
 //
 // Each CLI call runs detached (setsid -f), as the CLI takes its nearest claude
-// ancestor's account as its own. From the repo root (needs node >= 23.6 and setsid):
+// ancestor's account as its own. From the repo root, with the web UI built (it builds
+// ./cmd/agentwebctl; needs setsid):
 //
 //	go build -o /tmp/record-wire ./tools/fakeherdr/cmd/record-wire && /tmp/record-wire
 //
 // It writes testdata/wire/DONE (or FAILED with the reason) when finished.
-// Its TypeScript launch goes with the TypeScript server; the harness stays, for the Go
-// comparison tests (CLAUDE.md, Follow-ups).
 package main
 
 import (
@@ -49,20 +50,35 @@ var (
 	outDir = filepath.Join("testdata", "wire")
 )
 
-// goBin, when set, is recorded instead of the TypeScript bridge and CLI: the Go
-// agentwebctl, as `agentwebctl serve` and its commands (main_test.go).
+// goBin is the agentwebctl recorded, as `agentwebctl serve` and its commands: main
+// builds it, main_test.go its own.
 var goBin string
 
 func main() {
 	_ = os.MkdirAll(outDir, 0o755)
 	_ = os.Remove(filepath.Join(outDir, "DONE"))
 	_ = os.Remove(filepath.Join(outDir, "FAILED"))
-	if err := run(); err != nil {
+	err := buildThenRun()
+	if err != nil {
 		_ = os.WriteFile(filepath.Join(outDir, "FAILED"), []byte(err.Error()+"\n"), 0o644)
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	_ = os.WriteFile(filepath.Join(outDir, "DONE"), nil, 0o644)
+}
+
+// buildThenRun builds ./cmd/agentwebctl into a temp dir and records it.
+func buildThenRun() error {
+	dir, err := os.MkdirTemp("", "record-wire")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	goBin = filepath.Join(dir, "agentwebctl") // the CLI knows a bridge by this name
+	if out, err := exec.Command("go", "build", "-o", goBin, "./cmd/agentwebctl").CombinedOutput(); err != nil {
+		return fmt.Errorf("go build: %v\n%s", err, out)
+	}
+	return run()
 }
 
 // session is the fake herdr's world for the wire recordings.
@@ -368,10 +384,7 @@ func (r *recorder) http(rec *record, method, path string, body any) error {
 // away from any claude ancestor, whose account the CLI would take as its own) and
 // collects its output and exit code from files.
 func (r *recorder) cli(rec *record, extraEnv []string, args ...string) error {
-	argv := []string{nodeBin, filepath.Join(repoDir, "bin", "agentwebctl.ts")}
-	if goBin != "" {
-		argv = []string{goBin}
-	}
+	argv := []string{goBin}
 	dir, err := os.MkdirTemp("", "fwcli")
 	if err != nil {
 		return err
@@ -400,25 +413,8 @@ func (r *recorder) cli(rec *record, extraEnv []string, args ...string) error {
 	return nil
 }
 
-// repoDir is the repository root the TypeScript sources are run from (the cwd).
-var repoDir, _ = os.Getwd()
-
-// nodeBin is the real node binary: a version-manager shim (mise, asdf) may not work
-// under the temp HOME the recordings use.
-var nodeBin string
-
 func run() error {
-	var bridge *exec.Cmd
-	if goBin != "" {
-		bridge = exec.Command(goBin, "serve")
-	} else {
-		out, err := exec.Command("node", "-p", "process.execPath").Output()
-		if err != nil {
-			return fmt.Errorf("finding node: %w", err)
-		}
-		nodeBin = strings.TrimSpace(string(out))
-		bridge = exec.Command(nodeBin, "server/main.ts")
-	}
+	bridge := exec.Command(goBin, "serve")
 	tmp, err := os.MkdirTemp("", "fw")
 	if err != nil {
 		return err

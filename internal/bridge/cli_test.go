@@ -15,37 +15,23 @@ import (
 )
 
 // Only a bridge gets a SIGTERM through a pidfile: agentwebctl serve|run wherever it is
-// installed, or (until it is deleted) the TypeScript bridge of this binary's own checkout,
-// at the exact paths the TS checked; never another agentwebctl command, such as an
-// orchestrator's background `agent wait`, nor another project's server/main.js.
+// installed; never another agentwebctl command, such as an orchestrator's background
+// `agent wait`, nor the deleted TypeScript bridge (node …/server/main.js).
 func TestIsBridgeArgv(t *testing.T) {
-	const root = "/home/u/repo"
 	for argv, want := range map[string]bool{
 		"./bin/agentwebctl serve":                                      true,
 		"/home/u/.config/herdr/plugins/x/checkout/bin/agentwebctl run": true,
 		"agentwebctl serve --extra":                                    true,
-		"/usr/bin/node /home/u/repo/dist/server/main.js":               true,
-		"node /home/u/repo/server/main.ts":                             true,
-		"vim /home/u/repo/server/main.ts":                              false,
-		"node --inspect /home/u/repo/dist/server/main.js":              false,
-		"node /home/u/other/dist/server/main.js":                       false,
-		"node server/main.ts":                                          false,
+		"/usr/bin/node /home/u/repo/dist/server/main.js":               false,
 		"/x/agentwebctl agent wait p1 --status done":                   false,
 		"/x/agentwebctl overview":                                      false,
 		"/x/agentwebctl-old serve":                                     false,
 		"sleep 600":                                                    false,
 		"":                                                             false,
 	} {
-		if got := isBridgeArgv(strings.Fields(argv), root); got != want {
+		if got := isBridgeArgv(strings.Fields(argv)); got != want {
 			t.Errorf("isBridgeArgv(%q) = %v, want %v", argv, got, want)
 		}
-	}
-	// a binary outside a checkout recognizes no TS bridge
-	if isBridgeArgv([]string{"node", root + "/dist/server/main.js"}, legacyRoot("/tmp/x/agentwebctl")) {
-		t.Error("a binary outside <root>/bin took a TS bridge for its own")
-	}
-	if got := legacyRoot(root + "/bin/agentwebctl"); got != root {
-		t.Errorf("legacyRoot: %q, want %q", got, root)
 	}
 }
 
@@ -141,7 +127,7 @@ func TestCLIPort(t *testing.T) {
 }
 
 // Without /proc, ps prints the command line in one piece: only agentwebctl serve|run
-// counts (a path with spaces too); the TS bridge isn't guessed at (Linux only).
+// counts (a path with spaces too).
 func TestIsBridgeCommandLine(t *testing.T) {
 	for cmd, want := range map[string]bool{
 		"/Users/u/Library/herdr plugins/bin/agentwebctl serve":     true,

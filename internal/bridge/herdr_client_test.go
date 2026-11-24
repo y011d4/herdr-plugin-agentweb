@@ -20,8 +20,7 @@ func TestMain(m *testing.M) {
 }
 
 // Every fakeherdr scenario, run against this client, must report what the
-// TypeScript client reported in testdata/scenarios (recorded with
-// tools/fakeherdr/cmd/record-scenarios).
+// TypeScript client it was ported from (since deleted) reported in testdata/scenarios.
 func TestHerdrClientMatchesTypeScriptRecordings(t *testing.T) {
 	for _, sc := range fakeherdr.Scenarios {
 		t.Run(sc.Name, func(t *testing.T) {
@@ -97,7 +96,7 @@ func runScenario(t *testing.T, sc fakeherdr.Scenario) []fakeherdr.Output {
 	return append([]fakeherdr.Output(nil), outs...)
 }
 
-// summarize reduces a state push to what tools/scenario-ts/run.ts prints.
+// summarize reduces a state push to what the recordings hold.
 func summarize(s *State) fakeherdr.Output {
 	m := map[string]*fakeherdr.PaneAgent{}
 	for _, id := range s.PaneIDs() {
