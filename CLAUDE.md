@@ -333,9 +333,10 @@ vendor-neutrality is preserved.
   `stop`, check `/healthz` no longer answers, check out `423f49d` (just before the switch,
   7ce4080), `npm ci && npm run build`, re-link, `start`, Clear the orchestrators. Never Node's
   `stop` while Go runs: it can't see the Go bridge. To delete: `server/`, `bin/agentwebctl.ts`,
-  `server/test/` (move `prompt.test.ts`, a web test, to `web/test/`), `tools/scenario-ts` and the
-  TS recorders (`tools/fakeherdr/cmd/record-scenarios`, `record-wire/main.go`; keep `testdata/`
-  and the Go tests comparing against it); `package.json` down to the web build and tests
+  `server/test/` (move `prompt.test.ts`, a web test, to `web/test/`), `tools/scenario-ts`,
+  `tools/fakeherdr/cmd/record-scenarios` (all TS-only; keep `testdata/`, which the Go tests compare
+  against), and in `record-wire/main.go` only the TS launch (`nodeBin`, `node server/main.ts`, the
+  TS CLI): its harness runs the Go comparison tests; `package.json` down to the web build and tests
   (`typescript` only: drop `ws`, `@types/ws`, `start` and the `tsconfig.json` server build); CI's
   build-test job to the web; the Go CLI's recognition of the TS bridge (`legacyRoot`, the node
   branch of `isBridgeArgv`); the TS mentions here and in the READMEs.
