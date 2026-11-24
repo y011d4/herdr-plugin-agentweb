@@ -3,7 +3,7 @@
 **English** | [日本語](./README.ja.md)
 
 Monitor and control every coding agent running in [herdr](https://herdr.dev) from your
-phone. A herdr plugin that runs a small local bridge server (Node.js) and serves a
+phone. A herdr plugin that runs a small local bridge server (a Go binary) and serves a
 mobile-first PWA:
 
 - Dashboard of all agents across all workspaces with live status
@@ -36,7 +36,8 @@ herdr server
 ## Requirements
 
 - herdr >= 0.8.0 (Linux/macOS)
-- Node.js >= 20
+- To build it: Go >= 1.27, and Node.js >= 20 with `npm` for the web UI. The plugin builds
+  from source until releases with a prebuilt binary exist; the binary itself needs neither.
 - A way to reach the bridge from your phone — a reverse proxy, a tunnel, or a VPN
   (see [Exposing the bridge to your phone](#exposing-the-bridge-to-your-phone)).
   Tailscale is one easy option, not a requirement.
@@ -50,9 +51,26 @@ herdr plugin install y011d4/herdr-plugin-agentweb
 # or pin a version:  herdr plugin install y011d4/herdr-plugin-agentweb --ref v0.1.0
 ```
 
-No clone, no manual build: `herdr plugin install` runs the manifest `[[build]]` steps
-(`npm ci`, then `npm run build`), so it needs Node.js and `npm` on `PATH`. To hack on
+No clone, no manual build: `herdr plugin install` runs the manifest `[[build]]` step
+(`scripts/plugin-build.sh`: `npm ci`, the web build, `go build`), so it needs Go, Node.js
+and `npm` on `PATH`. To hack on
 the plugin from a local checkout instead, see [Development](#development).
+
+**Updating from a version before the Go bridge** (the actions ran `node dist/...`): stop the
+bridge first, then update, then start. The new `stop` doesn't recognize a Node bridge started
+from an earlier install, so it would drop the pidfile and leave that bridge holding the port:
+
+```bash
+herdr plugin action invoke y011d4.agentweb.stop   # wait until it has finished
+herdr plugin update
+herdr plugin action invoke y011d4.agentweb.start
+```
+
+Then restart each running orchestrator (**Clear** on its Home). The bridge rewrites their rules and
+allowlists with the new `agentwebctl` path when it starts, and a running orchestrator still calls the old one.
+An older unmanaged orchestrator directory (`orchestrator_dir`, or the old `dispatcher`) is yours and
+is never rewritten: change its `node …/dist/bin/agentwebctl.js` to `<plugin dir>/bin/agentwebctl`
+in its `CLAUDE.md` and `.claude/settings.json` yourself, or move to managed `orchestrators`.
 
 Start the bridge (any of these):
 
@@ -240,7 +258,7 @@ with defaults, is:
   account (`"~/.config/claude/work"`; a leading `~` is expanded), so you can keep, say, a work and a
   personal orchestrator apart. The plugin sets up each one's directory itself (see
   [Orchestrators](#orchestrators)) and starts it from the phone (**Start** buttons atop the agents
-  list) or with `agentwebctl.js orchestrator start <name>`. Opening the app lands on an
+  list) or with `<plugin dir>/bin/agentwebctl orchestrator start <name>`. Opening the app lands on an
   orchestrator's **Home**: its chat with only the dialogue (tool calls hidden), a status bar of its
   Claude account's agents (those that need you, and counts of the rest), and a "doing now" line while
   it works. Orchestrators aren't listed among the agents. Opened from a Home, the agents list shows
@@ -261,8 +279,9 @@ precedence over `config.json` for `host`/`port` (`public_url` and `notify_url` a
 config-file only). Effective precedence is env var → `config.json` → built-in
 default.
 
-> When you run the server directly for development (`node server/main.ts`),
-> `config.json` is only read if `HERDR_PLUGIN_CONFIG_DIR` points at the config dir.
+> When you run the bridge directly for development (`./bin/agentwebctl run`),
+> `config.json` is only read if `HERDR_PLUGIN_CONFIG_DIR` points at the config dir
+> (`HERDR_PLUGIN_CONFIG_DIR="$(herdr plugin config-dir y011d4.agentweb)" ./bin/agentwebctl run`).
 > herdr sets that automatically for plugin actions and panes, so it "just works"
 > when launched through herdr.
 
@@ -284,7 +303,7 @@ It starts in a new herdr workspace at that directory, with its `env`. The plugin
 it came up under the Claude account that `env` sets, and stops it otherwise. No per-directory
 tool such as direnv is needed. **Clear** (in the agent menu) restarts it with the same account.
 
-An orchestrator drives its workers only through `agentwebctl.js`, which touches nothing outside
+An orchestrator drives its workers only through `agentwebctl`, which touches nothing outside
 its own Claude account. The account is an agent process's `CLAUDE_CONFIG_DIR` (default
 `~/.claude`). Anything whose account differs, or can't be told, is hidden or refused:
 
@@ -311,7 +330,7 @@ commands, but already refuses the usual readers (`cat`, `ls`, `grep`, `git -C`�
 the orchestrator's directory; as of Claude Code 2.1.322 it lets `tree`, `du`, `fd`/`fdfind` and
 `lsof` through, so those are denied too. Existence checks (`test -e`, `realpath`) still answer.
 (Claude Code's `blockReadsOutsideWorkingDirectories` is not used: it would also refuse
-`agentwebctl.js` itself, whose path and `--cwd`/worktree paths lie outside the directory, and no
+`agentwebctl` itself, whose path and `--cwd`/worktree paths lie outside the directory, and no
 allow rule lifts it.) Workers themselves are ordinary agents under your own permission prompts;
 this boundary is about what each orchestrator, and so each account, sees.
 
@@ -319,13 +338,13 @@ this boundary is about what each orchestrator, and so each account, sees.
 or else the old default `~/.local/share/herdr-agentweb/dispatcher` if it exists, is still the one
 orchestrator, named `default`. It runs your own `CLAUDE.md` from that directory, which the plugin
 never writes to. If its `.claude/settings.json` has `blockReadsOutsideWorkingDirectories` (an
-earlier README suggested it), remove it, since it refuses every `agentwebctl.js` call, and deny the
+earlier README suggested it), remove it, since it refuses every `agentwebctl` call, and deny the
 listers above instead. To move to managed orchestrators:
 
 1. Add `orchestrators` to the config and restart the bridge. The plugin creates their directories.
 2. Put anything from your old `CLAUDE.md` that is still yours into each `local.md`. The bundled
    rules replace the parts about driving herdr.
-3. Start them (phone or `agentwebctl.js orchestrator start <name>`) and answer the folder-trust
+3. Start them (phone or `<plugin dir>/bin/agentwebctl orchestrator start <name>`) and answer the folder-trust
    question once. Then end the old orchestrator and delete its directory.
 
 ## Security model
@@ -414,25 +433,24 @@ GitHub — `herdr plugin link` points herdr at your checkout so your edits take 
 ```bash
 git clone https://github.com/y011d4/herdr-plugin-agentweb
 cd herdr-plugin-agentweb
-npm install && npm run build     # only dependency: ws
+./scripts/plugin-build.sh      # web UI, then bin/agentwebctl (Go)
 herdr plugin link "$(pwd)"
 ```
 
-Source is TypeScript under `server/`, `bin/`, and `web/src/`. The built JS
-distribution lives in `dist/` (server and bin) and `web/` (PWA assets).
+The bridge and CLI are Go (`cmd/agentwebctl`, `internal/bridge`). The PWA is TypeScript
+under `web/src/`, built to `web/` and embedded in the binary. The earlier TypeScript bridge
+(`server/`, `bin/`) stays for now, only to roll back to.
 
 ```bash
-npm run build                  # recompile TS → JS after changes
-npm test                       # unit tests (node --test, runs .ts natively, needs Node >= 23.6)
-node server/main.ts            # run against your live herdr in the foreground (dev, Node >= 23.6)
+./scripts/plugin-build.sh      # rebuild after changes, web ones too (the binary embeds the web UI)
+go test ./...                  # Go tests
+npm test                       # TypeScript tests (node --test, needs Node >= 23.6)
+./bin/agentwebctl run          # run against your live herdr in the foreground (config: see Configuration)
 ```
 
-`herdr plugin link` does **not** run build commands — rebuild with `npm run build`
+`herdr plugin link` does **not** run build commands — rebuild with `./scripts/plugin-build.sh`
 after edits (and re-run `herdr plugin link` only when `herdr-plugin.toml` changed).
 `herdr plugin install` runs the manifest build commands automatically.
-
-Runtime of the built `dist/` requires Node >= 20. Running TS sources directly
-(dev mode) requires Node >= 23.6 for native type stripping.
 
 Logs for the detached daemon go to `<state dir>/bridge.log`
 (`herdr plugin config-dir y011d4.agentweb` prints the config dir; state dir is its
