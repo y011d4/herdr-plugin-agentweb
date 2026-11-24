@@ -29,6 +29,14 @@ import (
 
 const pluginID = "y011d4.agentweb"
 
+// Version is the release this binary was built as (scripts/release.sh sets it with
+// -ldflags -X); "dev" for a build from source.
+var Version = "dev"
+
+// herdrBin is the herdr CLI: HERDR_BIN_PATH, which herdr sets for plugin commands and
+// its panes, else herdr on PATH.
+func herdrBin() string { return firstNonEmpty(os.Getenv("HERDR_BIN_PATH"), "herdr") }
+
 // CLI runs agentwebctl with args (the command line after the program name) and
 // returns its exit code. web and rules are what serve and run embed.
 func CLI(args []string, web fs.FS, rules string) int {
@@ -109,7 +117,7 @@ func configDir() string {
 		return d
 	}
 	// run outside herdr's plugin env (e.g. from an orchestrator's Bash): ask herdr
-	if out, err := exec.Command("herdr", "plugin", "config-dir", pluginID).Output(); err == nil && jsTrim(string(out)) != "" {
+	if out, err := exec.Command(herdrBin(), "plugin", "config-dir", pluginID).Output(); err == nil && jsTrim(string(out)) != "" {
 		return jsTrim(string(out))
 	}
 	return stateDir()
@@ -404,7 +412,34 @@ func (c cli) status() int {
 		fmt.Println("bridge is not running")
 		notify("herdr agent web stopped", "invoke y011d4.agentweb.start to launch")
 	}
+	printEnvironment()
 	return 0
+}
+
+// printEnvironment is status's troubleshooting part: this binary's version, the herdr
+// it reaches, and which optional commands it finds (on the PATH herdr gives actions).
+func printEnvironment() {
+	fmt.Println("agentwebctl " + Version)
+	var pong struct {
+		Version  string `json:"version"`
+		Protocol int    `json:"protocol"`
+	}
+	if raw, err := cliRPC("ping", nil, 2*time.Second); err != nil {
+		fmt.Printf("herdr: not reachable (%s)\n", err)
+	} else if err := json.Unmarshal(raw, &pong); err != nil {
+		fmt.Printf("herdr: unexpected ping answer (%s)\n", err)
+	} else {
+		fmt.Println(herdrVersionText(pong.Version, pong.Protocol))
+	}
+	var found, missing []string
+	for _, name := range []string{"git", "direnv", "gh", "tailscale", "qrencode"} {
+		if _, err := exec.LookPath(name); err == nil {
+			found = append(found, name)
+		} else {
+			missing = append(missing, name)
+		}
+	}
+	fmt.Printf("optional commands: found [%s], missing [%s]\n", strings.Join(found, " "), strings.Join(missing, " "))
 }
 
 // run serves in the foreground, in this process (the TS ran node in a child).
@@ -664,7 +699,7 @@ func (c cli) agent() int {
 		return 1
 	}
 	// the pane id, not the name: what was checked is what herdr acts on
-	herdr := exec.Command("herdr", append([]string{"agent", sub, paneID}, c.args[2:]...)...)
+	herdr := exec.Command(herdrBin(), append([]string{"agent", sub, paneID}, c.args[2:]...)...)
 	herdr.Stdin, herdr.Stdout, herdr.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return exitCode(herdr.Run())
 }
