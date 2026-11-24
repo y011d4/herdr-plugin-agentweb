@@ -177,6 +177,17 @@ export function parsePrompt(text: string): ParsedPrompt | null {
   return { question, options: best.options, selected: best.selected };
 }
 
+// Where a tapped answer stands, from its pane's status (app.ts's settlePendingAnswer):
+// 'back' once the press is confirmed and the agent has gone `working` (the answer
+// reached it and it moved on), 'stay' when it left the prompt without working (a
+// permission No: it waits for the user's instructions), else 'wait' (still blocked:
+// the next question of several, or not landed yet).
+export function answerOutcome(sent: boolean, sawWorking: boolean, status: string | undefined): 'back' | 'stay' | 'wait' {
+  if (!sent) return 'wait';
+  if (sawWorking) return 'back';
+  return status === 'blocked' ? 'wait' : 'stay';
+}
+
 // Identity of the on-screen prompt, used to skip needless re-renders and — when
 // answering — to detect that the prompt changed out from under a stale button so a
 // digit never lands on a different prompt. It hashes the visible prompt REGION rather
