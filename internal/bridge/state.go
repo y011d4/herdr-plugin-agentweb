@@ -338,7 +338,7 @@ func applyCompletionSeqs(s *State, agents []RawAgentSeqs, requestedAt int64) *St
 		}
 		u := *pane
 		na := *ag
-		na.CompletionSeq, na.StateChangeSeq = a.CompletionSeq, a.StateChangeSeq
+		na.CompletionSeq, na.StateChangeSeq = copySeq(a.CompletionSeq), copySeq(a.StateChangeSeq) // not the reply's own pointers
 		u.Agent = &na
 		paneByID[a.PaneID] = &u
 		changed = true
@@ -364,6 +364,14 @@ func applyCompletionSeqs(s *State, agents []RawAgentSeqs, requestedAt int64) *St
 		Workspaces: rebuildWorkspaces(s.Workspaces, tabByID),
 		paneByID:   paneByID, paneOrder: s.paneOrder, tabByID: tabByID,
 	}
+}
+
+func copySeq(p *int64) *int64 {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
 }
 
 func eqSeq(a, b *int64) bool {
