@@ -1,0 +1,18 @@
+{
+ "op": "agent-start-unknown-profile",
+ "http": {
+  "method": "POST",
+  "path": "/api/agents",
+  "body": {
+   "profile": "bash"
+  },
+  "status": 400,
+  "response": {
+   "error": {
+    "code": "invalid_params",
+    "message": "unknown profile: bash"
+   }
+  }
+ },
+ "herdr": []
+}

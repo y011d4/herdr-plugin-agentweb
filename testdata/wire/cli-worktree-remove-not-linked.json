@@ -1,0 +1,19 @@
+{
+ "op": "cli-worktree-remove-not-linked",
+ "cli": {
+  "args": [
+   "worktree",
+   "remove",
+   "$TMP/repo"
+  ],
+  "exit": 1,
+  "stdout": "",
+  "stderr": "refused: not a linked worktree open in herdr; $TMP/repo was left as it is\n"
+ },
+ "herdr": [
+  {
+   "method": "session.snapshot",
+   "params": {}
+  }
+ ]
+}
