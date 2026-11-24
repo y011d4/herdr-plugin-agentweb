@@ -15,26 +15,35 @@ import (
 )
 
 // Only a bridge gets a SIGTERM through a pidfile: agentwebctl serve|run wherever it is
-// installed, or (until P5 step 6) the TypeScript bridge; never another agentwebctl
-// command, such as an orchestrator's background `agent wait`.
+// installed, or (until P5 step 6) the TypeScript bridge of this binary's own checkout,
+// at the exact paths the TS checked; never another agentwebctl command, such as an
+// orchestrator's background `agent wait`, nor another project's server/main.js.
 func TestIsBridgeArgv(t *testing.T) {
+	const root = "/home/u/repo"
 	for argv, want := range map[string]bool{
 		"./bin/agentwebctl serve":                                      true,
 		"/home/u/.config/herdr/plugins/x/checkout/bin/agentwebctl run": true,
 		"agentwebctl serve --extra":                                    true,
 		"/usr/bin/node /home/u/repo/dist/server/main.js":               true,
-		"node server/main.ts":                                          true,
+		"node /home/u/repo/server/main.ts":                             true,
+		"node /home/u/other/dist/server/main.js":                       false,
+		"node server/main.ts":                                          false,
 		"/x/agentwebctl agent wait p1 --status done":                   false,
 		"/x/agentwebctl overview":                                      false,
 		"/x/agentwebctl-old serve":                                     false,
 		"sleep 600":                                                    false,
-		"node /x/server/other.js":                                      false,
-		"/x/main.js serve":                                             false,
 		"":                                                             false,
 	} {
-		if got := isBridgeArgv(strings.Fields(argv)); got != want {
+		if got := isBridgeArgv(strings.Fields(argv), root); got != want {
 			t.Errorf("isBridgeArgv(%q) = %v, want %v", argv, got, want)
 		}
+	}
+	// a binary outside a checkout recognizes no TS bridge
+	if isBridgeArgv([]string{"node", root + "/dist/server/main.js"}, legacyRoot("/tmp/x/agentwebctl")) {
+		t.Error("a binary outside <root>/bin took a TS bridge for its own")
+	}
+	if got := legacyRoot(root + "/bin/agentwebctl"); got != root {
+		t.Errorf("legacyRoot: %q, want %q", got, root)
 	}
 }
 
