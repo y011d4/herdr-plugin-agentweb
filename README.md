@@ -59,7 +59,7 @@ herdr plugin install y011d4/herdr-plugin-agentweb --ref v0.1.0
 ```
 
 No clone, no build: `herdr plugin install` runs the manifest `[[build]]` step,
-`scripts/plugin-build.sh`, which downloads that version's binary for your OS and CPU from the
+`scripts/plugin-build.sh release`, which downloads that version's binary for your OS and CPU from the
 [GitHub releases](https://github.com/y011d4/herdr-plugin-agentweb/releases) and checks it
 against the SHA-256 in `release/checksums.txt`, committed in the repo at that tag. A binary that
 doesn't match is not installed. (Without `--ref`, herdr installs the default branch, which
@@ -511,7 +511,7 @@ web UI's TypeScript build and tests).
 ```bash
 git clone https://github.com/y011d4/herdr-plugin-agentweb
 cd herdr-plugin-agentweb
-sh scripts/plugin-build.sh source   # web UI, then bin/agentwebctl (Go)
+sh scripts/plugin-build.sh          # web UI, then bin/agentwebctl (Go), from this checkout
 herdr plugin link "$(pwd)"
 ```
 
@@ -520,16 +520,17 @@ under `web/src/`, built to `web/` and embedded in the binary. The earlier TypeSc
 (`server/`, `bin/`) stays for now, only to roll back to.
 
 ```bash
-sh scripts/plugin-build.sh source   # rebuild after changes, web ones too (the binary embeds the web UI)
+sh scripts/plugin-build.sh          # rebuild after changes, web ones too (the binary embeds the web UI)
 go test ./...                       # Go tests
 npm test                            # TypeScript tests (node --test)
 ./bin/agentwebctl run               # run against your live herdr in the foreground (config: see Configuration)
 ```
 
-`herdr plugin link` does **not** run build commands — rebuild with
-`sh scripts/plugin-build.sh source` after edits (and re-run `herdr plugin link` only when
-`herdr-plugin.toml` changed). Without `source`, the script downloads the release binary of the
-version in `herdr-plugin.toml` instead of building your changes.
+herdr never runs build commands for a linked plugin (not on `herdr plugin link`, nor on
+`herdr plugin update`, which skips linked plugins) — rebuild with `sh scripts/plugin-build.sh`
+after edits (and re-run `herdr plugin link` only when `herdr-plugin.toml` changed). It always
+builds the checkout as it is; `sh scripts/plugin-build.sh release` instead downloads the release
+binary of the version in `herdr-plugin.toml`, as an install does.
 
 Logs for the detached daemon go to `<state dir>/bridge.log`
 (`~/.local/state/herdr/plugins/y011d4.agentweb`, or `$HERDR_PLUGIN_STATE_DIR` inside plugin

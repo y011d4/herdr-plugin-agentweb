@@ -53,7 +53,7 @@ herdr plugin install y011d4/herdr-plugin-agentweb --ref v0.1.0
 ```
 
 clone もビルドも不要です。`herdr plugin install` はマニフェストの `[[build]]`
-(`scripts/plugin-build.sh`) を実行します。これは、その版の OS と CPU に合うバイナリを
+(`scripts/plugin-build.sh release`) を実行します。これは、その版の OS と CPU に合うバイナリを
 [GitHub のリリース](https://github.com/y011d4/herdr-plugin-agentweb/releases) から取得し、そのタグの
 リポジトリにコミットされた `release/checksums.txt` の SHA-256 と照らし合わせます。合わないバイナリは
 インストールしません。(`--ref` を付けないと herdr は既定のブランチを入れ、その `herdr-plugin.toml` に
@@ -358,7 +358,7 @@ Node.js 23.6 以上と `npm` が要ります。
 ```bash
 git clone https://github.com/y011d4/herdr-plugin-agentweb
 cd herdr-plugin-agentweb
-sh scripts/plugin-build.sh source   # web UI、続いて bin/agentwebctl (Go)
+sh scripts/plugin-build.sh          # web UI、続いて bin/agentwebctl (Go)。このチェックアウトから
 herdr plugin link "$(pwd)"
 ```
 
@@ -367,15 +367,17 @@ bridge と CLI は Go (`cmd/agentwebctl`、`internal/bridge`) です。PWA は `
 戻すときのためだけに当面残しています。
 
 ```bash
-sh scripts/plugin-build.sh source   # 変更後に再ビルド。web の変更も (バイナリが web UI を埋め込むため)
+sh scripts/plugin-build.sh          # 変更後に再ビルド。web の変更も (バイナリが web UI を埋め込むため)
 go test ./...                       # Go のテスト
 npm test                            # TypeScript のテスト (node --test)
 ./bin/agentwebctl run               # ライブの herdr に対しフォアグラウンドで実行 (config は「設定」の節を参照)
 ```
 
-`herdr plugin link` は build コマンドを実行**しません** — 編集後は `sh scripts/plugin-build.sh source` で
-再ビルドしてください (`herdr plugin link` の再実行は `herdr-plugin.toml` を変更したときだけ)。`source` を
-付けないと、手元の変更をビルドせずに、`herdr-plugin.toml` の版のリリースのバイナリを取得します。
+herdr は link したプラグインの build コマンドを実行**しません** (`herdr plugin link` でも、link したものを
+飛ばす `herdr plugin update` でも) — 編集後は `sh scripts/plugin-build.sh` で再ビルドしてください
+(`herdr plugin link` の再実行は `herdr-plugin.toml` を変更したときだけ)。これは常にチェックアウトをそのまま
+ビルドします。`sh scripts/plugin-build.sh release` は、インストールのときと同じく、`herdr-plugin.toml` の版の
+リリースのバイナリを取得します。
 
 デタッチしたデーモンのログは `<state dir>/bridge.log` に出力されます
 (`~/.local/state/herdr/plugins/y011d4.agentweb`、プラグインコマンド内では `$HERDR_PLUGIN_STATE_DIR`)。
