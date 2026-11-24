@@ -6,8 +6,8 @@ package bridge
 //
 //	CLAUDE.md              imports rules.md, then local.md
 //	rules.md               the rules bundled with the plugin (orchestrator/rules.md),
-//	                       with the real agentwebctl command filled in
-//	.claude/settings.json  the allowlist: agentwebctl only, nothing else asked or allowed
+//	                       with the real yoicks command filled in
+//	.claude/settings.json  the allowlist: yoicks only, nothing else asked or allowed
 //	local.md               this orchestrator's own rules — created once, never overwritten
 //
 // (.claude/settings.local.json, which Claude Code also reads, is the user's too.)
@@ -35,10 +35,10 @@ func shellWord(p string) string {
 	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
 }
 
-// agentwebctlCommand is how an orchestrator runs agentwebctl: the exact command its
+// yoicksCommand is how an orchestrator runs yoicks: the exact command its
 // allowlist permits, this executable's real path. If that can't be found it is an
 // empty quoted word (an allowlist that matches nothing: fail closed).
-func agentwebctlCommand() string {
+func yoicksCommand() string {
 	exe, err := os.Executable()
 	if err == nil {
 		if real, err := filepath.EvalSymlinks(exe); err == nil {
@@ -49,7 +49,7 @@ func agentwebctlCommand() string {
 }
 
 const localTemplate = `<!-- This orchestrator's own rules: which repos it takes on, what language to answer in,
-     anything else. herdr-agentweb never changes this file (CLAUDE.md and rules.md are
+     anything else. yoicks never changes this file (CLAUDE.md and rules.md are
      rewritten each time it starts the orchestrator). -->
 `
 
@@ -70,7 +70,7 @@ func orchestratorFiles(def OrchestratorDef, rules, ctl string) map[string]string
 		Allow:       []string{"Bash(" + ctl + " overview)", "Bash(" + ctl + " agent *)", "Bash(" + ctl + " worktree remove *)"},
 		// dontAsk itself refuses most read-only commands (cat, ls, grep, git -C…) on paths outside
 		// this dir, but runs these listers there; existence checks (test -e, realpath) still answer.
-		// Not blockReadsOutsideWorkingDirectories: it also refuses agentwebctl, whose path and
+		// Not blockReadsOutsideWorkingDirectories: it also refuses yoicks, whose path and
 		// --cwd/worktree paths lie outside this dir, and no allow rule or hook lifts that.
 		// (Measured on Claude Code 2.1.322; recheck on upgrades.)
 		Deny: []string{"Edit", "Write", "NotebookEdit", "Bash(herdr *)",
@@ -84,7 +84,7 @@ func orchestratorFiles(def OrchestratorDef, rules, ctl string) map[string]string
 	enc.SetIndent("", "  ")
 	enc.Encode(settings) // plain strings: can't fail
 	return map[string]string{
-		"CLAUDE.md": `<!-- Written by herdr-agentweb each time it starts this orchestrator: edits here are lost.
+		"CLAUDE.md": `<!-- Written by yoicks each time it starts this orchestrator: edits here are lost.
      This orchestrator's own rules go in local.md. -->
 
 # Orchestrator: ` + def.Label + `
@@ -93,7 +93,7 @@ func orchestratorFiles(def OrchestratorDef, rules, ctl string) map[string]string
 
 @local.md
 `,
-		"rules.md":              strings.ReplaceAll(rules, "{{agentwebctl}}", ctl),
+		"rules.md":              strings.ReplaceAll(rules, "{{yoicks}}", ctl),
 		".claude/settings.json": js.String(),
 	}
 }
@@ -104,7 +104,7 @@ func ensureOrchestratorDir(def OrchestratorDef, rules string) error {
 	if err := os.MkdirAll(filepath.Join(def.Dir, ".claude"), 0o777); err != nil {
 		return err
 	}
-	for rel, text := range orchestratorFiles(def, rules, agentwebctlCommand()) {
+	for rel, text := range orchestratorFiles(def, rules, yoicksCommand()) {
 		if err := os.WriteFile(filepath.Join(def.Dir, rel), []byte(text), 0o666); err != nil {
 			return err
 		}

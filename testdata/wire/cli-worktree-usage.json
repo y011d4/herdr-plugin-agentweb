@@ -6,7 +6,7 @@
   ],
   "exit": 2,
   "stdout": "",
-  "stderr": "usage: agentwebctl.js worktree remove \u003ccheckout path\u003e\n"
+  "stderr": "usage: yoicks.js worktree remove \u003ccheckout path\u003e\n"
  },
  "herdr": []
 }

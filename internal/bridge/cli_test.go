@@ -11,23 +11,26 @@ import (
 	"testing"
 	"time"
 
-	"github.com/y011d4/herdr-plugin-agentweb/tools/fakeherdr"
+	"github.com/y011d4/herdr-plugin-yoicks/tools/fakeherdr"
 )
 
-// Only a bridge gets a SIGTERM through a pidfile: agentwebctl serve|run wherever it is
-// installed; never another agentwebctl command, such as an orchestrator's background
+// Only a bridge gets a SIGTERM through a pidfile: yoicks serve|run wherever it is
+// installed; never another yoicks command, such as an orchestrator's background
 // `agent wait`, nor the deleted TypeScript bridge (node …/server/main.js).
 func TestIsBridgeArgv(t *testing.T) {
 	for argv, want := range map[string]bool{
-		"./bin/agentwebctl serve":                                      true,
-		"/home/u/.config/herdr/plugins/x/checkout/bin/agentwebctl run": true,
-		"agentwebctl serve --extra":                                    true,
-		"/usr/bin/node /home/u/repo/dist/server/main.js":               false,
-		"/x/agentwebctl agent wait p1 --status done":                   false,
-		"/x/agentwebctl overview":                                      false,
-		"/x/agentwebctl-old serve":                                     false,
-		"sleep 600":                                                    false,
-		"":                                                             false,
+		"./bin/yoicks serve": true,
+		"/home/u/.config/herdr/plugins/x/checkout/bin/yoicks run": true,
+		"yoicks serve --extra":                           true,
+		"/usr/bin/node /home/u/repo/dist/server/main.js": false,
+		"/x/yoicks agent wait p1 --status done":          false,
+		"/x/yoicks overview":                             false,
+		"/x/yoicks-old serve":                            false,
+		"/x/bin/agentwebctl serve":                       true, // started before the rename
+		"./bin/agentwebctl run":                          true,
+		"/x/agentwebctl agent wait p1":                   false,
+		"sleep 600":                                      false,
+		"":                                               false,
 	} {
 		if got := isBridgeArgv(strings.Fields(argv)); got != want {
 			t.Errorf("isBridgeArgv(%q) = %v, want %v", argv, got, want)
@@ -41,7 +44,7 @@ func TestDefaultStateDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", "")
-	herdrDir := filepath.Join(home, ".local", "state", "herdr", "plugins", "y011d4.agentweb")
+	herdrDir := filepath.Join(home, ".local", "state", "herdr", "plugins", "y011d4.yoicks")
 	legacy := filepath.Join(home, ".local", "state", "herdr-agentweb")
 	token := func(dir string) {
 		os.MkdirAll(dir, 0o700)
@@ -60,12 +63,12 @@ func TestDefaultStateDir(t *testing.T) {
 	}
 	xdg := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", xdg)
-	if got, want := defaultStateDir(), filepath.Join(xdg, "herdr", "plugins", "y011d4.agentweb"); got != legacy {
+	if got, want := defaultStateDir(), filepath.Join(xdg, "herdr", "plugins", "y011d4.yoicks"); got != legacy {
 		// herdr's dir under XDG_STATE_HOME has no token yet, so the TS one still wins
 		t.Errorf("XDG_STATE_HOME without a token there: %s, want %s (not %s)", got, legacy, want)
 	}
 	os.RemoveAll(legacy)
-	if got, want := defaultStateDir(), filepath.Join(xdg, "herdr", "plugins", "y011d4.agentweb"); got != want {
+	if got, want := defaultStateDir(), filepath.Join(xdg, "herdr", "plugins", "y011d4.yoicks"); got != want {
 		t.Errorf("XDG_STATE_HOME: %s, want %s", got, want)
 	}
 }
@@ -112,7 +115,7 @@ func TestCliRPCErrors(t *testing.T) {
 
 // The port as `Number(env || config.port || 8390)` reads it.
 func TestCLIPort(t *testing.T) {
-	t.Setenv("HERDR_AGENTWEB_PORT", "")
+	t.Setenv("HERDR_YOICKS_PORT", "")
 	for cfg, want := range map[string]string{`{}`: "8390", `{"port":8391}`: "8391", `{"port":"8392"}`: "8392", `{"port":0}`: "8390", `{"port":"x"}`: "NaN"} {
 		var m map[string]any
 		json.Unmarshal([]byte(cfg), &m)
@@ -120,20 +123,22 @@ func TestCLIPort(t *testing.T) {
 			t.Errorf("config %s: %s, want %s", cfg, got, want)
 		}
 	}
-	t.Setenv("HERDR_AGENTWEB_PORT", " 8393 ")
+	t.Setenv("HERDR_YOICKS_PORT", " 8393 ")
 	if got := port(map[string]any{"port": 8391.0}); got != "8393" {
 		t.Errorf("the environment wins: %s", got)
 	}
 }
 
-// Without /proc, ps prints the command line in one piece: only agentwebctl serve|run
+// Without /proc, ps prints the command line in one piece: only yoicks serve|run
 // counts (a path with spaces too).
 func TestIsBridgeCommandLine(t *testing.T) {
 	for cmd, want := range map[string]bool{
-		"/Users/u/Library/herdr plugins/bin/agentwebctl serve":     true,
-		"./bin/agentwebctl run":                                    true,
-		"/x/agentwebctl agent wait p1":                             false,
+		"/Users/u/Library/herdr plugins/bin/yoicks serve": true,
+		"./bin/yoicks run":                                         true,
+		"/x/yoicks agent wait p1":                                  false,
+		"/Users/u/herdr/bin/agentwebctl serve":                     true, // started before the rename
 		"/x/agentwebctl overview":                                  false,
+		"/x/yoicks overview":                                       false,
 		"/opt/homebrew/bin/node /Users/u/repo/dist/server/main.js": false,
 		"sleep 600": false,
 	} {

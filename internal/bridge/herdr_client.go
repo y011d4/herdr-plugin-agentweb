@@ -59,7 +59,7 @@ func herdrRPC(socketPath, method string, params map[string]any) (json.RawMessage
 	if params == nil {
 		params = map[string]any{}
 	}
-	id := fmt.Sprintf("agentweb:%d:%d", time.Now().UnixMilli(), rpcSeq.Add(1))
+	id := fmt.Sprintf("yoicks:%d:%d", time.Now().UnixMilli(), rpcSeq.Add(1))
 	conn, err := net.DialTimeout("unix", socketPath, requestTimeout)
 	if err != nil {
 		logf("[herdr-client] rpc %s error: %s %s", method, err, safeParamsForLog(params))
@@ -522,7 +522,7 @@ func (c *HerdrClient) openSubscription(paneIDs []string, onReady func()) *subscr
 		return nil
 	}
 	s := &subscription{}
-	id := fmt.Sprintf("agentweb:sub:%d", time.Now().UnixMilli())
+	id := fmt.Sprintf("yoicks:sub:%d", time.Now().UnixMilli())
 	go func() {
 		conn, err := net.Dial("unix", c.socketPath)
 		if err != nil {

@@ -1,6 +1,9 @@
-# herdr-plugin-agentweb
+# herdr-plugin-yoicks
 
 **English** | [日本語](./README.ja.md)
+
+*Yoicks* is the huntsman's cry that sends the pack on. Formerly `herdr-plugin-agentweb`:
+see [Renamed from agentweb](#renamed-from-agentweb).
 
 Monitor and control every coding agent running in [herdr](https://herdr.dev) from your
 phone. A herdr plugin that runs a small local bridge server (a Go binary) and serves a
@@ -57,12 +60,12 @@ herdr server
 Install a release straight from GitHub:
 
 ```bash
-herdr plugin install y011d4/herdr-plugin-agentweb --ref v0.1.0
+herdr plugin install y011d4/herdr-plugin-yoicks --ref v0.1.0
 ```
 
 No clone, no build: `herdr plugin install` runs the manifest `[[build]]` step,
 `scripts/plugin-build.sh release`, which downloads that version's binary for your OS and CPU from the
-[GitHub releases](https://github.com/y011d4/herdr-plugin-agentweb/releases) and checks it
+[GitHub releases](https://github.com/y011d4/herdr-plugin-yoicks/releases) and checks it
 against the SHA-256 in `release/checksums.txt`, committed in the repo at that tag. A binary that
 doesn't match is not installed. (Without `--ref`, herdr installs the default branch, which
 downloads the release its `herdr-plugin.toml` names.) To hack on the plugin from a local
@@ -74,27 +77,46 @@ Stop the bridge, update, start it again — in that order: the update moves the 
 directory, and the new `stop` may not find a bridge the old binary started:
 
 ```bash
-herdr plugin action invoke y011d4.agentweb.stop   # wait until it has finished
+herdr plugin action invoke y011d4.yoicks.stop   # wait until it has finished
 herdr plugin update                               # or: herdr plugin install … --ref v<new>
-herdr plugin action invoke y011d4.agentweb.start
+herdr plugin action invoke y011d4.yoicks.start
 ```
 
 Then restart each running orchestrator (**Clear** on its Home). The bridge rewrites their rules and
-allowlists with the new `agentwebctl` path when it starts, and a running orchestrator still calls the old one.
+allowlists with the new `yoicks` path when it starts, and a running orchestrator still calls the old one.
 An older unmanaged orchestrator directory (`orchestrator_dir`, or the old `dispatcher`) is yours and
-is never rewritten: change its `agentwebctl` path (from a version before the Go bridge:
-`node …/dist/bin/agentwebctl.js`) to `<plugin dir>/bin/agentwebctl` in its `CLAUDE.md` and
-`.claude/settings.json` yourself, or move to managed `orchestrators`.
+is never rewritten: change its old path (`…/bin/agentwebctl` from before the rename, or
+`node …/dist/bin/agentwebctl.js` from before the Go bridge) to `<plugin dir>/bin/yoicks` in its
+`CLAUDE.md` and `.claude/settings.json` yourself, or move to managed `orchestrators`.
+
+### Renamed from agentweb
+
+Before v0.1.0 this plugin was `y011d4.agentweb`, its binary `agentwebctl`. herdr sees the new id
+as another plugin, so an install from before the rename moves over by hand:
+
+1. Stop the old bridge and wait until it has finished:
+   `herdr plugin action invoke y011d4.agentweb.stop`.
+2. Install (or link) this version. Copy `config.json` from `herdr plugin config-dir y011d4.agentweb`
+   into `herdr plugin config-dir y011d4.yoicks`, and `token` and `pane-profiles.json` from
+   `~/.local/state/herdr/plugins/y011d4.agentweb/` into `~/.local/state/herdr/plugins/y011d4.yoicks/`.
+   With the token, paired phones keep working, at the same URL.
+3. Start it (`herdr plugin action invoke y011d4.yoicks.start`), Clear the running orchestrators,
+   then `herdr plugin uninstall y011d4.agentweb` (or `unlink`).
+
+`~/.local/share/herdr-agentweb` stays in use while it exists, so the orchestrators' directories,
+and with them Claude Code's memory, transcripts and folder trust, don't move. The new `stop` also
+recognizes a bridge started as `agentwebctl`. `HERDR_AGENTWEB_HOST`/`_PORT` are now
+`HERDR_YOICKS_HOST`/`_PORT`.
 
 ### Rolling back
 
 To go back to an earlier release, stop the bridge, reinstall that version, start again:
 
 ```bash
-herdr plugin action invoke y011d4.agentweb.stop   # wait until it has finished
-herdr plugin uninstall y011d4.agentweb            # keeps the token, config and orchestrator dirs
-herdr plugin install y011d4/herdr-plugin-agentweb --ref v<earlier version>
-herdr plugin action invoke y011d4.agentweb.start
+herdr plugin action invoke y011d4.yoicks.stop   # wait until it has finished
+herdr plugin uninstall y011d4.yoicks            # keeps the token, config and orchestrator dirs
+herdr plugin install y011d4/herdr-plugin-yoicks --ref v<earlier version>
+herdr plugin action invoke y011d4.yoicks.start
 ```
 
 Then Clear the running orchestrators, as after an update.
@@ -102,35 +124,35 @@ Then Clear the running orchestrators, as after an update.
 ### Uninstalling
 
 ```bash
-herdr plugin action invoke y011d4.agentweb.stop
-herdr plugin config-dir y011d4.agentweb            # note the config dir before uninstalling
-herdr plugin uninstall y011d4.agentweb
+herdr plugin action invoke y011d4.yoicks.stop
+herdr plugin config-dir y011d4.yoicks            # note the config dir before uninstalling
+herdr plugin uninstall y011d4.yoicks
 ```
 
 `herdr plugin uninstall` leaves files behind. Delete what you no longer want:
 
-- the installed checkout: `~/.config/herdr/plugins/github-installations/y011d4.agentweb-*`
-  (older herdr: `~/.config/herdr/plugins/github/y011d4.agentweb-*`)
-- the state dir, `~/.local/state/herdr/plugins/y011d4.agentweb` (under `$XDG_STATE_HOME` when
+- the installed checkout: `~/.config/herdr/plugins/github-installations/y011d4.yoicks-*`
+  (older herdr: `~/.config/herdr/plugins/github/y011d4.yoicks-*`)
+- the state dir, `~/.local/state/herdr/plugins/y011d4.yoicks` (under `$XDG_STATE_HOME` when
   set): the access token, `bridge.log`, `pane-profiles.json`
 - the config dir printed above (`config.json`)
-- `~/.local/share/herdr-agentweb` (under `$XDG_DATA_HOME` when set): the orchestrator directories,
-  including your own `local.md` files
+- `~/.local/share/herdr-yoicks` (`herdr-agentweb` from before the rename; under `$XDG_DATA_HOME`
+  when set): the orchestrator directories, including your own `local.md` files
 
 ### Starting
 
 Start the bridge (any of these):
 
 ```bash
-herdr plugin action invoke y011d4.agentweb.start   # detached daemon
-herdr plugin pane open --plugin y011d4.agentweb --entrypoint server  # visible in a pane
+herdr plugin action invoke y011d4.yoicks.start   # detached daemon
+herdr plugin pane open --plugin y011d4.yoicks --entrypoint server  # visible in a pane
 ```
 
 Then connect the phone by scanning a QR code (requires the `qrencode` system
 package; falls back to printing the URL):
 
 ```bash
-herdr plugin pane open --plugin y011d4.agentweb --entrypoint connect
+herdr plugin pane open --plugin y011d4.yoicks --entrypoint connect
 ```
 
 The overlay pane shows a QR of your connect URL with the access token included:
@@ -146,14 +168,14 @@ The plugin exposes three workspace actions and two panes:
 
 | Entrypoint | Kind | What it does |
 | --- | --- | --- |
-| `y011d4.agentweb.start` | action | Start the bridge as a detached daemon |
-| `y011d4.agentweb.stop` | action | Stop the running bridge |
-| `y011d4.agentweb.status` | action | Report whether it's running, the URL (no token), the versions of the plugin and herdr, and which optional commands it finds |
+| `y011d4.yoicks.start` | action | Start the bridge as a detached daemon |
+| `y011d4.yoicks.stop` | action | Stop the running bridge |
+| `y011d4.yoicks.status` | action | Report whether it's running, the URL (no token), the versions of the plugin and herdr, and which optional commands it finds |
 | `server` | pane | Run the bridge in a visible pane (foreground; the tokenized URL is shown here) |
 | `connect` | pane | Show the connect QR / URL as an overlay |
 
 Invoke an action with `herdr plugin action invoke <id>`; open a pane with
-`herdr plugin pane open --plugin y011d4.agentweb --entrypoint <id>`. The detached
+`herdr plugin pane open --plugin y011d4.yoicks --entrypoint <id>`. The detached
 daemon and the foreground `server` pane are mutually exclusive — start one or the
 other, not both.
 
@@ -246,8 +268,8 @@ terminal scrollback, giving you the smooth local scrolling path everywhere.
 [[keys.command]]
 key = "prefix+m"
 type = "plugin_action"
-command = "y011d4.agentweb.status"
-description = "agent web bridge status"
+command = "y011d4.yoicks.status"
+description = "yoicks bridge status"
 ```
 
 ## Configuration
@@ -257,7 +279,7 @@ change anything, create a `config.json` in the plugin config dir. Print that dir
 with:
 
 ```bash
-herdr plugin config-dir y011d4.agentweb
+herdr plugin config-dir y011d4.yoicks
 ```
 
 Every key is optional; include only the ones you want to override. The full shape,
@@ -305,7 +327,7 @@ with defaults, is:
   account (`"~/.config/claude/work"`; a leading `~` is expanded), so you can keep, say, a work and a
   personal orchestrator apart. The plugin sets up each one's directory itself (see
   [Orchestrators](#orchestrators)) and starts it from the phone (**Start** buttons atop the agents
-  list) or with `<plugin dir>/bin/agentwebctl orchestrator start <name>`. Opening the app lands on an
+  list) or with `<plugin dir>/bin/yoicks orchestrator start <name>`. Opening the app lands on an
   orchestrator's **Home**: its chat with only the dialogue (tool calls hidden), a status bar of its
   Claude account's agents (those that need you, and counts of the rest), and a "doing now" line while
   it works. Orchestrators aren't listed among the agents. Opened from a Home, the agents list shows
@@ -319,23 +341,24 @@ with defaults, is:
   your tailnet, point the ntfy Android app at the same topic.
 
 **Applying changes:** the config is read once at startup, so restart the bridge
-after editing — `herdr plugin action invoke y011d4.agentweb.stop`, then `…start`.
+after editing — `herdr plugin action invoke y011d4.yoicks.stop`, then `…start`.
 
-**Environment overrides:** `HERDR_AGENTWEB_HOST` and `HERDR_AGENTWEB_PORT` take
+**Environment overrides:** `HERDR_YOICKS_HOST` and `HERDR_YOICKS_PORT` take
 precedence over `config.json` for `host`/`port` (`public_url` and `notify_url` are
 config-file only). Effective precedence is env var → `config.json` → built-in
 default.
 
-> When you run the bridge directly for development (`./bin/agentwebctl run`),
+> When you run the bridge directly for development (`./bin/yoicks run`),
 > `config.json` is only read if `HERDR_PLUGIN_CONFIG_DIR` points at the config dir
-> (`HERDR_PLUGIN_CONFIG_DIR="$(herdr plugin config-dir y011d4.agentweb)" ./bin/agentwebctl run`).
+> (`HERDR_PLUGIN_CONFIG_DIR="$(herdr plugin config-dir y011d4.yoicks)" ./bin/yoicks run`).
 > herdr sets that automatically for plugin actions and panes, so it "just works"
 > when launched through herdr.
 
 ### Orchestrators
 
 For each entry of `orchestrators`, the plugin keeps a directory,
-`~/.local/share/herdr-agentweb/orchestrators/<name>/` (under `$XDG_DATA_HOME` when set), writing
+`~/.local/share/herdr-yoicks/orchestrators/<name>/` (under `$XDG_DATA_HOME` when set;
+`herdr-agentweb` in place of `herdr-yoicks` while that one, from before the rename, exists), writing
 it when the bridge starts and again each time it starts that orchestrator:
 
 - `CLAUDE.md` — names the orchestrator and imports the two files below.
@@ -350,7 +373,7 @@ It starts in a new herdr workspace at that directory, with its `env`. The plugin
 it came up under the Claude account that `env` sets, and stops it otherwise. No per-directory
 tool such as direnv is needed. **Clear** (in the agent menu) restarts it with the same account.
 
-An orchestrator drives its workers only through `agentwebctl`, which touches nothing outside
+An orchestrator drives its workers only through `yoicks`, which touches nothing outside
 its own Claude account. The account is an agent process's `CLAUDE_CONFIG_DIR` (default
 `~/.claude`). Anything whose account differs, or can't be told, is hidden or refused:
 
@@ -377,7 +400,7 @@ commands, but already refuses the usual readers (`cat`, `ls`, `grep`, `git -C`�
 the orchestrator's directory; as of Claude Code 2.1.322 it lets `tree`, `du`, `fd`/`fdfind` and
 `lsof` through, so those are denied too. Existence checks (`test -e`, `realpath`) still answer.
 (Claude Code's `blockReadsOutsideWorkingDirectories` is not used: it would also refuse
-`agentwebctl` itself, whose path and `--cwd`/worktree paths lie outside the directory, and no
+`yoicks` itself, whose path and `--cwd`/worktree paths lie outside the directory, and no
 allow rule lifts it.) Workers themselves are ordinary agents under your own permission prompts;
 this boundary is about what each orchestrator, and so each account, sees.
 
@@ -385,13 +408,13 @@ this boundary is about what each orchestrator, and so each account, sees.
 or else the old default `~/.local/share/herdr-agentweb/dispatcher` if it exists, is still the one
 orchestrator, named `default`. It runs your own `CLAUDE.md` from that directory, which the plugin
 never writes to. If its `.claude/settings.json` has `blockReadsOutsideWorkingDirectories` (an
-earlier README suggested it), remove it, since it refuses every `agentwebctl` call, and deny the
+earlier README suggested it), remove it, since it refuses every `yoicks` call, and deny the
 listers above instead. To move to managed orchestrators:
 
 1. Add `orchestrators` to the config and restart the bridge. The plugin creates their directories.
 2. Put anything from your old `CLAUDE.md` that is still yours into each `local.md`. The bundled
    rules replace the parts about driving herdr.
-3. Start them (phone or `<plugin dir>/bin/agentwebctl orchestrator start <name>`) and answer the folder-trust
+3. Start them (phone or `<plugin dir>/bin/yoicks orchestrator start <name>`) and answer the folder-trust
    question once. Then end the old orchestrator and delete its directory.
 
 ## Security model
@@ -437,7 +460,7 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   refuse, an orchestrator's Home lists every agent rather than its account's, **Clear**
   relaunches without checking the account, and the CLI takes its own `CLAUDE_CONFIG_DIR` as the
   caller's account.
-- **Claude Code installed with npm** runs as `node`, so `agentwebctl` doesn't recognize it as the
+- **Claude Code installed with npm** runs as `node`, so `yoicks` doesn't recognize it as the
   calling orchestrator's Claude process and falls back to its own `CLAUDE_CONFIG_DIR`. Use
   Claude Code's native installer for orchestrators.
 - **Chat view transcripts** are found under `~/.claude/projects` and
@@ -449,12 +472,12 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
 - `curl -s http://127.0.0.1:8390/healthz` should answer `{"ok":true,"herdrConnected":true}`. No
   answer: the bridge isn't running (start it, then read `bridge.log`). `"herdrConnected":false`:
   it can't reach herdr's socket (`$HERDR_SOCKET_PATH`, by default `~/.config/herdr/herdr.sock`).
-- `herdr plugin action invoke y011d4.agentweb.status` reports the plugin's and herdr's versions,
+- `herdr plugin action invoke y011d4.yoicks.status` reports the plugin's and herdr's versions,
   herdr's protocol (with a warning when it isn't a verified one) and the optional commands found
   on the PATH herdr gives plugins. Read the output with
-  `herdr plugin log list --plugin y011d4.agentweb` (its `stdout`).
+  `herdr plugin log list --plugin y011d4.yoicks` (its `stdout`).
 - The detached bridge logs to `bridge.log` in the state dir
-  (`~/.local/state/herdr/plugins/y011d4.agentweb`): the version it runs, the herdr it connected
+  (`~/.local/state/herdr/plugins/y011d4.yoicks`): the version it runs, the herdr it connected
   to, and errors. It holds the tokenized connect URL, so keep it private.
 - The phone still shows the old app after an update: close and reopen it (the service worker
   fetches the new version in the background).
@@ -527,20 +550,20 @@ Building from source needs Go (the version in `go.mod`) and Node.js >= 23.6 with
 web UI's TypeScript build and tests).
 
 ```bash
-git clone https://github.com/y011d4/herdr-plugin-agentweb
-cd herdr-plugin-agentweb
-sh scripts/plugin-build.sh          # web UI, then bin/agentwebctl (Go), from this checkout
+git clone https://github.com/y011d4/herdr-plugin-yoicks
+cd herdr-plugin-yoicks
+sh scripts/plugin-build.sh          # web UI, then bin/yoicks (Go), from this checkout
 herdr plugin link "$(pwd)"
 ```
 
-The bridge and CLI are Go (`cmd/agentwebctl`, `internal/bridge`). The PWA is TypeScript
+The bridge and CLI are Go (`cmd/yoicks`, `internal/bridge`). The PWA is TypeScript
 under `web/src/`, built to `web/` and embedded in the binary.
 
 ```bash
 sh scripts/plugin-build.sh          # rebuild after changes, web ones too (the binary embeds the web UI)
 go test ./...                       # Go tests
 npm test                            # web UI tests (node --test)
-./bin/agentwebctl run               # run against your live herdr in the foreground (config: see Configuration)
+./bin/yoicks run               # run against your live herdr in the foreground (config: see Configuration)
 ```
 
 herdr never runs build commands for a linked plugin (not on `herdr plugin link`, nor on
@@ -550,7 +573,7 @@ builds the checkout as it is; `sh scripts/plugin-build.sh release` instead downl
 binary of the version in `herdr-plugin.toml`, as an install does.
 
 Logs for the detached daemon go to `<state dir>/bridge.log`
-(`~/.local/state/herdr/plugins/y011d4.agentweb`, or `$HERDR_PLUGIN_STATE_DIR` inside plugin
+(`~/.local/state/herdr/plugins/y011d4.yoicks`, or `$HERDR_PLUGIN_STATE_DIR` inside plugin
 commands).
 
 ### Releasing

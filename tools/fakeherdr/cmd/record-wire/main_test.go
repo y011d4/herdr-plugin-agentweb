@@ -12,12 +12,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/y011d4/herdr-plugin-agentweb/tools/fakeherdr"
+	"github.com/y011d4/herdr-plugin-yoicks/tools/fakeherdr"
 )
 
 const repoRoot = "../../../.."
 
-// The Go agentwebctl (its bridge, `serve`, and its CLI commands), driven through every
+// The Go yoicks (its bridge, `serve`, and its CLI commands), driven through every
 // operation recorded in testdata/wire (first from the TypeScript bridge), must send
 // herdr the same requests and answer, print and exit the same (compared as in
 // testdata/README.md).
@@ -29,7 +29,7 @@ func TestGoMatchesWireRecordings(t *testing.T) {
 		// recorded on Linux, where the account checks read /proc (elsewhere a clear skips them)
 		t.Skip("the recordings and the stand-in agents need Linux /proc")
 	}
-	bin := buildAgentwebctl(t)
+	bin := buildYoicks(t)
 	defer func(p, o, b string) { port, outDir, goBin = p, o, b }(port, outDir, goBin)
 	port, outDir, goBin = freePort(t), t.TempDir(), bin
 	if err := run(); err != nil {
@@ -65,9 +65,9 @@ func TestGoMatchesWireRecordings(t *testing.T) {
 	}
 }
 
-// buildAgentwebctl builds the Go agentwebctl into a temp dir (named agentwebctl: the
+// buildYoicks builds the Go yoicks into a temp dir (named yoicks: the
 // CLI knows a bridge by that name).
-func buildAgentwebctl(t *testing.T) string {
+func buildYoicks(t *testing.T) string {
 	t.Helper()
 	// go test caches a pass by the files the test itself looked at, and the build
 	// below reads the sources in another process: stat them here, so a change to any
@@ -81,11 +81,11 @@ func buildAgentwebctl(t *testing.T) string {
 		}
 		return nil
 	})
-	bin := filepath.Join(t.TempDir(), "agentwebctl")
-	build := exec.Command("go", "build", "-o", bin, "./cmd/agentwebctl")
+	bin := filepath.Join(t.TempDir(), "yoicks")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/yoicks")
 	build.Dir = repoRoot
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("building agentwebctl (needs `npm run build:web` first): %v\n%s", err, out)
+		t.Fatalf("building yoicks (needs `npm run build:web` first): %v\n%s", err, out)
 	}
 	return bin
 }
@@ -139,13 +139,13 @@ func requests(r record) []string {
 	return out
 }
 
-// tsUsage: the recordings taken from the TypeScript CLI name it agentwebctl.js in
-// usage lines; the Go one says agentwebctl.
-var tsUsage = strings.NewReplacer("agentwebctl.js", "agentwebctl")
+// tsUsage: the recordings taken from the TypeScript CLI name it yoicks.js in
+// usage lines; the Go one says yoicks.
+var tsUsage = strings.NewReplacer("yoicks.js", "yoicks")
 
 // beforeEnvironment is status output up to its troubleshooting lines.
 func beforeEnvironment(stdout string) string {
-	if i := strings.Index(stdout, "agentwebctl "); i >= 0 {
+	if i := strings.Index(stdout, "yoicks "); i >= 0 {
 		return stdout[:i]
 	}
 	return stdout
@@ -272,21 +272,21 @@ func TestCompareRecordsCatchesDifferences(t *testing.T) {
 func TestCompareRecordsCatchesCLIDifferences(t *testing.T) {
 	base := func() record {
 		return record{Op: "cli-x",
-			CLI:      &cliCall{Args: []string{"agent"}, Exit: 2, Stderr: "usage: agentwebctl.js agent …\n"},
+			CLI:      &cliCall{Args: []string{"agent"}, Exit: 2, Stderr: "usage: yoicks.js agent …\n"},
 			HerdrCLI: []string{"herdr agent get p1"},
 			Herdr: []fakeherdr.Request{{Method: "agent.list"},
 				{Method: "pane.process_info", Params: json.RawMessage(`{"pane_id":"p1"}`)},
 				{Method: "pane.process_info", Params: json.RawMessage(`{"pane_id":"p5"}`)}}}
 	}
 	same := base()
-	same.CLI.Stderr = "usage: agentwebctl agent …\n"            // the Go CLI's name
+	same.CLI.Stderr = "usage: yoicks agent …\n"                 // the Go CLI's name
 	same.Herdr[1], same.Herdr[2] = same.Herdr[2], same.Herdr[1] // a fan-out in another order
 	if d := compareRecords(base(), same); len(d) != 0 {
 		t.Errorf("equal records differ: %v", d)
 	}
 	for name, change := range map[string]func(*record){
 		"exit":      func(r *record) { r.CLI.Exit = 1 },
-		"stderr":    func(r *record) { r.CLI.Stderr = "usage: agentwebctl agent\n" },
+		"stderr":    func(r *record) { r.CLI.Stderr = "usage: yoicks agent\n" },
 		"stdout":    func(r *record) { r.CLI.Stdout = "x\n" },
 		"herdr cli": func(r *record) { r.HerdrCLI = []string{"herdr agent get w-named"} },
 		"no cli":    func(r *record) { r.CLI = nil },

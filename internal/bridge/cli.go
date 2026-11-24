@@ -1,6 +1,6 @@
 package bridge
 
-// agentwebctl's commands, a port of bin/agentwebctl.ts: run | start | stop | status |
+// yoicks's commands, a port of bin/agentwebctl.ts: run | start | stop | status |
 // qr | overview | agent | worktree | orchestrator, plus serve (the bridge itself, what
 // start launches in the background). herdr's actions and panes call them with cwd =
 // the plugin root; an orchestrator calls overview, agent and worktree from its Bash.
@@ -27,7 +27,7 @@ import (
 	"time"
 )
 
-const pluginID = "y011d4.agentweb"
+const pluginID = "y011d4.yoicks"
 
 // Version is the release this binary was built as (scripts/release.sh sets it with
 // -ldflags -X); "dev" for a build from source.
@@ -37,7 +37,7 @@ var Version = "dev"
 // its panes, else herdr on PATH.
 func herdrBin() string { return firstNonEmpty(os.Getenv("HERDR_BIN_PATH"), "herdr") }
 
-// CLI runs agentwebctl with args (the command line after the program name) and
+// CLI runs yoicks with args (the command line after the program name) and
 // returns its exit code. web and rules are what serve and run embed.
 func CLI(args []string, web fs.FS, rules string) int {
 	c := cli{web: web, rules: rules}
@@ -71,7 +71,7 @@ func CLI(args []string, web fs.FS, rules string) int {
 	case "orchestrator":
 		return c.orchestrator()
 	}
-	fmt.Fprintln(os.Stderr, "usage: agentwebctl <run|start|stop|status|qr|overview|agent|worktree|orchestrator>")
+	fmt.Fprintln(os.Stderr, "usage: yoicks <run|start|stop|status|qr|overview|agent|worktree|orchestrator>")
 	return 2
 }
 
@@ -93,8 +93,8 @@ func (c cli) arg(i int) string {
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 // defaultStateDir is where herdr keeps this plugin's state (what it passes as
-// HERDR_PLUGIN_STATE_DIR), also when agentwebctl runs outside herdr: the TS
-// used ~/.local/state/herdr-agentweb there, so a token found only in that old place
+// HERDR_PLUGIN_STATE_DIR), also when yoicks runs outside herdr: the TS
+// used ~/.local/state/herdr-agentweb there (the name before the rename), so a token found only in that old place
 // keeps being used rather than unpairing a phone.
 func defaultStateDir() string {
 	home := osHomedir()
@@ -151,11 +151,15 @@ func ownExe() string {
 	return exe
 }
 
-// isBridgeArgv is whether a command line is a bridge: `agentwebctl serve|run`, not
-// another agentwebctl command (an orchestrator's background `agent wait` must not get
+// bridgeNames are the names a bridge runs under: this binary's, and agentwebctl, its
+// name before the rename, so a bridge started before it can still be stopped.
+var bridgeNames = []string{"yoicks", "agentwebctl"}
+
+// isBridgeArgv is whether a command line is a bridge: `yoicks serve|run`, not
+// another yoicks command (an orchestrator's background `agent wait` must not get
 // a SIGTERM through a reused PID), whatever dir the binary lives in.
 func isBridgeArgv(argv []string) bool {
-	return len(argv) >= 2 && path.Base(argv[0]) == "agentwebctl" && (argv[1] == "serve" || argv[1] == "run")
+	return len(argv) >= 2 && slices.Contains(bridgeNames, path.Base(argv[0])) && (argv[1] == "serve" || argv[1] == "run")
 }
 
 // looksLikeBridge checks that a live pid from a pidfile still runs the bridge: the
@@ -185,9 +189,14 @@ func looksLikeBridge(pid int) bool {
 }
 
 // isBridgeCommandLine is the check for a command line as ps prints it (no /proc): it
-// ends in `agentwebctl serve|run` (a binary path may hold spaces).
+// ends in `yoicks serve|run` (a binary path may hold spaces), or a bridgeNames one.
 func isBridgeCommandLine(cmd string) bool {
-	return strings.HasSuffix(cmd, "agentwebctl serve") || strings.HasSuffix(cmd, "agentwebctl run")
+	for _, name := range bridgeNames {
+		if strings.HasSuffix(cmd, name+" serve") || strings.HasSuffix(cmd, name+" run") {
+			return true
+		}
+	}
+	return false
 }
 
 func pidAlive(pid int) bool { return syscall.Kill(pid, 0) == nil }
@@ -229,7 +238,7 @@ func jsNumberString(v any) string {
 
 // port is the bridge's port as the CLI reads it (env, else config, else 8390).
 func port(cfg map[string]any) string {
-	if p := os.Getenv("HERDR_AGENTWEB_PORT"); p != "" {
+	if p := os.Getenv("HERDR_YOICKS_PORT"); p != "" {
 		return jsNumberString(p)
 	}
 	if jsTruthy(cfg["port"]) {
@@ -240,7 +249,7 @@ func port(cfg map[string]any) string {
 
 func baseURL(cfg map[string]any) string {
 	host, _ := cfg["host"].(string)
-	return "http://" + firstNonEmpty(os.Getenv("HERDR_AGENTWEB_HOST"), host, "127.0.0.1") + ":" + port(cfg) + "/"
+	return "http://" + firstNonEmpty(os.Getenv("HERDR_YOICKS_HOST"), host, "127.0.0.1") + ":" + port(cfg) + "/"
 }
 
 // printConnectInfo never prints the token: herdr captures action stdout into its
@@ -249,7 +258,7 @@ func baseURL(cfg map[string]any) string {
 func printConnectInfo() {
 	fmt.Println("url: " + baseURL(readConfig()))
 	fmt.Println("token file: " + filepath.Join(stateDir(), "token"))
-	fmt.Println("full connect link: see the Agent Web bridge pane or " + filepath.Join(stateDir(), "bridge.log"))
+	fmt.Println("full connect link: see the Yoicks bridge pane or " + filepath.Join(stateDir(), "bridge.log"))
 }
 
 func notify(title, body string) {
@@ -345,7 +354,7 @@ func (c cli) start() int {
 	fmt.Printf("bridge started (pid %d)\n", pid)
 	printConnectInfo()
 	fmt.Println("log: " + logPath)
-	notify("herdr agent web started", baseURL(readConfig()))
+	notify("yoicks started", baseURL(readConfig()))
 	return 0
 }
 
@@ -374,11 +383,11 @@ func (c cli) stop() int {
 	}
 	if !ok {
 		fmt.Fprintf(os.Stderr, "bridge (pid %d) did not exit within 5s of SIGTERM; not force-killing\n", pid)
-		notify("herdr agent web stop timed out", fmt.Sprintf("pid %d", pid))
+		notify("yoicks stop timed out", fmt.Sprintf("pid %d", pid))
 		return 1
 	}
 	fmt.Printf("bridge stopped (pid %d)\n", pid)
-	notify("herdr agent web stopped", fmt.Sprintf("pid %d", pid))
+	notify("yoicks stopped", fmt.Sprintf("pid %d", pid))
 	return 0
 }
 
@@ -386,10 +395,10 @@ func (c cli) status() int {
 	if pid, fg := runningPid(); pid != 0 {
 		fmt.Printf("bridge running (%s)\n", pidLabel(pid, fg))
 		printConnectInfo()
-		notify("herdr agent web running", baseURL(readConfig()))
+		notify("yoicks running", baseURL(readConfig()))
 	} else {
 		fmt.Println("bridge is not running")
-		notify("herdr agent web stopped", "invoke y011d4.agentweb.start to launch")
+		notify("yoicks stopped", "invoke y011d4.yoicks.start to launch")
 	}
 	printEnvironment()
 	return 0
@@ -398,7 +407,7 @@ func (c cli) status() int {
 // printEnvironment is status's troubleshooting part: this binary's version, the herdr
 // it reaches, and which optional commands it finds (on the PATH herdr gives actions).
 func printEnvironment() {
-	fmt.Println("agentwebctl " + Version)
+	fmt.Println("yoicks " + Version)
 	var pong struct {
 		Version  string `json:"version"`
 		Protocol int    `json:"protocol"`
@@ -445,7 +454,7 @@ func (c cli) run() int {
 func (c cli) qr() int {
 	b, err := os.ReadFile(filepath.Join(stateDir(), "token"))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "no token yet — start the bridge first (action y011d4.agentweb.start)")
+		fmt.Fprintln(os.Stderr, "no token yet — start the bridge first (action y011d4.yoicks.start)")
 		return 1
 	}
 	token := jsTrim(string(b))
@@ -470,7 +479,7 @@ func (c cli) qr() int {
 			url = baseURL(cfg) + "?token=" + token
 		}
 		if !serveActive {
-			hint = `hint: set "public_url" in config.json (herdr plugin config-dir y011d4.agentweb) to your reverse-proxy / tunnel / VPN address (Cloudflare Tunnel, Caddy, ngrok, ...). Tailscale is auto-detected; for tailnet HTTPS run: tailscale serve --bg ` + p
+			hint = `hint: set "public_url" in config.json (herdr plugin config-dir y011d4.yoicks) to your reverse-proxy / tunnel / VPN address (Cloudflare Tunnel, Caddy, ngrok, ...). Tailscale is auto-detected; for tailnet HTTPS run: tailscale serve --bg ` + p
 		}
 	}
 	// the URL goes to qrencode on stdin: an argument would show the token in ps
@@ -531,7 +540,7 @@ func cliRPC(method string, params map[string]any, timeout time.Duration) (json.R
 	}
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(timeout))
-	req, err := json.Marshal(map[string]any{"type": "request", "id": "agentwebctl", "method": method, "params": params})
+	req, err := json.Marshal(map[string]any{"type": "request", "id": "yoicks", "method": method, "params": params})
 	if err != nil {
 		return nil, err
 	}
@@ -644,8 +653,8 @@ func (c cli) overview() int {
 // get/read/prompt/wait run herdr's own CLI on the resolved pane, so output, flags and
 // --wait behave exactly like `herdr agent …`.
 
-const agentUsage = `usage: agentwebctl agent get|read|prompt|wait <target> [herdr agent flags]
-       agentwebctl agent start <name> --cwd <dir> [--profile <launch profile>] [--worktree <branch> [--base <ref>]]`
+const agentUsage = `usage: yoicks agent get|read|prompt|wait <target> [herdr agent flags]
+       yoicks agent start <name> --cwd <dir> [--profile <launch profile>] [--worktree <branch> [--base <ref>]]`
 
 func (c cli) agent() int {
 	sub := c.arg(0)
@@ -821,7 +830,7 @@ func (c cli) agentStart(args []string) int {
 // head of a merged PR, for squash merges). Anything else is refused and left as is.
 func (c cli) worktree() int {
 	if c.arg(0) != "remove" || c.arg(1) == "" {
-		fmt.Fprintln(os.Stderr, "usage: agentwebctl worktree remove <checkout path>")
+		fmt.Fprintln(os.Stderr, "usage: yoicks worktree remove <checkout path>")
 		return 2
 	}
 	dir, _ := filepath.Abs(c.arg(1))
@@ -908,7 +917,7 @@ func (c cli) worktree() int {
 func (c cli) orchestrator() int {
 	name := c.arg(1)
 	if c.arg(0) != "start" || name == "" {
-		fmt.Fprintln(os.Stderr, "usage: agentwebctl orchestrator start <name>")
+		fmt.Fprintln(os.Stderr, "usage: yoicks orchestrator start <name>")
 		return 2
 	}
 	cfg := readConfig()
