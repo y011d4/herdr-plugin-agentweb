@@ -10,6 +10,9 @@
 // replaces the map.
 //
 // The reporter, unlike a grep of the sources, sees names built in loops.
+//
+// With -check (check.go) it counts instead how many of the map's tests the Go
+// port reproduces.
 package main
 
 import (
@@ -24,6 +27,13 @@ import (
 type test struct{ file, path string }
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "-check" {
+		if err := check(os.Args[2], os.Stdin); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	tests, err := parse(os.Stdin)
 	if err == nil && len(tests) == 0 {
 		err = fmt.Errorf("no tests in the report")
