@@ -7,7 +7,7 @@
 | # | 違い | 理由 | 段階 |
 |---|---|---|---|
 | D1 | herdr からの応答とイベントを行ごとに読む。TS 版は届いた塊ごとに UTF-8 に戻すので、塊の境目で分かれた多バイト文字が壊れる（`server/herdr-client.ts:80,232`） | TS 版の不具合。Go 版は `bufio` で行を読むので起きない | P0（試作で済み） |
-| D2 | herdr の外から CLI を動かしたときの state の既定の場所を、herdr と同じにする（計画 P-7） | TS 版では herdr から起動したときと場所が違い、token が 2 つできる（P0 で発見） | P1・P3 |
+| D2 | herdr の外から CLI と bridge を動かしたときの state の既定の場所を、herdr と同じ `$XDG_STATE_HOME`（なければ `~/.local/state`）`/herdr/plugins/y011d4.agentweb` にする（計画 P-7）。そこに token がなく、TS 版の既定の場所 `~/.local/state/herdr-agentweb` にだけあるときは、そちらを使い続ける。herdr が `XDG_STATE_HOME` を見るかは確かめていない（herdr を起動し直さないと確かめられない。`config-dir` は `XDG_CONFIG_HOME` を見ていたので、同じと推定した） | TS 版では herdr から起動したときと場所が違い、token が 2 つできる（P0 で発見）。herdr の外からつないでいた携帯の接続は切らない | P3 |
 | D3 | WS の送信が詰まった接続は閉じる。Node は際限なく溜める | coder/websocket の `Write` は止まるため、接続ごとに上限つきのバッファを持つ（計画 §3.7）。携帯は再接続して最新の State を受け取る | P2 |
 | D4 | ntfy への送信で `HTTP_PROXY` などを使う。Node の fetch は使わない | Go の HTTP クライアントの既定。外に出るのは `notify_url` だけなのは変わらない | P2 |
 | D5 | herdr の CLI を、どこでも「`HERDR_BIN_PATH` があればそれ、なければ PATH」で探す（計画 X6） | TS 版は通知と agent のコマンドで探し方が違う | P6 |
@@ -20,6 +20,8 @@
 | D12 | 静的ファイルは、バイナリに埋め込んだビルド済みのもの（`embed.go` の拡張子のパターン）だけを返す。TS 版は `web/` の下のファイルを何でも返していた（`web/src/*.ts` や `web/test/` も） | 計画 P-4 のとおり。web が読むのはビルド済みのファイルだけ。開発では `AGENTWEB_WEB_DIR` でディスクから返せる | P2 |
 | D13 | リクエストのパスを、送られてきた形のまま扱う。TS 版は WHATWG の URL で `.` と `..`（`%2e` を含む）を解決してから扱う。WS 以外へのアップグレード要求とトークンのないアップグレード要求に返す 404・401 に、Go の HTTP サーバーが付けるヘッダー（Content-Length など）が付く | ブラウザは解決してから送るので、手で作ったリクエストでだけ違う。どちらでも `/api` はトークンが要り、静的ファイルはディレクトリの外に出ない（`http_test.go` で確かめる） | P2 |
 | D14 | 細かい差: herdr のソケットにつながらないときなどのエラーの `message` の文言（Go の net の文言。`code` と HTTP の状態は同じ）。`/api/profiles` の並べ替えで、ASCII 以外の文字を含む名前の位置（TS の `localeCompare` は ICU の照合順。Go は ASCII の名前だけ同じ順に並べ、ほかは ASCII の後ろに符号位置の順で置く。web の新しい agent の選択欄は先頭の profile を選んだ状態で開くので、ASCII の名前では TS と同じ順にした。計画 L5 の「ASCII では差が出ない」は、大文字と記号の順で誤りだった）。`lines` や `after` に int の範囲を超える数を渡すと、`lines` は 400、`after` は無視する（TS はそのまま herdr やファイルの読み出しに渡す） | 文言は、herdr に届かないときに web のエラーのトースト（例: Stop failed）に出る。`code` と HTTP の状態は同じなので、web の動きは変わらない。範囲外の数は web の使い方では起きない。並べ替えは、launch profile の名前（config のキー）に ASCII 以外の文字を使ったときだけ、選択欄の並びと最初に選ばれている profile が変わる（例: `áb` は TS では `claude` の前、Go では後ろ）。選び直さずに起動すると、TS とは違う profile で agent が起動しうる。組み込みの profile はどれも ASCII で、そういう名前は利用者が config に書いたときだけ現れる。ICU の照合順をすべて写すには golang.org/x/text が要り、依存を増やさない方針（計画の原則 4）に反するので、記録にとどめる | P2 |
+| D15 | CLI の作りの違い: 使い方の行で自分を `agentwebctl` と名乗る（TS は `agentwebctl.js`。通信の記録の比較ではこの差だけを読み替える）。`run` は bridge を同じプロセスで動かし、自分の PID を `bridge-run.pid` に書く（TS は node の子を起動してその PID を書く）。`start` は自分自身を `serve` で切り離して起動する。pidfile の PID が bridge かどうかは、コマンドラインが `agentwebctl serve` か `agentwebctl run` か（Linux は `/proc/<pid>/cmdline`、ほかは `ps`）で見て、P5 の手順 6 までは TS の bridge（`…/server/main.js`・`main.ts`）も認める（TS は自分のチェックアウトの main.js・main.ts だけを認めた） | 計画 P3 と X7 のとおり。Go の CLI は Node の bridge も止められる（P5 の切り替えで要る）。逆に、本物の state ディレクトリで Go の `stop` を動かすと、動いている Node の bridge を止める（P4 では必ず一時的な `HERDR_PLUGIN_STATE_DIR` を付ける） | P3 |
+| D16 | TS 版が処理されない例外で落ちていた所（`worktree remove` と `agent start` で snapshot が取れないとき）は、エラーを 1 行出して終了コード 1 で終わる（TS はスタックトレースを出して 1）。接続の口でのエラーの文言は Go の net のもの（D14 と同じ）。`qr` の pane は、Enter を待つ間に標準入力が閉じたら終わる | どれも herdr が止まっているときなどの異常な場合だけ。終了コードは同じ | P3 |
 
 ## TS 版のまま残す（切り替えの後に直す候補）
 
