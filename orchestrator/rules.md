@@ -50,7 +50,7 @@ Check the worker with `agentwebctl agent get <name>`.
 | status | what to do |
 |---|---|
 | idle / done | read the result with `agentwebctl agent read <name> --source recent --lines 120` and pass on the gist |
-| blocked | it waits for an approval or an answer. Look with `agentwebctl agent read <name> --source visible` and tell the user what it waits for. **Don't answer it yourself** — the user answers in that worker's pane. Then run `agentwebctl agent wait <name>` in the background again |
+| blocked | it waits for an approval or an answer. Look with `agentwebctl agent read <name> --source recent` (`visible` is the desktop's view, which may be scrolled away from the prompt) and tell the user what it waits for. **Don't answer it yourself** — the user answers in that worker's pane. Then run `agentwebctl agent wait <name>` in the background again |
 | working | still going: run `agentwebctl agent wait <name>` in the background again |
 
 Follow-ups go the same way: `agentwebctl agent prompt <name> "<task>" --wait` in the
