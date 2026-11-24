@@ -33,7 +33,10 @@
     <main id="screen"></main>
 
     <!-- Toast container — fixed overlay -->
-    <div id="toast-container" aria-live="assertive" aria-atomic="false"></div>
+    <div id="toast-container" aria-live="assertive" aria-atomic="false">
+      <!-- shown (CSS) once two or more toasts are stacked -->
+      <button type="button" id="toast-clear-all">Clear all</button>
+    </div>
   </div>
 
   <script type="module" src="app.js"></script>
