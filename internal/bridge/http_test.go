@@ -566,3 +566,27 @@ func toStrings(v any) []string {
 	}
 	return out
 }
+
+// The New agent picker preselects the first profile, so /api/profiles must keep the
+// TS's localeCompare order. The want order is Node's (en-US) for these names.
+func TestProfilesSortLikeLocaleCompare(t *testing.T) {
+	want := []string{"a b", "a_b", "a-b", "ab", "aB", "Ab", "AB", "ab-", "Ab-", "b10", "B2", "claude", "Claude",
+		"claude_fast", "claude-yolo", "codex", "opencode", "x.y", "z10", "z9", "Zoo"}
+	got := slices.Clone(want)
+	for i := range got { // a fixed shuffle
+		j := (i*7 + 3) % len(got)
+		got[i], got[j] = got[j], got[i]
+	}
+	slices.SortFunc(got, func(a, b string) int {
+		if localeLess(a, b) {
+			return -1
+		}
+		if localeLess(b, a) {
+			return 1
+		}
+		return 0
+	})
+	if !slices.Equal(got, want) {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}
