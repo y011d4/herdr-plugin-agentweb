@@ -41,6 +41,155 @@ describe('parsePrompt — real menus', () => {
     assert.ok(p, 'should still parse');
     assert.equal(p!.options.length, 2);
     assert.equal(p!.selected, 1);
+    assert.equal(p!.options[1].description, '✓ recommended');
+  });
+});
+
+describe('parsePrompt — option descriptions', () => {
+  // Claude Code draws a full-width ─ rule above its prompts; that sets the screen width.
+  const rule = (cols: number): string => '─'.repeat(cols);
+
+  it('reads each description, rejoining its wrapped lines', () => {
+    const p = parsePrompt([
+      rule(25),
+      ' ☐ Color',
+      'Pick a color',
+      '',
+      '❯ 1. Red',
+      '     A warm color that',
+      '     draws attention.',
+      '  2. Blue',
+      '     落ち着いた印象の色で',
+      '     す。',
+      '  3. Type something.',
+      rule(25),
+      '  4. Chat about this',
+      '',
+      'Esc to cancel',
+    ].join('\n'));
+    assert.equal(p!.question, 'Pick a color');
+    assert.deepEqual(p!.options.map((o) => [o.label, o.description]), [
+      ['Red', 'A warm color that draws attention.'], // a word wrap dropped a space
+      ['Blue', '落ち着いた印象の色です。'], // a break between CJK glyphs dropped none
+      ['Type something.', ''],
+      ['Chat about this', ''],
+    ]);
+  });
+
+  it('keeps the menu when a description wraps over many lines', () => {
+    const p = parsePrompt(['❯ 1. Red', ...Array(8).fill('     more about red'), '  2. Blue', '  3. Green', HINT].join('\n'));
+    assert.deepEqual(p!.options.map((o) => o.label), ['Red', 'Blue', 'Green']);
+    assert.equal(p!.options[0].description, Array(8).fill('more about red').join(' '));
+  });
+
+  it('joins a wrapped label to the label, not the description', () => {
+    const p = parsePrompt([
+      rule(40),
+      ' Do you want to proceed?',
+      ' ❯ 1. Yes',
+      '   2. Yes, and don’t ask again for these', // fills all 40 columns
+      '      commands',
+      '   3. No',
+      '      Tell Claude what to do instead', // under a short label: a description
+      '',
+      ' Esc to cancel',
+    ].join('\n'));
+    assert.deepEqual(p!.options.map((o) => [o.label, o.description]), [
+      ['Yes', ''],
+      ['Yes, and don’t ask again for these commands', ''],
+      ['No', 'Tell Claude what to do instead'],
+    ]);
+  });
+
+  it('rejoins a label wrapped in the middle of a path without a space', () => {
+    const p = parsePrompt([
+      rule(40),
+      ' ❯ 1. Yes',
+      '   2. Yes, allow /home/me/projects/a-ver', // fills all 40 columns
+      '      y-long-repository-name/src',
+      '   3. No',
+      '',
+      ' Esc to cancel',
+    ].join('\n'));
+    assert.equal(p!.options[1].label, 'Yes, allow /home/me/projects/a-very-long-repository-name/src');
+  });
+
+  it('keeps the spaces of a label word-wrapped next to a long path', () => {
+    const p = parsePrompt([
+      rule(40),
+      ' ❯ 1. Yes',
+      '   2. Yes, allow reading from',
+      '      /home/me/projects/herdr-plugin/',
+      '      during this session',
+      '   3. No',
+      '',
+      ' Esc to cancel',
+    ].join('\n'));
+    assert.equal(p!.options[1].label, 'Yes, allow reading from /home/me/projects/herdr-plugin/ during this session');
+  });
+
+  it('rejoins a path split before a wide glyph that left one cell', () => {
+    const p = parsePrompt([
+      rule(40),
+      ' ❯ 1. Yes',
+      '   2. Yes, allow /home/me/projects/d/ab', // 39 columns: 設 is two cells wide
+      '      設計メモ/notes.md',
+      '   3. No',
+      '',
+      ' Esc to cancel',
+    ].join('\n'));
+    assert.equal(p!.options[1].label, 'Yes, allow /home/me/projects/d/ab設計メモ/notes.md');
+  });
+
+  it('keeps the space of a label that filled its line exactly (Claude Code, live)', () => {
+    const p = parsePrompt([
+      rule(40),
+      '❯ 1. abcdefghi abcdefghi abcdefghi abcde', // 40 columns, ends on a whole word
+      '     /home/me/projects/repo-name',
+      '     exact fit',
+      '  2. Short',
+      HINT.slice(0, 40),
+    ].join('\n'));
+    assert.deepEqual([p!.options[0].label, p!.options[0].description],
+      ['abcdefghi abcdefghi abcdefghi abcde /home/me/projects/repo-name', 'exact fit']);
+  });
+
+  it('keeps a space a CJK description wrapped at', () => {
+    const p = parsePrompt([rule(40), '❯ 1. 안정', '     이 옵션은 가장 안정적인 선택이며', '     팀이 이미 잘 알고 있습니다', '  2. 실험', HINT].join('\n'));
+    assert.equal(p!.options[0].description, '이 옵션은 가장 안정적인 선택이며 팀이 이미 잘 알고 있습니다');
+  });
+
+  it('keeps a description line that reads like an option in the description', () => {
+    const p = parsePrompt(['❯ 1. Red', '     2. is not an option', '  2. Green', HINT].join('\n'));
+    assert.deepEqual(p!.options.map((o) => [o.send, o.label, o.description]), [
+      ['1', 'Red', '2. is not an option'],
+      ['2', 'Green', ''],
+    ]);
+  });
+
+  it('does not take a multi-select menu\'s Submit row for a description', () => {
+    const p = parsePrompt([
+      '❯ 1. [ ] Cheese',
+      '         Melted on top',
+      '  2. [✔] Olives',
+      '  3. [ ] Type something',
+      '     Submit',
+      rule(30),
+      '  4. Chat about this',
+      '',
+      HINT,
+    ].join('\n'));
+    assert.deepEqual(p!.options.map((o) => [o.label, o.description]), [
+      ['[ ] Cheese', 'Melted on top'],
+      ['[✔] Olives', ''],
+      ['[ ] Type something', ''],
+      ['Chat about this', ''],
+    ]);
+  });
+
+  it('leaves the tab bar of several questions out of the question', () => {
+    const p = parsePrompt([rule(40), '←  ☐ Color  ☐ Size  ✔ Submit  →', '', 'Which color?', '', '❯ 1. Red', '  2. Blue', HINT].join('\n'));
+    assert.equal(p!.question, 'Which color?');
   });
 });
 

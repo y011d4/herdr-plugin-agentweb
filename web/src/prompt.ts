@@ -7,8 +7,46 @@
  * the two in sync.
  */
 
-export interface PromptOption { send: string; label: string }
+// description: the text Claude Code prints under an option, indented ('' if none).
+export interface PromptOption { send: string; label: string; description: string }
 export interface ParsedPrompt { question: string | null; options: PromptOption[]; selected: number }
+
+// Terminal display width of a line: CJK and other wide glyphs occupy two cells.
+const WIDE_CHAR = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/;
+export function displayCols(line: string): number {
+  let w = 0;
+  for (const ch of line) w += WIDE_CHAR.test(ch) ? 2 : 1;
+  return w;
+}
+
+// Whether `next` is the terminal's wrap of `prev` on a screen `width` cells wide: `prev`
+// left no room for next's first word. The room is capped so a long first word (a path,
+// a run of CJK text) under a short line still reads as a line of its own.
+// ponytail: positions only, so a label ending within a word of the right edge takes its
+// description as its own tail (rare: labels are short); Claude Code dims descriptions,
+// so the ANSI style of the two lines would tell them apart if that ever matters.
+function isWrap(prev: string, next: string, width: number): boolean {
+  const room = width - displayCols(prev);
+  return room <= 12 && room <= displayCols(next.match(/\S+/)?.[0] ?? '');
+}
+
+// Rejoin line `next` to `text`, which ends with line `prev`. A word wrap dropped a
+// space there. A word too long for a whole line (a path) was split mid-word, and CJK
+// text breaks between any two glyphs; those dropped none, and filled `prev` (up to one
+// cell short when the next glyph is wide and didn't fit).
+// ponytail: two separate words that each fill most of a line, the first ending right
+// at the edge, look the same as one split word (Claude Code marks neither) and get
+// joined; a long path split mid-word is the common case, so it wins.
+function joinWrap(text: string, prev: string, next: string, width: number): string {
+  const t = next.trim();
+  const tail = prev.match(/\S+$/)?.[0] ?? '';
+  const head = t.match(/^\S+/)?.[0] ?? '';
+  const room = width - displayCols(prev);
+  const full = room === 0 || (room === 1 && WIDE_CHAR.test(head[0] ?? ''));
+  const split = full && (displayCols(tail + head) > width - next.search(/\S/) ||
+    (WIDE_CHAR.test(tail.slice(-1)) && WIDE_CHAR.test(head[0] ?? '')));
+  return split ? text + t : `${text} ${t}`;
+}
 
 // A menu's navigation hint line. Deliberately menu-specific ("Enter to select /
 // confirm", the ↑/↓ arrows, "Esc to cancel / close") — NOT generic phrases like
@@ -26,39 +64,61 @@ export function stripAnsi(s: string): string {
 // Parse a numbered selection menu ("❯ 1. Yes\n  2. No …") out of a live TUI prompt
 // (permission / plan / confirm / AskUserQuestion dialogs), which carry no structured
 // transcript data: the question text, the options (bottom-most sequential 1,2,3…
-// block), and which option is highlighted (the ❯ marker, 1-based). Non-option lines
-// — each option's own description, dividers, blanks — sit between options, so they're
-// skipped without ending the block; a long run of unrelated lines (gap > 4) ends it
-// and a fresh "1." restarts it. Requires >= 2 options AND a ❯ highlight: an active
-// menu always highlights an option, while ordinary numbered prose ("1. do X … 2. do
+// block), and which option is highlighted (the ❯ marker, 1-based). The lines right
+// under an option that are indented at least to its text (past a multi-select's "[ ]"
+// box, so that menu's unnumbered "Submit" row is not one) continue it: first the rest
+// of a label the terminal wrapped, then its description (Claude Code prints those
+// below the label, however many lines they wrap to). Other non-option lines —
+// dividers, blanks — sit between options too, so they're skipped without ending the
+// block; a long run of them (gap > 4) ends it and a fresh "1." restarts it. Requires
+// >= 2 options AND a ❯ highlight: an active menu always highlights an option, while ordinary numbered prose ("1. do X … 2. do
 // Y") does not, so the marker is what tells a real, answerable menu from plain output.
 // (Verified against a real captured AskUserQuestion screen.)
 export function parsePrompt(text: string): ParsedPrompt | null {
   const raw = text.split('\n'); // kept un-stripped so the menu box border (│) is visible
   const lines = raw.map((l) => l.replace(/[│┃╭╮╰╯─━┌┐└┘├┤┬┴┼]/g, ' ').replace(/\s+$/, ''));
+  const width = Math.max(...raw.map((l) => displayCols(l.replace(/\s+$/, '')))); // the full-width ─ rule
   const blocks: Array<{ options: PromptOption[]; selected: number; first: number; last: number }> = [];
   let cur: PromptOption[] = [];
   let sel = 0;
   let first = -1;
   let last = -1;
   let gap = 0;
+  let col = 0; // the column of the current option's text
+  let cont = false; // still on lines continuing the current option
+  let inLabel = false; // ...and on the label's wrapped part, not yet its description
   const commit = (): void => {
     if (cur.length >= 2) blocks.push({ options: cur, selected: sel, first, last });
     cur = []; sel = 0; first = -1; last = -1; gap = 0;
   };
   for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    // A line indented to the current option's text continues it, even one that reads
+    // like an option ("2. …" in a description), and is no gap.
+    if (cur.length && cont && t && lines[i].search(/\S/) >= col) {
+      const o = cur[cur.length - 1];
+      const prev = lines[i - 1];
+      if (inLabel && isWrap(prev, lines[i], width)) o.label = joinWrap(o.label, prev, lines[i], width);
+      else { inLabel = false; o.description = o.description ? joinWrap(o.description, prev, lines[i], width) : t; }
+      continue;
+    }
     const m = lines[i].match(/^\s*([❯➤▶►])?\s*(\d+)[.)]\s+(\S.*)$/);
-    if (!m) { if (cur.length && ++gap > 4) commit(); continue; }
+    if (!m) {
+      if (cur.length) { cont = false; if (++gap > 4) commit(); }
+      continue;
+    }
     gap = 0;
+    col = lines[i].length - m[3].length + (/^\[.\] /u.test(m[3]) ? 4 : 0);
+    cont = inLabel = true;
     const num = Number(m[2]);
     if (num === cur.length + 1) {
       if (first < 0) first = i;
       last = i;
       if (m[1]) sel = num;
-      cur.push({ send: m[2], label: m[3].trim() });
+      cur.push({ send: m[2], label: m[3].trim(), description: '' });
     } else {
       commit();
-      if (num === 1) { cur = [{ send: '1', label: m[3].trim() }]; first = i; last = i; if (m[1]) sel = 1; }
+      if (num === 1) { cur = [{ send: '1', label: m[3].trim(), description: '' }]; first = i; last = i; if (m[1]) sel = 1; }
     }
   }
   commit();
@@ -108,7 +168,7 @@ export function parsePrompt(text: string): ParsedPrompt | null {
   for (let i = best.first - 1; i >= 0 && i >= best.first - 12; i--) {
     const t = lines[i].trim();
     if (isRule(i)) { boxed = true; break; } // box top rule — edge reached
-    if (/^[☐☑✓]/.test(t)) { boxed = true; break; } // category/title line — edge reached
+    if (/^[←☐☑✓]/.test(t)) { boxed = true; break; } // category/title line, or the tab bar of several questions — edge reached
     if (!t) continue; // padding blank — keep looking for the box edge
     if (/^(Enter to select|Press|Type something|Chat about this|↑|↓|Esc|Tab)/i.test(t)) continue;
     qLines.unshift(t.replace(/^[•·]+\s*/, ''));

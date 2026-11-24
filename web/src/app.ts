@@ -14,7 +14,7 @@
 import { ansiToHtml } from './ansi.ts';
 import { renderItems, conversationItems, latestActivity } from './transcript.ts';
 import type { TimelineItem } from './transcript.ts';
-import { stripAnsi, parsePrompt, promptIdentity } from './prompt.ts';
+import { stripAnsi, parsePrompt, promptIdentity, displayCols } from './prompt.ts';
 import type { PromptOption, ParsedPrompt } from './prompt.ts';
 import { dashboardCards, homeSummary, markSeen, shownStatus } from './dashboard-group.ts';
 import type { DashboardCard, SeenDone } from './dashboard-group.ts';
@@ -1746,15 +1746,6 @@ function measureMonoRatio(el: HTMLElement): number {
   return monoRatio;
 }
 
-// terminal display width of a line: CJK and other wide glyphs occupy two cells
-const WIDE_CHAR = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/;
-
-function displayCols(line: string): number {
-  let w = 0;
-  for (const ch of line) w += WIDE_CHAR.test(ch) ? 2 : 1;
-  return w;
-}
-
 function applyFitFontSize(outputEl: HTMLElement, ansiStr: string): void {
   if (paneFontPx !== null) {
     outputEl.style.fontSize = `${paneFontPx.toFixed(2)}px`;
@@ -2209,7 +2200,8 @@ function renderPromptPanel(parsed: ParsedPrompt | null, sid: string): void {
   if (qEl) qEl.textContent = parsed?.question ?? '';
   optsEl.innerHTML = (parsed?.options ?? []).map((o) =>
     `<button class="ask-opt" type="button" data-ask-send="${escHtml(o.send)}"><span class="ask-opt-num">${escHtml(o.send)}</span>` +
-    `<span class="ask-opt-label">${escHtml(o.label)}</span></button>`,
+    `<span class="ask-opt-text"><span class="ask-opt-label">${escHtml(o.label)}</span>` +
+    (o.description ? `<span class="ask-opt-desc">${escHtml(o.description)}</span>` : '') + '</span></button>',
   ).join('');
   const term = document.getElementById('chat-prompt-term') as HTMLDetailsElement | null;
   // Collapse the terminal only when we have a question to show above the buttons.
