@@ -436,10 +436,11 @@ func (c cli) status() int {
 		fmt.Printf("bridge running (%s)\n", pidLabel(pid, fg))
 		if old { // its URL and token are the old plugin's: ours could mislead
 			fmt.Println("started before the plugin's rename (agentwebctl): stop and start it to run this version")
+			notify("yoicks: the old bridge is running", "stop and start it to run this version")
 		} else {
 			printConnectInfo()
+			notify("yoicks running", baseURL(readConfig()))
 		}
-		notify("yoicks running", baseURL(readConfig()))
 	} else {
 		fmt.Println("bridge is not running")
 		notify("yoicks stopped", "invoke y011d4.yoicks.start to launch")
