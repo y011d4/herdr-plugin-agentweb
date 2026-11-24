@@ -27,7 +27,7 @@ import type { AppState, OrchestratorView, WsMessage, WsAgentStatusMessage, WsTra
 const APP_VERSION = '0.1.0';
 // Bumped each deploy and shown in the prompt panel + settings, so a stale cached
 // bundle is immediately visible (the SW cache version tracks this).
-const BUILD = 'v106';
+const BUILD = 'v107';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_TOKEN = 'herdr_token';
@@ -435,10 +435,9 @@ const TOAST_MAX = 10;
 function showToast(title: string, body: string, opts: ToastOptions = {}): void {
   if (!elToastContainer) return;
 
-  // keep the stack bounded — drop the oldest toast
-  while (elToastContainer.children.length >= TOAST_MAX) {
-    elToastContainer.firstElementChild?.remove();
-  }
+  // keep the stack bounded — drop the oldest toast (the container also holds Clear all)
+  const toasts = elToastContainer.getElementsByClassName('toast');
+  while (toasts.length >= TOAST_MAX) toasts[0].remove();
 
   const el = document.createElement('div');
   el.className = 'toast';
@@ -2512,6 +2511,9 @@ document.addEventListener('DOMContentLoaded', () => {
   elConnDot = document.getElementById('conn-dot');
   elReconnectBanner = document.getElementById('reconnect-banner');
   elToastContainer = document.getElementById('toast-container');
+  document.getElementById('toast-clear-all')!.addEventListener('click', () => {
+    elToastContainer!.querySelectorAll('.toast').forEach((el) => el.remove());
+  });
 
   // Load token from URL or storage
   token = loadToken();
