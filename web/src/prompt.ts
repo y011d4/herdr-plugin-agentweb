@@ -32,15 +32,19 @@ function isWrap(prev: string, next: string, width: number): boolean {
 
 // Rejoin line `next` to `text`, which ends with line `prev`. A word wrap dropped a
 // space there. A word too long for a whole line (a path) was split mid-word, and CJK
-// text breaks between any two glyphs; those dropped none, and filled `prev` (a wide
-// glyph that didn't fit leaves one cell).
+// text breaks between any two glyphs; those dropped none, and filled `prev` (up to one
+// cell short when the next glyph is wide and didn't fit).
+// ponytail: two separate words that each fill most of a line, the first ending right
+// at the edge, look the same as one split word (Claude Code marks neither) and get
+// joined; a long path split mid-word is the common case, so it wins.
 function joinWrap(text: string, prev: string, next: string, width: number): string {
   const t = next.trim();
   const tail = prev.match(/\S+$/)?.[0] ?? '';
   const head = t.match(/^\S+/)?.[0] ?? '';
   const room = width - displayCols(prev);
-  const split = (room === 0 && displayCols(tail + head) > width - next.search(/\S/)) ||
-    (room <= 1 && WIDE_CHAR.test(tail.slice(-1)) && WIDE_CHAR.test(head[0] ?? ''));
+  const full = room === 0 || (room === 1 && WIDE_CHAR.test(head[0] ?? ''));
+  const split = full && (displayCols(tail + head) > width - next.search(/\S/) ||
+    (WIDE_CHAR.test(tail.slice(-1)) && WIDE_CHAR.test(head[0] ?? '')));
   return split ? text + t : `${text} ${t}`;
 }
 
