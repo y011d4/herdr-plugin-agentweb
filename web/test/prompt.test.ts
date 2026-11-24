@@ -101,6 +101,27 @@ describe('parsePrompt — option descriptions', () => {
     ]);
   });
 
+  it('rejoins a label wrapped in the middle of a path without a space', () => {
+    const p = parsePrompt([
+      rule(40),
+      ' ❯ 1. Yes',
+      '   2. Yes, allow /home/me/projects/a-ver', // fills all 40 columns
+      '      y-long-repository-name/src',
+      '   3. No',
+      '',
+      ' Esc to cancel',
+    ].join('\n'));
+    assert.equal(p!.options[1].label, 'Yes, allow /home/me/projects/a-very-long-repository-name/src');
+  });
+
+  it('keeps a description line that reads like an option in the description', () => {
+    const p = parsePrompt(['❯ 1. Red', '     2. is not an option', '  2. Green', HINT].join('\n'));
+    assert.deepEqual(p!.options.map((o) => [o.send, o.label, o.description]), [
+      ['1', 'Red', '2. is not an option'],
+      ['2', 'Green', ''],
+    ]);
+  });
+
   it('does not take a multi-select menu\'s Submit row for a description', () => {
     const p = parsePrompt([
       '❯ 1. [ ] Cheese',

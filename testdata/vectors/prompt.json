@@ -60,6 +60,56 @@
     "want": null
   },
   {
+    "name": "a description line that reads like an option",
+    "input": "● Pick\n❯ 1. Red\n     2. is not an option\n  2. Green\n  3. Blue\nEnter to select · ↑/↓ to navigate · Esc to cancel",
+    "want": {
+      "question": null,
+      "options": [
+        {
+          "send": "1",
+          "label": "Red",
+          "description": "2. is not an option"
+        },
+        {
+          "send": "2",
+          "label": "Green",
+          "description": ""
+        },
+        {
+          "send": "3",
+          "label": "Blue",
+          "description": ""
+        }
+      ],
+      "selected": 1
+    }
+  },
+  {
+    "name": "a label wrapped in the middle of a path",
+    "input": "────────────────────────────────────────\n ❯ 1. Yes\n   2. Yes, allow /home/me/projects/a-ver\n      y-long-repository-name/src\n   3. No\n\n Esc to cancel",
+    "want": {
+      "question": null,
+      "options": [
+        {
+          "send": "1",
+          "label": "Yes",
+          "description": ""
+        },
+        {
+          "send": "2",
+          "label": "Yes, allow /home/me/projects/a-very-long-repository-name/src",
+          "description": ""
+        },
+        {
+          "send": "3",
+          "label": "No",
+          "description": ""
+        }
+      ],
+      "selected": 1
+    }
+  },
+  {
     "name": "AskUserQuestion whose description wraps over six lines",
     "input": "──────────────────────────────────────────────────────────────────────────\n←  ☐ Color  ☐ Size  ✔ Submit  →\n\nWhich color should the button use?\n\n❯ 1. Red\n     A warm, high-contrast color that draws attention.\n  2. Blue\n     落ち着いた印象の色です。説明がとても長い場合にどう折り返されるかを確\n     かめるため、この説明文はわざと長くしてあります。スマートフォンの狭い\n     画面でも読みやすく表示されるかどうか、ボタンの押しやすさが損なわれな\n     いかどうかを確認します。さらにもう少し文章を足して、端末の幅を超えて\n     二行以上に折り返されるようにします。ここまで書けば十分な長さになるは\n     ずです。\n  3. Green\n     Short.\n  4. Type something.\n──────────────────────────────────────────────────────────────────────────\n  5. Chat about this\n\nEnter to select · Tab/Arrow keys to navigate · Esc to cancel",
     "want": {

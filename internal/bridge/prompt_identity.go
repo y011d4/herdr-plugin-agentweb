@@ -106,19 +106,19 @@ func parsePrompt(text string) *ParsedPrompt {
 		cur, sel, first, last, gap = nil, 0, -1, -1, 0
 	}
 	for i, l := range lines {
+		// A line indented to the current option's text continues it (a wrapped label or
+		// its description), even one that reads like an option ("2. …"), and is no gap.
+		if len(cur) > 0 && cont && jsTrim(l) != "" &&
+			utf8.RuneCountInString(l)-utf8.RuneCountInString(strings.TrimLeftFunc(l, isJSSpace)) >= col {
+			continue
+		}
 		at := menuOption.FindStringSubmatchIndex(l)
 		if at == nil {
-			if len(cur) == 0 {
-				continue
-			}
-			// a line indented to the option's text continues it (a wrapped label or its
-			// description), which is no gap
-			if cont && jsTrim(l) != "" && utf8.RuneCountInString(l)-utf8.RuneCountInString(strings.TrimLeftFunc(l, isJSSpace)) >= col {
-				continue
-			}
-			cont = false
-			if gap++; gap > 4 {
-				commit()
+			if len(cur) > 0 {
+				cont = false
+				if gap++; gap > 4 {
+					commit()
+				}
 			}
 			continue
 		}
