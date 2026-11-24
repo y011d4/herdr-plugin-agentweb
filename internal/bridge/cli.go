@@ -277,8 +277,25 @@ func waitForExit(pid int, timeout time.Duration) bool {
 	return true
 }
 
+// livePidFiles is the bridge's pidfiles and their live PIDs: this plugin's, or while
+// those have none, the ones of the plugin before the rename (y011d4.agentweb, beside
+// this state dir in herdr's layout), whose bridge, agentwebctl, is still ours to find
+// and stop.
+func livePidFiles() (daemonFile, runFile string, daemon, fg int) {
+	daemonFile, runFile = daemonPidFile(), runPidFile()
+	if daemon, fg = alivePid(daemonFile), alivePid(runFile); daemon != 0 || fg != 0 {
+		return
+	}
+	old := filepath.Join(filepath.Dir(stateDir()), "y011d4.agentweb")
+	oldDaemon, oldRun := filepath.Join(old, "bridge.pid"), filepath.Join(old, "bridge-run.pid")
+	if d, f := alivePid(oldDaemon), alivePid(oldRun); d != 0 || f != 0 {
+		return oldDaemon, oldRun, d, f
+	}
+	return
+}
+
 func runningPid() (pid int, foreground bool) {
-	daemon, fg := alivePid(daemonPidFile()), alivePid(runPidFile())
+	_, _, daemon, fg := livePidFiles()
 	if daemon != 0 {
 		return daemon, fg != 0
 	}
@@ -359,7 +376,7 @@ func (c cli) start() int {
 }
 
 func (c cli) stop() int {
-	daemon, fg := alivePid(daemonPidFile()), alivePid(runPidFile())
+	daemonFile, runFile, daemon, fg := livePidFiles()
 	pid := daemon
 	if pid == 0 {
 		pid = fg
@@ -377,9 +394,9 @@ func (c cli) stop() int {
 	// bridge. No SIGKILL: a stale pidfile's PID may belong to something else now.
 	ok := waitForExit(pid, 5*time.Second)
 	if daemon != 0 {
-		os.Remove(daemonPidFile())
+		os.Remove(daemonFile)
 	} else {
-		os.Remove(runPidFile())
+		os.Remove(runFile)
 	}
 	if !ok {
 		fmt.Fprintf(os.Stderr, "bridge (pid %d) did not exit within 5s of SIGTERM; not force-killing\n", pid)
