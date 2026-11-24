@@ -386,7 +386,8 @@ func testBottomScreen(t *testing.T, offset int) {
 				"scroll": map[string]any{"offset_from_bottom": offset, "max_offset_from_bottom": 69, "viewport_rows": 8}}}}, true
 		case "pane.read":
 			text := "| row 12 of a long table |" // the scrolled-up viewport
-			if strings.Contains(string(p), `"source":"recent"`) && strings.Contains(string(p), `"lines":8`) {
+			if strings.Contains(string(p), `"source":"recent"`) && strings.Contains(string(p), `"lines":8`) && strings.Contains(string(p), `"format":"ansi"`) ||
+				strings.Contains(string(p), `"source":"detection"`) {
 				text = menu
 			}
 			return fakeherdr.Reply{Result: map[string]any{"read": map[string]any{"text": text}}}, true
@@ -395,6 +396,10 @@ func testBottomScreen(t *testing.T, offset int) {
 	}, nil)
 	if _, body, _ := b.do(t, "GET", "/api/panes/p1/read?source=visible&format=ansi", b.token, nil); !strings.Contains(body, "Which?") {
 		t.Errorf("read: %s, want the bottom screen", body)
+	}
+	// text: herdr's detection, never a recent text read (which can capture history)
+	if _, body, _ := b.do(t, "GET", "/api/panes/p1/read?source=visible", b.token, nil); !strings.Contains(body, "Which?") {
+		t.Errorf("text read: %s, want the bottom screen", body)
 	}
 	press, _ := json.Marshal(map[string]any{"press": "1", "expect_prompt": promptIdentity(menu)})
 	if status, body, _ := b.do(t, "POST", "/api/panes/p1/input", b.token, press); status != 200 {

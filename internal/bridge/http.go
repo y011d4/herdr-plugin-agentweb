@@ -624,15 +624,21 @@ type rawPaneInfo struct {
 	ForegroundCwd string `json:"foreground_cwd"`
 }
 
-// screenRead makes a visible read (params) read the pane's live screen: the bottom
-// viewport_rows rows (recent). herdr's visible is the desktop's viewport: scrolled up
-// there (to read a long reply, say), it keeps returning that old text while a new
-// prompt waits at the bottom, so the phone found no prompt at all. Reading the bottom
-// whatever the scroll, not only when pane.get says scrolled, leaves no gap for a
-// scroll between the two calls. Never more lines than the screen has, so herdr's
-// alt-screen history capture (which scrolls the app) can't start. info nil (pane.get
-// failed): left as visible.
+// screenRead makes a visible read (params) read the pane's live screen. herdr's
+// visible is the desktop's viewport: scrolled up there (to read a long reply, say), it
+// keeps returning that old text while a new prompt waits at the bottom, so the phone
+// found no prompt at all. The bottom is read whatever the scroll, not only when
+// pane.get says scrolled, which leaves no gap for a scroll between the two calls.
+// Text: detection, herdr's own bottom screen. ANSI (detection has none): the bottom
+// viewport_rows rows of recent. A recent *text* read for more rows than an idle
+// alt-screen agent's screen makes herdr scroll the app to capture history, and the
+// screen can shrink after pane.get; ANSI reads never do that. info nil (pane.get
+// failed): an ANSI read is left as visible.
 func screenRead(params map[string]any, info *rawPaneInfo) {
+	if params["format"] != "ansi" {
+		params["source"] = "detection"
+		return
+	}
 	if info == nil || info.Scroll == nil || info.Scroll.ViewportRows == nil || *info.Scroll.ViewportRows < 1 {
 		return
 	}
