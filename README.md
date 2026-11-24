@@ -17,7 +17,8 @@ mobile-first PWA:
   (fresh session), or stops it
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
   scrollback by swiping down, multiline input, and quick keys
-  (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …)
+  (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …). On a PC's browser, Enter sends and
+  Shift+Enter inserts a newline; on a phone, Enter inserts a newline and Send sends
 - Live updates over WebSocket (sub-second); notifications when an agent
   becomes blocked or done — tap to jump to the pane, swipe right to dismiss
 - No accounts, no cloud, no third-party services. Everything stays on your machine;
