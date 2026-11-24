@@ -1,0 +1,16 @@
+{
+ "op": "cli-agent-start-other-account",
+ "cli": {
+  "args": [
+   "agent",
+   "start",
+   "w-x",
+   "--cwd",
+   "$TMP/other"
+  ],
+  "exit": 1,
+  "stdout": "",
+  "stderr": "refused: $TMP/other is not under this Claude account (its direnv CLAUDE_CONFIG_DIR differs)\n"
+ },
+ "herdr": []
+}

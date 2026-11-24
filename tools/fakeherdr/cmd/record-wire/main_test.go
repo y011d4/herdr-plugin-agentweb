@@ -17,56 +17,30 @@ import (
 
 const repoRoot = "../../../.."
 
-// The Go bridge (agentwebctl serve), driven through every REST and WS operation the
-// TypeScript one was recorded doing, must send herdr the same requests and answer
-// the same (testdata/wire, compared as in testdata/README.md). The CLI operations
-// come with the Go CLI (plan P3).
-func TestGoBridgeMatchesWireRecordings(t *testing.T) {
+// The Go agentwebctl (its bridge, `serve`, and its CLI commands), driven through every
+// operation the TypeScript bridge and CLI were recorded doing, must send herdr the same
+// requests and answer, print and exit the same (testdata/wire, compared as in
+// testdata/README.md).
+func TestGoMatchesWireRecordings(t *testing.T) {
 	if testing.Short() {
-		t.Skip("drives a real bridge for ~30 s")
+		t.Skip("drives a real bridge for ~40 s")
 	}
 	if runtime.GOOS != "linux" {
 		// recorded on Linux, where the account checks read /proc (elsewhere a clear skips them)
 		t.Skip("the recordings and the stand-in agents need Linux /proc")
 	}
-	// go test caches a pass by the files the test itself looked at, and the build
-	// below reads the bridge's sources in another process: stat them here, so a
-	// change to any of them reruns this test
-	filepath.WalkDir(repoRoot, func(p string, d os.DirEntry, err error) error {
-		if d != nil && d.IsDir() && slices.Contains([]string{".git", "node_modules", "dist", "testdata"}, d.Name()) {
-			return filepath.SkipDir
-		}
-		if err == nil && !d.IsDir() {
-			os.Stat(p)
-		}
-		return nil
-	})
-	bin := filepath.Join(t.TempDir(), "agentwebctl")
-	build := exec.Command("go", "build", "-o", bin, "./cmd/agentwebctl")
-	build.Dir = repoRoot
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("building agentwebctl (needs `npm run build:web` first): %v\n%s", err, out)
-	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, p, _ := net.SplitHostPort(ln.Addr().String())
-	ln.Close()
-
-	defer func(p, o string, b []string) { port, outDir, bridgeCmd = p, o, b }(port, outDir, bridgeCmd)
-	port, outDir, bridgeCmd = p, t.TempDir(), []string{bin, "serve"}
+	bin := buildAgentwebctl(t)
+	defer func(p, o, b string) { port, outDir, goBin = p, o, b }(port, outDir, goBin)
+	port, outDir, goBin = freePort(t), t.TempDir(), bin
 	if err := run(); err != nil {
 		t.Fatal(err)
 	}
 
-	// the same operations on both sides: none recorded only for one bridge
+	// the same operations on both sides: none recorded for one only
 	ops := func(dir string) (names []string) {
 		files, _ := filepath.Glob(filepath.Join(dir, "*.json"))
 		for _, f := range files {
-			if name := strings.TrimSuffix(filepath.Base(f), ".json"); !strings.HasPrefix(name, "cli-") {
-				names = append(names, name)
-			}
+			names = append(names, strings.TrimSuffix(filepath.Base(f), ".json"))
 		}
 		return names
 	}
@@ -91,6 +65,42 @@ func TestGoBridgeMatchesWireRecordings(t *testing.T) {
 	}
 }
 
+// buildAgentwebctl builds the Go agentwebctl into a temp dir (named agentwebctl: the
+// CLI knows a bridge by that name).
+func buildAgentwebctl(t *testing.T) string {
+	t.Helper()
+	// go test caches a pass by the files the test itself looked at, and the build
+	// below reads the sources in another process: stat them here, so a change to any
+	// of them reruns the test
+	filepath.WalkDir(repoRoot, func(p string, d os.DirEntry, err error) error {
+		if d != nil && d.IsDir() && slices.Contains([]string{".git", "node_modules", "dist", "testdata"}, d.Name()) {
+			return filepath.SkipDir
+		}
+		if err == nil && !d.IsDir() {
+			os.Stat(p)
+		}
+		return nil
+	})
+	bin := filepath.Join(t.TempDir(), "agentwebctl")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/agentwebctl")
+	build.Dir = repoRoot
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("building agentwebctl (needs `npm run build:web` first): %v\n%s", err, out)
+	}
+	return bin
+}
+
+func freePort(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	_, p, _ := net.SplitHostPort(ln.Addr().String())
+	return p
+}
+
 func loadRecord(path string) (record, error) {
 	var r record
 	b, err := os.ReadFile(path)
@@ -113,13 +123,25 @@ func canonical(raw json.RawMessage) string {
 	return string(b)
 }
 
+// requests is r's herdr requests in order, except that a run of the same method (a
+// fan-out, which the TypeScript sends concurrently) is sorted.
 func requests(r record) []string {
 	var out []string
-	for _, q := range r.Herdr {
+	start := 0
+	for i, q := range r.Herdr {
+		if i > 0 && q.Method != r.Herdr[i-1].Method {
+			slices.Sort(out[start:])
+			start = i
+		}
 		out = append(out, q.Method+" "+canonical(q.Params))
 	}
+	slices.Sort(out[start:])
 	return out
 }
+
+// tsUsage is how the TypeScript CLI names itself in usage lines; the Go one says
+// agentwebctl (divergences.md D15).
+var tsUsage = strings.NewReplacer("agentwebctl.js", "agentwebctl")
 
 func distinct(xs []string) []string {
 	var out []string
@@ -152,6 +174,24 @@ func compareRecords(want, got record) []string {
 		if w.Status != g.Status || canonical(w.Response) != canonical(g.Response) {
 			differ("response", fmt.Sprint(w.Status, " ", canonical(w.Response)), fmt.Sprint(g.Status, " ", canonical(g.Response)))
 		}
+	}
+	switch {
+	case (want.CLI == nil) != (got.CLI == nil):
+		differ("cli", want.CLI, got.CLI)
+	case want.CLI != nil:
+		w, g := *want.CLI, *got.CLI
+		if !slices.Equal(w.Args, g.Args) || w.Exit != g.Exit {
+			differ("command and exit", fmt.Sprint(w.Args, " → ", w.Exit), fmt.Sprint(g.Args, " → ", g.Exit))
+		}
+		if ws := tsUsage.Replace(w.Stdout); ws != g.Stdout {
+			differ("stdout", fmt.Sprintf("%q", ws), fmt.Sprintf("%q", g.Stdout))
+		}
+		if ws := tsUsage.Replace(w.Stderr); ws != g.Stderr {
+			differ("stderr", fmt.Sprintf("%q", ws), fmt.Sprintf("%q", g.Stderr))
+		}
+	}
+	if !slices.Equal(want.HerdrCLI, got.HerdrCLI) {
+		differ("herdr/gh CLI calls", want.HerdrCLI, got.HerdrCLI)
 	}
 	split := func(msgs []string) (sent, received []string) {
 		for _, m := range msgs {
@@ -201,6 +241,39 @@ func TestCompareRecordsCatchesDifferences(t *testing.T) {
 			r.Herdr = append(r.Herdr, fakeherdr.Request{Method: "pane.get"})
 		},
 		"ws message": func(r *record) { r.WS = []string{`{"type":"pong"}`} },
+	} {
+		got := base()
+		change(&got)
+		if len(compareRecords(base(), got)) == 0 {
+			t.Errorf("%s: a difference went unnoticed", name)
+		}
+	}
+}
+
+func TestCompareRecordsCatchesCLIDifferences(t *testing.T) {
+	base := func() record {
+		return record{Op: "cli-x",
+			CLI:      &cliCall{Args: []string{"agent"}, Exit: 2, Stderr: "usage: agentwebctl.js agent …\n"},
+			HerdrCLI: []string{"herdr agent get p1"},
+			Herdr: []fakeherdr.Request{{Method: "agent.list"},
+				{Method: "pane.process_info", Params: json.RawMessage(`{"pane_id":"p1"}`)},
+				{Method: "pane.process_info", Params: json.RawMessage(`{"pane_id":"p5"}`)}}}
+	}
+	same := base()
+	same.CLI.Stderr = "usage: agentwebctl agent …\n"            // D15
+	same.Herdr[1], same.Herdr[2] = same.Herdr[2], same.Herdr[1] // a fan-out in another order
+	if d := compareRecords(base(), same); len(d) != 0 {
+		t.Errorf("equal records differ: %v", d)
+	}
+	for name, change := range map[string]func(*record){
+		"exit":      func(r *record) { r.CLI.Exit = 1 },
+		"stderr":    func(r *record) { r.CLI.Stderr = "usage: agentwebctl agent\n" },
+		"stdout":    func(r *record) { r.CLI.Stdout = "x\n" },
+		"herdr cli": func(r *record) { r.HerdrCLI = []string{"herdr agent get w-named"} },
+		"no cli":    func(r *record) { r.CLI = nil },
+		"order across methods": func(r *record) {
+			r.Herdr[0], r.Herdr[1] = r.Herdr[1], r.Herdr[0]
+		},
 	} {
 		got := base()
 		change(&got)
