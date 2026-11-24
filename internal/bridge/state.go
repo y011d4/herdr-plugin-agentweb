@@ -183,7 +183,7 @@ func applyEvent(s *State, name string, data map[string]any, now int64) (*State, 
 	tabByID := make(map[string]*TabNode, len(s.tabByID))
 	for k, t := range s.tabByID {
 		c := *t
-		c.Panes = append([]*PaneNode(nil), t.Panes...)
+		c.Panes = append(make([]*PaneNode, 0, len(t.Panes)), t.Panes...) // [] stays [] in the json
 		tabByID[k] = &c
 	}
 	focused := s.Focused
