@@ -41,6 +41,89 @@ describe('parsePrompt — real menus', () => {
     assert.ok(p, 'should still parse');
     assert.equal(p!.options.length, 2);
     assert.equal(p!.selected, 1);
+    assert.equal(p!.options[1].description, '✓ recommended');
+  });
+});
+
+describe('parsePrompt — option descriptions', () => {
+  // Claude Code draws a full-width ─ rule above its prompts; that sets the screen width.
+  const rule = (cols: number): string => '─'.repeat(cols);
+
+  it('reads each description, rejoining its wrapped lines', () => {
+    const p = parsePrompt([
+      rule(60),
+      ' ☐ Color',
+      'Pick a color',
+      '',
+      '❯ 1. Red',
+      '     A warm color that',
+      '     draws attention.',
+      '  2. Blue',
+      '     落ち着いた印象の色で',
+      '     す。',
+      '  3. Type something.',
+      rule(60),
+      '  4. Chat about this',
+      '',
+      'Enter to select · Esc to cancel',
+    ].join('\n'));
+    assert.equal(p!.question, 'Pick a color');
+    assert.deepEqual(p!.options.map((o) => [o.label, o.description]), [
+      ['Red', 'A warm color that draws attention.'], // a word wrap dropped a space
+      ['Blue', '落ち着いた印象の色です。'], // a break between CJK glyphs dropped none
+      ['Type something.', ''],
+      ['Chat about this', ''],
+    ]);
+  });
+
+  it('keeps the menu when a description wraps over many lines', () => {
+    const p = parsePrompt(['❯ 1. Red', ...Array(8).fill('     more about red'), '  2. Blue', '  3. Green', HINT].join('\n'));
+    assert.deepEqual(p!.options.map((o) => o.label), ['Red', 'Blue', 'Green']);
+    assert.equal(p!.options[0].description, Array(8).fill('more about red').join(' '));
+  });
+
+  it('joins a wrapped label to the label, not the description', () => {
+    const p = parsePrompt([
+      rule(40),
+      ' Do you want to proceed?',
+      ' ❯ 1. Yes',
+      '   2. Yes, and don’t ask again for these', // fills all 40 columns
+      '      commands',
+      '   3. No',
+      '      Tell Claude what to do instead', // under a short label: a description
+      '',
+      ' Esc to cancel',
+    ].join('\n'));
+    assert.deepEqual(p!.options.map((o) => [o.label, o.description]), [
+      ['Yes', ''],
+      ['Yes, and don’t ask again for these commands', ''],
+      ['No', 'Tell Claude what to do instead'],
+    ]);
+  });
+
+  it('does not take a multi-select menu\'s Submit row for a description', () => {
+    const p = parsePrompt([
+      '❯ 1. [ ] Cheese',
+      '         Melted on top',
+      '  2. [✔] Olives',
+      '  3. [ ] Type something',
+      '     Submit',
+      rule(30),
+      '  4. Chat about this',
+      '',
+      HINT,
+    ].join('\n'));
+    assert.deepEqual(p!.options.map((o) => [o.label, o.description]), [
+      ['[ ] Cheese', 'Melted on top'],
+      ['[✔] Olives', ''],
+      ['[ ] Type something', ''],
+      ['Chat about this', ''],
+    ]);
+  });
+
+  it('leaves the tab bar of several questions out of the question', () => {
+    const p = parsePrompt([rule(40), '←  ☐ Color  ☐ Size  ✔ Submit  →', '', 'Which color?', '', '❯ 1. Red', '  2. Blue', HINT].join('\n'));
+    assert.equal(p!.question, 'Which color?');
   });
 });
 

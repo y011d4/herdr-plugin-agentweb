@@ -8,7 +8,9 @@ package bridge
 // the client — to confirm the prompt hasn't changed before pressing the answer digit
 // (closing the client read->POST TOCTOU gap). If the two diverge, an answer would 409
 // or, worse, a stale menu could verify. testdata/vectors/prompt.json (written from
-// the web copy by tools/vectors/prompt.ts) is run by both sides' tests.
+// the web copy by tools/vectors/prompt.ts) is run by both sides' tests. Only the web
+// shows the options, so only it joins a wrapped label and reads the descriptions; this
+// copy matches it on everything else (labels up to their first line break).
 //
 // The regexps keep JavaScript's meaning: \s is jsSpace, `.` excludes \r and the
 // Unicode line separators, and the /i ones match an ASCII-lowercased line instead of
@@ -18,6 +20,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 type PromptOption struct {
@@ -48,7 +51,8 @@ var (
 	menuOption       = regexp.MustCompile(`^` + reSpace + `*([❯➤▶►])?` + reSpace + `*(\d+)[.)]` + reSpace + `+(` + reNonSpace + `[^\n\r\x{2028}\x{2029}]*)$`)
 	boxRule          = regexp.MustCompile(`[─━]{4,}`)
 	indentedLine     = regexp.MustCompile(`^` + reSpace + `+` + reNonSpace)
-	boxTitle         = regexp.MustCompile(`^[☐☑✓]`)
+	checkbox         = regexp.MustCompile(`^\[[^\n\r\x{2028}\x{2029}]\] `) // a multi-select option's box
+	boxTitle         = regexp.MustCompile(`^[←☐☑✓]`)
 	questionNoise    = regexp.MustCompile(`^(enter to select|press|type something|chat about this|↑|↓|esc|tab)`) // matched against asciiLower(line)
 	questionBullet   = regexp.MustCompile(`^[•·]+` + reSpace + `*`)
 	blankLines       = regexp.MustCompile(`\n{2,}`)
@@ -94,6 +98,7 @@ func parsePrompt(text string) *ParsedPrompt {
 	var best *block // the bottom-most block
 	var cur []PromptOption
 	sel, first, last, gap := 0, -1, -1, 0
+	col, cont := 0, false // the column of the current option's text; still on lines continuing it
 	commit := func() {
 		if len(cur) >= 2 {
 			best = &block{cur, sel, first, last}
@@ -101,16 +106,31 @@ func parsePrompt(text string) *ParsedPrompt {
 		cur, sel, first, last, gap = nil, 0, -1, -1, 0
 	}
 	for i, l := range lines {
-		m := menuOption.FindStringSubmatch(l)
-		if m == nil {
-			if len(cur) > 0 {
-				if gap++; gap > 4 {
-					commit()
-				}
+		at := menuOption.FindStringSubmatchIndex(l)
+		if at == nil {
+			if len(cur) == 0 {
+				continue
+			}
+			// a line indented to the option's text continues it (a wrapped label or its
+			// description), which is no gap
+			if cont && jsTrim(l) != "" && utf8.RuneCountInString(l)-utf8.RuneCountInString(strings.TrimLeftFunc(l, isJSSpace)) >= col {
+				continue
+			}
+			cont = false
+			if gap++; gap > 4 {
+				commit()
 			}
 			continue
 		}
+		m := []string{"", "", l[at[4]:at[5]], l[at[6]:]}
+		if at[2] >= 0 {
+			m[1] = l[at[2]:at[3]]
+		}
 		gap = 0
+		col, cont = utf8.RuneCountInString(l[:at[6]]), true
+		if checkbox.MatchString(m[3]) {
+			col += 4
+		}
 		// Number(): a digit run too long for an int is a huge float, never a match
 		num, _ := strconv.ParseFloat(m[2], 64)
 		if num == float64(len(cur)+1) {

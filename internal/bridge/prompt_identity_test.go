@@ -134,7 +134,17 @@ func TestPromptIdentity(t *testing.T) {
 			t.Run("agrees with the client on: "+v.Name, func(t *testing.T) {
 				// The bridge gates the verify identity on this parsePrompt; if it disagreed with
 				// the client's, a real answer would 409 or a stale one could slip through.
-				if got := parsePrompt(v.Input); !reflect.DeepEqual(got, v.Want) {
+				// Labels are the web's display text (it joins wrapped ones), so they're left out.
+				got := parsePrompt(v.Input)
+				for _, p := range []*ParsedPrompt{got, v.Want} {
+					if p == nil {
+						continue
+					}
+					for i := range p.Options {
+						p.Options[i].Label = ""
+					}
+				}
+				if !reflect.DeepEqual(got, v.Want) {
 					g, _ := json.Marshal(got)
 					w, _ := json.Marshal(v.Want)
 					t.Errorf("got %s, want %s", g, w)
