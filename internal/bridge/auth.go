@@ -32,7 +32,9 @@ func initAuth(stateDir string) (string, error) {
 		buf := make([]byte, 16)
 		rand.Read(buf) // never fails (crypto/rand)
 		tok = hex.EncodeToString(buf)
-		if err := os.WriteFile(tokenPath, []byte(tok), 0o600); err != nil {
+		// a new 0600 file renamed over the old one: an existing (invalid) file's looser
+		// mode never applies to the new token, even for a moment (d10)
+		if err := writeFile0600(tokenPath, []byte(tok)); err != nil {
 			return "", err
 		}
 	}
@@ -110,4 +112,25 @@ func formDecode(s string) string {
 		}
 	}
 	return strings.ToValidUTF8(string(out), "�")
+}
+
+// writeFile0600 replaces path with data through a fresh 0600 temp file in the same
+// dir and a rename, so the content is never readable under another mode.
+func writeFile0600(path string, data []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".token-*") // created 0600
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	cerr := f.Close()
+	if werr == nil && cerr == nil {
+		werr = os.Rename(f.Name(), path)
+	}
+	if werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		os.Remove(f.Name())
+	}
+	return werr
 }
