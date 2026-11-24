@@ -26,3 +26,12 @@ updates:
     # delay for every `npm install` / `npm ci` (CI included), not just Dependabot.
     cooldown:
       default-days: 7
+
+  # Go module updates (coder/websocket). Same 7-day cooldown as above.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7

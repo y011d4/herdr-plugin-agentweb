@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && tsc -p tsconfig.web.json && tsc -p tsconfig.sw.json",
+    "build": "tsc -p tsconfig.json && npm run build:web",
     "test": "node --test 'server/test/*.test.ts' 'web/test/*.test.ts'",
-    "start": "node server/main.ts"
+    "start": "node server/main.ts",
+    "build:web": "tsc -p tsconfig.web.json && tsc -p tsconfig.sw.json"
   },
   "dependencies": {
     "ws": "^8.22.0"
