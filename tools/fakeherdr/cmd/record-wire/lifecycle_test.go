@@ -203,9 +203,10 @@ func TestGoLifecycleCommands(t *testing.T) {
 		os.Remove(filepath.Join(state, c.file))
 	}
 
-	// a bridge started before the rename: agentwebctl, with its pidfile in the old
-	// plugin's state dir beside this one; status, start and stop still find it
-	oldState, oldBin := filepath.Join(filepath.Dir(state), "y011d4.agentweb"), filepath.Join(dir, "old", "agentwebctl")
+	// a bridge started before the rename: agentwebctl, with its pidfile in herdr's
+	// state dir for the old plugin; status and stop still find it, start refuses
+	oldState := filepath.Join(dir, "home", ".local", "state", "herdr", "plugins", "y011d4.agentweb")
+	oldBin := filepath.Join(dir, "old", "agentwebctl")
 	os.MkdirAll(filepath.Dir(oldBin), 0o755)
 	if b, err := os.ReadFile(bin); err != nil || os.WriteFile(oldBin, b, 0o755) != nil {
 		t.Fatal("copying the binary:", err)
@@ -225,8 +226,8 @@ func TestGoLifecycleCommands(t *testing.T) {
 		}
 	})
 	waitFor("the old-named bridge answers", healthy)
-	expect([]string{"status"}, 0, "bridge running (pid "+pid+")")
-	expect([]string{"start"}, 0, "bridge already running (pid "+pid+")")
+	expect([]string{"status"}, 0, "bridge running (pid "+pid+")\nstarted before the plugin's rename")
+	expect([]string{"start"}, 1, "a bridge the plugin started before its rename (agentwebctl) is running (pid "+pid+")")
 	expect([]string{"stop"}, 0, "bridge stopped (pid "+pid+")")
 	if healthy() {
 		t.Error("the old-named bridge still answers after stop")

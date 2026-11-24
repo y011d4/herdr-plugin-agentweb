@@ -95,9 +95,9 @@ v0.1.0 より前、このプラグインの ID は `y011d4.agentweb`、バイナ
    から、`herdr plugin uninstall y011d4.agentweb` (または `unlink`) する。
 
 `~/.local/share/herdr-agentweb` は、あるあいだ使い続けます。orchestrator のディレクトリが動かないので、
-Claude Code のメモリ、会話の履歴、フォルダの信頼設定もそのまま残ります。新しい `start`、`status`、
-`stop` は、古いプラグインが起動したブリッジ (`agentwebctl`。pid ファイルは古い state ディレクトリにある)
-も見つけるので、手順 1 を飛ばしても動き続けることはありません。`HERDR_AGENTWEB_HOST`/`_PORT` は
+Claude Code のメモリ、会話の履歴、フォルダの信頼設定もそのまま残ります。新しい `status` と `stop` は、
+古いプラグインが起動したブリッジ (`agentwebctl`。pid ファイルは古い state ディレクトリにある) も見つけ、
+`start` はそれが動いているあいだは起動を断ります。手順 1 を飛ばしても、古いブリッジが動き続けることはありません。`HERDR_AGENTWEB_HOST`/`_PORT` は
 `HERDR_YOICKS_HOST`/`_PORT` になりました。
 
 ### 前の版に戻す

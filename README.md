@@ -105,9 +105,9 @@ as another plugin, so an install from before the rename moves over by hand:
    then `herdr plugin uninstall y011d4.agentweb` (or `unlink`).
 
 `~/.local/share/herdr-agentweb` stays in use while it exists, so the orchestrators' directories,
-and with them Claude Code's memory, transcripts and folder trust, don't move. The new `start`,
-`status` and `stop` also find a bridge the old plugin started (`agentwebctl`, its pidfile in the old
-state dir), so a missed step 1 doesn't leave it running. `HERDR_AGENTWEB_HOST`/`_PORT` are now
+and with them Claude Code's memory, transcripts and folder trust, don't move. The new `status` and
+`stop` also find a bridge the old plugin started (`agentwebctl`, its pidfile in the old state dir),
+and `start` refuses while one runs, so a missed step 1 can't leave the old one serving. `HERDR_AGENTWEB_HOST`/`_PORT` are now
 `HERDR_YOICKS_HOST`/`_PORT`.
 
 ### Rolling back

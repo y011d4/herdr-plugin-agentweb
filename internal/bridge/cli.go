@@ -98,7 +98,7 @@ func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 // keeps being used rather than unpairing a phone.
 func defaultStateDir() string {
 	home := osHomedir()
-	herdrDir := filepath.Join(firstNonEmpty(os.Getenv("XDG_STATE_HOME"), filepath.Join(home, ".local", "state")), "herdr", "plugins", pluginID)
+	herdrDir := herdrStateDir(pluginID)
 	legacy := filepath.Join(home, ".local", "state", "herdr-agentweb")
 	if !fileExists(filepath.Join(herdrDir, "token")) && fileExists(filepath.Join(legacy, "token")) {
 		return legacy
@@ -277,16 +277,20 @@ func waitForExit(pid int, timeout time.Duration) bool {
 	return true
 }
 
+// herdrStateDir is the state dir herdr keeps for plugin id.
+func herdrStateDir(id string) string {
+	return filepath.Join(firstNonEmpty(os.Getenv("XDG_STATE_HOME"), filepath.Join(osHomedir(), ".local", "state")), "herdr", "plugins", id)
+}
+
 // livePidFiles is the bridge's pidfiles and their live PIDs: this plugin's, or while
-// those have none, the ones of the plugin before the rename (y011d4.agentweb, beside
-// this state dir in herdr's layout), whose bridge, agentwebctl, is still ours to find
-// and stop.
+// those have none, the ones of the plugin before the rename (herdr's state dir for
+// y011d4.agentweb), whose bridge, agentwebctl, is still ours to find and stop.
 func livePidFiles() (daemonFile, runFile string, daemon, fg int) {
 	daemonFile, runFile = daemonPidFile(), runPidFile()
 	if daemon, fg = alivePid(daemonFile), alivePid(runFile); daemon != 0 || fg != 0 {
 		return
 	}
-	old := filepath.Join(filepath.Dir(stateDir()), "y011d4.agentweb")
+	old := herdrStateDir("y011d4.agentweb")
 	oldDaemon, oldRun := filepath.Join(old, "bridge.pid"), filepath.Join(old, "bridge-run.pid")
 	if d, f := alivePid(oldDaemon), alivePid(oldRun); d != 0 || f != 0 {
 		return oldDaemon, oldRun, d, f
@@ -294,12 +298,15 @@ func livePidFiles() (daemonFile, runFile string, daemon, fg int) {
 	return
 }
 
-func runningPid() (pid int, foreground bool) {
-	_, _, daemon, fg := livePidFiles()
+// runningPid is the live bridge's PID; old is whether the plugin before the rename
+// started it.
+func runningPid() (pid int, foreground, old bool) {
+	daemonFile, _, daemon, fg := livePidFiles()
+	old = (daemon != 0 || fg != 0) && filepath.Dir(daemonFile) != stateDir()
 	if daemon != 0 {
-		return daemon, fg != 0
+		return daemon, fg != 0, old
 	}
-	return fg, fg != 0
+	return fg, fg != 0, old
 }
 
 func pidLabel(pid int, foreground bool) string {
@@ -312,7 +319,11 @@ func pidLabel(pid int, foreground bool) string {
 // ── bridge lifecycle ─────────────────────────────────────────────────────────
 
 func (c cli) start() int {
-	if pid, fg := runningPid(); pid != 0 {
+	if pid, fg, old := runningPid(); old {
+		// it serves the old plugin's config and token: "already running" would hide that
+		fmt.Printf("a bridge the plugin started before its rename (agentwebctl) is running (%s): stop it (the stop action), then start again\n", pidLabel(pid, fg))
+		return 1
+	} else if pid != 0 {
 		fmt.Printf("bridge already running (%s)\n", pidLabel(pid, fg))
 		printConnectInfo()
 		return 0
@@ -409,8 +420,11 @@ func (c cli) stop() int {
 }
 
 func (c cli) status() int {
-	if pid, fg := runningPid(); pid != 0 {
+	if pid, fg, old := runningPid(); pid != 0 {
 		fmt.Printf("bridge running (%s)\n", pidLabel(pid, fg))
+		if old {
+			fmt.Println("started before the plugin's rename (agentwebctl): stop and start it to run this version")
+		}
 		printConnectInfo()
 		notify("yoicks running", baseURL(readConfig()))
 	} else {
@@ -449,7 +463,7 @@ func printEnvironment() {
 
 // run serves in the foreground, in this process (the TS ran node in a child).
 func (c cli) run() int {
-	if pid, _ := runningPid(); pid != 0 {
+	if pid, _, _ := runningPid(); pid != 0 {
 		fmt.Fprintf(os.Stderr, "bridge already running (pid %d); stop it first\n", pid)
 		return 1
 	}
