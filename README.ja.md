@@ -89,13 +89,15 @@ v0.1.0 より前、このプラグインの ID は `y011d4.agentweb`、バイナ
 2. この版をインストール (またはリンク) する。`config.json` を `herdr plugin config-dir y011d4.agentweb`
    から `herdr plugin config-dir y011d4.yoicks` へ、`token` と `pane-profiles.json` を
    `~/.local/state/herdr/plugins/y011d4.agentweb/` から `~/.local/state/herdr/plugins/y011d4.yoicks/`
-   へコピーする。トークンを移せば、ペアリング済みのスマホは同じ URL のまま使えます。
+   へコピーする (`$XDG_STATE_HOME` があれば、どちらも `$XDG_STATE_HOME/herdr/plugins/` の下)。
+   トークンを移せば、ペアリング済みのスマホは同じ URL のまま使えます。
 3. 起動し (`herdr plugin action invoke y011d4.yoicks.start`)、動いている orchestrator を Clear して
    から、`herdr plugin uninstall y011d4.agentweb` (または `unlink`) する。
 
 `~/.local/share/herdr-agentweb` は、あるあいだ使い続けます。orchestrator のディレクトリが動かないので、
-Claude Code のメモリ、会話の履歴、フォルダの信頼設定もそのまま残ります。新しい `stop` は
-`agentwebctl` として起動したブリッジも見分けます。`HERDR_AGENTWEB_HOST`/`_PORT` は
+Claude Code のメモリ、会話の履歴、フォルダの信頼設定もそのまま残ります。新しい `start`、`status`、
+`stop` は、古いプラグインが起動したブリッジ (`agentwebctl`。pid ファイルは古い state ディレクトリにある)
+も見つけるので、手順 1 を飛ばしても動き続けることはありません。`HERDR_AGENTWEB_HOST`/`_PORT` は
 `HERDR_YOICKS_HOST`/`_PORT` になりました。
 
 ### 前の版に戻す

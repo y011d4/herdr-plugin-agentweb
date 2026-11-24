@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -200,6 +201,38 @@ func TestGoLifecycleCommands(t *testing.T) {
 			t.Errorf("a failed %s left a bridge serving", c.cmd)
 		}
 		os.Remove(filepath.Join(state, c.file))
+	}
+
+	// a bridge started before the rename: agentwebctl, with its pidfile in the old
+	// plugin's state dir beside this one; status, start and stop still find it
+	oldState, oldBin := filepath.Join(filepath.Dir(state), "y011d4.agentweb"), filepath.Join(dir, "old", "agentwebctl")
+	os.MkdirAll(filepath.Dir(oldBin), 0o755)
+	if b, err := os.ReadFile(bin); err != nil || os.WriteFile(oldBin, b, 0o755) != nil {
+		t.Fatal("copying the binary:", err)
+	}
+	old := exec.Command(oldBin, "start")
+	old.Env = append(slices.Clone(env), "HERDR_PLUGIN_STATE_DIR="+oldState) // the last one wins
+	b, err := old.CombinedOutput()
+	m = regexp.MustCompile(`bridge started \(pid (\d+)\)`).FindStringSubmatch(string(b))
+	if err != nil || m == nil {
+		t.Fatalf("start (old name): %v, %q", err, b)
+	}
+	pid = m[1]
+	t.Cleanup(func() { // if status or stop lost it: only this test's bridge
+		if b, _ := exec.Command("ps", "-p", pid, "-o", "args=").Output(); strings.TrimSpace(string(b)) == oldBin+" serve" {
+			n, _ := strconv.Atoi(pid)
+			syscall.Kill(n, syscall.SIGTERM)
+		}
+	})
+	waitFor("the old-named bridge answers", healthy)
+	expect([]string{"status"}, 0, "bridge running (pid "+pid+")")
+	expect([]string{"start"}, 0, "bridge already running (pid "+pid+")")
+	expect([]string{"stop"}, 0, "bridge stopped (pid "+pid+")")
+	if healthy() {
+		t.Error("the old-named bridge still answers after stop")
+	}
+	if _, err := os.Stat(filepath.Join(oldState, "bridge.pid")); err == nil {
+		t.Error("stop left the old bridge.pid")
 	}
 
 	if runtime.GOOS != "linux" {

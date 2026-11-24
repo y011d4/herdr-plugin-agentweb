@@ -98,14 +98,16 @@ as another plugin, so an install from before the rename moves over by hand:
    `herdr plugin action invoke y011d4.agentweb.stop`.
 2. Install (or link) this version. Copy `config.json` from `herdr plugin config-dir y011d4.agentweb`
    into `herdr plugin config-dir y011d4.yoicks`, and `token` and `pane-profiles.json` from
-   `~/.local/state/herdr/plugins/y011d4.agentweb/` into `~/.local/state/herdr/plugins/y011d4.yoicks/`.
-   With the token, paired phones keep working, at the same URL.
+   `~/.local/state/herdr/plugins/y011d4.agentweb/` into `~/.local/state/herdr/plugins/y011d4.yoicks/`
+   (both under `$XDG_STATE_HOME/herdr/plugins/` when that is set). With the token, paired phones
+   keep working, at the same URL.
 3. Start it (`herdr plugin action invoke y011d4.yoicks.start`), Clear the running orchestrators,
    then `herdr plugin uninstall y011d4.agentweb` (or `unlink`).
 
 `~/.local/share/herdr-agentweb` stays in use while it exists, so the orchestrators' directories,
-and with them Claude Code's memory, transcripts and folder trust, don't move. The new `stop` also
-recognizes a bridge started as `agentwebctl`. `HERDR_AGENTWEB_HOST`/`_PORT` are now
+and with them Claude Code's memory, transcripts and folder trust, don't move. The new `start`,
+`status` and `stop` also find a bridge the old plugin started (`agentwebctl`, its pidfile in the old
+state dir), so a missed step 1 doesn't leave it running. `HERDR_AGENTWEB_HOST`/`_PORT` are now
 `HERDR_YOICKS_HOST`/`_PORT`.
 
 ### Rolling back
