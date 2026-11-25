@@ -1,13 +1,19 @@
 /**
  * store.ts — the app's shared state: the last State, the WebSocket link, what is on
- * screen (`view`) and the done panes seen on this phone. Plain module state, mutated in
- * place (`store.view` is never replaced); emit() tells subscribers something changed.
+ * screen (`view`), the done panes seen on this phone and the kept first tasks. Plain module
+ * state, mutated in place (`store.view` is never replaced); emit() tells subscribers
+ * something changed.
  */
 import { markSeen } from './dashboard-group.ts';
 import type { SeenDone } from './dashboard-group.ts';
+import { KeptTasks } from './kept-tasks.ts';
 import type { AppState } from './types.ts';
 
 const STORAGE_SEEN = 'herdr_seen_done'; // done panes already opened on this phone (SeenDone)
+
+/** First tasks the bridge couldn't deliver to a just-started agent (New agent keeps them);
+ *  each pane's composer keeps its task, with the user's edits, until it is sent. */
+export const keptTasks = new KeptTasks();
 
 export interface View {
   /** what #screen shows */

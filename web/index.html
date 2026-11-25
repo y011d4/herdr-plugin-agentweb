@@ -32,12 +32,12 @@
     <!-- Main screen — content injected by app.ts -->
     <main id="screen"></main>
 
-    <!-- Toast container — fixed overlay -->
-    <div id="toast-container" aria-live="assertive" aria-atomic="false">
-      <!-- shown (CSS) once two or more toasts are stacked -->
-      <button type="button" id="toast-clear-all">Clear all</button>
-    </div>
+    <!-- Toast container — fixed overlay; Clear all and the toasts: ui/Toasts.tsx -->
+    <div id="toast-container" aria-live="assertive" aria-atomic="false"></div>
   </div>
+
+  <!-- Modal dialogs (ui/Modals.tsx), above everything -->
+  <div id="modal-root"></div>
 
   <script type="module" src="/src/app.ts"></script>
 </body>

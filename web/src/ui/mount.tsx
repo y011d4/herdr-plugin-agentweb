@@ -2,12 +2,14 @@
  * ui/mount.tsx — the shared DOM while app.ts and React screens live side by side (temporary
  * glue, deleted with app.ts): the only holder of #screen, the topbar and its slots, the
  * connection dot and the reconnect banner. Every write to them goes through here, and each
- * screen change sets store.view.screen.
+ * screen change sets store.view.screen. It also mounts the toast and modal roots.
  */
 import { StrictMode, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { store, type View } from '../store.ts';
+import { Modals } from './Modals.tsx';
+import { Toasts } from './Toasts.tsx';
 
 export interface Topbar { title?: ReactNode; left?: ReactNode; right?: ReactNode }
 
@@ -57,6 +59,13 @@ export function setConnIndicator(connected: boolean): void {
   dot.classList.toggle('connected', connected);
   dot.title = connected ? 'Connected' : 'Reconnecting…';
   showBanner();
+}
+
+/** The toasts and the modals, once at startup: React roots of their own outside #screen,
+ *  in #toast-container and #modal-root (after #app, where the legacy overlays went). */
+export function mountOverlays(): void {
+  createRoot(el('toast-container')).render(<StrictMode><Toasts /></StrictMode>);
+  createRoot(el('modal-root')).render(<StrictMode><Modals /></StrictMode>);
 }
 
 /** A React screen, in a display:contents wrapper in #screen, its topbar portalled into

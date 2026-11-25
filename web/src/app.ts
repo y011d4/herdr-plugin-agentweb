@@ -18,17 +18,18 @@ import { stripAnsi, parsePrompt, promptIdentity, displayCols, answerOutcome } fr
 import type { PromptOption, ParsedPrompt } from './prompt.ts';
 import { dashboardCards, homeSummary, shownStatus } from './dashboard-group.ts';
 import type { DashboardCard } from './dashboard-group.ts';
-import { KeptTasks, taskToKeep } from './kept-tasks.ts';
 import { DESKTOP_QUERY, enterSends } from './composer-keys.ts';
-import type { AppState, OrchestratorView, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
+import type { AppState, ClearResponse, OrchestratorView, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 import { apiDelete, apiGet, apiPost, getToken, loadToken, onUnauthorized, setToken } from './api.ts';
-import { markPaneSeen, setAppState, store, subscribe } from './store.ts';
+import { keptTasks, markPaneSeen, setAppState, store, subscribe } from './store.ts';
+import { dismissNotificationsForPane, dismissToastsForPane, notifyAgentStatus, showToast } from './notify.ts';
 import { onWsMessage, wsConnect, wsSendWatch } from './ws.ts';
 import { agentsScope, defaultHome, homeAgentsHash, homeHash, homeOf, isAgentsRoute, nextPaneBackRoute, orchestratorOfPane,
   paneGoneRoute, paneRoute, resolveRoute } from './routes.ts';
 import { createElement } from 'react';
-import { mountScreen, setConnIndicator, setLegacyScreen, setLegacyTopbar } from './ui/mount.tsx';
-import { BUILD, STORAGE_NOTIF, Settings, settingsTopbar } from './ui/Settings.tsx';
+import { confirmModal, openAgentMenu, openNewAgent } from './ui/Modals.tsx';
+import { mountOverlays, mountScreen, setConnIndicator, setLegacyScreen, setLegacyTopbar } from './ui/mount.tsx';
+import { BUILD, Settings, settingsTopbar } from './ui/Settings.tsx';
 import { Token } from './ui/Token.tsx';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
@@ -89,7 +90,6 @@ const ANSWER_CONFIRM_MS = 10_000; // still on the same prompt this long after th
 
 // ── DOM refs (populated after DOMContentLoaded) ───────────────────────────────
 let elApp: HTMLElement | null;
-let elToastContainer: HTMLElement | null;
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 
@@ -193,13 +193,13 @@ function onStateUpdate(): void {
     }
     markActivePaneSeen(); // it may have just finished while on screen
     // Pane detail auto-refreshes via its own poller; header may need updating
-    updatePaneDetailHeader();
+    refreshPaneHeader();
     updatePromptPanel(); // agent may have just become (un)blocked
     settlePendingAnswer(); // ...because a tapped answer landed
   } else if (hash.startsWith('#/home/')) {
     if (homeReplaced(hash)) return;
     markActivePaneSeen(); // the orchestrator may have just finished while on screen
-    updatePaneDetailHeader();
+    refreshPaneHeader();
     renderHomeStatus();
     renderHomeActivity();
     updatePromptPanel();
@@ -207,10 +207,10 @@ function onStateUpdate(): void {
   }
 }
 
-// ── Agent status notification handler ────────────────────────────────────────
+// ── Agent status pushes ───────────────────────────────────────────────────────
 
 function onAgentStatus(msg: WsAgentStatusMessage): void {
-  const { paneId, agent, from, to, workspaceLabel, tabLabel } = msg;
+  const { paneId, to } = msg;
 
   // A tapped answer's pane going `working`: these events come one by one, while state
   // snapshots are debounced and can skip a short `working` (blocked → done).
@@ -219,220 +219,13 @@ function onAgentStatus(msg: WsAgentStatusMessage): void {
     settlePendingAnswer();
   }
 
-  const jumpToPane = (): void => navigate(paneRoute(store.appState, paneId));
-
-  const notifyStatuses = new Set(['blocked', 'done']);
-  if (!notifyStatuses.has(to)) {
-    // Still show toast for other transitions if not currently on that pane
-    if (view.activePaneId !== paneId) {
-      showToast(
-        `${agent ?? 'Agent'}: ${from} → ${to}`,
-        `${workspaceLabel ?? ''} / ${tabLabel ?? ''}`,
-        { sticky: true, onclick: jumpToPane, paneId }
-      );
-    }
-    return;
-  }
-
-  const body = `${workspaceLabel ?? ''} / ${tabLabel ?? ''}`;
-  const title = `${agent ?? 'Agent'} ${to}`;
-
-  // In-app toast (skip for the pane currently being viewed)
-  if (view.activePaneId !== paneId) {
-    showToast(title, body, { sticky: true, onclick: jumpToPane, paneId });
-  }
-
-  // System notification when page is hidden
-  if (
-    document.hidden &&
-    localStorage.getItem(STORAGE_NOTIF) === 'true' &&
-    typeof Notification !== 'undefined' &&
-    Notification.permission === 'granted'
-  ) {
-    showSystemNotification(title, body, paneId);
-  }
+  notifyAgentStatus(msg); // a toast; for blocked/done also an OS notification while hidden
 
   // Refresh pane detail if it's the active one (not while hidden — the
   // visibilitychange handler re-reads the screen on return)
-  if (view.activePaneId === paneId && !document.hidden) {
+  if ((to === 'blocked' || to === 'done') && view.activePaneId === paneId && !document.hidden) {
     refreshPaneOutput();
   }
-}
-
-// ── Toast ─────────────────────────────────────────────────────────────────────
-
-interface ToastOptions {
-  onclick?: () => void;
-  /** sticky toasts stay until the user dismisses them */
-  sticky?: boolean;
-  /** associates the toast with a pane so opening that pane auto-dismisses it */
-  paneId?: string;
-}
-
-const TOAST_MAX = 10;
-
-function showToast(title: string, body: string, opts: ToastOptions = {}): void {
-  if (!elToastContainer) return;
-
-  // keep the stack bounded — drop the oldest toast (the container also holds Clear all)
-  const toasts = elToastContainer.getElementsByClassName('toast');
-  while (toasts.length >= TOAST_MAX) toasts[0].remove();
-
-  const el = document.createElement('div');
-  el.className = 'toast';
-  // tag so navigating to this pane can auto-dismiss its toasts (see dismissToastsForPane)
-  if (opts.paneId) el.dataset.paneId = opts.paneId;
-  el.innerHTML =
-    `<div class="toast-main">` +
-    `<div class="toast-header">${escHtml(title)}</div>` +
-    `<div class="toast-body">${escHtml(body)}</div>` +
-    `</div>` +
-    `<button class="toast-close" aria-label="Dismiss">&#10005;</button>`;
-
-  const dismiss = (): void => {
-    el.classList.add('fading');
-    setTimeout(() => el.remove(), 300);
-  };
-
-  el.querySelector('.toast-close')!.addEventListener('click', (e) => {
-    e.stopPropagation();
-    dismiss();
-  });
-
-  // Swipe right to dismiss
-  let touchStartX = 0;
-  let touchDeltaX = 0;
-  let didSwipe = false;
-  el.addEventListener('touchstart', (e: TouchEvent) => {
-    touchStartX = e.touches[0].clientX;
-    touchDeltaX = 0;
-    el.style.transition = 'none';
-  }, { passive: true });
-  el.addEventListener('touchmove', (e: TouchEvent) => {
-    touchDeltaX = e.touches[0].clientX - touchStartX;
-    if (touchDeltaX > 0) {
-      el.style.transform = `translateX(${touchDeltaX}px)`;
-      el.style.opacity = String(Math.max(0.2, 1 - touchDeltaX / 240));
-    }
-  }, { passive: true });
-  el.addEventListener('touchend', () => {
-    el.style.transition = 'transform 0.15s ease-out, opacity 0.15s ease-out';
-    if (touchDeltaX > 72) {
-      didSwipe = true;
-      el.style.transform = 'translateX(120%)';
-      el.style.opacity = '0';
-      setTimeout(() => el.remove(), 150);
-    } else {
-      if (Math.abs(touchDeltaX) > 10) didSwipe = true;
-      el.style.transform = '';
-      el.style.opacity = '';
-    }
-    touchDeltaX = 0;
-  });
-
-  if (opts.onclick) {
-    el.style.cursor = 'pointer';
-    el.addEventListener('click', () => {
-      // a swipe gesture must not double as a tap
-      if (didSwipe) { didSwipe = false; return; }
-      opts.onclick!();
-      el.remove();
-    });
-  }
-  elToastContainer.appendChild(el);
-
-  if (!opts.sticky) {
-    setTimeout(dismiss, 4_000);
-  }
-}
-
-/** Fade out and remove every toast associated with a pane (called on pane open). */
-function dismissToastsForPane(paneId: string): void {
-  if (!elToastContainer) return;
-  for (const el of Array.from(elToastContainer.children) as HTMLElement[]) {
-    if (el.dataset.paneId === paneId) {
-      el.classList.add('fading');
-      setTimeout(() => el.remove(), 300);
-    }
-  }
-}
-
-// ── System (OS) notifications ─────────────────────────────────────────────────
-
-// Notifications are shown through the service-worker registration rather than the
-// page `new Notification()` constructor: the constructor throws on mobile (Android
-// requires SW notifications), and only SW-shown notifications are reachable via
-// getNotifications() for later auto-dismissal. Desktop without an active
-// registration falls back to the page constructor.
-//
-// tag === paneId is intentional: successive status pings for one pane coalesce to a
-// single OS entry (latest status wins) instead of stacking stale ones, and it is the
-// key dismissNotificationsForPane() matches on. The in-app toast stack keeps history.
-
-function showSystemNotification(title: string, body: string, paneId: string): void {
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistration()
-      .then((reg) => {
-        // The app may have become visible while getRegistration() resolved; a
-        // return-to-visible dismiss would then run before this notification exists.
-        // Re-check the same document.hidden gate so a now-visible pane is never
-        // left with a stale OS notification.
-        if (!document.hidden) return;
-        if (!reg) { pageNotification(title, body, paneId); return; }
-        // showNotification() is itself async: the app can become visible between the
-        // check above and when the notification is registered, so a visibilitychange
-        // dismiss can run too early and miss it. Once it provably exists, dismiss it
-        // if the user is now looking at this very pane.
-        return reg.showNotification(title, { body, tag: paneId }).then(() => {
-          if (!document.hidden && view.activePaneId === paneId) dismissNotificationsForPane(paneId);
-        });
-      })
-      .catch(() => { if (document.hidden) pageNotification(title, body, paneId); });
-  } else {
-    pageNotification(title, body, paneId);
-  }
-}
-
-// Page-constructor notifications are not reachable via getNotifications(), so track
-// them per pane to close on pane open.
-const pageNotifications = new Map<string, Notification[]>();
-
-function pageNotification(title: string, body: string, paneId: string): void {
-  try {
-    const n = new Notification(title, { body, tag: paneId });
-    n.onclick = () => {
-      window.focus();
-      navigate(paneRoute(store.appState, paneId));
-    };
-    const list = pageNotifications.get(paneId) ?? [];
-    list.push(n);
-    pageNotifications.set(paneId, list);
-    n.addEventListener('close', () => {
-      const cur = pageNotifications.get(paneId);
-      if (!cur) return;
-      const rest = cur.filter((x) => x !== n);
-      if (rest.length) pageNotifications.set(paneId, rest);
-      else pageNotifications.delete(paneId);
-    });
-  } catch {
-    // `new Notification()` is an illegal constructor on some platforms — ignore
-  }
-}
-
-/** Close any OS notifications for a pane once its page is opened. */
-function dismissNotificationsForPane(paneId: string): void {
-  // page-constructor fallbacks: closed via the tracked references
-  const tracked = pageNotifications.get(paneId);
-  if (tracked) {
-    for (const n of tracked) n.close();
-    pageNotifications.delete(paneId);
-  }
-  // SW-shown notifications: reachable via the registration
-  if (!('serviceWorker' in navigator)) return;
-  navigator.serviceWorker.getRegistration()
-    .then((reg) => reg?.getNotifications({ tag: paneId }).then((ns) => ns.forEach((n) => n.close())))
-    .catch(() => {});
 }
 
 // ── Routing ───────────────────────────────────────────────────────────────────
@@ -581,223 +374,13 @@ function signIn(token: string): void {
 
 // ── Agent lifecycle UI (start / rename / clear / stop) ────────────────────────
 
-/** First tasks the bridge couldn't deliver to a just-started agent; each pane's composer
- *  keeps its task (with the user's edits) until it is sent. */
-const keptTasks = new KeptTasks();
-
-// Minimal modal overlay appended to <body>, above everything (toasts are z 1000,
-// modals sit higher). Closes on backdrop tap, the buttons, or Escape; close() is
-// idempotent and fires onClose exactly once (so a confirm can resolve on dismiss).
-function openModal(innerHtml: string, onClose?: () => void): { overlay: HTMLElement; close: () => void } {
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${innerHtml}</div>`;
-  let closed = false;
-  const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') close(); };
-  const close = (): void => {
-    if (closed) return;
-    closed = true;
-    document.removeEventListener('keydown', onKey);
-    overlay.remove();
-    onClose?.();
-  };
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  document.addEventListener('keydown', onKey);
-  document.body.appendChild(overlay);
-  return { overlay, close };
-}
-
-// Yes/no confirm; resolves false on cancel or dismiss. `danger` styles the confirm
-// button as destructive.
-function confirmModal(title: string, message: string, confirmLabel: string, danger: boolean): Promise<boolean> {
-  return new Promise((resolve) => {
-    let result = false;
-    const { overlay, close } = openModal(`
-      <div class="modal-title">${escHtml(title)}</div>
-      <div class="modal-message">${escHtml(message)}</div>
-      <div class="modal-actions">
-        <button class="btn-secondary" id="cf-cancel">Cancel</button>
-        <button class="btn-primary${danger ? ' danger' : ''}" id="cf-ok" style="width:auto;">${escHtml(confirmLabel)}</button>
-      </div>`, () => resolve(result));
-    overlay.querySelector('#cf-cancel')!.addEventListener('click', () => close());
-    overlay.querySelector('#cf-ok')!.addEventListener('click', () => { result = true; close(); });
-  });
-}
-
-// Directories to launch an agent in: one per open workspace/worktree, so on a
-// phone you pick an existing repo/worktree from a list instead of typing a path.
-// Prefer a herdr worktree's stable checkout path over the (mutable) pane cwd.
-function agentStartDirs(): Array<{ path: string; label: string; workspaceId: string }> {
-  const dirs: Array<{ path: string; label: string; workspaceId: string }> = [];
-  const seen = new Set<string>();
-  for (const ws of store.appState?.workspaces ?? []) {
-    const path = ws.worktree?.checkoutPath || ws.cwd;
-    if (!path || seen.has(path)) continue;
-    seen.add(path);
-    const branch = ws.worktree?.branch ? ` · ${ws.worktree.branch}` : '';
-    const wt = ws.worktree?.isLinkedWorktree ? ' (worktree)' : '';
-    dirs.push({ path, label: `${ws.label || ws.workspaceId}${branch}${wt}`, workspaceId: ws.workspaceId });
-  }
-  return dirs;
-}
-
-// "New agent" — pick a launch profile, a directory (from the open workspaces /
-// worktrees, or a custom path), and optionally a name and first task.
-async function openNewAgentModal(): Promise<void> {
-  let profiles: Array<{ name: string; label: string }>;
-  try {
-    profiles = ((await apiGet('/api/profiles')) as { profiles?: Array<{ name: string; label: string }> }).profiles ?? [];
-  } catch (err) {
-    showToast('Could not load profiles', (err as Error).message);
-    return;
-  }
-  if (profiles.length === 0) {
-    showToast('No launch profiles', 'Configure launch_profiles in the bridge config.');
-    return;
-  }
-  const options = profiles.map((p) => `<option value="${escHtml(p.name)}">${escHtml(p.label)}</option>`).join('');
-
-  // Directory choices come straight from store.appState — default to the focused
-  // workspace so "another agent in this repo/worktree" is the zero-typing path.
-  const dirs = agentStartDirs();
-  const focusedWs = store.appState?.workspaces.find((w) => w.workspaceId === store.appState?.focused.workspaceId);
-  const focusedPath = focusedWs ? (focusedWs.worktree?.checkoutPath || focusedWs.cwd) : null;
-  const dirOptions = dirs
-    .map((d) => `<option value="${escHtml(d.path)}"${d.path === focusedPath ? ' selected' : ''}>${escHtml(d.label)}</option>`)
-    .join('') + `<option value="__custom__">Custom path…</option>`;
-
-  const { overlay, close } = openModal(`
-    <div class="modal-title">New agent</div>
-    <label class="modal-field"><span>Profile</span><select id="na-profile">${options}</select></label>
-    <label class="modal-field"><span>Working directory</span><select id="na-dir">${dirOptions}</select></label>
-    <label class="modal-field" id="na-cwd-wrap" style="display:none;"><span>Custom path</span><input id="na-cwd" type="text" placeholder="/path/to/repo" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
-    <div class="modal-field modal-toggle-row">
-      <span>Create a new worktree</span>
-      <label class="toggle"><input type="checkbox" id="na-wt-toggle" /><span class="toggle-track"></span></label>
-    </div>
-    <div id="na-wt-wrap" style="display:none;">
-      <div class="modal-hint">A new branch is checked out from the working directory above, and the agent runs there.</div>
-      <label class="modal-field"><span>New branch <em>(optional)</em></span><input id="na-wt-branch" type="text" placeholder="auto (worktree/…)" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
-      <label class="modal-field"><span>Base <em>(optional)</em></span><input id="na-wt-base" type="text" placeholder="e.g. origin/main" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
-    </div>
-    <label class="modal-field"><span>Name <em>(optional)</em></span><input id="na-name" type="text" placeholder="auto" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
-    <label class="modal-field"><span>First task <em>(optional)</em></span><textarea id="na-task" rows="2" placeholder="e.g. review the diff"></textarea></label>
-    <div class="modal-error" id="na-error"></div>
-    <div class="modal-actions">
-      <button class="btn-secondary" id="na-cancel">Cancel</button>
-      <button class="btn-primary" id="na-start" style="width:auto;">Start</button>
-    </div>`);
-  // "Custom path…" reveals a free-text field; the worktree toggle reveals branch/base.
-  const dirSel = overlay.querySelector('#na-dir') as HTMLSelectElement;
-  const cwdWrap = overlay.querySelector('#na-cwd-wrap') as HTMLElement;
-  const wtToggle = overlay.querySelector('#na-wt-toggle') as HTMLInputElement;
-  const wtWrap = overlay.querySelector('#na-wt-wrap') as HTMLElement;
-  const syncMode = (): void => {
-    cwdWrap.style.display = dirSel.value === '__custom__' ? '' : 'none';
-    wtWrap.style.display = wtToggle.checked ? '' : 'none';
-  };
-  dirSel.addEventListener('change', syncMode);
-  wtToggle.addEventListener('change', syncMode);
-  syncMode();
-
-  overlay.querySelector('#na-cancel')!.addEventListener('click', () => close());
-  const startBtn = overlay.querySelector('#na-start') as HTMLButtonElement;
-  const errBox = overlay.querySelector('#na-error') as HTMLElement;
-  startBtn.addEventListener('click', async () => {
-    const val = (id: string): string => (overlay.querySelector(id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value.trim();
-    const body: Record<string, unknown> = { profile: val('#na-profile') };
-    const name = val('#na-name'); if (name) body.name = name;
-    const task = val('#na-task'); if (task) body.task = task;
-    startBtn.disabled = true;
-    errBox.textContent = '';
-    // The working directory the user chose: a picked workspace/worktree, or the custom path.
-    const chosenDir = dirSel.value === '__custom__' ? val('#na-cwd') : dirSel.value;
-    try {
-      if (wtToggle.checked) {
-        // Branch a new worktree from the chosen directory's repo and launch the agent
-        // in it — one atomic request (the bridge rolls the worktree back if the agent
-        // fails to start).
-        if (!chosenDir) {
-          errBox.textContent = 'Pick a working directory (or a custom path) to branch the worktree from.';
-          startBtn.disabled = false;
-          return;
-        }
-        body.worktree = {
-          repo: chosenDir,
-          ...(val('#na-wt-branch') ? { branch: val('#na-wt-branch') } : {}),
-          ...(val('#na-wt-base') ? { base: val('#na-wt-base') } : {}),
-        };
-      } else if (chosenDir) {
-        body.cwd = chosenDir;
-        // Pin a picked selection to its workspace (not the focused one) so the agent
-        // lands under the right group, not just at a matching cwd.
-        if (dirSel.value !== '__custom__') {
-          const wsId = dirs.find((d) => d.path === dirSel.value)?.workspaceId;
-          if (wsId) body.workspace = wsId;
-        }
-      }
-      const res = (await apiPost('/api/agents', body)) as { paneId?: string; name?: string; taskDelivered?: boolean };
-      close();
-      const started = res.name ? `Started ${res.name}` : 'Agent started';
-      // the agent never became ready for its task (e.g. waiting on a startup dialog):
-      // keep the task in the new pane's composer instead of losing it
-      const kept = taskToKeep(res, task);
-      if (kept) keptTasks.keep(kept.paneId, kept.text);
-      showToast('Agent started', kept ?`${started}. The task wasn't sent yet — it's in the composer, tap Send when the agent is ready` : started);
-      if (res.paneId) navigate(`#/pane/${encodeURIComponent(res.paneId)}`);
-    } catch (err) {
-      startBtn.disabled = false;
-      errBox.textContent = (err as Error).message;
-    }
-  });
-}
-
-// Actions on the agent in the current pane: rename, clear (fresh session), stop.
-function openAgentMenu(paneId: string): void {
-  const found = findPane(paneId);
-  const current = found?.pane.agent?.displayName || found?.pane.agent?.name || '';
-  const { overlay, close } = openModal(`
-    <div class="modal-title">Agent actions</div>
-    <div class="modal-menu">
-      <button class="modal-menu-item" id="am-rename">Rename…</button>
-      <button class="modal-menu-item" id="am-clear">Clear (fresh session)…</button>
-      <button class="modal-menu-item danger" id="am-stop">Stop agent…</button>
-    </div>
-    <div class="modal-actions"><button class="btn-secondary" id="am-cancel">Cancel</button></div>`);
-  overlay.querySelector('#am-cancel')!.addEventListener('click', () => close());
-  overlay.querySelector('#am-rename')!.addEventListener('click', () => { close(); openRenameModal(paneId, current); });
-  overlay.querySelector('#am-clear')!.addEventListener('click', () => { close(); void clearAgentFlow(paneId); });
-  overlay.querySelector('#am-stop')!.addEventListener('click', () => { close(); void stopAgentFlow(paneId); });
-}
-
-function openRenameModal(paneId: string, current: string): void {
-  const { overlay, close } = openModal(`
-    <div class="modal-title">Rename agent</div>
-    <label class="modal-field"><span>Name</span><input id="rn-name" type="text" value="${escHtml(current)}" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
-    <div class="modal-error" id="rn-error"></div>
-    <div class="modal-actions">
-      <button class="btn-secondary" id="rn-cancel">Cancel</button>
-      <button class="btn-primary" id="rn-save" style="width:auto;">Save</button>
-    </div>`);
-  const input = overlay.querySelector('#rn-name') as HTMLInputElement;
-  input.focus();
-  input.select();
-  overlay.querySelector('#rn-cancel')!.addEventListener('click', () => close());
-  const saveBtn = overlay.querySelector('#rn-save') as HTMLButtonElement;
-  saveBtn.addEventListener('click', async () => {
-    const name = input.value.trim();
-    if (!name) { (overlay.querySelector('#rn-error') as HTMLElement).textContent = 'Name is required.'; return; }
-    saveBtn.disabled = true;
-    try {
-      // the bridge fits the name to herdr's rule (lowercase, a-z0-9-_), so show what it stored
-      const res = (await apiPost(`/api/panes/${encodeURIComponent(paneId)}/rename`, { name })) as { name?: string };
-      close();
-      showToast('Renamed', `Agent renamed to ${res.name ?? name}`);
-      updatePaneDetailHeader();
-    } catch (err) {
-      saveBtn.disabled = false;
-      (overlay.querySelector('#rn-error') as HTMLElement).textContent = (err as Error).message;
-    }
+// The pane's ⋮ (ui/Modals.tsx): Rename… (then the header here), Clear, Stop.
+function agentMenu(paneId: string): void {
+  const agent = findPane(paneId)?.pane.agent;
+  openAgentMenu(paneId, agent?.displayName || agent?.name || '', {
+    clear: () => { void clearAgentFlow(paneId); },
+    stop: () => { void stopAgentFlow(paneId); },
+    renamed: refreshPaneHeader,
   });
 }
 
@@ -805,7 +388,7 @@ async function clearAgentFlow(paneId: string): Promise<void> {
   const ok = await confirmModal('Clear agent?', 'Starts a fresh session (same profile & directory) and closes the current one. In-session context is lost.', 'Clear', false);
   if (!ok) return;
   try {
-    const res = (await apiPost(`/api/agents/${encodeURIComponent(paneId)}/clear`)) as { paneId?: string };
+    const res = (await apiPost(`/api/agents/${encodeURIComponent(paneId)}/clear`)) as Partial<ClearResponse>;
     showToast('Cleared', 'Started a fresh session');
     // Clearing an orchestrator keeps the user on its Home: the state may not know the
     // replacement yet, so stay on #/home/<name> and let onStateUpdate re-resolve it.
@@ -910,7 +493,7 @@ function renderAgentsDashboard(): void {
       `<button class="topbar-action" id="btn-settings" aria-label="Settings">&#9881;</button>`,
   });
   if (home) left.querySelector('button')!.addEventListener('click', () => navigate(homeHash(home.name)));
-  right.querySelector('#btn-new-agent')!.addEventListener('click', () => { void openNewAgentModal(); });
+  right.querySelector('#btn-new-agent')!.addEventListener('click', () => { void openNewAgent(); });
   right.querySelector('#btn-settings')!.addEventListener('click', () => navigate('#/settings'));
 
   if (!store.appState) {
@@ -1000,7 +583,7 @@ function homeHeaderHtml(found: ReturnType<typeof findPane>): string {
   return `${escHtml(orchestratorLabel(orchestratorOfPane(store.appState, view.activePaneId)))}<span class="topbar-subtitle home-state ${escHtml(st)}">&#183; ${sub}</span>`;
 }
 
-function updatePaneDetailHeader(): void {
+function refreshPaneHeader(): void {
   if (!view.activePaneId) return;
   const found = findPane(view.activePaneId);
   if (found) setLegacyTopbar({ titleHtml: view.homeMode ? homeHeaderHtml(found) : paneHeaderHtml(found, view.activePaneId) });
@@ -1067,7 +650,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     right.querySelector('#btn-view-toggle')!.addEventListener('click', () => {
       if (view.paneViewMode === 'chat') switchToTerminal(false); else switchToChat(undefined, false);
     });
-    right.querySelector('#btn-agent-menu')!.addEventListener('click', () => openAgentMenu(paneId));
+    right.querySelector('#btn-agent-menu')!.addEventListener('click', () => agentMenu(paneId));
   } else {
     const backRoute = view.paneBackRoute;
     const { left, right } = setLegacyTopbar({
@@ -1081,7 +664,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     right.querySelector('#btn-view-toggle')!.addEventListener('click', () => {
       if (view.paneViewMode === 'chat') switchToTerminal(); else switchToChat();
     });
-    right.querySelector('#btn-agent-menu')!.addEventListener('click', () => openAgentMenu(paneId));
+    right.querySelector('#btn-agent-menu')!.addEventListener('click', () => agentMenu(paneId));
     left.querySelector('button')!.addEventListener('click', () => navigate(backRoute));
   }
 
@@ -2191,10 +1774,7 @@ function bindViewportHeight(): void {
 document.addEventListener('DOMContentLoaded', () => {
   elApp = document.getElementById('app');
   bindViewportHeight();
-  elToastContainer = document.getElementById('toast-container');
-  document.getElementById('toast-clear-all')!.addEventListener('click', () => {
-    elToastContainer!.querySelectorAll('.toast').forEach((el) => el.remove());
-  });
+  mountOverlays(); // the toasts and the modals
 
   // A 401 drops the token (api.ts): ask for it again
   onUnauthorized(() => renderTokenScreen('Session expired or token invalid. Please enter your token.'));
