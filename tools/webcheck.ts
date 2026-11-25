@@ -214,7 +214,8 @@ const accountName = (account: string) => account || 'the default account (CLAUDE
 
 /** Every Claude webcheck starts runs in the pinned account: the same CLAUDE_CONFIG_DIR, or none for the default. */
 function checkAccount(pane: string, name: string, account: string): void {
-  if (paneConfigDir(pane) !== account) throw env(`${name} account mismatch (want ${accountName(account)})`);
+  const got = paneConfigDir(pane);
+  if (got !== account) throw env(`${name} account mismatch (want ${accountName(account)}, got ${got === null ? 'no agent process' : got || 'unset'})`);
 }
 
 const orchConfig = (account: string | null) => js({ orchestrators: ['wc-o1', 'wc-o2'].map((name) =>
@@ -429,13 +430,15 @@ async function newTab(c: Ctx, ws: string, label: string): Promise<string> {
   return r.root_pane.pane_id;
 }
 
-/** A just-started claude: pass the trust prompt (Enter) if it shows, then wait until it is idle. */
+/** A just-started claude: accept the folder-trust prompt if it shows, then wait until it is idle. The prompt's
+ *  default is "No, exit" (Enter alone would quit), so Enter goes only once the cursor is on "Yes, I trust…". */
 async function agentReady(c: Ctx, pane: string, ms: number): Promise<void> {
-  let trusted = false;
   const r = await waitFn(async () => {
     const st = (await paneOf(c, pane))?.agent?.status;
     if (st === 'idle' || st === 'done') return true;
-    if (!trusted && /trust/i.test(screen(pane))) { mutate(c.rec, pane, ['pane', 'send-keys', pane, 'enter']); trusted = true; }
+    const s = screen(pane);
+    if (!/Yes, I trust this folder/.test(s)) return false;
+    mutate(c.rec, pane, ['pane', 'send-keys', pane, /❯\s*Yes, I trust/.test(s) ? 'enter' : 'down']);
     return false;
   }, ms, 1000);
   if (r.timeout) throw env('no trust prompt or agent not started');
@@ -914,7 +917,10 @@ async function p9(c: Ctx) {
   await sendPrompt(c, cl, ASK_PROMPT);
   const b = await statusFrame(c, cl, 'blocked', t0, 90_000);
   await pg.goto(`#/pane/${enc(cl)}`);
-  const panel = await pg.until(`document.querySelectorAll('#chat-prompt .ask-opt').length`, 3000);
+  const panel = await pg.until(`document.querySelectorAll('#chat-prompt .ask-opt').length >= 3`, 3000);
+  // Claude Code appends its own options (type something, chat about this) after the 3 asked for
+  const labels: string[] = await pg.ev(`[...document.querySelectorAll('#chat-prompt .ask-opt')].map((b) => (b.querySelector('.ask-opt-label') ?? b).textContent.trim())`);
+  const asked = ['apple', 'banana', 'cherry'].every((f, i) => (labels[i] ?? '').toLowerCase().includes(f));
   guard(c.rec, cl);
   const opt = await pg.at(`document.querySelectorAll('#chat-prompt .ask-opt')[1]`);
   const tt = Date.now();
@@ -924,9 +930,10 @@ async function p9(c: Ctx) {
   await sleep(1500);
   const posts = pg.posts(tt, `/api/panes/${enc(cl)}/input`).map((q) => q.body);
   const unb = await waitFn(async () => (await paneOf(c, cl))?.agent?.status !== 'blocked', 10_000, 300);
-  result(c, !b.timeout && panel.v === 3 && posts.length === 1 && posts[0].press === '2' && !!posts[0].expect_prompt && !unb.timeout,
-    'P9', `blocked=${ms(b)},options=${panel.v},posts=${js(posts)},unblocked=${ms(unb)}`,
-    "panel within 3s with 3 .ask-opt; option 2 tapped twice in 200ms -> exactly one POST {press:'2', expect_prompt}; unblocked within 10s");
+  const sent = posts.map((p) => `{press:${p.press},expect_prompt:${p.expect_prompt ? `${String(p.expect_prompt).length}chars` : 'none'}}`);
+  result(c, !b.timeout && !panel.timeout && asked && posts.length === 1 && posts[0].press === '2' && !!posts[0].expect_prompt && !unb.timeout,
+    'P9', `blocked=${ms(b)},options=${labels.length}[${labels.join('|')}],posts=${sent.join('+') || 0},unblocked=${ms(unb)}`,
+    "panel within 3s, options 1-3 = apple/banana/cherry (Claude adds its own after); option 2 tapped twice in 200ms -> exactly one POST {press:'2', expect_prompt}; unblocked within 10s");
 }
 
 async function p11(c: Ctx) {
