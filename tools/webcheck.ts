@@ -1313,9 +1313,21 @@ async function p9(c: Ctx) {
     "panel within 3s, options 1-3 = apple/banana/cherry (Claude adds its own after); option 2 tapped twice in 200ms -> exactly one POST {press:'2', expect_prompt}; unblocked within 10s");
 }
 
+/** wc-claude's transcript, for the chat items: a fresh wc-claude has none until a turn, so one goes first (P4-T2's prompt). */
+async function ensureTranscript(c: Ctx): Promise<void> {
+  const cl = c.rec.names.claude;
+  const has = async () => (await api(c, 'GET', `/api/panes/${enc(cl)}/transcript`)).available === true;
+  if (await has()) return;
+  const t0 = Date.now();
+  await sendPrompt(c, cl, OK_PROMPT);
+  if ((await statusFrame(c, cl, 'done', t0, 90_000)).timeout) throw new Error('wc-claude never done');
+  if ((await waitFn(has, 10_000, 300)).timeout) throw new Error('wc-claude has no transcript after a turn');
+}
+
 async function p11(c: Ctx) {
   const { pg } = c;
   const cl = c.rec.names.claude;
+  await ensureTranscript(c);
   await pg.ev(`localStorage.removeItem('herdr_pane_view')`);
   await pg.goto('#/agents');
   await pg.goto(`#/pane/${enc(cl)}`);
@@ -1346,10 +1358,12 @@ async function p11(c: Ctx) {
 async function p10t2(c: Ctx) {
   const { pg, rec } = c;
   const { claude: cl, shell } = rec.names;
+  await ensureTranscript(c);
+  await pg.ev(`localStorage.removeItem('herdr_pane_view')`); // chat is the default view
   await pg.goto('#/agents');
   await pg.goto(`#/pane/${enc(cl)}`);
   const chat = await pg.until(`(() => { const l = document.getElementById('chat-log'); return !!l && l.style.display !== 'none'; })()`, 5000);
-  if (chat.timeout) throw env('wc-claude not in chat (needs a transcript: run after P11)');
+  if (chat.timeout) throw new Error('wc-claude not shown in chat');
   const t0 = Date.now();
   await pg.ev(`location.hash = ${js(`#/pane/${enc(shell)}`)}`);
   if ((await pg.until(`document.getElementById('term-live')?.textContent.includes('wc-A')`, 5000)).timeout) throw new Error("wc-shell's screen not shown");
@@ -1510,7 +1524,7 @@ const ITEMS: Item[] = [
   { id: 'P4-T2', tier: 2, needs: ['claude'], run: p4t2 },
   { id: 'P17-T2', tier: 2, needs: ['claude'], run: p17t2 },
   { id: 'P11', tier: 2, needs: ['claude'], run: p11 },
-  { id: 'P10-T2', tier: 2, needs: ['claude', 'shell'], run: p10t2 }, // after P11: wc-claude opens in chat
+  { id: 'P10-T2', tier: 2, needs: ['claude', 'shell'], run: p10t2 },
   { id: 'P9', tier: 2, needs: ['claude'], run: p9 },
   { id: 'P15-T2', tier: 2, needs: ['claude', 'orch'], run: p15t2 },
   { id: 'P8-T2', tier: 2, needs: ['orch'], run: p8t2 },
