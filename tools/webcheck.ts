@@ -63,7 +63,8 @@ function herdr(args: string[]): any {
   return j?.result ?? r.stdout;
 }
 
-interface Rec { dir: string; base: string; gonogo?: boolean; chrome?: { pid: number; dir: string };
+/** gonogo: the pid of the `setup --gonogo` holding this run, the only record `block` may act on */
+interface Rec { dir: string; base: string; gonogo?: number; chrome?: { pid: number; dir: string };
   workspaces: string[]; tabs: string[]; panes: string[]; reported: string[]; names: Record<string, string> }
 
 const save = (rec: Rec) => fs.writeFileSync(path.join(rec.dir, 'webcheck.json'), js(rec, null, 1));
@@ -122,7 +123,7 @@ function teardown(dir: string): void {
       workspaces: r.workspaces.filter((w) => step(w, ['workspace', 'close', w])),
     };
     if (left.reported.length + left.tabs.length + left.workspaces.length) {
-      save({ ...r, ...left, chrome: undefined });
+      save({ ...r, ...left, chrome: undefined, gonogo: undefined }); // a kept record is never an active go/no-go
       console.log(`WARN kept ${path.join(dir, 'webcheck.json')}: ${js(left)} not closed`);
       rm(path.join(dir, 'chrome'));
       return;
@@ -201,7 +202,8 @@ function pinnedAccount(): string {
   fs.mkdirSync(path.join(WORK, 'wc-claude'), { recursive: true });
   const v = spawnSync('direnv', ['exec', path.join(WORK, 'wc-claude'), 'printenv', 'CLAUDE_CONFIG_DIR'], { encoding: 'utf8', env: e }).stdout?.trim();
   if (!v) throw env(`${envrc} not allowed or sets no CLAUDE_CONFIG_DIR`);
-  return path.resolve(v);
+  if (!path.isAbsolute(v)) throw env('CLAUDE_CONFIG_DIR must be absolute');
+  return path.normalize(v);
 }
 
 const orchConfig = (account: string | null) => js({ orchestrators: ['wc-o1', 'wc-o2'].map((name) =>
@@ -434,7 +436,7 @@ function paneConfigDir(pane: string): string | null {
   const pid = pi?.foreground_process_group_id;
   if (!pid || pid === pi.shell_pid) return null;
   const v = fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').find((kv) => kv.startsWith('CLAUDE_CONFIG_DIR='));
-  return v ? path.resolve(v.slice('CLAUDE_CONFIG_DIR='.length)) : '';
+  return v ? path.normalize(v.slice('CLAUDE_CONFIG_DIR='.length)) : '';
 }
 
 async function setup(c: Ctx, needs: Set<string>): Promise<void> {
@@ -1046,7 +1048,7 @@ async function locked(base: string, body: (c: Ctx) => Promise<void>, needs: Set<
   const dir = path.join(WC_ROOT, 'run', String(Date.now()));
   fs.mkdirSync(dir, { recursive: true });
   const c: Ctx = { base, port, token: fs.readFileSync(tokenFile, 'utf8').trim(), preview: readPreview(port), failures: 0, out: [],
-    rec: { dir, base, gonogo, workspaces: [], tabs: [], panes: [], reported: [], names: {} }, pg: null!, build: null! };
+    rec: { dir, base, gonogo: gonogo ? process.pid : undefined, workspaces: [], tabs: [], panes: [], reported: [], names: {} }, pg: null!, build: null! };
   save(c.rec);
   let done = false;
   const finish = () => {
@@ -1121,8 +1123,10 @@ function block(): number {
   const runs = path.join(WC_ROOT, 'run');
   const rec: Rec | undefined = (fs.existsSync(runs) ? fs.readdirSync(runs) : [])
     .map((d) => { try { return JSON.parse(fs.readFileSync(path.join(runs, d, 'webcheck.json'), 'utf8')); } catch { return null; } })
-    .find((r) => r?.gonogo);
-  if (!rec?.names.less) throw env('no go/no-go run (start `setup --gonogo` first)');
+    .find((r) => { // only the run whose setup --gonogo is still holding it, never a stale record
+      try { return !!r?.gonogo && fs.readFileSync(`/proc/${r.gonogo}/cmdline`, 'utf8').includes('webcheck.ts'); } catch { return false; }
+    });
+  if (!rec?.names.less) throw env('no active go/no-go run (start `setup --gonogo` first)');
   if (spawnSync('flock', ['-n', LOCK, 'true']).status === 0) throw env('run without lock');
   mutate(rec, rec.names.less, ['pane', 'report-agent', '--source', 'webcheck', '--agent', 'claude', '--state', 'blocked', rec.names.less]);
   console.log(`wc-less ${rec.names.less} reported blocked`);
