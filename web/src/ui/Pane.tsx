@@ -2,8 +2,8 @@
  * ui/Pane.tsx — an opened pane (#/pane/<id>) or an orchestrator's Home (#/home/<name>): the topbar,
  * Home's status bar (the switcher between running orchestrators, the agents waiting on the user,
  * the counts) and "doing now" line, the composer and the quick keys, around the pane's body. The
- * body (terminal, chat, answer panel) is pane-view.ts, imperative, in #pane-view: created on mount,
- * destroyed on unmount, one at a time.
+ * body (terminal, chat) is pane-view.ts, imperative, in #pane-view: created on mount, destroyed on
+ * unmount, one at a time. Below it, while the view reports a prompt, the answer panel (PromptPanel.tsx).
  *
  * State pushes re-render it constantly. The composer's textarea is uncontrolled (React never sets its
  * value), so a push never resets what is being typed, an IME composition included.
@@ -13,12 +13,13 @@ import { apiPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
 import { homeSummary, shownStatus } from '../dashboard-group.ts';
 import { showToast } from '../notify.ts';
-import { createPaneView, type PaneView } from '../pane-view.ts';
+import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
 import { homeAgentsHash, orchestratorOfPane, paneRoute } from '../routes.ts';
 import { emit, findPane, keptTasks, store, subscribe } from '../store.ts';
 import type { AppState } from '../types.ts';
 import { agentCards, cardTitle, orchestratorLabel } from './Dashboard.tsx';
 import type { Topbar } from './mount.tsx';
+import { PromptPanel } from './PromptPanel.tsx';
 
 type Mode = 'terminal' | 'chat';
 
@@ -73,6 +74,7 @@ export function Pane({ paneId, home }: { paneId: string; home: boolean }) {
   const state = useAppState();
   const { mode } = useToggle();
   const [activity, setActivity] = useState<string | null>(null); // Home: the latest tool call since it last spoke
+  const [prompt, setPrompt] = useState<PanelPrompt | null>(null); // the answer panel's, while blocked in chat
   const body = useRef<HTMLDivElement>(null);
   // Reads the screen first, then the scrollback, then polls and probes for a transcript.
   useEffect(() => {
@@ -80,12 +82,14 @@ export function Pane({ paneId, home }: { paneId: string; home: boolean }) {
       showToggle: (shown) => setToggle({ shown }),
       modeChanged: () => setToggle({ mode: store.view.paneViewMode }),
       activity: setActivity,
+      prompt: setPrompt,
     });
     paneView = view;
     return () => {
       view.destroy();
       if (paneView === view) paneView = null;
       toggle = NO_TOGGLE;
+      setPrompt(null);
     };
   }, [paneId]);
   // "doing now": only while the orchestrator works — its latest tool call, or "thinking…" between them
@@ -94,6 +98,7 @@ export function Pane({ paneId, home }: { paneId: string; home: boolean }) {
     <div id="screen-pane" className={home ? 'screen-home' : undefined} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       {home && <HomeStatus paneId={paneId} state={state} />}
       <div id="pane-view" ref={body} style={{ display: 'contents' }}></div>
+      {prompt && paneView && <PromptPanel paneId={paneId} prompt={prompt} view={paneView} />}
       {home && (
         <div className="home-activity" id="home-activity" style={working ? undefined : { display: 'none' }}>
           {working ? (activity ? `▸ ${activity}` : 'thinking…') : null}
