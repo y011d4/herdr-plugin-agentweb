@@ -21,7 +21,7 @@ func testOrchestratorDef(over func(*OrchestratorDef)) OrchestratorDef {
 
 func TestOrchestratorFiles(t *testing.T) {
 	t.Run("orchestratorFiles", func(t *testing.T) {
-		files := orchestratorFiles(testOrchestratorDef(nil), "run {{agentwebctl}} overview; {{agentwebctl}} agent get x", "node /p/agentwebctl.js")
+		files := orchestratorFiles(testOrchestratorDef(nil), "run {{yoicks}} overview; {{yoicks}} agent get x", "node /p/yoicks.js")
 
 		t.Run("CLAUDE.md names the orchestrator and imports the rules, then local.md", func(t *testing.T) {
 			md := files["CLAUDE.md"]
@@ -33,8 +33,8 @@ func TestOrchestratorFiles(t *testing.T) {
 			}
 		})
 
-		t.Run("fills the real agentwebctl command into the rules", func(t *testing.T) {
-			if got := files["rules.md"]; got != "run node /p/agentwebctl.js overview; node /p/agentwebctl.js agent get x" {
+		t.Run("fills the real yoicks command into the rules", func(t *testing.T) {
+			if got := files["rules.md"]; got != "run node /p/yoicks.js overview; node /p/yoicks.js agent get x" {
 				t.Errorf("got %q", got)
 			}
 		})
@@ -49,7 +49,7 @@ func TestOrchestratorFiles(t *testing.T) {
 				t.Errorf("defaultMode %v", p["defaultMode"])
 			}
 			allow, _ := p["allow"].([]any)
-			if want := []any{"Bash(node /p/agentwebctl.js overview)", "Bash(node /p/agentwebctl.js agent *)", "Bash(node /p/agentwebctl.js worktree remove *)"}; !slices.Equal(allow, want) {
+			if want := []any{"Bash(node /p/yoicks.js overview)", "Bash(node /p/yoicks.js agent *)", "Bash(node /p/yoicks.js worktree remove *)"}; !slices.Equal(allow, want) {
 				t.Errorf("allow %v", allow)
 			}
 			deny, _ := p["deny"].([]any)
@@ -62,7 +62,7 @@ func TestOrchestratorFiles(t *testing.T) {
 					t.Errorf("%s not denied", lister)
 				}
 			}
-			// it refuses agentwebctl itself: its path and the --cwd/worktree paths are outside the dir
+			// it refuses yoicks itself: its path and the --cwd/worktree paths are outside the dir
 			if _, ok := p["blockReadsOutsideWorkingDirectories"]; ok {
 				t.Error("blockReadsOutsideWorkingDirectories is set")
 			}
@@ -74,9 +74,9 @@ func TestShellWord(t *testing.T) {
 	t.Run("shellWord", func(t *testing.T) {
 		t.Run("leaves a plain path alone and single-quotes one with spaces or quotes", func(t *testing.T) {
 			for in, want := range map[string]string{
-				"/home/u/plugin/dist/bin/agentwebctl.js": "/home/u/plugin/dist/bin/agentwebctl.js",
-				"/home/u/my plugin/x.js":                 "'/home/u/my plugin/x.js'",
-				"/it's/x.js":                             `'/it'\''s/x.js'`,
+				"/home/u/plugin/dist/bin/yoicks.js": "/home/u/plugin/dist/bin/yoicks.js",
+				"/home/u/my plugin/x.js":            "'/home/u/my plugin/x.js'",
+				"/it's/x.js":                        `'/it'\''s/x.js'`,
 			} {
 				if got := shellWord(in); got != want {
 					t.Errorf("shellWord(%q) = %q, want %q", in, got, want)
@@ -102,8 +102,8 @@ func TestEnsureOrchestratorDir(t *testing.T) {
 					t.Error(err)
 				}
 			}
-			if b, _ := os.ReadFile(filepath.Join(def.Dir, "rules.md")); strings.Contains(string(b), "{{agentwebctl}}") {
-				t.Error("rules.md still has {{agentwebctl}}")
+			if b, _ := os.ReadFile(filepath.Join(def.Dir, "rules.md")); strings.Contains(string(b), "{{yoicks}}") {
+				t.Error("rules.md still has {{yoicks}}")
 			}
 			mine := "answer in Japanese\n"
 			os.WriteFile(filepath.Join(def.Dir, "local.md"), []byte(mine), 0o666) // the user's own edit

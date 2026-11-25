@@ -4,13 +4,15 @@ package bridge
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
 
 func TestConfig(t *testing.T) {
 	const home = "/home/u"
-	const data = "/home/u/.local/share/herdr-agentweb"
+	const data = "/home/u/.local/share/herdr-yoicks"
 	none := func(string) bool { return false }
 	fromJSON := func(t *testing.T, s string) any {
 		t.Helper()
@@ -79,9 +81,29 @@ func TestConfig(t *testing.T) {
 // loopback only (CLAUDE.md, security invariants).
 func TestTheDefaultListenAddressIsLoopback(t *testing.T) {
 	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", t.TempDir()) // no config.json
-	t.Setenv("HERDR_AGENTWEB_HOST", "")
-	t.Setenv("HERDR_AGENTWEB_PORT", "")
+	t.Setenv("HERDR_YOICKS_HOST", "")
+	t.Setenv("HERDR_YOICKS_PORT", "")
 	if c := loadConfig(); c.Host != "127.0.0.1" || c.Port != 8390 {
 		t.Errorf("default listen address %s:%d, want 127.0.0.1:8390", c.Host, c.Port)
+	}
+}
+
+// The data dir from before the rename stays in use while it exists: the orchestrators'
+// cwds, and so their Claude Code memory and transcripts, must not move.
+func TestDataDir(t *testing.T) {
+	data := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", data)
+	if got, want := dataDir("/home/u"), filepath.Join(data, "herdr-yoicks"); got != want {
+		t.Errorf("fresh: %s, want %s", got, want)
+	}
+	legacy := filepath.Join(data, "herdr-agentweb")
+	os.MkdirAll(filepath.Join(legacy, "orchestrators", "personal"), 0o755)
+	os.MkdirAll(filepath.Join(data, "herdr-yoicks"), 0o755) // even when the new one exists too
+	if got := dataDir("/home/u"); got != legacy {
+		t.Errorf("with the old dir: %s, want %s", got, legacy)
+	}
+	t.Setenv("XDG_DATA_HOME", "")
+	if got, want := dataDir("/home/u"), "/home/u/.local/share/herdr-yoicks"; got != want {
+		t.Errorf("no XDG_DATA_HOME: %s, want %s", got, want)
 	}
 }

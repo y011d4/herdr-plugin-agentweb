@@ -1,5 +1,5 @@
-id = "y011d4.agentweb"
-name = "Herdr Agent Web"
+id = "y011d4.yoicks"
+name = "Yoicks"
 version = "0.1.0"
 min_herdr_version = "0.9.5"
 description = "Monitor and control herdr agents from your phone or browser — a PWA + REST/WS bridge"
@@ -10,30 +10,30 @@ command = ["sh", "scripts/plugin-build.sh", "release"]
 
 [[actions]]
 id = "start"
-title = "Start Agent Web bridge"
+title = "Start Yoicks bridge"
 contexts = ["workspace"]
-command = ["./bin/agentwebctl", "start"]
+command = ["./bin/yoicks", "start"]
 
 [[actions]]
 id = "stop"
-title = "Stop Agent Web bridge"
+title = "Stop Yoicks bridge"
 contexts = ["workspace"]
-command = ["./bin/agentwebctl", "stop"]
+command = ["./bin/yoicks", "stop"]
 
 [[actions]]
 id = "status"
-title = "Agent Web bridge status"
+title = "Yoicks bridge status"
 contexts = ["workspace"]
-command = ["./bin/agentwebctl", "status"]
+command = ["./bin/yoicks", "status"]
 
 [[panes]]
 id = "server"
-title = "Agent Web bridge"
+title = "Yoicks bridge"
 placement = "tab"
-command = ["./bin/agentwebctl", "run"]
+command = ["./bin/yoicks", "run"]
 
 [[panes]]
 id = "connect"
 title = "Connect phone"
 placement = "overlay"
-command = ["./bin/agentwebctl", "qr"]
+command = ["./bin/yoicks", "qr"]

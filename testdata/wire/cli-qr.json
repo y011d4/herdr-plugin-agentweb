@@ -5,7 +5,7 @@
    "qr"
   ],
   "exit": 0,
-  "stdout": "(qrencode not found — install it for a scannable QR code)\n\nhttp://127.0.0.1:<port>/?token=<token>\n\nhint: set \"public_url\" in config.json (herdr plugin config-dir y011d4.agentweb) to your reverse-proxy / tunnel / VPN address (Cloudflare Tunnel, Caddy, ngrok, ...). Tailscale is auto-detected; for tailnet HTTPS run: tailscale serve --bg <port>\n",
+  "stdout": "(qrencode not found — install it for a scannable QR code)\n\nhttp://127.0.0.1:<port>/?token=<token>\n\nhint: set \"public_url\" in config.json (herdr plugin config-dir y011d4.yoicks) to your reverse-proxy / tunnel / VPN address (Cloudflare Tunnel, Caddy, ngrok, ...). Tailscale is auto-detected; for tailnet HTTPS run: tailscale serve --bg <port>\n",
   "stderr": ""
  },
  "herdr": []

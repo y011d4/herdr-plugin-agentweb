@@ -1,5 +1,5 @@
 /**
- * app.ts — Herdr Agent Web PWA
+ * app.ts — Yoicks PWA
  *
  * Single-page application with hash routing:
  *   #/agents    — dashboard (default)
@@ -800,7 +800,7 @@ function renderTokenScreen(message?: string): void {
   elScreen!.innerHTML = `
     <div id="screen-login" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:32px 24px;height:100%;overflow-y:auto;">
       <div class="login-logo">&#128241;</div>
-      <div class="login-title">Herdr Agent Web</div>
+      <div class="login-title">Yoicks</div>
       <div class="login-subtitle">${message ? escHtml(message) : 'Enter the access token shown when the bridge server started.'}</div>
       <form class="login-form" id="token-form" style="width:100%;max-width:360px;display:flex;flex-direction:column;gap:12px;">
         <input type="password" id="token-input" placeholder="Paste access token…" autocomplete="off" autocorrect="off" spellcheck="false" />
@@ -1459,7 +1459,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
     try {
       // clear:true wipes the pane's composer first so this message submits on its
       // own — never merged with a half-typed draft the user left in the pane that
-      // agentweb can't see. Scope it to Claude Code panes: Ctrl+U safely clears
+      // yoicks can't see. Scope it to Claude Code panes: Ctrl+U safely clears
       // Claude's input box, but to another app it's a raw control byte a
       // full-screen / non-readline TUI could act on. Other panes just get
       // text+enter. enter:true then submits in the same request.

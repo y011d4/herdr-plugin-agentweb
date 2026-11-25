@@ -24,7 +24,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/y011d4/herdr-plugin-agentweb/tools/fakeherdr"
+	"github.com/y011d4/herdr-yoicks/tools/fakeherdr"
 )
 
 // override answers a request in place of the fake World (ok = handled).

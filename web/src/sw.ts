@@ -1,5 +1,5 @@
 /**
- * sw.ts — Service Worker for Herdr Agent Web PWA
+ * sw.ts — Service Worker for Yoicks PWA
  *
  * Strategy:
  *   - Static assets (index.html, app.js, ansi.js, style.css, manifest, icons):
@@ -14,7 +14,7 @@ const sw = self as unknown as ServiceWorkerGlobalScope;
 
 // Bump on every release that changes any static asset: cached assets are only
 // refreshed when the service worker itself changes.
-const CACHE_VERSION = 'herdr-agentweb-v123';
+const CACHE_VERSION = 'herdr-yoicks-v124';
 
 const STATIC_ASSETS = [
   '/',

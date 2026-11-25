@@ -4,7 +4,7 @@
   "args": null,
   "exit": 2,
   "stdout": "",
-  "stderr": "usage: agentwebctl.js \u003crun|start|stop|status|qr|overview|agent|worktree|orchestrator\u003e\n"
+  "stderr": "usage: yoicks.js \u003crun|start|stop|status|qr|overview|agent|worktree|orchestrator\u003e\n"
  },
  "herdr": []
 }

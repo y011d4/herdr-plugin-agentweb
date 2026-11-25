@@ -36,7 +36,7 @@ const (
 	// Ctrl+U (0x15) kills to the start of the current composer line; repeating it
 	// walks up and wipes a multi-line draft. Sent before a composed message so it
 	// submits on its own instead of being concatenated with text the user had already
-	// typed straight into the pane (which agentweb can't see). 30 covers any realistic
+	// typed straight into the pane (which yoicks can't see). 30 covers any realistic
 	// draft; it's a no-op once the composer is empty.
 	composerClearKills = 30
 )
@@ -783,7 +783,7 @@ func (s *server) inputPane(w http.ResponseWriter, r *http.Request, paneID string
 		params["keys"] = keys
 	}
 	// `clear` wipes the composer (raw Ctrl+U bytes, not a bracketed-paste send_input)
-	// before the text lands, so a message composed in agentweb submits alone instead
+	// before the text lands, so a message composed in yoicks submits alone instead
 	// of appended to a draft left in the pane. The clear is answered before send_input
 	// goes out, and the app consumes pty input in order.
 	if body["clear"] == true {

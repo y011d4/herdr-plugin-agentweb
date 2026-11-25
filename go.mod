@@ -1,4 +1,4 @@
-module github.com/y011d4/herdr-plugin-agentweb
+module github.com/y011d4/herdr-yoicks
 
 go 1.27
 
