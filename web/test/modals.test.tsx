@@ -82,7 +82,7 @@ describe('Confirm', () => {
 });
 
 describe('Agent actions and Rename', () => {
-  const on = () => ({ clear: vi.fn(), stop: vi.fn(), renamed: vi.fn() });
+  const on = () => ({ clear: vi.fn(), stop: vi.fn() });
 
   it('Clear and Stop close the menu and hand over', async () => {
     for (const [id, key] of [['#am-clear', 'clear'], ['#am-stop', 'stop']] as const) {
@@ -91,11 +91,11 @@ describe('Agent actions and Rename', () => {
       await fire(() => $(id).click());
       assert.ok(!open());
       assert.equal(cb[key].mock.calls.length, 1);
-      assert.equal(cb.clear.mock.calls.length + cb.stop.mock.calls.length + cb.renamed.mock.calls.length, 1);
+      assert.equal(cb.clear.mock.calls.length + cb.stop.mock.calls.length, 1);
     }
   });
 
-  it('renames: the current name selected, a name required, then the stored name toasted and the header refreshed', async () => {
+  it('renames: the current name selected, a name required, then the stored name toasted', async () => {
     bridge({ 'POST /api/panes/p%2F1/rename': { body: rename[0] } });
     const cb = on();
     await fire(() => openAgentMenu('p/1', 'claude', cb));
@@ -115,7 +115,6 @@ describe('Agent actions and Rename', () => {
     assert.deepEqual(reqs, [{ method: 'POST', url: '/api/panes/p%2F1/rename', body: { name: 'Renamed One' } }]);
     assert.ok(!open());
     assert.deepEqual(toastsShown(), ['Renamed: Agent renamed to renamed-one']);
-    assert.equal(cb.renamed.mock.calls.length, 1);
   });
 
   it('a failed rename shows the error and can be saved again', async () => {
@@ -127,7 +126,6 @@ describe('Agent actions and Rename', () => {
     await settle();
     assert.equal($('#rn-error').textContent, 'unknown profile: bash');
     assert.equal($<HTMLButtonElement>('#rn-save').disabled, false);
-    assert.equal(cb.renamed.mock.calls.length, 0);
     assert.deepEqual(toastsShown(), []);
   });
 });

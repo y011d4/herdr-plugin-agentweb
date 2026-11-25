@@ -77,13 +77,13 @@ export function confirmModal(title: string, message: string, confirmLabel: strin
 
 // ── Agent actions: rename, clear (fresh session), stop ────────────────────────
 
-/** The pane's agent-actions menu; Rename… is handled here, then `onRenamed` (the header). */
-export function openAgentMenu(paneId: string, current: string, on: { clear: () => void; stop: () => void; renamed: () => void }): void {
+/** The pane's agent-actions menu; Rename… is handled here (the header follows the State). */
+export function openAgentMenu(paneId: string, current: string, on: { clear: () => void; stop: () => void }): void {
   showModal((close) => (
     <>
       <div className="modal-title">Agent actions</div>
       <div className="modal-menu">
-        <button className="modal-menu-item" id="am-rename" onClick={() => { close(); openRename(paneId, current, on.renamed); }}>Rename…</button>
+        <button className="modal-menu-item" id="am-rename" onClick={() => { close(); openRename(paneId, current); }}>Rename…</button>
         <button className="modal-menu-item" id="am-clear" onClick={() => { close(); on.clear(); }}>Clear (fresh session)…</button>
         <button className="modal-menu-item danger" id="am-stop" onClick={() => { close(); on.stop(); }}>Stop agent…</button>
       </div>
@@ -92,11 +92,11 @@ export function openAgentMenu(paneId: string, current: string, on: { clear: () =
   ));
 }
 
-export function openRename(paneId: string, current: string, onRenamed: () => void): void {
-  showModal((close) => <Rename paneId={paneId} current={current} close={close} onRenamed={onRenamed} />);
+export function openRename(paneId: string, current: string): void {
+  showModal((close) => <Rename paneId={paneId} current={current} close={close} />);
 }
 
-function Rename({ paneId, current, close, onRenamed }: { paneId: string; current: string; close: () => void; onRenamed: () => void }) {
+function Rename({ paneId, current, close }: { paneId: string; current: string; close: () => void }) {
   const input = useRef<HTMLInputElement>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -110,7 +110,6 @@ function Rename({ paneId, current, close, onRenamed }: { paneId: string; current
       const res = await apiPost<RenameResponse>(`/api/panes/${encodeURIComponent(paneId)}/rename`, { name });
       close();
       showToast('Renamed', `Agent renamed to ${res.name ?? name}`);
-      onRenamed();
     } catch (err) {
       setBusy(false);
       setError((err as Error).message);
