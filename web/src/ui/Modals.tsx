@@ -107,7 +107,7 @@ function Rename({ paneId, current, close, onRenamed }: { paneId: string; current
     setBusy(true);
     try {
       // the bridge fits the name to herdr's rule (lowercase, a-z0-9-_), so show what it stored
-      const res = (await apiPost(`/api/panes/${encodeURIComponent(paneId)}/rename`, { name })) as Partial<RenameResponse>;
+      const res = await apiPost<RenameResponse>(`/api/panes/${encodeURIComponent(paneId)}/rename`, { name });
       close();
       showToast('Renamed', `Agent renamed to ${res.name ?? name}`);
       onRenamed();
@@ -157,7 +157,7 @@ function agentStartDirs(): Dir[] {
 export async function openNewAgent(): Promise<void> {
   let profiles: ProfilesResponse['profiles'];
   try {
-    profiles = ((await apiGet('/api/profiles')) as Partial<ProfilesResponse>).profiles ?? [];
+    profiles = (await apiGet<ProfilesResponse>('/api/profiles')).profiles ?? [];
   } catch (err) {
     showToast('Could not load profiles', (err as Error).message);
     return;
@@ -217,7 +217,7 @@ function NewAgent({ profiles, dirs, initialDir, close }: { profiles: ProfilesRes
           if (wsId) body.workspace = wsId;
         }
       }
-      const res = (await apiPost('/api/agents', body)) as Partial<AgentStartResponse>;
+      const res = await apiPost<AgentStartResponse>('/api/agents', body);
       close();
       const started = res.name ? `Started ${res.name}` : 'Agent started';
       // the agent never became ready for its task (e.g. waiting on a startup dialog):
