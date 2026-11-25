@@ -1,10 +1,10 @@
 /**
  * First tasks the bridge couldn't deliver to a just-started agent (e.g. it was still
- * on a startup dialog), kept per pane until they are sent. Pure state, no DOM: app.ts
- * mirrors the pane's composer into it (`edit`), asks it what a rebuilt composer should
+ * on a startup dialog), kept per pane until they are sent. Pure state, no DOM: the
+ * composer (ui/Pane.tsx) mirrors itself into it (`edit`), asks it what a rebuilt composer should
  * show (`draft`), and brackets each send with `beginSend` / `finishSend`.
  *
- * While a kept task's send is in flight (`sending`), app.ts locks that pane's composer
+ * While a kept task's send is in flight (`sending`), the composer is locked
  * — in every view of the pane, including one reopened meanwhile — so the task can't be
  * edited or sent a second time before the outcome is known.
  */
