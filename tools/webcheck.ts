@@ -509,7 +509,12 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     // it gets its account from .envrc via direnv in its dir (POST /api/agents takes no env)
     checkAccount(out.paneId, 'wc-claude', account);
   }
-  if (needs.has('orch')) for (const name of ['wc-o1', 'wc-o2']) await startOrch(c, name);
+  // wc-o1/wc-o2 start later (startOrchs), so the items before them (P8) see no orchestrator running
+}
+
+/** Starts wc-o1/wc-o2 once, when the first item that needs them begins. */
+async function startOrchs(c: Ctx): Promise<void> {
+  for (const name of ['wc-o1', 'wc-o2']) if (!c.rec.names[name.slice(3)]) await startOrch(c, name);
 }
 
 async function startOrch(c: Ctx, name: string): Promise<string> {
@@ -1160,6 +1165,7 @@ async function check(o: Record<string, any>): Promise<number> {
     c.pg = await openPage(c, o.profile);
     await loadApp(c);
     for (const item of items) {
+      if (item.needs?.includes('orch')) await startOrchs(c); // a failed start ends the run, as in setup
       for (let attempt = 1; ; attempt++) {
         const mark = c.out.length;
         const fails = c.failures;
