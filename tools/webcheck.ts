@@ -369,9 +369,11 @@ async function openPage(c: Ctx, profile?: string): Promise<Page> {
   const dir = profile ? path.resolve(profile) : path.join(c.rec.dir, 'chrome');
   fs.mkdirSync(dir, { recursive: true });
   fs.rmSync(path.join(dir, 'DevToolsActivePort'), { force: true });
-  // headless Linux swallows touchmoves within ~30px of the touchstart; 3 makes it ~8px, a phone's 8dp
+  // headless Linux swallows touchmoves within ~30px of the touchstart; 3 makes it ~8px, a phone's 8dp. Without touch
+  // emulation headless has no pointer: the blink settings make it a PC's mouse (hover, fine), from the next document on
   pg.proc = spawn('google-chrome-stable', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${dir}`,
-    '--touch-slop-distance=3', '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' });
+    '--touch-slop-distance=3', '--blink-settings=primaryPointerType=4,primaryHoverType=2,availablePointerTypes=4,availableHoverTypes=2',
+    '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' });
   // a spawn failure ('error') rejects into the run's normal teardown instead of crashing past it
   const failed = new Promise<never>((_, rej) => pg.proc.on('error', (e) => rej(env(`chrome: ${e.message}`))));
   failed.catch(() => {});
@@ -1143,6 +1145,76 @@ async function p18(c: Ctx) {
   }
 }
 
+/** P6: wc-shell's composer (what reaches the shell is a comment line). On a PC Enter sends once and Shift+Enter
+ *  inserts a newline; an IME composition survives a state push (a rename of wc-shell's tab, wc- kept): the same
+ *  textarea, its value kept, then committed and sent once by Enter. On a phone Enter never sends. */
+async function p6(c: Ctx) {
+  const { pg, rec } = c;
+  const shell = rec.names.shell;
+  const tab = herdr(['pane', 'get', shell]).pane.tab_id;
+  const TA = `document.getElementById('pane-input')`;
+  const DESKTOP = `matchMedia('(hover: hover) and (pointer: fine)').matches`;
+  const enter = async (modifiers = 0) => {
+    const k = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, modifiers };
+    await pg.S('Input.dispatchKeyEvent', { type: 'keyDown', text: '\r', unmodifiedText: '\r', ...k });
+    await pg.S('Input.dispatchKeyEvent', { type: 'keyUp', ...k });
+  };
+  /** empties the composer, then types text into it */
+  const type = async (text: string) => { await pg.ev(`(() => { const t = ${TA}; t.value = ''; t.focus(); return 1; })()`); await pg.S('Input.insertText', { text }); };
+  /** the bodies of the POST /input this pane got from t on, after a second */
+  const sent = async (t: number) => { await sleep(1000); return pg.posts(t, `/api/panes/${enc(shell)}/input`).map((q) => q.body); };
+  try {
+    await mobile(pg, false);
+    await loadApp(c, `#/pane/${enc(shell)}`); // a new document: a PC's pointer (openPage)
+    if ((await pg.until(`!!${TA}`, 5000)).timeout) throw new Error('no #pane-input');
+    const desk = await pg.ev(DESKTOP);
+    guard(rec, shell);
+    await type('# wc-p6-enter');
+    let t = Date.now();
+    await enter();
+    const e1 = await sent(t);
+    await type('# wc-p6-shift');
+    t = Date.now();
+    await enter(8); // Shift
+    const s1 = await sent(t);
+    const nl: string = await pg.ev(`${TA}.value`);
+
+    await type('# ');
+    await pg.S('Input.imeSetComposition', { text: 'にほんご', selectionStart: 4, selectionEnd: 4 });
+    const v0: string = await pg.ev(`window.__wcTa = ${TA}, ${TA}.value`);
+    const label = `wc-shell-${Date.now() % 100000}`;
+    pg.stateMark = js(label);
+    pg.stateMarkT = 0;
+    mutate(rec, tab, ['tab', 'rename', tab, label]);
+    const pushed = !(await waitFn(() => pg.stateMarkT > 0, 5000, 5)).timeout;
+    await sleep(300);
+    const [same, v1]: [boolean, string] = await pg.ev(`[${TA} === window.__wcTa, ${TA}.value]`);
+    await pg.S('Input.insertText', { text: 'にほんご' }); // commits the composition
+    const v2: string = await pg.ev(`${TA}.value`);
+    t = Date.now();
+    await enter();
+    const i1 = await sent(t);
+
+    await mobile(pg, true);
+    const touch = await pg.ev(DESKTOP);
+    await type('# wc-p6-touch');
+    t = Date.now();
+    await enter();
+    const t1 = await sent(t);
+    result(c, desk && e1.length === 1 && e1[0].text === '# wc-p6-enter' && s1.length === 0 && nl === '# wc-p6-shift\n' &&
+      pushed && same && v0 === '# にほんご' && v1 === v0 && v2 === v0 && i1.length === 1 && i1[0].text === '# にほんご' && !touch && t1.length === 0,
+      'P6', `pc=${desk},enter=${js(e1)},shiftEnter=${s1.length}:${js(nl)},ime:push=${pushed},sameNode=${same},value=${js(v0)}->${js(v1)}->${js(v2)},enter=${js(i1)},` +
+        `phone=${!touch},enter=${t1.length}`,
+      "PC: Enter -> exactly 1 POST /input; Shift+Enter -> 0 and a '\\n'; mid-IME a state push keeps the textarea (===) and its value, " +
+        'insertText commits, Enter -> exactly 1 POST; phone: Enter -> 0 POSTs');
+  } finally {
+    pg.stateMark = '';
+    await mobile(pg, true);
+    mutate(rec, tab, ['tab', 'rename', tab, 'wc-shell']);
+    await pg.goto('#/agents');
+  }
+}
+
 // ── Tier 2 items (real Claude in wc-claude; wc-o1/wc-o2 are only started, cleared, stopped) ──
 
 async function sendPrompt(c: Ctx, pane: string, text: string) {
@@ -1387,6 +1459,7 @@ const ITEMS: Item[] = [
   { id: 'P14', tier: 1, needs: ['shell', 'less'], run: p14 },
   { id: 'P12', tier: 1, needs: ['shell'], run: p12 },
   { id: 'P13', tier: 1, run: p13 },
+  { id: 'P6', tier: 1, needs: ['shell'], run: p6 }, // late: its lines reach wc-shell
   ...['P2.old', 'P2.upgrade', 'P2.downgrade'].map((id): Item => ({ id, tier: 1, manual: true, run: (c) => p2Round(c, id) })),
   { id: 'P4-T2', tier: 2, needs: ['claude'], run: p4t2 },
   { id: 'P17-T2', tier: 2, needs: ['claude'], run: p17t2 },
