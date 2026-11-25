@@ -1201,12 +1201,12 @@ async function p6(c: Ctx) {
     t = Date.now();
     await enter();
     const t1 = await sent(t);
-    result(c, desk && e1.length === 1 && e1[0].text === '# wc-p6-enter' && s1.length === 0 && nl === '# wc-p6-shift\n' &&
-      pushed && same && v0 === '# にほんご' && v1 === v0 && v2 === v0 && i1.length === 1 && i1[0].text === '# にほんご' && !touch && t1.length === 0,
+    result(c, desk && js(e1) === js([{ text: '# wc-p6-enter', enter: true }]) && s1.length === 0 && nl === '# wc-p6-shift\n' &&
+      pushed && same && v0 === '# にほんご' && v1 === v0 && v2 === v0 && js(i1) === js([{ text: '# にほんご', enter: true }]) && !touch && t1.length === 0,
       'P6', `pc=${desk},enter=${js(e1)},shiftEnter=${s1.length}:${js(nl)},ime:push=${pushed},sameNode=${same},value=${js(v0)}->${js(v1)}->${js(v2)},enter=${js(i1)},` +
         `phone=${!touch},enter=${t1.length}`,
-      "PC: Enter -> exactly 1 POST /input; Shift+Enter -> 0 and a '\\n'; mid-IME a state push keeps the textarea (===) and its value, " +
-        'insertText commits, Enter -> exactly 1 POST; phone: Enter -> 0 POSTs');
+      "PC: Enter -> exactly 1 POST /input {text, enter:true}; Shift+Enter -> 0 and a '\\n'; mid-IME a state push keeps the textarea (===) and its value, " +
+        'insertText commits, Enter -> exactly 1 POST {text, enter:true}; phone: Enter -> 0 POSTs');
   } finally {
     pg.stateMark = '';
     await mobile(pg, true);
