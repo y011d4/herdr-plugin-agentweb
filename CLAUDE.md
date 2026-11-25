@@ -53,7 +53,9 @@ All in `internal/bridge/` (one package):
   herdr's `agent.start` RPC answers before the agent's process exists (the shell is still in the
   foreground), so `agent start` waits for `agent.get` to report the detected agent before
   checking the started agent's account.
-- `web/src/app.ts` — SPA (hash routing), `ansi.ts` — pure ANSI→HTML,
+- `web/src/app.ts` — SPA shell (hash routing) over `api.ts` (token, REST; a 401 → callback),
+  `store.ts` (State, WS link, `view`, seen done; subscribe/emit), `ws.ts` (socket, ping, backoff,
+  state polling, watches) and `routes.ts` (pure `resolveRoute`); `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
   (manifest, icons) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one

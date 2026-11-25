@@ -16,12 +16,16 @@ import { renderItems, conversationItems, latestActivity } from './transcript.ts'
 import type { TimelineItem } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity, displayCols, answerOutcome } from './prompt.ts';
 import type { PromptOption, ParsedPrompt } from './prompt.ts';
-import { dashboardCards, homeSummary, markSeen, shownStatus } from './dashboard-group.ts';
-import type { DashboardCard, SeenDone } from './dashboard-group.ts';
-import { watchMessages } from './watch.ts';
+import { dashboardCards, homeSummary, shownStatus } from './dashboard-group.ts';
+import type { DashboardCard } from './dashboard-group.ts';
 import { KeptTasks, taskToKeep } from './kept-tasks.ts';
 import { DESKTOP_QUERY, enterSends } from './composer-keys.ts';
 import type { AppState, OrchestratorView, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
+import { apiDelete, apiGet, apiPost, clearToken, getToken, loadToken, onUnauthorized, setToken } from './api.ts';
+import { markPaneSeen, store, subscribe } from './store.ts';
+import { onWsMessage, wsConnect, wsSendWatch, wsSignOut } from './ws.ts';
+import { agentsScope, defaultHome, homeAgentsHash, homeHash, homeOf, isAgentsRoute, nextPaneBackRoute, orchestratorOfPane,
+  paneGoneRoute, paneRoute, resolveRoute } from './routes.ts';
 
 // ── App version ──────────────────────────────────────────────────────────────
 const APP_VERSION = '0.1.0';
@@ -30,39 +34,18 @@ const APP_VERSION = '0.1.0';
 const BUILD = import.meta.url.match(/-([\w-]{8})\.js$/)?.[1] ?? 'dev';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
-const STORAGE_TOKEN = 'herdr_token';
 const STORAGE_NOTIF = 'herdr_notifications';
 const STORAGE_VIEW = 'herdr_pane_view'; // preferred pane view: 'terminal' | 'chat'
-const STORAGE_SEEN = 'herdr_seen_done'; // done panes already opened on this phone (SeenDone)
 const STORAGE_HOME = 'herdr_home'; // the orchestrator whose Home was opened last
 
-// ── WS reconnect config ───────────────────────────────────────────────────────
-const WS_PING_INTERVAL_MS = 30_000;
-const WS_RECONNECT_BASE_MS = 1_000;
-const WS_RECONNECT_MAX_MS  = 15_000;
-const STATE_POLL_INTERVAL_MS = 10_000;   // fallback when WS is down
 const PANE_REFRESH_INTERVAL_MS = 3_000;  // polling while pane detail is visible
 
 // ── Module-level state ────────────────────────────────────────────────────────
-let token: string | null = null;
-let wsSocket: WebSocket | null = null;
-let wsConnected = false;
-let wsReconnectDelay = WS_RECONNECT_BASE_MS;
-let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let wsPingTimer: ReturnType<typeof setInterval> | null = null;
-let statePollTimer: ReturnType<typeof setInterval> | null = null;
 let paneRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
-/** Last received State JSON */
-let appState: AppState | null = null;
-
-/** paneId currently shown in detail view (null if not on pane screen) */
-let activePaneId: string | null = null;
-
-/** Done panes this phone has looked at; the dashboard shows them as idle (see SeenDone). */
-let seenDone: SeenDone = (() => {
-  try { return JSON.parse(localStorage.getItem(STORAGE_SEEN) ?? '{}') ?? {}; } catch { return {}; }
-})();
+// What is on screen (store.ts): the pane shown (activePaneId), whether it is a Home,
+// its terminal/chat mode and where its Back goes. Mutated in place.
+const { view } = store;
 
 // Opening a done pane (or watching it finish) with the page visible counts as
 // seeing it, like viewing it in herdr. Kept on the phone only: herdr can only mark
@@ -71,18 +54,15 @@ let seenDone: SeenDone = (() => {
 // state push while the pane is open retries. Not while the bridge is cut off from
 // herdr: the pane state shown may be stale.
 function markActivePaneSeen(): void {
-  if (!activePaneId || document.hidden || !appState?.connected) return;
-  const agent = findPane(activePaneId)?.pane.agent;
-  if (agent?.status !== 'done' || agent.completionSeq == null || seenDone[activePaneId] === agent.completionSeq) return;
-  seenDone = markSeen(seenDone, appState.workspaces ?? [], activePaneId);
-  // best-effort: a storage failure must not stop the pane view from rendering
-  try { localStorage.setItem(STORAGE_SEEN, JSON.stringify(seenDone)); } catch { /* memory-only */ }
+  if (!view.activePaneId || document.hidden || !store.appState?.connected) return;
+  const agent = findPane(view.activePaneId)?.pane.agent;
+  if (agent?.status !== 'done' || agent.completionSeq == null || store.seenDone[view.activePaneId] === agent.completionSeq) return;
+  markPaneSeen(view.activePaneId);
 }
 
 // ── Chat view (Claude Code transcript) ────────────────────────────────────────
 // A claude pane can be shown as its structured transcript instead of the raw
-// terminal. Availability is probed per pane; the terminal stays the fallback.
-let paneViewMode: 'terminal' | 'chat' = 'terminal';
+// terminal (view.paneViewMode). Availability is probed per pane; the terminal stays the fallback.
 let chatAvailable = false;
 let chatSessionId: string | null = null;
 let chatCursor = 0; // byte offset into the transcript for incremental fetches
@@ -136,175 +116,33 @@ function relativeTime(ms: number): string {
   return `${Math.floor(diff / 3_600_000)}h ago`;
 }
 
-// ── Token handling ────────────────────────────────────────────────────────────
+// ── Server messages ───────────────────────────────────────────────────────────
 
-function loadToken(): string | null {
-  // Check URL for ?token= param first
-  const params = new URLSearchParams(window.location.search);
-  const urlToken = params.get('token');
-  if (urlToken) {
-    localStorage.setItem(STORAGE_TOKEN, urlToken);
-    // Strip from URL without reload
-    params.delete('token');
-    const newSearch = params.toString();
-    const newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash;
-    history.replaceState(null, '', newUrl);
-    return urlToken;
-  }
-  return localStorage.getItem(STORAGE_TOKEN);
-}
-
-function clearToken(): void {
-  localStorage.removeItem(STORAGE_TOKEN);
-  token = null;
-}
-
-// ── Fetch wrapper ─────────────────────────────────────────────────────────────
-
-async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-    ...((options.headers ?? {}) as Record<string, string>),
-  };
-  const resp = await fetch(path, { ...options, headers });
-  if (resp.status === 401) {
-    clearToken();
-    renderTokenScreen('Session expired or token invalid. Please enter your token.');
-    throw new Error('401');
-  }
-  return resp;
-}
-
-async function apiGet(path: string): Promise<unknown> {
-  const resp = await apiFetch(path);
-  if (!resp.ok) {
-    const body = await resp.json().catch(() => ({})) as Record<string, unknown>;
-    const err = body?.error as Record<string, unknown> | undefined;
-    throw new Error((err?.message as string | undefined) ?? `HTTP ${resp.status}`);
-  }
-  return resp.json();
-}
-
-function apiError(data: Record<string, unknown>, status: number): Error & { code?: string; status?: number } {
-  const err = data?.error as Record<string, unknown> | undefined;
-  const e = new Error((err?.message as string | undefined) ?? `HTTP ${status}`) as Error & { code?: string; status?: number };
-  e.code = err?.code as string | undefined; // e.g. 'prompt_changed'/'no_profile' — lets callers branch on the reason
-  e.status = status;
-  return e;
-}
-
-async function apiPost(path: string, body: Record<string, unknown> = {}): Promise<unknown> {
-  const resp = await apiFetch(path, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) throw apiError(await resp.json().catch(() => ({})) as Record<string, unknown>, resp.status);
-  return resp.json();
-}
-
-async function apiDelete(path: string): Promise<unknown> {
-  const resp = await apiFetch(path, { method: 'DELETE' });
-  if (!resp.ok) throw apiError(await resp.json().catch(() => ({})) as Record<string, unknown>, resp.status);
-  return resp.json();
-}
-
-// ── WebSocket lifecycle ───────────────────────────────────────────────────────
-
-function wsConnect(): void {
-  if (!token) return;
-  if (wsSocket && wsSocket.readyState <= 1 /* OPEN or CONNECTING */) return;
-
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const url = `${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`;
-  const ws = new WebSocket(url);
-  wsSocket = ws;
-
-  ws.addEventListener('open', () => {
-    wsConnected = true;
-    wsReconnectDelay = WS_RECONNECT_BASE_MS;
-    updateConnBadge();
-    stopStatePoll();
-    wsSendWatch(); // re-establish pane watch after reconnect
-
-    // Ping keepalive
-    if (wsPingTimer) clearInterval(wsPingTimer);
-    wsPingTimer = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'ping' }));
-      }
-    }, WS_PING_INTERVAL_MS);
-  });
-
-  ws.addEventListener('message', (evt: MessageEvent<string>) => {
-    let msg: WsMessage;
-    try { msg = JSON.parse(evt.data) as WsMessage; } catch { return; }
-    handleWsMessage(msg);
-  });
-
-  ws.addEventListener('close', () => {
-    // A delayed close from a socket we've already replaced isn't ours to act on.
-    if (wsSocket !== ws) return;
-    // Always clean up this socket's connection state...
-    wsConnected = false;
-    updateConnBadge();
-    if (wsPingTimer) clearInterval(wsPingTimer);
-    // ...but don't revive polling/reconnect once signed out (e.g. after a 401).
-    if (!token) return;
-    startStatePoll();
-    scheduleWsReconnect();
-  });
-
-  ws.addEventListener('error', () => {
-    // close event will follow
-  });
-}
-
-function scheduleWsReconnect(): void {
-  if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-  wsReconnectTimer = setTimeout(() => {
-    wsConnect();
-    wsReconnectDelay = Math.min(wsReconnectDelay * 2, WS_RECONNECT_MAX_MS);
-  }, wsReconnectDelay);
-}
-
+// Every WS message lands here, a fallback-polled state as a `state` message (ws.ts).
 function handleWsMessage(msg: WsMessage): void {
   if (msg.type === 'state') {
-    appState = msg.state;
+    store.appState = msg.state;
     onStateUpdate();
   } else if (msg.type === 'agent_status') {
     onAgentStatus(msg);
   } else if (msg.type === 'pane_output') {
-    if (msg.paneId === activePaneId) {
+    if (msg.paneId === view.activePaneId) {
       appScrollPane = msg.appScroll; // server decides from fresh scroll metadata
       renderPaneOutput(msg.ansi);
     }
   } else if (msg.type === 'pane_gone') {
-    if (msg.paneId === activePaneId && homeMode) {
-      holdHomeForReplacement(); // the orchestrator may be mid-replacement; state decides
-    } else if (msg.paneId === activePaneId) {
-      showToast('Pane closed', 'This pane no longer exists.');
-      navigate(paneGoneRoute());
-    }
+    onPaneGone(msg.paneId);
   } else if (msg.type === 'transcript_items') {
-    if (msg.paneId === activePaneId) onTranscriptItems(msg);
+    if (msg.paneId === view.activePaneId) onTranscriptItems(msg);
   }
   // pong — no-op
 }
 
-// Tell the server what to watch for the active pane: its transcript in chat
-// mode, its terminal output otherwise. The two watches are mutually exclusive,
-// so the unused one is always cancelled. Re-sent on reconnect and mode switches.
-function wsSendWatch(): void {
-  if (!wsSocket || wsSocket.readyState !== WebSocket.OPEN) return;
-  for (const m of watchMessages(activePaneId, paneViewMode, document.hidden)) wsSocket.send(JSON.stringify(m));
-}
-
 // The badge reflects end-to-end connectivity: the WebSocket to the bridge AND
-// the bridge's own link to herdr (appState.connected). herdr can drop while the
+// the bridge's own link to herdr (store.appState.connected). herdr can drop while the
 // WS stays open, so a green dot requires both to be up.
 function updateConnBadge(): void {
-  const connected = wsConnected && (appState?.connected ?? true);
+  const connected = store.wsConnected && (store.appState?.connected ?? true);
   if (elConnDot) {
     elConnDot.classList.toggle('connected', connected);
     elConnDot.title = connected ? 'Connected' : 'Reconnecting…';
@@ -314,25 +152,31 @@ function updateConnBadge(): void {
   }
 }
 
-// ── Fallback state polling (when WS is down) ──────────────────────────────────
+// ── The open pane going away (the shell's transitions) ────────────────────────
+// Pane views only show a pane; leaving it when it closes, and holding a Home while
+// its orchestrator is replaced, happen here.
 
-function startStatePoll(): void {
-  if (statePollTimer) return;
-  statePollTimer = setInterval(async () => {
-    if (!token) return;
-    try {
-      const state = await apiGet('/api/state') as AppState;
-      appState = state;
-      onStateUpdate();
-    } catch {
-      // ignore
-    }
-  }, STATE_POLL_INTERVAL_MS);
+/** The open pane no longer exists: say so and go back to the list it came from. */
+function leaveClosedPane(): void {
+  showToast('Pane closed', 'This pane no longer exists.');
+  navigate(paneGoneRoute(view));
 }
 
-function stopStatePoll(): void {
-  if (statePollTimer) clearInterval(statePollTimer);
-  statePollTimer = null;
+/** herdr closed a pane (pane_gone): the open one leaves, or, on a Home, holds for a replacement. */
+function onPaneGone(paneId: string): void {
+  if (paneId !== view.activePaneId) return;
+  if (view.homeMode) holdHomeForReplacement(); // the orchestrator may be mid-replacement; state decides
+  else leaveClosedPane();
+}
+
+/** A state on a Home: without its orchestrator's pane it holds for a replacement, with a
+ *  new pane it re-routes onto it (true: either happened). */
+function homeReplaced(hash: string): boolean {
+  const id = homeOf(hash, store.appState)?.paneId ?? null;
+  if (id === view.activePaneId) { stopHoldingHome(); return false; }
+  if (id) { stopHoldingHome(); handleRoute(); } // replaced (e.g. cleared): re-resolve Home onto the new pane
+  else holdHomeForReplacement(); // gone — maybe being replaced
+  return true;
 }
 
 // ── State update handler ──────────────────────────────────────────────────────
@@ -349,17 +193,16 @@ function onStateUpdate(): void {
     if (isAgentsRoute(location.hash)) { navigate(homeHash(started.name)); return; }
   }
   // Nothing rendered yet (startup), or the token was just (re-)entered and the
-  // login screen is still up: render the current route.
-  if (!routeRendered || document.getElementById('screen-login')) { handleRoute(); return; }
+  // token screen is still up: render the current route.
+  if (!routeRendered || view.screen === 'token') { handleRoute(); return; }
   const hash = location.hash || '#/agents';
   if (isAgentsRoute(hash)) {
     renderAgentsDashboard();
   } else if (hash.startsWith('#/pane/')) {
     // If the pane vanished (e.g. seen via /api/state polling while the WS is
     // down, so the pane_gone push can't fire), leave the now-stale view.
-    if (activePaneId && !findPane(activePaneId)) {
-      showToast('Pane closed', 'This pane no longer exists.');
-      navigate(paneGoneRoute());
+    if (view.activePaneId && !findPane(view.activePaneId)) {
+      leaveClosedPane();
       return;
     }
     markActivePaneSeen(); // it may have just finished while on screen
@@ -368,14 +211,7 @@ function onStateUpdate(): void {
     updatePromptPanel(); // agent may have just become (un)blocked
     settlePendingAnswer(); // ...because a tapped answer landed
   } else if (hash.startsWith('#/home/')) {
-    const id = homeOf(hash)?.paneId ?? null;
-    if (id !== activePaneId) {
-      if (!id) { holdHomeForReplacement(); return; } // gone — maybe being replaced
-      stopHoldingHome();
-      handleRoute(); // replaced (e.g. cleared): re-resolve Home onto the new pane
-      return;
-    }
-    stopHoldingHome();
+    if (homeReplaced(hash)) return;
     markActivePaneSeen(); // the orchestrator may have just finished while on screen
     updatePaneDetailHeader();
     renderHomeStatus();
@@ -397,12 +233,12 @@ function onAgentStatus(msg: WsAgentStatusMessage): void {
     settlePendingAnswer();
   }
 
-  const jumpToPane = (): void => navigate(paneRoute(paneId));
+  const jumpToPane = (): void => navigate(paneRoute(store.appState, paneId));
 
   const notifyStatuses = new Set(['blocked', 'done']);
   if (!notifyStatuses.has(to)) {
     // Still show toast for other transitions if not currently on that pane
-    if (activePaneId !== paneId) {
+    if (view.activePaneId !== paneId) {
       showToast(
         `${agent ?? 'Agent'}: ${from} → ${to}`,
         `${workspaceLabel ?? ''} / ${tabLabel ?? ''}`,
@@ -416,7 +252,7 @@ function onAgentStatus(msg: WsAgentStatusMessage): void {
   const title = `${agent ?? 'Agent'} ${to}`;
 
   // In-app toast (skip for the pane currently being viewed)
-  if (activePaneId !== paneId) {
+  if (view.activePaneId !== paneId) {
     showToast(title, body, { sticky: true, onclick: jumpToPane, paneId });
   }
 
@@ -432,7 +268,7 @@ function onAgentStatus(msg: WsAgentStatusMessage): void {
 
   // Refresh pane detail if it's the active one (not while hidden — the
   // visibilitychange handler re-reads the screen on return)
-  if (activePaneId === paneId && !document.hidden) {
+  if (view.activePaneId === paneId && !document.hidden) {
     refreshPaneOutput();
   }
 }
@@ -563,7 +399,7 @@ function showSystemNotification(title: string, body: string, paneId: string): vo
         // dismiss can run too early and miss it. Once it provably exists, dismiss it
         // if the user is now looking at this very pane.
         return reg.showNotification(title, { body, tag: paneId }).then(() => {
-          if (!document.hidden && activePaneId === paneId) dismissNotificationsForPane(paneId);
+          if (!document.hidden && view.activePaneId === paneId) dismissNotificationsForPane(paneId);
         });
       })
       .catch(() => { if (document.hidden) pageNotification(title, body, paneId); });
@@ -581,7 +417,7 @@ function pageNotification(title: string, body: string, paneId: string): void {
     const n = new Notification(title, { body, tag: paneId });
     n.onclick = () => {
       window.focus();
-      navigate(paneRoute(paneId));
+      navigate(paneRoute(store.appState, paneId));
     };
     const list = pageNotifications.get(paneId) ?? [];
     list.push(n);
@@ -614,49 +450,28 @@ function dismissNotificationsForPane(paneId: string): void {
 }
 
 // ── Routing ───────────────────────────────────────────────────────────────────
+// What a hash shows is decided in routes.ts (resolveRoute); this shell renders it.
 
 function navigate(hash: string): void {
   location.hash = hash;
 }
 
-// Opening the app without a route (the PWA's start_url) lands on an
-// orchestrator's chat — the agent the user talks to — when one is running, and
-// on the agents list otherwise. Decided once, on the first state: the empty hash
-// is replaced either way, so an orchestrator that starts later never yanks the
-// user off the list. location.replace keeps the empty-hash entry out of history.
-function goHomeToOrchestrator(): boolean {
-  if (location.hash || !appState) return false;
-  const home = defaultHome();
-  location.replace(home ? homeHash(home.name) : '#/agents');
-  return true;
-}
-
 // Orchestrators (one per Claude account, say) each have a Home: #/home/<name>.
-const orchestrators = (): OrchestratorView[] => appState?.orchestrators ?? [];
-const orchestratorOfPane = (paneId: string | null): OrchestratorView | undefined =>
-  paneId === null ? undefined : orchestrators().find((o) => o.paneId === paneId);
-const homeHash = (name: string): string => `#/home/${encodeURIComponent(name)}`;
-// From a Home (#/home/<name>), the agents list is #/agents/<name>: just that orchestrator's account's agents.
-const homeAgentsHash = (): string => location.hash.replace(/^#\/home\//, '#/agents/');
-const isAgentsRoute = (hash: string): boolean => hash === '#/agents' || hash.startsWith('#/agents/');
+const orchestrators = (): OrchestratorView[] => store.appState?.orchestrators ?? [];
 
-/** The orchestrator a #/home/<name> or #/agents/<name> route names. */
-function homeOf(hash: string): OrchestratorView | undefined {
-  let name: string;
-  try {
-    name = decodeURIComponent(hash.replace(/^#\/(?:home|agents)\//, ''));
-  } catch {
-    return undefined;
-  }
-  return orchestrators().find((o) => o.name === name);
+/** The orchestrator whose Home was opened last on this phone. */
+function lastHome(): string | null {
+  try { return localStorage.getItem(STORAGE_HOME); } catch { return null; }
 }
 
-/** The Home to open by default: the one last opened here while it runs, else the first running one. */
-function defaultHome(): OrchestratorView | undefined {
-  let last: string | null = null;
-  try { last = localStorage.getItem(STORAGE_HOME); } catch { /* none */ }
-  const running = orchestrators().filter((o) => o.paneId);
-  return running.find((o) => o.name === last) ?? running[0];
+// Opening the app without a route (the PWA's start_url) is decided once, on the first
+// state (resolveRoute): location.replace keeps the empty-hash entry out of history.
+function goHomeToOrchestrator(): boolean {
+  if (location.hash) return false;
+  const route = resolveRoute('', store.appState, lastHome());
+  if (route.kind !== 'redirect') return false; // no state yet
+  location.replace(route.hash);
+  return true;
 }
 
 // Set once a route has been rendered: until then, the first state (WS push or
@@ -664,16 +479,11 @@ function defaultHome(): OrchestratorView | undefined {
 let routeRendered = false;
 
 // Home (#/home) is the orchestrator's chat as the app's main screen: the pane view
-// with its own chrome — a status bar of its account's agents, dialogue-only chat (no
-// tool calls or injected notifications), a "doing now" line while it works, and a
-// plain messenger composer without terminal keys.
-let homeMode = false;
+// (view.homeMode) with its own chrome — a status bar of its account's agents,
+// dialogue-only chat (no tool calls or injected notifications), a "doing now" line
+// while it works, and a plain messenger composer without terminal keys.
 let homeActivity: string | null = null; // latest tool call since the orchestrator last spoke
 let homeStatusHtml = ''; // last rendered status bar, to skip no-op DOM writes
-// Where a pane's Back goes: Home or an account's list when it was opened from there, else the list.
-let paneBackRoute = '#/agents';
-// Where to go when the open pane goes away: the list it came from (an account's included).
-const paneGoneRoute = (): string => (!homeMode && paneBackRoute.startsWith('#/agents/') ? paneBackRoute : '#/agents');
 
 // A cleared or restarted orchestrator leaves a gap: its old pane is gone before the
 // replacement is detected as an agent. Home holds through that gap instead of
@@ -685,7 +495,7 @@ function holdHomeForReplacement(): void {
   if (homeLostTimer) return;
   homeLostTimer = setTimeout(() => {
     homeLostTimer = null;
-    if (!location.hash.startsWith('#/home/') || homeOf(location.hash)?.paneId) return; // left, or onStateUpdate re-resolved
+    if (!location.hash.startsWith('#/home/') || homeOf(location.hash, store.appState)?.paneId) return; // left, or onStateUpdate re-resolved
     showToast('Orchestrator stopped', 'Showing all agents.');
     handleRoute(); // no orchestrator → the list
   }, HOME_REPLACE_GRACE_MS);
@@ -711,14 +521,8 @@ async function startOrchestratorFlow(name: string): Promise<void> {
   }
 }
 
-// An orchestrator's pane opens as its Home; every other pane as its own view.
-function paneRoute(paneId: string): string {
-  const o = orchestratorOfPane(paneId);
-  return o ? homeHash(o.name) : `#/pane/${encodeURIComponent(paneId)}`;
-}
-
 function handleRoute(e?: Event): void {
-  if (!token) {
+  if (!getToken()) {
     renderTokenScreen();
     return;
   }
@@ -726,66 +530,41 @@ function handleRoute(e?: Event): void {
   routeRendered = true;
 
   stopPaneRefresh();
-  activePaneId = null;
-  homeMode = false;
+  view.activePaneId = null;
+  view.homeMode = false;
   dropPendingAnswer(); // left the pane: nothing to go back from
 
-  const hash = location.hash || '#/agents';
-  const fromHash = e instanceof HashChangeEvent ? new URL(e.oldURL).hash : null;
-
-  if (hash === '#/home' && appState) {
-    // no name (older links): the default Home
-    const home = defaultHome();
-    location.replace(home ? homeHash(home.name) : '#/agents');
+  const route = resolveRoute(location.hash, store.appState, lastHome());
+  if (route.kind === 'redirect') {
+    if (route.replace) location.replace(route.hash);
+    else navigate(route.hash);
     return;
   }
-  if (hash === '#/home' || hash.startsWith('#/home/')) {
-    const id = homeOf(hash)?.paneId;
-    if (!appState) {
-      // can't resolve the orchestrator yet — the first state re-routes (onStateUpdate)
-      routeRendered = false;
-      elScreen!.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;flex:1;"><span class="loading-spinner"></span></div>';
-    } else if (!id) {
-      navigate('#/agents');
-      return;
-    } else {
-      homeMode = true;
-      activePaneId = id;
-      try { localStorage.setItem(STORAGE_HOME, homeOf(hash)!.name); } catch { /* memory-only */ }
-      dismissToastsForPane(id);
-      dismissNotificationsForPane(id);
-      markActivePaneSeen();
-      renderPaneDetail(id);
-    }
-  } else if (isAgentsRoute(hash) || hash === '#/') {
-    renderAgentsDashboard();
-  } else if (hash.startsWith('#/pane/')) {
-    const encoded = hash.slice('#/pane/'.length);
-    let paneId: string;
-    try {
-      paneId = decodeURIComponent(encoded);
-    } catch {
-      navigate('#/agents'); // malformed pane hash — don't break routing
-      return;
-    }
-    // an orchestrator always opens as its Home (notification clicks, stale links, …)
-    const o = orchestratorOfPane(paneId);
-    if (o) {
-      location.replace(homeHash(o.name));
-      return;
-    }
-    activePaneId = paneId;
-    if (fromHash?.startsWith('#/home/') || fromHash?.startsWith('#/agents/')) paneBackRoute = fromHash;
-    else if (!fromHash?.startsWith('#/pane/')) paneBackRoute = '#/agents'; // pane→pane keeps it
-    // opening a pane clears its pending notifications (in-app toasts + OS)
-    dismissToastsForPane(paneId);
-    dismissNotificationsForPane(paneId);
+  if (route.kind === 'loading') {
+    // can't resolve the orchestrator yet — the first state re-routes (onStateUpdate)
+    routeRendered = false;
+    view.screen = 'loading';
+    elScreen!.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;flex:1;"><span class="loading-spinner"></span></div>';
+  } else if (route.kind === 'home') {
+    view.homeMode = true;
+    view.activePaneId = route.paneId;
+    try { localStorage.setItem(STORAGE_HOME, route.name); } catch { /* memory-only */ }
+    dismissToastsForPane(route.paneId);
+    dismissNotificationsForPane(route.paneId);
     markActivePaneSeen();
-    renderPaneDetail(paneId);
-  } else if (hash === '#/settings') {
-    renderSettingsScreen();
+    renderPaneDetail(route.paneId);
+  } else if (route.kind === 'agents') {
+    renderAgentsDashboard();
+  } else if (route.kind === 'pane') {
+    view.activePaneId = route.paneId;
+    view.paneBackRoute = nextPaneBackRoute(e instanceof HashChangeEvent ? new URL(e.oldURL).hash : null, view.paneBackRoute);
+    // opening a pane clears its pending notifications (in-app toasts + OS)
+    dismissToastsForPane(route.paneId);
+    dismissNotificationsForPane(route.paneId);
+    markActivePaneSeen();
+    renderPaneDetail(route.paneId);
   } else {
-    navigate('#/agents');
+    renderSettingsScreen();
   }
 
   wsSendWatch(); // sync the server-side pane watch with the current route
@@ -795,8 +574,9 @@ function handleRoute(e?: Event): void {
 
 function renderTokenScreen(message?: string): void {
   stopPaneRefresh();
-  activePaneId = null;
+  view.activePaneId = null;
 
+  view.screen = 'token';
   elScreen!.innerHTML = `
     <div id="screen-login" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:32px 24px;height:100%;overflow-y:auto;">
       <div class="login-logo">&#128241;</div>
@@ -818,19 +598,18 @@ function renderTokenScreen(message?: string): void {
     e.preventDefault();
     const val = (document.getElementById('token-input') as HTMLInputElement).value.trim();
     if (!val) return;
-    token = val;
-    localStorage.setItem(STORAGE_TOKEN, token);
+    setToken(val);
     if (topbar) topbar.style.display = '';
-    appState = null; // drop pre-expiry state, so whichever of WS / HTTP lands first wins
+    store.appState = null; // drop pre-expiry state, so whichever of WS / HTTP lands first wins
     wsConnect();
     // Immediately fetch state
     apiGet('/api/state').then((state) => {
-      if (appState) return; // a WS push landed first: it is newer and has routed already
-      appState = state as AppState;
+      if (store.appState) return; // a WS push landed first: it is newer and has routed already
+      store.appState = state as AppState;
       onStateUpdate(); // routes off the login screen
     }).catch((err: Error) => {
       // a WS state push already proved the token and opened the app: keep it
-      if (err.message !== '401' && !appState) {
+      if (err.message !== '401' && !store.appState) {
         renderTokenScreen('Could not connect. Check the token and try again.');
       }
     });
@@ -888,7 +667,7 @@ function confirmModal(title: string, message: string, confirmLabel: string, dang
 function agentStartDirs(): Array<{ path: string; label: string; workspaceId: string }> {
   const dirs: Array<{ path: string; label: string; workspaceId: string }> = [];
   const seen = new Set<string>();
-  for (const ws of appState?.workspaces ?? []) {
+  for (const ws of store.appState?.workspaces ?? []) {
     const path = ws.worktree?.checkoutPath || ws.cwd;
     if (!path || seen.has(path)) continue;
     seen.add(path);
@@ -915,10 +694,10 @@ async function openNewAgentModal(): Promise<void> {
   }
   const options = profiles.map((p) => `<option value="${escHtml(p.name)}">${escHtml(p.label)}</option>`).join('');
 
-  // Directory choices come straight from appState — default to the focused
+  // Directory choices come straight from store.appState — default to the focused
   // workspace so "another agent in this repo/worktree" is the zero-typing path.
   const dirs = agentStartDirs();
-  const focusedWs = appState?.workspaces.find((w) => w.workspaceId === appState?.focused.workspaceId);
+  const focusedWs = store.appState?.workspaces.find((w) => w.workspaceId === store.appState?.focused.workspaceId);
   const focusedPath = focusedWs ? (focusedWs.worktree?.checkoutPath || focusedWs.cwd) : null;
   const dirOptions = dirs
     .map((d) => `<option value="${escHtml(d.path)}"${d.path === focusedPath ? ' selected' : ''}>${escHtml(d.label)}</option>`)
@@ -1067,8 +846,8 @@ async function clearAgentFlow(paneId: string): Promise<void> {
     showToast('Cleared', 'Started a fresh session');
     // Clearing an orchestrator keeps the user on its Home: the state may not know the
     // replacement yet, so stay on #/home/<name> and let onStateUpdate re-resolve it.
-    if (homeMode) return;
-    navigate(res.paneId ? paneRoute(res.paneId) : '#/agents');
+    if (view.homeMode) return;
+    navigate(res.paneId ? paneRoute(store.appState, res.paneId) : '#/agents');
   } catch (err) {
     showToast('Clear failed', (err as Error).message);
   }
@@ -1080,7 +859,7 @@ async function stopAgentFlow(paneId: string): Promise<void> {
   try {
     await apiDelete(`/api/panes/${encodeURIComponent(paneId)}`);
     showToast('Stopped', 'Agent pane closed');
-    navigate(paneGoneRoute());
+    navigate(paneGoneRoute(view));
   } catch (err) {
     showToast('Stop failed', (err as Error).message);
   }
@@ -1107,7 +886,7 @@ function renderCard(card: DashboardCard): string {
   // e.g. "claude"/"codex") over displayName, which can be a richer label.
   const agentKind = name || displayName || 'agent';
   const cardLabel = cardTitle(card);
-  const statusClass = shownStatus(pane, seenDone) || 'unknown';
+  const statusClass = shownStatus(pane, store.seenDone) || 'unknown';
   const meta = customStatus || message || '';
   const relTime = relativeTime(sinceUnixMs);
 
@@ -1152,20 +931,20 @@ function onAgentsTouchEnd(e: TouchEvent): void {
   // still authenticated, so a tap-away, a 401 that swapped in the token screen, or
   // any other navigation isn't overwritten with stale agent data.
   setTimeout(() => {
-    if (token && document.getElementById('screen-agents')) renderAgentsDashboard();
+    if (getToken() && document.getElementById('screen-agents')) renderAgentsDashboard();
   }, 0);
 }
 
 function renderAgentsDashboard(): void {
   // #/agents/<name> (opened from that orchestrator's Home): its account's agents, with a Back to its Home
-  const scope = location.hash.startsWith('#/agents/') ? homeOf(location.hash) : undefined;
+  const scope = agentsScope(location.hash, store.appState);
   const topbar = document.getElementById('topbar');
   if (topbar) {
     topbar.style.display = '';
     document.getElementById('topbar-title')!.innerHTML = 'Agents' +
       (scope ? `<span class="topbar-subtitle">&#183; ${escHtml(orchestratorLabel(scope))}</span>` : '');
     // Orchestrators have no cards, so this is the way to a Home: its own, else the one used last
-    const home = scope ?? defaultHome();
+    const home = scope ?? defaultHome(store.appState, lastHome());
     document.getElementById('topbar-left')!.innerHTML = home ? '<button class="topbar-back" aria-label="Home">&#8592; Home</button>' : '';
     if (home) document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate(homeHash(home.name)));
     document.getElementById('topbar-right')!.innerHTML =
@@ -1175,7 +954,8 @@ function renderAgentsDashboard(): void {
     document.getElementById('btn-settings')!.addEventListener('click', () => navigate('#/settings'));
   }
 
-  if (!appState) {
+  if (!store.appState) {
+    view.screen = 'agents';
     elScreen!.innerHTML = `<div id="screen-agents" style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="loading-spinner"></span></div>`;
     return;
   }
@@ -1189,7 +969,7 @@ function renderAgentsDashboard(): void {
     return;
   }
 
-  const { workspaces = [] } = appState;
+  const { workspaces = [] } = store.appState;
   const cards = agentCards(scope);
   // configured orchestrators that aren't running get a Start button atop the list
   const stopped = orchestrators().filter((o) => !o.paneId);
@@ -1207,6 +987,7 @@ function renderAgentsDashboard(): void {
   // to the route) — the loading-spinner placeholder lacks data-ready.
   let scroller = document.getElementById('screen-agents') as HTMLElement | null;
   if (!scroller || !scroller.dataset.ready) {
+    view.screen = 'agents';
     elScreen!.innerHTML = '<div id="screen-agents" data-ready="1"></div>';
     scroller = document.getElementById('screen-agents') as HTMLElement;
     agentsTouchActive = false;
@@ -1224,7 +1005,7 @@ function renderAgentsDashboard(): void {
   scroller.querySelectorAll('.agent-card').forEach((card) => {
     const el = card as HTMLElement;
     const paneId = el.dataset.paneId!;
-    const activate = () => navigate(paneRoute(paneId));
+    const activate = () => navigate(paneRoute(store.appState, paneId));
     el.addEventListener('click', activate);
     el.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') activate(); });
   });
@@ -1233,8 +1014,8 @@ function renderAgentsDashboard(): void {
 // ── Pane detail ───────────────────────────────────────────────────────────────
 
 function findPane(paneId: string) {
-  if (!appState) return null;
-  for (const ws of appState.workspaces ?? []) {
+  if (!store.appState) return null;
+  for (const ws of store.appState.workspaces ?? []) {
     for (const tab of ws.tabs ?? []) {
       for (const pane of tab.panes ?? []) {
         if (pane.paneId === paneId) return { pane, ws, tab };
@@ -1259,15 +1040,15 @@ function orchestratorLabel(o: OrchestratorView | undefined): string {
 function homeHeaderHtml(found: ReturnType<typeof findPane>): string {
   const st = found?.pane?.agent?.status ?? '';
   const sub = st === 'working' ? 'working…' : st === 'blocked' ? 'needs you' : 'ready';
-  return `${escHtml(orchestratorLabel(orchestratorOfPane(activePaneId)))}<span class="topbar-subtitle home-state ${escHtml(st)}">&#183; ${sub}</span>`;
+  return `${escHtml(orchestratorLabel(orchestratorOfPane(store.appState, view.activePaneId)))}<span class="topbar-subtitle home-state ${escHtml(st)}">&#183; ${sub}</span>`;
 }
 
 function updatePaneDetailHeader(): void {
-  if (!activePaneId) return;
-  const found = findPane(activePaneId);
+  if (!view.activePaneId) return;
+  const found = findPane(view.activePaneId);
   const titleEl = document.getElementById('topbar-title');
   if (titleEl && found) {
-    titleEl.innerHTML = homeMode ? homeHeaderHtml(found) : paneHeaderHtml(found, activePaneId);
+    titleEl.innerHTML = view.homeMode ? homeHeaderHtml(found) : paneHeaderHtml(found, view.activePaneId);
   }
 }
 
@@ -1275,7 +1056,7 @@ function updatePaneDetailHeader(): void {
 // orchestrators, and for an orchestrator (`scope`) only its account's agents —
 // all of them when that isn't known (pure helper, tested in dashboard-group.test.ts).
 function agentCards(scope?: OrchestratorView): DashboardCard[] {
-  return dashboardCards(appState?.workspaces ?? [], orchestrators().map((o) => o.paneId), scope?.agents ?? null);
+  return dashboardCards(store.appState?.workspaces ?? [], orchestrators().map((o) => o.paneId), scope?.agents ?? null);
 }
 
 // Home status bar: its agents waiting on the user (tap → that agent) and counts of
@@ -1283,15 +1064,15 @@ function agentCards(scope?: OrchestratorView): DashboardCard[] {
 // constant state pushes don't replace a chip under a finger.
 function renderHomeStatus(): void {
   const el = document.getElementById('home-status');
-  if (!el || !appState) return;
-  const s = homeSummary(agentCards(orchestratorOfPane(activePaneId)), seenDone);
+  if (!el || !store.appState) return;
+  const s = homeSummary(agentCards(orchestratorOfPane(store.appState, view.activePaneId)), store.seenDone);
   // With several orchestrators running, a switcher between their Homes (tap = that
   // orchestrator's pane, which routes to its Home like any chip), each with its status.
   const running = orchestrators().filter((o) => o.paneId);
   const switcher = running.length < 2 ? '' : '<div class="home-switch">' + running.map((o) => {
     const pane = findPane(o.paneId!)?.pane;
-    const st = pane?.agent ? shownStatus(pane, seenDone) : 'unknown';
-    return `<button class="home-switch-btn${o.paneId === activePaneId ? ' active' : ''}" data-pane-id="${escHtml(o.paneId!)}">` +
+    const st = pane?.agent ? shownStatus(pane, store.seenDone) : 'unknown';
+    return `<button class="home-switch-btn${o.paneId === view.activePaneId ? ' active' : ''}" data-pane-id="${escHtml(o.paneId!)}">` +
       `<i class="home-dot ${escHtml(st)}"></i>${escHtml(orchestratorLabel(o))}</button>`;
   }).join('') + '</div>';
   const chips = s.blocked.map((c) =>
@@ -1312,7 +1093,7 @@ function renderHomeStatus(): void {
 function renderHomeActivity(): void {
   const el = document.getElementById('home-activity');
   if (!el) return;
-  const working = activePaneId !== null && findPane(activePaneId)?.pane?.agent?.status === 'working';
+  const working = view.activePaneId !== null && findPane(view.activePaneId)?.pane?.agent?.status === 'working';
   el.style.display = working ? '' : 'none';
   if (working) el.textContent = homeActivity ? `▸ ${homeActivity}` : 'thinking…';
 }
@@ -1320,7 +1101,7 @@ function renderHomeActivity(): void {
 async function renderPaneDetail(paneId: string): Promise<void> {
   const topbar = document.getElementById('topbar');
   const found = findPane(paneId);
-  if (topbar && homeMode) {
+  if (topbar && view.homeMode) {
     topbar.style.display = '';
     document.getElementById('topbar-title')!.innerHTML = homeHeaderHtml(found);
     document.getElementById('topbar-left')!.innerHTML = '';
@@ -1329,15 +1110,15 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       // terminal ⇄ chat, as on any pane (Esc / Ctrl+C / arrows live in the terminal's keys)
       `<button class="topbar-action view-toggle home-view-toggle" id="btn-view-toggle" style="display:none;" aria-label="Toggle terminal">&gt;_</button>` +
       `<button class="topbar-action" id="btn-agent-menu" aria-label="Agent actions">&#8942;</button>`;
-    document.getElementById('btn-home-agents')!.addEventListener('click', () => navigate(homeAgentsHash()));
+    document.getElementById('btn-home-agents')!.addEventListener('click', () => navigate(homeAgentsHash(location.hash)));
     document.getElementById('btn-view-toggle')!.addEventListener('click', () => {
-      if (paneViewMode === 'chat') switchToTerminal(false); else switchToChat(undefined, false);
+      if (view.paneViewMode === 'chat') switchToTerminal(false); else switchToChat(undefined, false);
     });
     document.getElementById('btn-agent-menu')!.addEventListener('click', () => openAgentMenu(paneId));
   } else if (topbar) {
     topbar.style.display = '';
     document.getElementById('topbar-title')!.innerHTML = paneHeaderHtml(found, paneId);
-    const backRoute = paneBackRoute;
+    const backRoute = view.paneBackRoute;
     document.getElementById('topbar-left')!.innerHTML =
       `<button class="topbar-back" aria-label="Back">&#8592; ${backRoute.startsWith('#/home/') ? 'Home' : 'Agents'}</button>`;
     // View toggle (terminal ⇄ chat, hidden until a claude transcript is found) +
@@ -1346,7 +1127,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
       `<button class="topbar-action view-toggle" id="btn-view-toggle" style="display:none;">Chat</button>` +
       `<button class="topbar-action" id="btn-agent-menu" aria-label="Agent actions">&#8942;</button>`;
     document.getElementById('btn-view-toggle')!.addEventListener('click', () => {
-      if (paneViewMode === 'chat') switchToTerminal(); else switchToChat();
+      if (view.paneViewMode === 'chat') switchToTerminal(); else switchToChat();
     });
     document.getElementById('btn-agent-menu')!.addEventListener('click', () => openAgentMenu(paneId));
     document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate(backRoute));
@@ -1364,7 +1145,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   wheelQueue = 0;
   stopFling();
   // chat view starts closed; availability is probed after the terminal loads
-  paneViewMode = 'terminal';
+  view.paneViewMode = 'terminal';
   chatAvailable = false;
   chatSessionId = null;
   chatCursor = 0;
@@ -1376,31 +1157,32 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   // Build screen HTML. The terminal holds two sections that are updated
   // independently so live pushes never touch the scrollback DOM above:
   // #term-history (scrollback prefix) + #term-live (current screen).
+  view.screen = 'pane';
   elScreen!.innerHTML = `
-    <div id="screen-pane"${homeMode ? ' class="screen-home"' : ''} style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
-      ${homeMode ? '<div class="home-status" id="home-status"></div>' : ''}
+    <div id="screen-pane"${view.homeMode ? ' class="screen-home"' : ''} style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
+      ${view.homeMode ? '<div class="home-status" id="home-status"></div>' : ''}
       <div class="terminal-output" id="terminal-output"><div id="term-history"></div><div id="term-live"><span class="loading-spinner"></span></div></div>
       <div class="chat-log" id="chat-log" style="display:none;"></div>
-      ${homeMode ? '<div class="home-activity" id="home-activity" style="display:none;"></div>' : ''}
+      ${view.homeMode ? '<div class="home-activity" id="home-activity" style="display:none;"></div>' : ''}
       <div class="chat-prompt" id="chat-prompt" style="display:none;"></div>
       <div class="input-bar">
         <div class="input-row">
-          <textarea id="pane-input" rows="1" placeholder="${homeMode ? `Message ${escHtml(orchestratorLabel(orchestratorOfPane(paneId)))}…` : 'Send text…'}" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+          <textarea id="pane-input" rows="1" placeholder="${view.homeMode ? `Message ${escHtml(orchestratorLabel(orchestratorOfPane(store.appState, paneId)))}…` : 'Send text…'}" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
           <button class="input-send-btn" id="btn-send-enter">Send</button>
         </div>
-        <div class="quickkey-row" id="quickkey-row"${homeMode ? ' style="display:none;"' : ''}></div>
+        <div class="quickkey-row" id="quickkey-row"${view.homeMode ? ' style="display:none;"' : ''}></div>
       </div>
     </div>
   `;
 
-  if (homeMode) {
+  if (view.homeMode) {
     homeStatusHtml = '';
     homeActivity = null;
     document.getElementById('home-status')!.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
       const chip = t.closest('[data-pane-id]') as HTMLElement | null;
-      if (chip) navigate(paneRoute(chip.dataset.paneId!));
-      else if (t.closest('[data-go="agents"]')) navigate(homeAgentsHash());
+      if (chip) navigate(paneRoute(store.appState, chip.dataset.paneId!));
+      else if (t.closest('[data-go="agents"]')) navigate(homeAgentsHash(location.hash));
     });
     renderHomeStatus();
   }
@@ -1412,7 +1194,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   // Answer a pending prompt: tapping an option sends its menu key.
   document.getElementById('chat-prompt')!.addEventListener('click', (e) => {
     const btn = (e.target as HTMLElement).closest('.ask-opt') as HTMLElement | null;
-    if (!btn || !activePaneId) return;
+    if (!btn || !view.activePaneId) return;
     const send = btn.dataset.askSend;
     if (send) void sendAskAnswer(send, btn);
   });
@@ -1477,7 +1259,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
         // during the send (this textarea is then detached) — and on failure show the
         // task in it again.
         paneInput.disabled = false;
-        const live = activePaneId === paneId ? document.getElementById('pane-input') as HTMLTextAreaElement | null : null;
+        const live = view.activePaneId === paneId ? document.getElementById('pane-input') as HTMLTextAreaElement | null : null;
         if (live) {
           live.disabled = false;
           if (restored !== null) {
@@ -1499,7 +1281,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   // If the user switched panes while the first read was in flight, this old
   // continuation must not run loadHistoryPrefix against the new pane — it would
   // slice the recent buffer with lastLiveAnsi='' and duplicate the screen.
-  if (gen !== paneViewGen || paneId !== activePaneId) return;
+  if (gen !== paneViewGen || paneId !== view.activePaneId) return;
   void loadHistoryPrefix();
 
   // Start polling while this pane is visible
@@ -1528,9 +1310,9 @@ function preferredView(): 'terminal' | 'chat' {
 
 function updateViewToggleLabel(): void {
   const btn = document.getElementById('btn-view-toggle');
-  if (btn) btn.textContent = homeMode ? (paneViewMode === 'chat' ? '>_' : 'Chat') : (paneViewMode === 'chat' ? 'Terminal' : 'Chat');
+  if (btn) btn.textContent = view.homeMode ? (view.paneViewMode === 'chat' ? '>_' : 'Chat') : (view.paneViewMode === 'chat' ? 'Terminal' : 'Chat');
   // Home hides the terminal keys while chatting; they come back with the terminal
-  if (homeMode) document.getElementById('quickkey-row')?.style.setProperty('display', paneViewMode === 'chat' ? 'none' : '');
+  if (view.homeMode) document.getElementById('quickkey-row')?.style.setProperty('display', view.paneViewMode === 'chat' ? 'none' : '');
 }
 
 function showViewToggle(visible: boolean): void {
@@ -1549,11 +1331,11 @@ async function initChatAvailability(paneId: string): Promise<void> {
     const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript`) as TranscriptResponse;
     // gen/paneId invalidate a probe from a prior pane; the in-flight guard means
     // no concurrent re-probe supersedes this one, so a slow probe still applies.
-    if (probeId !== chatProbeSeq || gen !== paneViewGen || paneId !== activePaneId) return;
+    if (probeId !== chatProbeSeq || gen !== paneViewGen || paneId !== view.activePaneId) return;
     chatAvailable = data.available;
     showViewToggle(chatAvailable);
     // the orchestrator is someone to talk to: always open it as chat
-    if (chatAvailable && (preferredView() === 'chat' || orchestratorOfPane(paneId))) switchToChat(data, false);
+    if (chatAvailable && (preferredView() === 'chat' || orchestratorOfPane(store.appState, paneId))) switchToChat(data, false);
     else updateViewToggleLabel(); // staying on the terminal: Home reveals its keys
   } catch {
     // leave the terminal view; toggle stays hidden (Home reveals the keys)
@@ -1567,8 +1349,8 @@ async function initChatAvailability(paneId: string): Promise<void> {
 // existing preference, or falling back on a transient transcript miss) must not
 // rewrite the stored preference.
 function switchToChat(initial?: TranscriptResponse, persist = true): void {
-  if (!chatAvailable || !activePaneId) return;
-  paneViewMode = 'chat';
+  if (!chatAvailable || !view.activePaneId) return;
+  view.paneViewMode = 'chat';
   if (persist) localStorage.setItem(STORAGE_VIEW, 'chat');
   document.getElementById('terminal-output')?.style.setProperty('display', 'none');
   document.getElementById('chat-log')?.style.setProperty('display', '');
@@ -1585,7 +1367,7 @@ function switchToChat(initial?: TranscriptResponse, persist = true): void {
 }
 
 function switchToTerminal(persist = true): void {
-  paneViewMode = 'terminal';
+  view.paneViewMode = 'terminal';
   if (persist) localStorage.setItem(STORAGE_VIEW, 'terminal');
   document.getElementById('chat-log')?.style.setProperty('display', 'none');
   document.getElementById('terminal-output')?.style.setProperty('display', '');
@@ -1596,9 +1378,9 @@ function switchToTerminal(persist = true): void {
 }
 
 async function loadChatInitial(): Promise<void> {
-  if (!activePaneId) return;
+  if (!view.activePaneId) return;
   const gen = paneViewGen;
-  const paneId = activePaneId;
+  const paneId = view.activePaneId;
   // switchToChat starts the WS transcript watch alongside this request; if that
   // watch (or anything else) advances the chat state while this GET is in flight,
   // its result is stale — capture the start state and drop a mismatched reply so
@@ -1607,7 +1389,7 @@ async function loadChatInitial(): Promise<void> {
   const reqCursor = chatCursor;
   try {
     const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript`) as TranscriptResponse;
-    if (gen !== paneViewGen || paneId !== activePaneId || paneViewMode !== 'chat') return;
+    if (gen !== paneViewGen || paneId !== view.activePaneId || view.paneViewMode !== 'chat') return;
     if (chatSessionId !== reqSession || chatCursor !== reqCursor) return; // superseded in flight
     if (!data.available) { chatAvailable = false; showViewToggle(false); switchToTerminal(false); return; }
     chatSessionId = data.sessionId ?? null;
@@ -1625,7 +1407,7 @@ function renderChatReset(items: TimelineItem[], preserveScroll = false): void {
   // they were reading instead of snapping to the bottom.
   const prevTop = chat.scrollTop;
   const prevFromBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight;
-  if (homeMode) {
+  if (view.homeMode) {
     homeActivity = latestActivity(items, null);
     renderHomeActivity();
     items = conversationItems(items);
@@ -1639,7 +1421,7 @@ function renderChatReset(items: TimelineItem[], preserveScroll = false): void {
 function appendChatItems(items: TimelineItem[]): void {
   const chat = document.getElementById('chat-log');
   if (!chat || items.length === 0) return;
-  if (homeMode) {
+  if (view.homeMode) {
     homeActivity = latestActivity(items, homeActivity);
     renderHomeActivity();
     items = conversationItems(items);
@@ -1657,12 +1439,12 @@ function onTranscriptItems(msg: WsTranscriptItemsMessage): void {
   if (!msg.available) {
     chatAvailable = false;
     showViewToggle(false);
-    if (paneViewMode === 'chat') switchToTerminal(false);
+    if (view.paneViewMode === 'chat') switchToTerminal(false);
     return;
   }
   chatAvailable = true;
   showViewToggle(true);
-  if (paneViewMode !== 'chat') return; // availability noted; content applies only in chat mode
+  if (view.paneViewMode !== 'chat') return; // availability noted; content applies only in chat mode
   if (msg.reset || msg.sessionId !== chatSessionId) {
     // Same session (a reconnect re-watch) → keep scroll; a new session → bottom.
     const sameSession = msg.sessionId != null && msg.sessionId === chatSessionId;
@@ -1678,9 +1460,9 @@ function onTranscriptItems(msg: WsTranscriptItemsMessage): void {
 // HTTP fallback while the WS is down: fetch items past the cursor for the same
 // session (mirrors the transcript watch).
 async function pollChatFallback(): Promise<void> {
-  if (!activePaneId || paneViewMode !== 'chat') return;
+  if (!view.activePaneId || view.paneViewMode !== 'chat') return;
   const gen = paneViewGen;
-  const paneId = activePaneId;
+  const paneId = view.activePaneId;
   // The response is only valid against the state this request started from. If
   // anything (a WS reset/push, or a newer poll) advances the session or cursor
   // while the request is in flight, applying it — append OR reset — would
@@ -1690,7 +1472,7 @@ async function pollChatFallback(): Promise<void> {
   const q = chatSessionId ? `?session=${encodeURIComponent(chatSessionId)}&after=${reqCursor}` : '';
   try {
     const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript${q}`) as TranscriptResponse;
-    if (gen !== paneViewGen || paneId !== activePaneId || paneViewMode !== 'chat') return;
+    if (gen !== paneViewGen || paneId !== view.activePaneId || view.paneViewMode !== 'chat') return;
     // Drop any response whose request start no longer matches the current state
     // BEFORE acting on it — a stale available:false must not force the terminal
     // after a WS push/reset already advanced the chat.
@@ -1948,7 +1730,7 @@ async function flushWheelQueue(): Promise<void> {
   // app-scroll may have turned off (pane left full-screen) since these were
   // queued — drop them so we don't inject SGR wheel bytes into a normal pane.
   if (!appScrollPane) { wheelQueue = 0; stopFling(); return; }
-  if (!activePaneId || wheelQueue === 0) return;
+  if (!view.activePaneId || wheelQueue === 0) return;
   const direction = wheelQueue > 0 ? 'up' : 'down';
   const steps = Math.min(30, Math.abs(wheelQueue));
   wheelQueue -= (direction === 'up' ? steps : -steps);
@@ -1957,7 +1739,7 @@ async function flushWheelQueue(): Promise<void> {
     wheelFlushTimer = setTimeout(() => { void flushWheelQueue(); }, 70);
   }
   try {
-    await apiPost(`/api/panes/${encodeURIComponent(activePaneId)}/scroll`, { direction, steps });
+    await apiPost(`/api/panes/${encodeURIComponent(view.activePaneId)}/scroll`, { direction, steps });
   } catch { /* transient send failures just skip a scroll step */ }
   const now = Date.now();
   if (now - lastWheelRefreshAt > 200) {
@@ -2003,15 +1785,15 @@ async function loadHistoryPrefix(): Promise<void> {
   // without lastLiveAnsi we can't trim it off, so we'd duplicate it into history.
   // (Bails harmlessly when the first pane read hasn't rendered yet; historyFetchedAt
   // stays 0 so the next above-bottom scroll retries once live output exists.)
-  if (!activePaneId || historyRefreshing || terminalTouchActive || !lastLiveAnsi) return;
+  if (!view.activePaneId || historyRefreshing || terminalTouchActive || !lastLiveAnsi) return;
   const gen = paneViewGen;
-  const paneId = activePaneId;
+  const paneId = view.activePaneId;
   historyRefreshing = true;
   try {
     const data = await apiGet(
       `/api/panes/${encodeURIComponent(paneId)}/read?source=recent&lines=${HISTORY_LINES}&format=ansi`
     ) as Record<string, string | null>;
-    if (gen !== paneViewGen || paneId !== activePaneId) return; // navigated away
+    if (gen !== paneViewGen || paneId !== view.activePaneId) return; // navigated away
     // A gesture may have started while the fetch was in flight; replacing the
     // history DOM / adjusting scrollTop now would cancel or jump it. Bail and
     // leave the cache dirty so the next above-bottom scroll refetches.
@@ -2104,19 +1886,19 @@ function flushPendingOutput(): void {
 }
 
 async function refreshPaneOutput(): Promise<void> {
-  if (!activePaneId) return;
+  if (!view.activePaneId) return;
   const liveEl = document.getElementById('term-live');
   if (!liveEl) return;
 
   const gen = paneViewGen;
   const seq = outputSeq;
   const reqId = ++refreshReqSeq;
-  const paneId = activePaneId;
+  const paneId = view.activePaneId;
   try {
     const data = await apiGet(
       `/api/panes/${encodeURIComponent(paneId)}/read?source=visible&lines=200&format=ansi`
     ) as Record<string, unknown>;
-    if (gen !== paneViewGen || paneId !== activePaneId) return; // navigated away
+    if (gen !== paneViewGen || paneId !== view.activePaneId) return; // navigated away
     // A later read started while this one was in flight — let the newest win, so
     // an earlier HTTP read can't overwrite a newer one's fresher output.
     if (reqId !== refreshReqSeq) return;
@@ -2166,8 +1948,8 @@ const PROMPT_SCREEN_INTERVAL_MS = 1200;
 function updatePromptPanel(): void {
   const panel = document.getElementById('chat-prompt');
   if (!panel) return;
-  const status = activePaneId ? findPane(activePaneId)?.pane?.agent?.status : null;
-  const blocked = paneViewMode === 'chat' && status === 'blocked';
+  const status = view.activePaneId ? findPane(view.activePaneId)?.pane?.agent?.status : null;
+  const blocked = view.paneViewMode === 'chat' && status === 'blocked';
   if (!blocked) {
     // Pane is no longer waiting: the answer (if one was just sent) has landed, so
     // end the post-send cooldown that was suppressing re-taps.
@@ -2241,17 +2023,17 @@ function startPromptScreenPoll(): void {
   if (promptScreenTimer) return;
   const tick = async (): Promise<void> => {
     if (promptPollActive) return; // a poll is in flight — don't overlap (so slow reads aren't all discarded)
-    if (paneViewMode !== 'chat' || !activePaneId) { stopPromptScreenPoll(); return; }
+    if (view.paneViewMode !== 'chat' || !view.activePaneId) { stopPromptScreenPoll(); return; }
     if (document.hidden) return; // a full screen read every 1.2s — skip while nobody can see it
-    if (findPane(activePaneId)?.pane?.agent?.status !== 'blocked') { updatePromptPanel(); return; }
+    if (findPane(view.activePaneId)?.pane?.agent?.status !== 'blocked') { updatePromptPanel(); return; }
     const reqId = ++promptPollSeq;
     promptPollActive = reqId;
-    const paneId = activePaneId;
+    const paneId = view.activePaneId;
     try {
       const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
       // stopPromptScreenPoll bumps promptPollSeq to invalidate a poll from a prior
       // session; the in-flight guard means no concurrent tick supersedes this one.
-      if (reqId !== promptPollSeq || paneViewMode !== 'chat' || paneId !== activePaneId) return;
+      if (reqId !== promptPollSeq || view.paneViewMode !== 'chat' || paneId !== view.activePaneId) return;
       const ansi = (data.ansi ?? data.text ?? '') as string;
       const stripped = stripAnsi(ansi);
       const parsed = parsePrompt(stripped);
@@ -2298,7 +2080,7 @@ function dropPendingAnswer(): void {
 function settlePendingAnswer(): void {
   const a = pendingAnswer;
   if (!a) return;
-  if (a.paneId !== activePaneId) { dropPendingAnswer(); return; }
+  if (a.paneId !== view.activePaneId) { dropPendingAnswer(); return; }
   const status = findPane(a.paneId)?.pane?.agent?.status;
   if (status === 'working') a.resumed = true; // may come before the press is confirmed
   const outcome = answerOutcome(a.sent, a.resumed, status);
@@ -2322,7 +2104,7 @@ function settlePendingAnswer(): void {
 // gap). A mismatch returns 409 and we refresh. An in-flight guard and a per-answer
 // generation token keep double-taps and stale async work off the shared guard.
 async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
-  if (!activePaneId || promptAnswerInFlight) return;
+  if (!view.activePaneId || promptAnswerInFlight) return;
   const to = parseInt(target, 10);
   // Claude's prompts never exceed ~6 options, so every option is a single digit; a
   // multi-digit option would submit on its first digit, so refuse it and leave the
@@ -2330,7 +2112,7 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   if (!Number.isInteger(to) || to < 1 || to > 9) return;
   const expectedId = promptScreenId; // region identity of the prompt these buttons belong to
   if (!expectedId) return;
-  const paneId = activePaneId;
+  const paneId = view.activePaneId;
   const myGen = ++answerGen; // token for THIS answer; a stale POST/timer must not touch a newer one
   promptAnswerInFlight = true;
   if (answerCooldownTimer) { clearTimeout(answerCooldownTimer); answerCooldownTimer = null; }
@@ -2343,7 +2125,7 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
   const chat = /^Chat about this/i.test(btn.querySelector('.ask-opt-label')?.textContent ?? '');
   dropPendingAnswer();
   const pending: PendingAnswer = {
-    paneId, gen: myGen, prompt: expectedId, back: homeMode || chat ? '' : paneBackRoute,
+    paneId, gen: myGen, prompt: expectedId, back: view.homeMode || chat ? '' : view.paneBackRoute,
     sent: false, resumed: false, timer: null,
   };
   pendingAnswer = pending;
@@ -2355,7 +2137,7 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
       pending.timer = setTimeout(() => {
         if (pendingAnswer !== pending) return;
         dropPendingAnswer();
-        if (paneId === activePaneId) showToast('Answer not confirmed', 'The prompt is still waiting. Check the terminal.');
+        if (paneId === view.activePaneId) showToast('Answer not confirmed', 'The prompt is still waiting. Check the terminal.');
       }, ANSWER_CONFIRM_MS);
       settlePendingAnswer();
     }
@@ -2376,7 +2158,7 @@ async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
       // The prompt advanced before the digit landed — refresh to the live prompt and
       // let the user retap; never send into a different prompt.
       const live = await readPromptScreen(paneId);
-      if (myGen === answerGen && paneId === activePaneId) renderPromptPanel(live?.parsed ?? null, live?.id ?? '');
+      if (myGen === answerGen && paneId === view.activePaneId) renderPromptPanel(live?.parsed ?? null, live?.id ?? '');
       showToast('Prompt changed', 'The prompt updated before your tap was sent — try again.');
     } else {
       showToast('Send failed', (err as Error).message);
@@ -2394,17 +2176,17 @@ function paneIsClaude(paneId: string): boolean {
 function startPaneRefresh(): void {
   stopPaneRefresh();
   paneRefreshTimer = setInterval(() => {
-    if (!activePaneId || document.hidden) return;
+    if (!view.activePaneId || document.hidden) return;
     // A claude pane's transcript may appear shortly after the pane opens (session
     // just started, JSONL not written yet). Re-probe until chat is found so the
     // view upgrades without a manual reload; non-claude panes are never probed.
-    if (!chatAvailable && paneViewMode === 'terminal' && paneIsClaude(activePaneId)) {
-      void initChatAvailability(activePaneId);
+    if (!chatAvailable && view.paneViewMode === 'terminal' && paneIsClaude(view.activePaneId)) {
+      void initChatAvailability(view.activePaneId);
     }
     // While the WS watch is pushing, client polling is redundant — poll only as
     // a fallback when the socket is down, for whichever view is active.
-    if (!wsConnected) {
-      if (paneViewMode === 'chat') void pollChatFallback();
+    if (!store.wsConnected) {
+      if (view.paneViewMode === 'chat') void pollChatFallback();
       else refreshPaneOutput();
     }
   }, PANE_REFRESH_INTERVAL_MS);
@@ -2429,11 +2211,12 @@ function renderSettingsScreen(): void {
   }
 
   const notifEnabled = localStorage.getItem(STORAGE_NOTIF) === 'true';
-  const herdrVersion = appState?.herdr?.version ?? '—';
-  const herdrProtocol = appState?.herdr?.protocol ?? '—';
+  const herdrVersion = store.appState?.herdr?.version ?? '—';
+  const herdrProtocol = store.appState?.herdr?.protocol ?? '—';
   const bridgeUrl = `${location.protocol}//${location.host}`;
   const notifPermission = typeof Notification !== 'undefined' ? Notification.permission : 'unavailable';
 
+  view.screen = 'settings';
   elScreen!.innerHTML = `
     <div id="screen-settings">
       <div class="settings-section">
@@ -2470,7 +2253,7 @@ function renderSettingsScreen(): void {
         </div>
         <div class="settings-row">
           <span class="settings-row-label">WS status</span>
-          <span class="settings-row-value">${wsConnected ? 'Connected' : 'Disconnected'}</span>
+          <span class="settings-row-value">${store.wsConnected ? 'Connected' : 'Disconnected'}</span>
         </div>
       </div>
 
@@ -2521,13 +2304,9 @@ function renderSettingsScreen(): void {
 
   // Clear token
   document.getElementById('btn-clear-token')!.addEventListener('click', () => {
-    if (wsSocket) { wsSocket.close(); wsSocket = null; }
-    if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-    if (wsPingTimer) clearInterval(wsPingTimer);
-    stopStatePoll();
+    wsSignOut();
     stopPaneRefresh();
-    appState = null;
-    wsConnected = false;
+    store.appState = null;
     clearToken();
     renderTokenScreen();
   });
@@ -2584,8 +2363,13 @@ document.addEventListener('DOMContentLoaded', () => {
     elToastContainer!.querySelectorAll('.toast').forEach((el) => el.remove());
   });
 
+  // A 401 drops the token (api.ts): ask for it again
+  onUnauthorized(() => renderTokenScreen('Session expired or token invalid. Please enter your token.'));
+  onWsMessage(handleWsMessage);
+  subscribe(updateConnBadge); // the socket's link (ws.ts)
+
   // Load token from URL or storage
-  token = loadToken();
+  const token = loadToken();
 
   // Route on hash change
   window.addEventListener('hashchange', handleRoute);
@@ -2600,8 +2384,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Connect WS and load initial state
     wsConnect();
     apiGet('/api/state').then((state) => {
-      if (appState) return; // a WS push landed first: it is newer and has routed already
-      appState = state as AppState;
+      if (store.appState) return; // a WS push landed first: it is newer and has routed already
+      store.appState = state as AppState;
       onStateUpdate();
     }).catch((err: Error) => {
       if (err.message !== '401' && !routeRendered) {
@@ -2615,16 +2399,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Stop pane polling when tab is hidden, resume when visible
   document.addEventListener('visibilitychange', () => {
-    if (paneViewMode !== 'chat') wsSendWatch(); // pause/resume the pane watch
-    if (document.hidden || !activePaneId) return;
+    if (view.paneViewMode !== 'chat') wsSendWatch(); // pause/resume the pane watch
+    if (document.hidden || !view.activePaneId) return;
     // Returning to a pane that's already open (app switch, no route change) won't
     // fire handleRoute, so clear any OS notification raised for it while hidden.
-    dismissNotificationsForPane(activePaneId);
+    dismissNotificationsForPane(view.activePaneId);
     markActivePaneSeen();
     // In chat mode the transcript watch keeps pushing while the WS is up, so the
     // HTTP fallback must only run when the socket is down — otherwise a fallback
     // response racing a WS push duplicates items and rewinds chatCursor.
-    if (paneViewMode === 'chat') { if (!wsConnected) void pollChatFallback(); }
+    if (view.paneViewMode === 'chat') { if (!store.wsConnected) void pollChatFallback(); }
     else refreshPaneOutput();
   });
 });
