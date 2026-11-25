@@ -278,6 +278,8 @@ class Page {
   cdp!: Cdp; sid = ''; targetId = ''; proc!: ReturnType<typeof spawn>;
   reqs: Req[] = []; resps: Array<{ t: number; url: string; status: number; type: string; sw: boolean }> = [];
   wsSent: Frame[] = []; wsRecv: Frame[] = []; wsCreated: number[] = []; swFails = 0; refused: string[] = [];
+  /** GETs whose URL contains `hold` are held unsent in `held` until release(): a bridge that answers late */
+  hold: string | null = null; held: any[] = [];
   /** state frames aren't kept: stateMarkT is when the first one containing stateMark arrived (0: none yet) */
   stateMark = ''; stateMarkT = 0;
   c: Ctx;
@@ -335,9 +337,17 @@ class Page {
   uncovered = (el: string, p: { x: number; y: number }) =>
     this.until(`(() => { const e = ${el}, hit = document.elementFromPoint(${p.x}, ${p.y}); if (e && e.contains(hit)) return true;
       if (hit?.closest('#toast-container')) document.getElementById('toast-clear-all')?.click(); return false; })()`, 10_000);
+  /** Stops holding, and sends the held requests on; returns how many there were. */
+  async release(): Promise<number> {
+    this.hold = null;
+    const ps = this.held.splice(0);
+    for (const p of ps) await this.S('Fetch.continueRequest', { requestId: p.requestId });
+    return ps.length;
+  }
   posts = (t: number, suffix: string) => this.reqs.filter((q) => q.t >= t && q.method === 'POST' && q.url.endsWith(suffix));
   /** The page's own API mutations go through the same guard: a UI bug must not reach a real agent. */
   async guardRequest(p: any) {
+    if (this.hold && p.request.method === 'GET' && p.request.url.includes(this.hold)) { this.held.push(p); return; }
     const u = new URL(p.request.url);
     try {
       const id = u.pathname.match(/^\/api\/(?:panes|agents)\/([^/]+)/)?.[1];
@@ -825,19 +835,38 @@ async function p10(c: Ctx) {
   result(c, reads >= 2, 'P10.app-quickkey', `reads600ms=${reads}`, 'a quick key is followed by >= 2 GET /read within 600ms');
 }
 
-/** Stale responses: a pane left at once (its first reads still in flight) must not paint the next pane. */
+/** Stale responses: wc-shell's screen read, held until wc-less is on screen, must not paint wc-less's terminal. */
 async function p14(c: Ctx) {
   const { pg } = c;
   const { shell, less } = c.rec.names;
+  const read = `/api/panes/${enc(shell)}/read?`;
   await pg.goto('#/agents');
-  const gap = await pg.ev(`new Promise((res) => { location.hash = ${js(`#/pane/${enc(shell)}`)}; const t = performance.now();
-    setTimeout(() => { location.hash = ${js(`#/pane/${enc(less)}`)}; res(Math.round(performance.now() - t)); }, 20); })`);
-  await sleep(3000);
-  const [hash, live] = await pg.ev(`[location.hash, document.getElementById('term-live')?.textContent ?? '']`);
-  const b = live.includes('wc-B');
-  const a = live.includes('wc-A');
-  result(c, gap <= 50 && hash === `#/pane/${enc(less)}` && b && !a, 'P14', `switchAfter=${gap}ms,onLess=${hash === `#/pane/${enc(less)}`},wc-B=${b},wc-A=${a}`,
-    '#/pane/<wc-shell>, then #/pane/<wc-less> within 50ms: 3s later #term-live has wc-B and no wc-A');
+  pg.hold = read;
+  let n = 0, tNav = 0, tRel = 0;
+  try {
+    await pg.ev(`location.hash = ${js(`#/pane/${enc(shell)}`)}`);
+    const paused = await waitFn(() => pg.held.length > 0, 3000);
+    if (paused.timeout) throw env("wc-shell's /read never sent");
+    await pg.ev(`location.hash = ${js(`#/pane/${enc(less)}`)}`);
+    tNav = Date.now();
+    const onLess = await pg.until(`document.getElementById('term-live')?.textContent.includes('wc-B')`, 5000);
+    if (onLess.timeout) throw env('wc-less never showed wc-B');
+    tRel = Date.now();
+    n = await pg.release();
+  } finally {
+    await pg.release();
+  }
+  const answered = await waitFn(() => pg.resps.find((r) => r.t >= tRel && r.url.includes(read)), 2000);
+  // 2s from the release: every look shows wc-less's screen and none of wc-shell's
+  const seen = new Set<string>();
+  for (const t0 = Date.now(); Date.now() - t0 < 2000; await sleep(100)) {
+    const live: string = await pg.ev(`document.getElementById('term-live')?.textContent ?? ''`);
+    seen.add(`${live.includes('wc-B') ? 'B' : '-'}${live.includes('wc-A') ? 'A' : '-'}`);
+  }
+  const after = answered.timeout ? 'none' : `+${answered.v.t - tRel}ms(status ${answered.v.status})`;
+  result(c, n >= 1 && tRel >= tNav && !answered.timeout && seen.size === 1 && seen.has('B-'), 'P14',
+    `held=${n},releasedAfterNav=${tRel >= tNav}(+${tRel - tNav}ms),shellResponse=${after},liveFor2s=${[...seen].join('+')}`,
+    "wc-shell's /read held until #/pane/<wc-less> shows wc-B, then released and answered: for 2s #term-live keeps wc-B and no wc-A");
 }
 
 async function p12(c: Ctx) {
