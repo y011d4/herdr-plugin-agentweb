@@ -2,7 +2,7 @@
  * app.ts — Yoicks PWA
  *
  * Single-page application with hash routing:
- *   #/agents    — dashboard (default)
+ *   #/agents    — dashboard (default; ui/Dashboard.tsx)
  *   #/agents/:name — the dashboard of one orchestrator's Claude account (from its Home)
  *   #/home/:name — an orchestrator's chat (Home); #/home opens the last one used
  *   #/pane/:id  — pane terminal detail
@@ -16,25 +16,24 @@ import { renderItems, conversationItems, latestActivity } from './transcript.ts'
 import type { TimelineItem } from './transcript.ts';
 import { stripAnsi, parsePrompt, promptIdentity, displayCols, answerOutcome } from './prompt.ts';
 import type { PromptOption, ParsedPrompt } from './prompt.ts';
-import { dashboardCards, homeSummary, shownStatus } from './dashboard-group.ts';
-import type { DashboardCard } from './dashboard-group.ts';
+import { homeSummary, shownStatus } from './dashboard-group.ts';
 import { DESKTOP_QUERY, enterSends } from './composer-keys.ts';
 import type { AppState, ClearResponse, OrchestratorView, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 import { apiDelete, apiGet, apiPost, getToken, loadToken, onUnauthorized, setToken } from './api.ts';
-import { keptTasks, markPaneSeen, setAppState, store, subscribe } from './store.ts';
+import { STORAGE_HOME, findPane, keptTasks, lastHome, markPaneSeen, setAppState, setStartingHome, store, subscribe } from './store.ts';
 import { dismissNotificationsForPane, dismissToastsForPane, notifyAgentStatus, showToast } from './notify.ts';
 import { onWsMessage, wsConnect, wsSendWatch } from './ws.ts';
-import { agentsScope, defaultHome, homeAgentsHash, homeHash, homeOf, isAgentsRoute, nextPaneBackRoute, orchestratorOfPane,
+import { homeAgentsHash, homeHash, homeOf, isAgentsRoute, nextPaneBackRoute, orchestratorOfPane,
   paneGoneRoute, paneRoute, resolveRoute } from './routes.ts';
 import { createElement } from 'react';
-import { confirmModal, openAgentMenu, openNewAgent } from './ui/Modals.tsx';
+import { agentCards, cardTitle, Dashboard, dashboardTopbar, orchestratorLabel } from './ui/Dashboard.tsx';
+import { confirmModal, openAgentMenu } from './ui/Modals.tsx';
 import { mountOverlays, mountScreen, setConnIndicator, setLegacyScreen, setLegacyTopbar } from './ui/mount.tsx';
 import { BUILD, Settings, settingsTopbar } from './ui/Settings.tsx';
 import { Token } from './ui/Token.tsx';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 const STORAGE_VIEW = 'herdr_pane_view'; // preferred pane view: 'terminal' | 'chat'
-const STORAGE_HOME = 'herdr_home'; // the orchestrator whose Home was opened last
 
 const PANE_REFRESH_INTERVAL_MS = 3_000;  // polling while pane detail is visible
 
@@ -101,15 +100,6 @@ function escHtml(s: unknown): string {
     .replace(/"/g, '&quot;');
 }
 
-function relativeTime(ms: number): string {
-  if (!ms) return '';
-  const diff = Date.now() - ms;
-  if (diff < 5_000) return 'just now';
-  if (diff < 60_000) return `${Math.floor(diff / 1_000)}s ago`;
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  return `${Math.floor(diff / 3_600_000)}h ago`;
-}
-
 // ── Server messages ───────────────────────────────────────────────────────────
 
 // Every WS message lands here, a fallback-polled state as a `state` message (ws.ts).
@@ -173,18 +163,17 @@ function homeReplaced(hash: string): boolean {
 function onStateUpdate(): void {
   if (goHomeToOrchestrator()) return; // first state of a fresh open: decide home
   // an orchestrator started from the list is up: open its Home, if the list is still on screen
-  const started = startingHome ? orchestrators().find((o) => o.name === startingHome && o.paneId) : undefined;
+  const started = store.startingHome ? orchestrators().find((o) => o.name === store.startingHome && o.paneId) : undefined;
   if (started) {
-    startingHome = null;
+    setStartingHome(null);
     if (isAgentsRoute(location.hash)) { navigate(homeHash(started.name)); return; }
   }
   // Nothing rendered yet (startup), or the token was just (re-)entered and the
   // token screen is still up: render the current route.
   if (!routeRendered || view.screen === 'token') { handleRoute(); return; }
-  const hash = location.hash || '#/agents';
-  if (isAgentsRoute(hash)) {
-    renderAgentsDashboard();
-  } else if (hash.startsWith('#/pane/')) {
+  // (the list follows the store itself: ui/Dashboard.tsx)
+  const hash = location.hash;
+  if (hash.startsWith('#/pane/')) {
     // If the pane vanished (e.g. seen via /api/state polling while the WS is
     // down, so the pane_gone push can't fire), leave the now-stale view.
     if (view.activePaneId && !findPane(view.activePaneId)) {
@@ -238,11 +227,6 @@ function navigate(hash: string): void {
 // Orchestrators (one per Claude account, say) each have a Home: #/home/<name>.
 const orchestrators = (): OrchestratorView[] => store.appState?.orchestrators ?? [];
 
-/** The orchestrator whose Home was opened last on this phone. */
-function lastHome(): string | null {
-  try { return localStorage.getItem(STORAGE_HOME); } catch { return null; }
-}
-
 // Opening the app without a route (the PWA's start_url) is decided once, on the first
 // state (resolveRoute): location.replace keeps the empty-hash entry out of history.
 function goHomeToOrchestrator(): boolean {
@@ -285,21 +269,6 @@ function stopHoldingHome(): void {
   homeLostTimer = null;
 }
 
-// An orchestrator started from the list: its Home opens once the state shows it running.
-let startingHome: string | null = null;
-
-async function startOrchestratorFlow(name: string): Promise<void> {
-  startingHome = name;
-  renderAgentsDashboard(); // the button shows it's starting
-  try {
-    await apiPost(`/api/orchestrators/${encodeURIComponent(name)}/start`);
-  } catch (err) {
-    startingHome = null;
-    showToast('Could not start the orchestrator', (err as Error).message);
-    if (isAgentsRoute(location.hash)) renderAgentsDashboard();
-  }
-}
-
 function handleRoute(e?: Event): void {
   if (!getToken()) {
     renderTokenScreen();
@@ -332,7 +301,7 @@ function handleRoute(e?: Event): void {
     markActivePaneSeen();
     renderPaneDetail(route.paneId);
   } else if (route.kind === 'agents') {
-    renderAgentsDashboard();
+    mountScreen('agents', createElement(Dashboard, { hash: location.hash }), { topbar: dashboardTopbar(location.hash) });
   } else if (route.kind === 'pane') {
     view.activePaneId = route.paneId;
     view.paneBackRoute = nextPaneBackRoute(e instanceof HashChangeEvent ? new URL(e.oldURL).hash : null, view.paneBackRoute);
@@ -411,169 +380,12 @@ async function stopAgentFlow(paneId: string): Promise<void> {
   }
 }
 
-// ── Agents dashboard ──────────────────────────────────────────────────────────
-
-// One dashboard card. The list is flat (most recent status change first, see
-// dashboardCards), so each card names its own workspace; `branch` and the
-// `worktree` chip come from that workspace. pane.title is usually null, so the
-// tab name is the card label, with a per-tab index for split-pane agents.
-// A card's label: its tab name (the agent kind if a tab somehow has no label),
-// with a per-tab index for split-pane agents.
-function cardTitle({ pane, tabLabel, tabAgentIndex, tabAgentCount }: DashboardCard): string {
-  const base = tabLabel || pane.agent?.name || pane.agent?.displayName || 'agent';
-  return tabAgentCount > 1 ? `${base} #${tabAgentIndex}` : base;
-}
-
-function renderCard(card: DashboardCard): string {
-  const { pane, workspaceLabel, branch, isWorktree } = card;
-  const { paneId, agent, title } = pane;
-  const { displayName, name, customStatus, message, sinceUnixMs } = agent!;
-  // The chip shows the stable agent kind, so prefer `name` (raw pane.agent,
-  // e.g. "claude"/"codex") over displayName, which can be a richer label.
-  const agentKind = name || displayName || 'agent';
-  const cardLabel = cardTitle(card);
-  const statusClass = shownStatus(pane, store.seenDone) || 'unknown';
-  const meta = customStatus || message || '';
-  const relTime = relativeTime(sinceUnixMs);
-
-  return `
-    <div class="agent-card" data-pane-id="${escHtml(paneId)}" role="button" tabindex="0">
-      <div class="agent-card-header">
-        <span class="agent-name">${escHtml(cardLabel)}</span>
-        ${branch ? `<span class="card-branch">${escHtml(branch)}</span>` : ''}
-        <span class="status-badge ${escHtml(statusClass)}">${escHtml(statusClass)}</span>
-      </div>
-      ${meta ? `<div class="agent-custom-status">${escHtml(meta)}</div>` : ''}
-      <div class="agent-card-meta">
-        <span class="card-workspace">${escHtml(workspaceLabel)}</span>
-        <span class="agent-kind">${escHtml(agentKind)}</span>
-        ${isWorktree ? '<span class="card-worktree">worktree</span>' : ''}
-        ${title ? `<span class="pane-title">${escHtml(title)}</span>` : ''}
-        ${relTime ? `<span>${escHtml(relTime)}</span>` : ''}
-      </div>
-    </div>`;
-}
-
-// State pushes (agent_status_changed and friends) arrive continuously while the
-// user reads the list. Rebuilding the whole #screen subtree on each one used to
-// recreate #screen-agents — the scroll container — snapping scrollTop back to
-// the top and, mid-drag, cancelling the in-progress touch scroll. So the
-// container is kept stable (only its inner groups are replaced, which preserves
-// scrollTop and iOS momentum) and rebuilds are deferred while a finger is down,
-// flushing when it lifts (mirrors the terminal view's touch handling).
-let agentsTouchActive = false;
-let agentsRenderPending = false;
-
-function onAgentsTouchEnd(e: TouchEvent): void {
-  if (e.touches.length > 0) return; // other fingers still down
-  agentsTouchActive = false;
-  if (!agentsRenderPending) return;
-  agentsRenderPending = false;
-  // Rebuild on the next macrotask, not synchronously: a stationary tap synthesizes
-  // a `click` on the tapped card right after touchend, and replacing the card here
-  // would drop that tap (navigation lost). Deferring lets the click — and any
-  // resulting navigation — land first. Only rebuild if the dashboard is still the
-  // mounted view (its container survives only while shown) and the session is
-  // still authenticated, so a tap-away, a 401 that swapped in the token screen, or
-  // any other navigation isn't overwritten with stale agent data.
-  setTimeout(() => {
-    if (getToken() && document.getElementById('screen-agents')) renderAgentsDashboard();
-  }, 0);
-}
-
-function renderAgentsDashboard(): void {
-  // #/agents/<name> (opened from that orchestrator's Home): its account's agents, with a Back to its Home
-  const scope = agentsScope(location.hash, store.appState);
-  // Orchestrators have no cards, so this is the way to a Home: its own, else the one used last
-  const home = scope ?? defaultHome(store.appState, lastHome());
-  const { left, right } = setLegacyTopbar({
-    titleHtml: 'Agents' + (scope ? `<span class="topbar-subtitle">&#183; ${escHtml(orchestratorLabel(scope))}</span>` : ''),
-    leftHtml: home ? '<button class="topbar-back" aria-label="Home">&#8592; Home</button>' : '',
-    rightHtml: `<button class="topbar-action" id="btn-new-agent" aria-label="New agent">+</button>` +
-      `<button class="topbar-action" id="btn-settings" aria-label="Settings">&#9881;</button>`,
-  });
-  if (home) left.querySelector('button')!.addEventListener('click', () => navigate(homeHash(home.name)));
-  right.querySelector('#btn-new-agent')!.addEventListener('click', () => { void openNewAgent(); });
-  right.querySelector('#btn-settings')!.addEventListener('click', () => navigate('#/settings'));
-
-  if (!store.appState) {
-    setLegacyScreen('agents', `<div id="screen-agents" style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="loading-spinner"></span></div>`);
-    return;
-  }
-
-  // A scroll gesture is in progress on the list — rebuilding now would cancel it
-  // and reset the scroll position. Defer until the finger lifts (onAgentsTouchEnd).
-  // An absent container means we're re-entering the route; fall through to rebuild
-  // it (which also clears any stale gesture flag) rather than deferring forever.
-  if (agentsTouchActive && document.getElementById('screen-agents')) {
-    agentsRenderPending = true;
-    return;
-  }
-
-  const { workspaces = [] } = store.appState;
-  const cards = agentCards(scope);
-  // configured orchestrators that aren't running get a Start button atop the list
-  const stopped = orchestrators().filter((o) => !o.paneId);
-  const starts = stopped.length === 0 ? '' : '<div class="orch-start"><span class="orch-start-label">Start</span>' +
-    stopped.map((o) => `<button class="orch-start-btn" data-orch="${escHtml(o.name)}"${startingHome === o.name ? ' disabled' : ''}>` +
-      `${escHtml(o.label || o.name)}${startingHome === o.name ? ' …' : ''}</button>`).join('') + '</div>';
-  const inner = starts + (workspaces.length === 0 ? '<div class="empty-state">No workspaces found.</div>'
-    : cards.length === 0 ? '<div class="empty-state">No active agents.</div>'
-    : `<div class="agent-list">${cards.map(renderCard).join('')}</div>`);
-
-  // Keep the #screen-agents scroll container stable across state-push rebuilds:
-  // replacing only its inner content preserves scrollTop and iOS momentum, while
-  // the touch-defer above keeps an active drag from being cancelled. The container
-  // is (re)created only when absent (first paint, or after leaving and returning
-  // to the route) — the loading-spinner placeholder lacks data-ready.
-  let scroller = document.getElementById('screen-agents') as HTMLElement | null;
-  if (!scroller || !scroller.dataset.ready) {
-    setLegacyScreen('agents', '<div id="screen-agents" data-ready="1"></div>');
-    scroller = document.getElementById('screen-agents') as HTMLElement;
-    agentsTouchActive = false;
-    agentsRenderPending = false;
-    scroller.addEventListener('touchstart', () => { agentsTouchActive = true; }, { passive: true });
-    scroller.addEventListener('touchend', onAgentsTouchEnd, { passive: true });
-    scroller.addEventListener('touchcancel', onAgentsTouchEnd, { passive: true });
-  }
-  scroller.innerHTML = inner;
-
-  // Attach tap handlers
-  scroller.querySelectorAll('.orch-start-btn').forEach((b) => {
-    b.addEventListener('click', () => { void startOrchestratorFlow((b as HTMLElement).dataset.orch!); });
-  });
-  scroller.querySelectorAll('.agent-card').forEach((card) => {
-    const el = card as HTMLElement;
-    const paneId = el.dataset.paneId!;
-    const activate = () => navigate(paneRoute(store.appState, paneId));
-    el.addEventListener('click', activate);
-    el.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') activate(); });
-  });
-}
-
 // ── Pane detail ───────────────────────────────────────────────────────────────
-
-function findPane(paneId: string) {
-  if (!store.appState) return null;
-  for (const ws of store.appState.workspaces ?? []) {
-    for (const tab of ws.tabs ?? []) {
-      for (const pane of tab.panes ?? []) {
-        if (pane.paneId === paneId) return { pane, ws, tab };
-      }
-    }
-  }
-  return null;
-}
 
 function paneHeaderHtml(found: ReturnType<typeof findPane>, paneId: string): string {
   const label = found?.pane?.agent?.displayName || found?.pane?.agent?.name || found?.pane?.title || paneId;
   const context = found ? `${found.ws.label} / ${found.tab.label}` : '';
   return `${escHtml(label)}${context ? `<span class="topbar-subtitle">&#183; ${escHtml(context)}</span>` : ''}`;
-}
-
-// An orchestrator's name: its configured label, else its workspace label.
-function orchestratorLabel(o: OrchestratorView | undefined): string {
-  return o?.label || (o?.paneId ? findPane(o.paneId)?.ws.label : '') || o?.name || 'Home';
 }
 
 // Home's title: the orchestrator's name and what it's up to.
@@ -589,20 +401,13 @@ function refreshPaneHeader(): void {
   if (found) setLegacyTopbar({ titleHtml: view.homeMode ? homeHeaderHtml(found) : paneHeaderHtml(found, view.activePaneId) });
 }
 
-// The agents a list or a Home shows, most recent status change first: never the
-// orchestrators, and for an orchestrator (`scope`) only its account's agents —
-// all of them when that isn't known (pure helper, tested in dashboard-group.test.ts).
-function agentCards(scope?: OrchestratorView): DashboardCard[] {
-  return dashboardCards(store.appState?.workspaces ?? [], orchestrators().map((o) => o.paneId), scope?.agents ?? null);
-}
-
 // Home status bar: its agents waiting on the user (tap → that agent) and counts of
 // the rest (tap → its list). Rewritten only when its content changes, so the
 // constant state pushes don't replace a chip under a finger.
 function renderHomeStatus(): void {
   const el = document.getElementById('home-status');
   if (!el || !store.appState) return;
-  const s = homeSummary(agentCards(orchestratorOfPane(store.appState, view.activePaneId)), store.seenDone);
+  const s = homeSummary(agentCards(store.appState, orchestratorOfPane(store.appState, view.activePaneId)), store.seenDone);
   // With several orchestrators running, a switcher between their Homes (tap = that
   // orchestrator's pane, which routes to its Home like any chip), each with its status.
   const running = orchestrators().filter((o) => o.paneId);

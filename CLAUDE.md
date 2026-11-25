@@ -56,7 +56,7 @@ All in `internal/bridge/` (one package):
 - `web/src/app.ts` — SPA shell (hash routing) over `api.ts` (token, REST; a 401 → callback),
   `store.ts` (State, WS link, `view`, seen done, kept tasks; subscribe/emit), `ws.ts` (socket, ping, backoff,
   state polling, watches) and `routes.ts` (pure `resolveRoute`). Screens moving to React live in
-  `web/src/ui/` (Settings, Token); until app.ts is gone, `ui/mount.tsx` (temporary glue) is the
+  `web/src/ui/` (Settings, Token, the agents list `Dashboard.tsx`); until app.ts is gone, `ui/mount.tsx` (temporary glue) is the
   only writer of `#screen`, the topbar and the connection dot/banner. `notify.ts` holds the toast
   store and the OS notifications; `ui/Toasts.tsx` and `ui/Modals.tsx` (Confirm, agent actions,
   Rename, New agent) are React roots of their own in `#toast-container` and `#modal-root`. `ansi.ts` — pure ANSI→HTML,
@@ -314,14 +314,13 @@ vendor-neutrality is preserved.
   the in-progress scroll gesture. Renders defer via `pendingAnsi` while
   `terminalTouchActive` or scrolled above the bottom, and flush on touchend /
   return-to-bottom.
-- **The agents dashboard has the same hazard.** `#screen-agents` is the scroll
-  container; state pushes (agent_status_changed etc.) arrive constantly, so
-  `renderAgentsDashboard` must keep that element **stable** and replace only its
-  inner content (`data-ready` marks the real container; the loading spinner
-  lacks it). Rebuilding the whole `#screen` subtree recreates `#screen-agents`,
-  which snaps `scrollTop` to 0 (the "scroll jumps to top" bug) and cancels an
-  in-progress drag. Like the terminal, rebuilds also defer while a finger is
-  down (`agentsTouchActive`/`agentsRenderPending`) and flush on touchend.
+- **The agents list (`ui/Dashboard.tsx`) has the same hazard.** `#screen-agents` is the scroll
+  container; state pushes (agent_status_changed etc.) arrive constantly, so it must stay the
+  **same element** while the list is shown, with the cards keyed by pane id (`data-ready` marks
+  the real container; the loading spinner lacks it). Recreating `#screen-agents` snaps
+  `scrollTop` to 0 (the "scroll jumps to top" bug) and cancels an in-progress drag. Like the
+  terminal, the list holds still while a finger is down and shows the latest State on the
+  macrotask after touchend (`setTimeout(0)`, so a still tap's click lands first).
 - Async fetches capture `paneViewGen` + pane id and bail if the user navigated
   away; stale responses must not poison the next pane's view.
 - Double-tap detection requires two *stationary* taps (movement > 10px within

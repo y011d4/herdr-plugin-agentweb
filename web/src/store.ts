@@ -2,7 +2,7 @@
  * store.ts — the app's shared state: the last State, the WebSocket link, what is on
  * screen (`view`), the done panes seen on this phone and the kept first tasks. Plain module
  * state, mutated in place (`store.view` is never replaced); emit() tells subscribers
- * something changed.
+ * something changed. Also the lookups over it that more than one screen needs.
  */
 import { markSeen } from './dashboard-group.ts';
 import type { SeenDone } from './dashboard-group.ts';
@@ -10,6 +10,7 @@ import { KeptTasks } from './kept-tasks.ts';
 import type { AppState } from './types.ts';
 
 const STORAGE_SEEN = 'herdr_seen_done'; // done panes already opened on this phone (SeenDone)
+export const STORAGE_HOME = 'herdr_home'; // the orchestrator whose Home was opened last
 
 /** First tasks the bridge couldn't deliver to a just-started agent (New agent keeps them);
  *  each pane's composer keeps its task, with the user's edits, until it is sent. */
@@ -27,9 +28,14 @@ export interface View {
   paneBackRoute: string;
 }
 
-export const store: { appState: AppState | null; wsConnected: boolean; view: View; seenDone: SeenDone } = {
+export const store: {
+  appState: AppState | null; wsConnected: boolean; view: View; seenDone: SeenDone;
+  /** an orchestrator started from the list (its Start button shows it): its Home opens once the State shows it running */
+  startingHome: string | null;
+} = {
   appState: null,
   wsConnected: false,
+  startingHome: null,
   view: { screen: 'loading', activePaneId: null, homeMode: false, paneViewMode: 'terminal', paneBackRoute: '#/agents' },
   seenDone: (() => {
     try { return JSON.parse(localStorage.getItem(STORAGE_SEEN) ?? '{}') ?? {}; } catch { return {}; }
@@ -51,6 +57,29 @@ export function emit(): void {
 export function setAppState(state: AppState | null): void {
   store.appState = state;
   emit();
+}
+
+export function setStartingHome(name: string | null): void {
+  store.startingHome = name;
+  emit();
+}
+
+/** The orchestrator whose Home was opened last on this phone. */
+export function lastHome(): string | null {
+  try { return localStorage.getItem(STORAGE_HOME); } catch { return null; }
+}
+
+/** A pane of the State, with its workspace and tab. */
+export function findPane(paneId: string) {
+  if (!store.appState) return null;
+  for (const ws of store.appState.workspaces ?? []) {
+    for (const tab of ws.tabs ?? []) {
+      for (const pane of tab.panes ?? []) {
+        if (pane.paneId === paneId) return { pane, ws, tab };
+      }
+    }
+  }
+  return null;
 }
 
 /** Records a done pane as seen on this phone (see SeenDone). */
