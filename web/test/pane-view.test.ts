@@ -2,11 +2,12 @@
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { clearToasts, getToasts } from '../src/notify.ts';
-import { createPaneView, type PaneView } from '../src/pane-view.ts';
+import { createPaneView, type PanelPrompt, type PaneView } from '../src/pane-view.ts';
+import { promptIdentity } from '../src/prompt.ts';
 import { setAppState, store } from '../src/store.ts';
 import type { TimelineItem } from '../src/transcript.ts';
-import type { WsMessage } from '../src/types.ts';
-import { errors, read, state, transcript } from './contract.gen.ts';
+import type { AgentStatus, WsMessage } from '../src/types.ts';
+import { read, state, transcript } from './contract.gen.ts';
 
 // The socket: the test delivers messages to whoever listens (pane-view.ts subscribes itself).
 const wsListeners = new Set<(msg: WsMessage) => void>();
@@ -37,15 +38,15 @@ const ASK = ['─'.repeat(28), ' ☐ Fruit', 'Pick a fruit', '', '❯ 1. apple',
 
 let container: HTMLElement;
 let view: PaneView;
-let calls: { toggle: boolean[]; modes: number; activity: Array<string | null> };
+let calls: { toggle: boolean[]; modes: number; activity: Array<string | null>; prompt: Array<PanelPrompt | null> };
 function open(paneId: string): void {
-  calls = { toggle: [], modes: 0, activity: [] };
+  calls = { toggle: [], modes: 0, activity: [], prompt: [] };
   view = createPaneView(container, paneId, {
     showToggle: (v) => calls.toggle.push(v), modeChanged: () => calls.modes++, activity: (a) => calls.activity.push(a),
+    prompt: (p) => calls.prompt.push(p),
   });
 }
 const chatLog = () => container.querySelector<HTMLElement>('#chat-log')!;
-const options = () => [...container.querySelectorAll<HTMLButtonElement>('#chat-prompt .ask-opt')];
 
 beforeEach(() => {
   reqs = [];
@@ -120,29 +121,76 @@ describe('pane view: answer panel', () => {
     open('p6');
     await answer(SCREEN, read[1]);
     await answer('/transcript', transcript[0]); // chat: the blocked pane's panel shows
+    assert.deepEqual(calls.prompt, [{ parsed: null, id: '', screen: null }]);
     await answer(PROMPT, { ansi: ASK });
-    assert.deepEqual(options().map((b) => b.textContent), ['1apple', '2banana', '3cherry']);
   }
-  const posts = () => reqs.filter((q) => q.method === 'POST' && q.url === '/api/panes/p6/input');
+  const shown = () => calls.prompt[calls.prompt.length - 1];
+  const withStatus = (status: AgentStatus) => {
+    const s = structuredClone(state);
+    for (const ws of s.workspaces) for (const t of ws.tabs) for (const p of t.panes) if (p.paneId === 'p6') p.agent!.status = status;
+    setAppState(s);
+    view.onState();
+  };
 
-  it('sends one press for a double tap, with the prompt it answers', async () => {
+  it('feeds the prompt and its identity, the same while it holds, a new one when it changes, none once unblocked', async () => {
+    vi.useFakeTimers();
     await blocked();
-    options()[1].click();
-    options()[1].click();
-    assert.equal(posts().length, 1);
-    assert.equal(posts()[0].body.press, '2');
-    assert.ok(posts()[0].body.expect_prompt, 'expect_prompt is set');
+    const first = shown()!;
+    assert.deepEqual(first.parsed!.options.map((o) => o.label), ['apple', 'banana', 'cherry']);
+    assert.equal(first.parsed!.question, 'Pick a fruit');
+    assert.equal(first.id, promptIdentity(ASK));
+    assert.match(first.screen!, /banana/);
+    await vi.advanceTimersByTimeAsync(1200);
+    await answer(PROMPT, { ansi: `${ASK}\n\u001b[2m status bar\u001b[0m` }); // the status bar below: same prompt
+    assert.ok(shown()!.parsed === first.parsed, 'the same prompt while its identity holds');
+    assert.match(shown()!.screen!, /status bar/);
+    await vi.advanceTimersByTimeAsync(1200);
+    await answer(PROMPT, { ansi: ASK.replace('Pick a fruit', 'Pick another') });
+    assert.equal(shown()!.parsed!.question, 'Pick another');
+    assert.notEqual(shown()!.id, first.id);
+    withStatus('working');
+    assert.equal(shown(), null);
   });
 
-  it('on a 409 (prompt changed) re-reads the prompt, says so, and takes a new tap', async () => {
+  it('goes Back once a sent answer has the agent working, not for "Chat about this" nor from a Home', async () => {
     await blocked();
-    options()[1].click();
-    await answer('POST /api/panes/p6/input', errors.find((e) => e.error.code === 'prompt_changed'), 409);
+    store.view.paneBackRoute = '#/agents/personal';
+    location.hash = '#/pane/p6';
+    view.answered(shown()!.id, false, Promise.resolve());
+    await flush();
+    push({ type: 'agent_status', paneId: 'p6', agent: 'claude', from: 'blocked', to: 'working', workspaceLabel: null, tabLabel: null });
+    assert.equal(location.hash, '#/agents/personal');
+
+    location.hash = '#/pane/p6';
+    view.answered(shown()!.id, true, Promise.resolve()); // Chat about this
+    await flush();
+    withStatus('working');
+    assert.equal(location.hash, '#/pane/p6');
+  });
+
+  it('says "Answer not confirmed" when the pane is still blocked 10s after the press; a failed press stays quiet', async () => {
+    vi.useFakeTimers();
+    await blocked();
+    view.answered(shown()!.id, false, Promise.reject(new Error('boom')));
+    await vi.advanceTimersByTimeAsync(10_000);
+    assert.deepEqual(getToasts(), []);
+    view.answered(shown()!.id, false, Promise.resolve());
+    await vi.advanceTimersByTimeAsync(9_999);
+    assert.deepEqual(getToasts(), []);
+    await vi.advanceTimersByTimeAsync(1);
+    assert.deepEqual(getToasts().map((t) => t.title), ['Answer not confirmed']);
+  });
+
+  it('after a 409 re-reads the prompt and shows it, unless a newer answer began meanwhile', async () => {
+    await blocked();
+    const changed = ASK.replace('Pick a fruit', 'Pick another');
+    const done = view.reread(() => true);
+    await answer(PROMPT, { ansi: changed });
+    await done;
+    assert.equal(shown()!.parsed!.question, 'Pick another');
+    const stale = view.reread(() => false);
     await answer(PROMPT, { ansi: ASK });
-    assert.deepEqual(getToasts().map((t) => t.title), ['Prompt changed']);
-    assert.ok(!container.querySelector('#chat-prompt')!.classList.contains('chat-prompt-sending'), 'the buttons are live again');
-    options()[0].click();
-    assert.equal(posts().length, 2);
-    assert.equal(posts()[1].body.press, '1');
+    await stale;
+    assert.equal(shown()!.parsed!.question, 'Pick another');
   });
 });
