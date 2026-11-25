@@ -276,7 +276,7 @@ interface Frame { t: number; payload: string; msg?: any }
 
 class Page {
   cdp!: Cdp; sid = ''; targetId = ''; proc!: ReturnType<typeof spawn>;
-  reqs: Req[] = []; resps: Array<{ t: number; url: string; status: number; type: string; sw: boolean }> = [];
+  reqs: Req[] = []; resps: Array<{ t: number; id: string; url: string; status: number; type: string; sw: boolean }> = [];
   wsSent: Frame[] = []; wsRecv: Frame[] = []; wsCreated: number[] = []; swFails = 0; refused: string[] = [];
   /** GETs whose URL contains `hold` are held unsent in `held` until release(): a bridge that answers late */
   hold: string | null = null; held: any[] = [];
@@ -337,12 +337,12 @@ class Page {
   uncovered = (el: string, p: { x: number; y: number }) =>
     this.until(`(() => { const e = ${el}, hit = document.elementFromPoint(${p.x}, ${p.y}); if (e && e.contains(hit)) return true;
       if (hit?.closest('#toast-container')) document.getElementById('toast-clear-all')?.click(); return false; })()`, 10_000);
-  /** Stops holding, and sends the held requests on; returns how many there were. */
-  async release(): Promise<number> {
+  /** Stops holding, and sends the held requests on; returns them (Fetch.requestPaused params). */
+  async release(): Promise<any[]> {
     this.hold = null;
     const ps = this.held.splice(0);
     for (const p of ps) await this.S('Fetch.continueRequest', { requestId: p.requestId });
-    return ps.length;
+    return ps;
   }
   posts = (t: number, suffix: string) => this.reqs.filter((q) => q.t >= t && q.method === 'POST' && q.url.endsWith(suffix));
   /** The page's own API mutations go through the same guard: a UI bug must not reach a real agent. */
@@ -393,7 +393,7 @@ async function openPage(c: Ctx, profile?: string): Promise<Page> {
       try { body = JSON.parse(body); } catch { /* not JSON */ }
       pg.reqs.push({ t, method: p.request.method, url: p.request.url, body });
     } else if (m.method === 'Network.responseReceived') {
-      pg.resps.push({ t, url: p.response.url, status: p.response.status, type: p.type, sw: !!p.response.fromServiceWorker });
+      pg.resps.push({ t, id: p.requestId, url: p.response.url, status: p.response.status, type: p.type, sw: !!p.response.fromServiceWorker });
     } else if (m.method === 'Network.webSocketCreated') pg.wsCreated.push(t);
     else if (m.method === 'Network.webSocketFrameSent') pg.wsSent.push({ t, payload: p.response.payloadData });
     else if (m.method === 'Network.webSocketFrameReceived') {
@@ -842,7 +842,7 @@ async function p14(c: Ctx) {
   const read = `/api/panes/${enc(shell)}/read?`;
   await pg.goto('#/agents');
   pg.hold = read;
-  let n = 0, tNav = 0, tRel = 0;
+  let held: any[] = [], tNav = 0, tRel = 0;
   try {
     await pg.ev(`location.hash = ${js(`#/pane/${enc(shell)}`)}`);
     const paused = await waitFn(() => pg.held.length > 0, 3000);
@@ -851,22 +851,38 @@ async function p14(c: Ctx) {
     tNav = Date.now();
     const onLess = await pg.until(`document.getElementById('term-live')?.textContent.includes('wc-B')`, 5000);
     if (onLess.timeout) throw env('wc-less never showed wc-B');
+    // every node or text put into #term-live from here on: a stale paint overwritten between polls still shows
+    await pg.ev(`(() => { window.__wcSawA = false; window.__wcMoA = new MutationObserver((recs) => { for (const r of recs) {
+      const el = r.target.nodeType === 1 ? r.target : r.target.parentElement;
+      if (!el?.closest('#term-live')) continue;
+      if (r.type === 'characterData' ? r.target.data.includes('wc-A') : [...r.addedNodes].some((n) => n.textContent.includes('wc-A'))) window.__wcSawA = true;
+    } }); window.__wcMoA.observe(document.getElementById('screen'), { childList: true, subtree: true, characterData: true }); return 1; })()`);
     tRel = Date.now();
-    n = await pg.release();
+    held = await pg.release();
   } finally {
     await pg.release();
   }
-  const answered = await waitFn(() => pg.resps.find((r) => r.t >= tRel && r.url.includes(read)), 2000);
+  const ids = held.map((p) => p.networkId);
+  const answered = await waitFn(() => ids.every((id) => pg.resps.some((r) => r.id === id)), 2000);
   // 2s from the release: every look shows wc-less's screen and none of wc-shell's
   const seen = new Set<string>();
   for (const t0 = Date.now(); Date.now() - t0 < 2000; await sleep(100)) {
     const live: string = await pg.ev(`document.getElementById('term-live')?.textContent ?? ''`);
     seen.add(`${live.includes('wc-B') ? 'B' : '-'}${live.includes('wc-A') ? 'A' : '-'}`);
   }
-  const after = answered.timeout ? 'none' : `+${answered.v.t - tRel}ms(status ${answered.v.status})`;
-  result(c, n >= 1 && tRel >= tNav && !answered.timeout && seen.size === 1 && seen.has('B-'), 'P14',
-    `held=${n},releasedAfterNav=${tRel >= tNav}(+${tRel - tNav}ms),shellResponse=${after},liveFor2s=${[...seen].join('+')}`,
-    "wc-shell's /read held until #/pane/<wc-less> shows wc-B, then released and answered: for 2s #term-live keeps wc-B and no wc-A");
+  const sawA: boolean = await pg.ev('window.__wcMoA.disconnect(), window.__wcSawA');
+  // the held read really carried wc-shell's screen (200, wc-A in it), or the stale path wasn't exercised
+  const shellScreen = await Promise.all(ids.map(async (id) => {
+    const status = pg.resps.find((r) => r.id === id)?.status;
+    const body = await waitFn(async () => (await pg.S('Network.getResponseBody', { requestId: id })).body as string, 2000);
+    return { status, wcA: !body.timeout && body.v.includes('wc-A') };
+  }));
+  const after = answered.timeout ? 'none' : `+${Math.max(...ids.map((id) => pg.resps.find((r) => r.id === id)!.t)) - tRel}ms`;
+  const real = shellScreen.length >= 1 && shellScreen.every((x) => x.status === 200 && x.wcA);
+  result(c, real && tRel >= tNav && !answered.timeout && !sawA && seen.size === 1 && seen.has('B-'), 'P14',
+    `held=${held.length},releasedAfterNav=${tRel >= tNav}(+${tRel - tNav}ms),shellResponse=${after}[${shellScreen.map((x) => `${x.status}:${x.wcA ? 'wc-A' : 'no-wc-A'}`).join('+')}],` +
+      `wcAEverPainted=${sawA},liveFor2s=${[...seen].join('+')}`,
+    "wc-shell's /read (200, carrying wc-A) held until #/pane/<wc-less> shows wc-B, then released: through it and 2s on, #term-live never gets wc-A and keeps wc-B");
 }
 
 async function p12(c: Ctx) {
@@ -1438,6 +1454,8 @@ async function check(o: Record<string, any>): Promise<number> {
       for (let attempt = 1; ; attempt++) {
         const mark = c.out.length;
         const fails = c.failures;
+        // sticky toasts from real agents' status changes stack over the screen and take touches meant for it
+        await c.pg.ev(`document.getElementById('toast-clear-all')?.click(), 1`).catch(() => {});
         try { await item.run(c); } catch (e) {
           result(c, false, item.id, `${e instanceof EnvError ? 'ENV:' : 'error:'}${(e as Error).message}`, 'item threw');
         }
