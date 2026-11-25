@@ -123,6 +123,9 @@ herdr plugin action invoke y011d4.yoicks.start
 
 Then Clear the running orchestrators, as after an update.
 
+A linked checkout (see [Development](#development)) rolls back with `sh scripts/redeploy.sh
+<commit>` instead.
+
 ### Uninstalling
 
 ```bash
@@ -548,8 +551,8 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
 For local development, clone and **link** a working tree instead of installing from
 GitHub — `herdr plugin link` points herdr at your checkout so your edits take effect:
 
-Building from source needs Go (the version in `go.mod`) and Node.js >= 23.6 with `npm` (the
-web UI's TypeScript build and tests).
+Building from source needs Go (the version in `go.mod`) and Node.js 22.18+, 24 or 26+ with `npm`
+(`engines` in `package.json`; the web UI's Vite build and Vitest tests).
 
 ```bash
 git clone https://github.com/y011d4/herdr-yoicks
@@ -559,13 +562,15 @@ herdr plugin link "$(pwd)"
 ```
 
 The bridge and CLI are Go (`cmd/yoicks`, `internal/bridge`). The PWA is TypeScript
-under `web/src/`, built to `web/` and embedded in the binary.
+under `web/src/`, built by Vite to `web/dist` and embedded in the binary.
 
 ```bash
 sh scripts/plugin-build.sh          # rebuild after changes, web ones too (the binary embeds the web UI)
 go test ./...                       # Go tests
-npm test                            # web UI tests (node --test)
-./bin/yoicks run               # run against your live herdr in the foreground (config: see Configuration)
+npm test                            # web UI tests (Vitest)
+./bin/yoicks run                    # run against your live herdr in the foreground (config: see Configuration)
+YOICKS_DEV_BRIDGE=http://127.0.0.1:8390 npm run dev   # the web UI from source on :5174 (hot reload),
+                                    # /api and /ws proxied to a running bridge; open ?token=<its token>
 ```
 
 herdr never runs build commands for a linked plugin (not on `herdr plugin link`, nor on
@@ -573,6 +578,20 @@ herdr never runs build commands for a linked plugin (not on `herdr plugin link`,
 after edits (and re-run `herdr plugin link` only when `herdr-plugin.toml` changed). It always
 builds the checkout as it is; `sh scripts/plugin-build.sh release` instead downloads the release
 binary of the version in `herdr-plugin.toml`, as an install does.
+
+To deploy a linked checkout's new commits to its running bridge, or to roll it back, run this in
+that checkout:
+
+```bash
+sh scripts/redeploy.sh main         # fast-forward main to origin/main, rebuild, restart
+sh scripts/redeploy.sh <commit>     # the same for an earlier commit (detached)
+```
+
+It waits for the stop and start actions and for `/healthz`, and prints the `BUILD` and `CACHE`
+that Settings → App version should then show. It refuses before stopping anything on a dirty
+tree, or when `herdr-plugin.toml` would change (herdr caches a linked manifest: it prints the
+steps by hand, `herdr plugin link` included); after any later failure it starts the old binary
+again.
 
 Logs for the detached daemon go to `<state dir>/bridge.log`
 (`~/.local/state/herdr/plugins/y011d4.yoicks`, or `$HERDR_PLUGIN_STATE_DIR` inside plugin
