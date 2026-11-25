@@ -981,17 +981,26 @@ async function p15t2(c: Ctx) {
   const { pg } = c;
   const cl = c.rec.names.claude;
   await pg.goto(`#/pane/${enc(cl)}`);
+  // rename through the UI (⋮ → Rename…): the POST answers ok, a "Renamed" toast shows, herdr has the new name.
+  // (The topbar shows the agent kind, not herdr's agent name, on legacy and S0 alike.)
   guard(c.rec, cl);
-  await api(c, 'POST', `/api/panes/${enc(cl)}/rename`, { name: 'wc-renamed' });
-  const r = await pg.until(`document.getElementById('topbar-title').textContent.includes('wc-renamed')`, 3000);
+  await pg.tapEl(`document.getElementById('btn-agent-menu')`);
+  await pg.tapEl(`document.getElementById('am-rename')`);
+  await pg.ev(`document.getElementById('rn-name').value = 'wc-renamed'`);
+  const tr = await pg.tapEl(`document.getElementById('rn-save')`);
+  const toast = await pg.until(`[...document.querySelectorAll('.toast')].some((t) => /Renamed/.test(t.textContent))`, 3000);
+  const ok = pg.resps.find((x) => x.t >= tr && x.url.endsWith(`/api/panes/${enc(cl)}/rename`))?.status;
+  const named = await waitFn(() => herdr(['agent', 'get', cl]).agent?.name === 'wc-renamed', 3000 - (Date.now() - tr), 200);
+  const r = { timeout: toast.timeout || named.timeout || ok !== 200, ms: Date.now() - tr };
   await pg.goto('#/home/wc-o1');
   const t0 = Date.now();
   const fresh = await clearOrch(c, 'wc-o1');
   const stayed = await stayFor(c, '#/home/wc-o1', 8000);
   const now = (await api(c, 'GET', '/api/state')).orchestrators.find((o: any) => o.name === 'wc-o1')?.paneId;
   const watched = pg.wsSent.some((f) => f.t >= t0 && f.payload.includes(js(fresh)));
-  result(c, !r.timeout && stayed && now === fresh && watched, 'P15-T2', `rename=${ms(r)},stayedHome8s=${stayed},replaced=${now === fresh},followed=${watched}`,
-    'rename shows in the topbar within 3s; clearing wc-o1 keeps #/home/wc-o1 and follows the new pane');
+  result(c, !r.timeout && stayed && now === fresh && watched, 'P15-T2',
+    `renamePost=${ok},toast=${ms(toast)},herdrName=${ms(named)},stayedHome8s=${stayed},replaced=${now === fresh},followed=${watched}`,
+    "UI rename: POST ok, a 'Renamed' toast and herdr's agent name wc-renamed within 3s; clearing wc-o1 keeps #/home/wc-o1 and follows the new pane");
 }
 
 async function p8t2(c: Ctx) {
