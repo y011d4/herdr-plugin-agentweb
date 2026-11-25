@@ -278,6 +278,8 @@ class Page {
   cdp!: Cdp; sid = ''; targetId = ''; proc!: ReturnType<typeof spawn>;
   reqs: Req[] = []; resps: Array<{ t: number; url: string; status: number; type: string; sw: boolean }> = [];
   wsSent: Frame[] = []; wsRecv: Frame[] = []; wsCreated: number[] = []; swFails = 0; refused: string[] = [];
+  /** state frames aren't kept: stateMarkT is when the first one containing stateMark arrived (0: none yet) */
+  stateMark = ''; stateMarkT = 0;
   c: Ctx;
   constructor(c: Ctx) { this.c = c; }
 
@@ -327,6 +329,12 @@ class Page {
     return r;
   }
   async tapEl(el: string) { const p = await this.at(el); await this.tap(p.x, p.y); return Date.now(); }
+  /** Waits (10s at most) until a touch at p lands on `el`, clearing the toasts over it: status changes raise
+   *  sticky ones, right where the list's top (the Start buttons) is. With two or more, the stack's own box
+   *  (beside its Clear all) takes the touch too, so any hit in #toast-container clears them all. */
+  uncovered = (el: string, p: { x: number; y: number }) =>
+    this.until(`(() => { const e = ${el}, hit = document.elementFromPoint(${p.x}, ${p.y}); if (e && e.contains(hit)) return true;
+      if (hit?.closest('#toast-container')) document.getElementById('toast-clear-all')?.click(); return false; })()`, 10_000);
   posts = (t: number, suffix: string) => this.reqs.filter((q) => q.t >= t && q.method === 'POST' && q.url.endsWith(suffix));
   /** The page's own API mutations go through the same guard: a UI bug must not reach a real agent. */
   async guardRequest(p: any) {
@@ -380,7 +388,10 @@ async function openPage(c: Ctx, profile?: string): Promise<Page> {
     else if (m.method === 'Network.webSocketFrameSent') pg.wsSent.push({ t, payload: p.response.payloadData });
     else if (m.method === 'Network.webSocketFrameReceived') {
       const payload: string = p.response.payloadData;
-      if (/^\{"type":"state"/.test(payload)) return; // big and frequent; nothing checks them
+      if (/^\{"type":"state"/.test(payload)) { // big and frequent: only the marked one's time is kept
+        if (pg.stateMark && !pg.stateMarkT && payload.includes(pg.stateMark)) pg.stateMarkT = t;
+        return;
+      }
       let msg: any;
       try { msg = JSON.parse(payload); } catch { return; }
       if (msg.type === 'pane_output' && !c.rec.panes.includes(msg.paneId)) return;
@@ -510,12 +521,12 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     // it gets its account from .envrc via direnv in its dir (POST /api/agents takes no env)
     checkAccount(out.paneId, 'wc-claude', account);
   }
-  // wc-o1/wc-o2 start later (startOrchs), so the items before them (P8) see no orchestrator running
+  // wc-o1 starts later (startOrchs), so the items before it (P8) see no orchestrator running
 }
 
-/** Starts wc-o1/wc-o2 once, when the first item that needs them begins. */
+/** Starts wc-o1 once, when the first item that needs it begins (P8-T2 starts wc-o2 from the list's Start button). */
 async function startOrchs(c: Ctx): Promise<void> {
-  for (const name of ['wc-o1', 'wc-o2']) if (!c.rec.names[name.slice(3)]) await startOrch(c, name);
+  if (!c.rec.names.o1) await startOrch(c, 'wc-o1');
 }
 
 async function startOrch(c: Ctx, name: string): Promise<string> {
@@ -997,6 +1008,81 @@ async function p15(c: Ctx) {
   await pg.goto('#/agents');
 }
 
+/** P18: the list (390x400) under state pushes, each a rename of wc-less's tab (wc- kept), so its card changes:
+ *  scrolled to 200px the scroller keeps its node and scrollTop; a finger down (moved 50px) holds every card until
+ *  it lifts; a still tap on wc-less's card with a push arriving while the finger is down still opens it. */
+async function p18(c: Ctx) {
+  const { pg, rec } = c;
+  const less = rec.names.less;
+  const tab = herdr(['pane', 'get', less]).pane.tab_id;
+  const SC = `document.getElementById('screen-agents')`;
+  const CARD = `document.querySelector('.agent-card[data-pane-id=${js(less)}]')`;
+  let n = 0;
+  /** renames wc-less's tab; true once the page got the state frame carrying the new label */
+  const push = async (): Promise<boolean> => {
+    const label = `wc-less-${++n}`;
+    pg.stateMark = js(label);
+    pg.stateMarkT = 0;
+    mutate(rec, tab, ['tab', 'rename', tab, label]);
+    return !(await waitFn(() => pg.stateMarkT > 0, 5000, 5)).timeout;
+  };
+  await pg.goto('#/agents');
+  await pg.S('Emulation.setDeviceMetricsOverride', { width: 390, height: 400, deviceScaleFactor: 3, mobile: true });
+  try {
+    await pg.until(`!!${SC}?.dataset.ready && !!${CARD}`, 5000);
+    // scrolled to 200px (the padding makes room however many agents herdr has)
+    await pg.ev(`(() => { const s = ${SC}; s.style.paddingBottom = '1500px'; s.scrollTop = 200; window.__wcSc = s; })()`);
+    await sleep(300);
+    const top0 = await pg.ev(`${SC}.scrollTop`);
+    const p1 = await push();
+    await sleep(500);
+    const [top1, same] = await pg.ev(`[${SC}.scrollTop, ${SC} === window.__wcSc]`);
+    result(c, top0 === 200 && p1 && Math.abs(top1 - top0) <= 1 && same, 'P18.scroll', `push=${p1},scrollTop=${top0}->${top1},sameNode=${same}`,
+      'scrolled to 200px, a state push keeps #screen-agents (same node) and its scrollTop (+-1px)');
+
+    // a finger down and moved 50px: a push changes nothing in the list until it lifts
+    const p = await pg.at(CARD);
+    await pg.uncovered(CARD, p);
+    await pg.ev(`(() => { const s = ${SC}; window.__wcTE = 0; window.__wcMut = []; window.__wcMo?.disconnect();
+      window.__wcMo = new MutationObserver((rs) => { for (const r of rs) window.__wcMut.push(performance.now()); });
+      window.__wcMo.observe(s, { subtree: true, childList: true, characterData: true, attributes: true });
+      s.addEventListener('touchend', () => { window.__wcTE = performance.now(); }, { once: true, passive: true }); })()`);
+    await pg.touch('touchStart', [[p.x, p.y]]);
+    await pg.ev('window.__wcMut = []');
+    for (let i = 1; i <= 5; i++) { await sleep(16); await pg.touch('touchMove', [[p.x, p.y - 10 * i]]); }
+    const p2 = await push();
+    await sleep(500);
+    const down = await pg.ev('window.__wcMut.length');
+    await pg.touch('touchEnd', []);
+    const lift = await pg.until(`(() => { const t = window.__wcMut.find((m) => window.__wcTE && m >= window.__wcTE); return t !== undefined && { d: Math.round(t - window.__wcTE) }; })()`, 1000);
+    await pg.ev('window.__wcMo.disconnect()');
+    const d = lift.timeout ? null : lift.v.d;
+    result(c, p2 && down === 0 && d !== null && d <= 50, 'P18.touch', `push=${p2},mutationsWhileDown=${down},firstAfterLift=${d === null ? 'none' : `${d}ms`}`,
+      'with a finger down (moved 50px) a push records 0 mutations in the list; the first comes within 50ms of touchend');
+
+    // a still tap on wc-less's card with a push arriving while the finger is down: what the push changed
+    // shows only after touchend, and that mustn't swallow the tap's click
+    const q = await pg.at(CARD);
+    await pg.uncovered(CARD, q);
+    await pg.touch('touchStart', [[q.x, q.y]]);
+    const tDown = Date.now();
+    const p3 = await push();
+    await sleep(50); // the page handles the frame (CDP saw it arrive) before the touchend
+    const tUp = Date.now();
+    await pg.touch('touchEnd', []);
+    const nav = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)}`, 1000);
+    const whileDown = p3 && pg.stateMarkT >= tDown && pg.stateMarkT < tUp;
+    result(c, whileDown && !nav.timeout, 'P18.tap', `push=${p3},pushAt=${pg.stateMarkT - tDown}ms,liftAt=${tUp - tDown}ms,nav=${ms(nav)}`,
+      "a push arriving while a finger is down on wc-less's card: lifting it (a still tap) opens #/pane/<it> within 1s");
+  } finally {
+    pg.stateMark = '';
+    await pg.ev(`(() => { const s = ${SC}; if (s) s.style.paddingBottom = ''; })()`);
+    await mobile(pg, true);
+    mutate(rec, tab, ['tab', 'rename', tab, 'wc-less']);
+    await pg.goto('#/agents');
+  }
+}
+
 // ── Tier 2 items (real Claude in wc-claude; wc-o1/wc-o2 are only started, cleared, stopped) ──
 
 async function sendPrompt(c: Ctx, pane: string, text: string) {
@@ -1158,9 +1244,42 @@ async function p15t2(c: Ctx) {
 
 async function p8t2(c: Ctx) {
   const { pg } = c;
-  for (const name of ['wc-o1', 'wc-o2']) { // a retry finds wc-o2 stopped
-    if (!(await api(c, 'GET', '/api/state')).orchestrators.find((o: any) => o.name === name)?.paneId) await startOrch(c, name);
+  const running = async (name: string): Promise<string | undefined> =>
+    (await api(c, 'GET', '/api/state')).orchestrators.find((o: any) => o.name === name)?.paneId;
+  if (!(await running('wc-o1'))) await startOrch(c, 'wc-o1');
+  // wc-o2 starts from the list's Start button (a retry may find it running: stopped first)
+  const old2 = await running('wc-o2');
+  if (old2) {
+    recordPane(c, old2, 'o2');
+    await api(c, 'DELETE', `/api/panes/${enc(old2)}`);
+    if ((await waitFn(async () => !(await running('wc-o2')), 10_000, 300)).timeout) throw env('wc-o2 still running');
   }
+  await pg.goto('#/agents');
+  const btn = `document.querySelector('.orch-start-btn[data-orch="wc-o2"]')`;
+  if ((await pg.until(`!!${btn}`, 5000)).timeout) throw new Error('no Start button for wc-o2');
+  const at = await pg.at(btn);
+  await pg.uncovered(btn, at); // wc-o1's start raised toasts
+  // the busy button is recorded in the page as it happens: the push of wc-o2 running can take the page Home
+  // before a poll from here would see it
+  await pg.ev(`(() => { window.__wcBusy = 0; window.__wcBusyMo?.disconnect(); const t0 = performance.now();
+    window.__wcBusyMo = new MutationObserver(() => { const b = ${btn};
+      if (!window.__wcBusy && b && b.disabled && b.textContent.endsWith(' \\u2026')) window.__wcBusy = Math.max(1, Math.round(performance.now() - t0)); });
+    window.__wcBusyMo.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true }); })()`);
+  const tb = Date.now();
+  await pg.tap(at.x, at.y);
+  const seen = await pg.until('window.__wcBusy', 1000);
+  await pg.ev('window.__wcBusyMo.disconnect()');
+  const busy = { timeout: seen.timeout || seen.v > 1000, ms: seen.v };
+  const up = await waitFn(() => running('wc-o2'), 60_000, 200);
+  if (up.timeout) {
+    const post = pg.resps.find((x) => x.t >= tb && x.url.endsWith('/api/orchestrators/wc-o2/start'))?.status ?? 'none';
+    const toasts = await pg.ev(`[...document.querySelectorAll('.toast')].map((t) => t.textContent).join(' | ')`);
+    throw env(`wc-o2 not running 60s after its Start button (busy=${!busy.timeout}, POST ${post}, toasts: ${toasts || 'none'})`);
+  }
+  recordPane(c, up.v!, 'o2');
+  const toHome = await pg.until(`location.hash === '#/home/wc-o2'`, 3000);
+  await agentReady(c, up.v!, 60_000);
+  checkAccount(up.v!, 'wc-o2', pinnedAccount());
   const st = await api(c, 'GET', '/api/state');
   const first = st.orchestrators.filter((o: any) => o.paneId)[0]?.name;
   await pg.ev(`localStorage.removeItem('herdr_home')`);
@@ -1178,11 +1297,15 @@ async function p8t2(c: Ctx) {
   const ts = Date.now();
   await api(c, 'DELETE', `/api/panes/${enc(o2)}`);
   const toast = await pg.until(`[...document.querySelectorAll('.toast')].some((t) => /Orchestrator stopped/.test(t.textContent))`, 12_000, 100);
-  const tToast = Date.now() - ts;
+  // the grace runs from when the page learns the pane is gone (pane_gone), which herdr's close delays past the DELETE
+  const gone = pg.wsRecv.find((f) => f.t >= ts && f.msg.type === 'pane_gone' && f.msg.paneId === o2)?.t;
+  const tToast = Date.now() - (gone ?? ts);
   const list = await pg.until(`location.hash === '#/agents'`, 2000);
-  result(c, !home.timeout && !sw.timeout && stayed && followed && !toast.timeout && Math.abs(tToast - 8000) <= 1000 && !list.timeout,
-    'P8-T2', `home=${ms(home)}(${first}),switcher=${!sw.timeout},clearStayed=${stayed},followed=${followed},stopToast=${tToast}ms,toList=${!list.timeout}`,
-    '/ -> the first running Home within 3s with 2 switcher buttons; clear wc-o1 holds its Home 8s then follows; stop wc-o2 -> toast at 8+-1s and #/agents');
+  result(c, !busy.timeout && !toHome.timeout && !home.timeout && !sw.timeout && stayed && followed && !toast.timeout && Math.abs(tToast - 8000) <= 1000 && !list.timeout,
+    'P8-T2', `startButton=${busy.timeout ? 'not-busy' : `disabled…:${busy.ms}ms`},running=${up.ms}ms,toHomeO2=${ms(toHome)},home=${ms(home)}(${first}),switcher=${!sw.timeout},` +
+      `clearStayed=${stayed},followed=${followed},paneGone=${gone ? `${gone - ts}ms` : 'none'},stopToast=${tToast}ms(from ${gone ? 'pane_gone' : 'DELETE'}),toList=${!list.timeout}`,
+    "wc-o2's Start button on #/agents: disabled with ' …' within 1s, then #/home/wc-o2 within 3s of it running; " +
+      '/ -> the first running Home within 3s with 2 switcher buttons; clear wc-o1 holds its Home 8s then follows; stop wc-o2 -> toast 8+-1s after its pane_gone, then #/agents');
 }
 
 // ── runner ───────────────────────────────────────────────────────────────────
@@ -1195,6 +1318,7 @@ const ITEMS: Item[] = [
   { id: 'P17', tier: 1, run: p17 },
   { id: 'P16', tier: 1, run: p16 },
   { id: 'P7', tier: 1, needs: ['less'], run: p7 },
+  { id: 'P18', tier: 1, needs: ['less'], run: p18 },
   { id: 'P3', tier: 1, needs: ['less'], run: p3 },
   { id: 'P4-T1', tier: 1, needs: ['less'], run: p4t1 },
   { id: 'P5', tier: 1, needs: ['less'], run: p5 },
