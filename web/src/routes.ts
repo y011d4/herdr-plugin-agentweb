@@ -1,5 +1,5 @@
 /**
- * routes.ts — what a hash shows, decided from the State alone (pure; app.ts renders it):
+ * routes.ts — what a hash shows, decided from the State alone (pure; ui/App.tsx renders it):
  *   #/agents         the list; #/agents/<name> one orchestrator's account's agents
  *   #/home/<name>    an orchestrator's Home; #/home opens the default one
  *   #/pane/<id>      a pane (an orchestrator's pane opens as its Home)

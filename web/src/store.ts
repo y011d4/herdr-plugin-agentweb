@@ -53,7 +53,7 @@ export function emit(): void {
   for (const fn of listeners) fn();
 }
 
-/** A new State (null: signed out), with an emit(); app.ts's onStateUpdate stays its caller's job. */
+/** A new State (null: signed out), with an emit(); the shell's onStateUpdate (ui/App.tsx) stays its caller's job. */
 export function setAppState(state: AppState | null): void {
   store.appState = state;
   emit();

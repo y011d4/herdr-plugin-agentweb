@@ -18,7 +18,7 @@ import { homeAgentsHash, orchestratorOfPane, paneRoute } from '../routes.ts';
 import { emit, findPane, keptTasks, store, subscribe } from '../store.ts';
 import type { AppState } from '../types.ts';
 import { agentCards, cardTitle, orchestratorLabel } from './Dashboard.tsx';
-import type { Topbar } from './mount.tsx';
+import type { Topbar } from './App.tsx';
 import { PromptPanel } from './PromptPanel.tsx';
 
 type Mode = 'terminal' | 'chat';
@@ -38,10 +38,12 @@ export function paneViewOnState(): void {
   paneView?.onState();
 }
 
-/** Leaving the pane (or Home) on screen: its view stops, and its late responses do nothing. */
+/** Leaving the pane (or Home) on screen: its view stops, and its late responses do nothing. The
+ *  toggle resets now, not at the unmount: the next screen renders before that. */
 export function closePaneView(): void {
   paneView?.destroy();
   paneView = null;
+  toggle = NO_TOGGLE;
 }
 
 const KEYS: Array<[string, Record<string, unknown>]> = [
