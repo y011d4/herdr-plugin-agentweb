@@ -668,6 +668,41 @@ async function p7(c: Ctx) {
     '.agent-card count = /api/state (#/agents, #/agents/wc-o1); 2 topbar buttons; tapping wc-less opens #/pane/<it> within 2s');
 }
 
+/** Without a running orchestrator, a fresh open (/) and #/home land on #/agents by location.replace. */
+async function p8(c: Ctx) {
+  const { pg } = c;
+  const running = (await api(c, 'GET', '/api/state')).orchestrators.filter((o: any) => o.paneId).map((o: any) => o.name);
+  if (running.length) {
+    result(c, true, 'P8', `n/a(running:${running.join('+')})`, 'needs no orchestrator running (/api/state)');
+    return;
+  }
+  /** #/agents within 3s, then its .agent-card count = /api/state's (within 5s, as P7) */
+  const landed = async (): Promise<{ ok: boolean; s: string }> => {
+    const r = await pg.until(`location.hash === '#/agents' && !!document.querySelector('#screen-agents[data-ready]')`, 3000);
+    let last = '';
+    const n = await waitFn(async () => {
+      const dom = await pg.ev(`document.querySelectorAll('.agent-card').length`);
+      const want = expectedCards(await api(c, 'GET', '/api/state'));
+      last = `${dom}/${want}`;
+      return dom === want;
+    }, 5000, 300);
+    return { ok: !r.timeout && !n.timeout, s: `${ms(r)}:cards=${last}` };
+  };
+  // a fresh document's history.length already counts its own entry: a replace keeps it, a push adds one
+  const { identifier } = await pg.S('Page.addScriptToEvaluateOnNewDocument', { source: 'window.__wcHist0 = history.length' });
+  try { await pg.load(`${c.base}/`); } finally { await pg.S('Page.removeScriptToEvaluateOnNewDocument', { identifier }); }
+  const root = await landed();
+  const [h1, h0] = await pg.ev(`[history.length, window.__wcHist0]`);
+  // in the app: the hash assignment adds one entry, the redirect none
+  const g0 = await pg.ev('history.length');
+  await pg.ev(`location.hash = '#/home'`);
+  const home = await landed();
+  const g1 = await pg.ev('history.length');
+  result(c, root.ok && h1 === h0 && home.ok && g1 === g0 + 1, 'P8',
+    `/=${root.s},history=${h0}->${h1};#/home=${home.s},history=${g0}->${g1}`,
+    'no orchestrator running: / and #/home are replaced by #/agents within 3s (history.length +0, +1 for the #/home assignment itself); .agent-card count = /api/state');
+}
+
 async function p10(c: Ctx) {
   const { pg, rec } = c;
   const { shell, less } = rec.names;
@@ -1053,6 +1088,7 @@ async function p8t2(c: Ctx) {
 interface Item { id: string; tier: 1 | 2; manual?: boolean; needs?: string[]; run: (c: Ctx) => Promise<void> }
 const ITEMS: Item[] = [
   { id: 'P2', tier: 1, run: p2 }, // first: the profile is fresh and the first load carried ?token=
+  { id: 'P8', tier: 1, needs: ['less'], run: p8 }, // early: Chrome caps history.length at 50
   { id: 'P1', tier: 1, run: p1 },
   { id: 'P17', tier: 1, run: p17 },
   { id: 'P16', tier: 1, run: p16 },
