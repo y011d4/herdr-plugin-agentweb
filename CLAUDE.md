@@ -362,14 +362,16 @@ vendor-neutrality is preserved.
   - Tier 1 is deterministic, shell panes only: `wc-shell` (`seq`) and `wc-less` (`less --mouse`,
     `report-agent`ed as claude, so it takes the app-scroll path). Tier 2 (`--tier 2`) drives a
     real Claude (`wc-claude`, orchestrators `wc-o1`/`wc-o2`) and refuses to run until
-    `$WC_ROOT/.envrc` sets the account's `CLAUDE_CONFIG_DIR` (`direnv allow`ed).
+    `$WC_ROOT/.envrc` sets the account's `CLAUDE_CONFIG_DIR` (`direnv allow`ed). `preview start`
+    then gives the orchestrators that account as `env` (start the preview after the `.envrc`), and
+    a `wc-claude` in another account stops the run (`ENV: wc-claude account mismatch`).
   - Safety: the preview controls the real herdr, and production (so the phone, notifications
     included) sees the scratch agents: say so before a run. It mutates only what the run created
     and recorded whose live tab or workspace label starts with `wc-` (one guard, which the page's
-    own API requests pass too), refuses port 8390, and runs one at a time (`$WC_ROOT/lock`, held by
-    a separate `flock` process the bridge and Chrome never inherit). Teardown also runs on Ctrl+C;
-    the next run cleans up an unfinished one. `WC_ROOT` = `$WEBCHECK_ROOT` or
-    `~/.local/state/herdr-yoicks-webcheck`.
+    own API requests pass too), and refuses port 8390. Runs and `preview start`/`stop` take turns
+    on `$WC_ROOT/lock`, held by a separate `flock` process the bridge and Chrome never inherit.
+    Teardown also runs on Ctrl+C; what it can't close stays recorded, and the next run retries it.
+    `WC_ROOT` = `$WEBCHECK_ROOT` or `~/.local/state/herdr-yoicks-webcheck`.
   - A new check first passes on the current UI (the main before a screen's port), so it isn't
     written to fit the new code.
 
