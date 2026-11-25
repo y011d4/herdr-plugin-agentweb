@@ -1,16 +1,17 @@
 /**
  * pane-view.ts — the body of an opened pane (a pane route or a Home), in its container:
- * the terminal (terminal.ts), the chat view of a Claude pane's transcript, and the answer
- * panel of a blocked one. It owns that DOM and everything that feeds it: the transcript
- * availability probe (one at a time), its WS messages (pane_output, transcript_items, the
- * pane's agent_status), the 3s refresh / fallback polling, the pane's part of
- * visibilitychange, and the answer guards. ui/Pane.tsx draws the rest (header, toggle button,
+ * the terminal (terminal.ts) and the chat view of a Claude pane's transcript. It owns that DOM
+ * and everything that feeds it: the transcript availability probe (one at a time), its WS
+ * messages (pane_output, transcript_items, the pane's agent_status), the 3s refresh / fallback
+ * polling and the pane's part of visibilitychange. For a blocked pane in chat it reads the
+ * prompt off the screen (opts.prompt: ui/PromptPanel.tsx draws it and sends the answers) and
+ * goes Back once a tapped answer lands. ui/Pane.tsx draws the rest (header, toggle button,
  * composer, Home's status bar and "doing now" line) and hears back through opts.
  * store.view.paneViewMode is its mode (wsSendWatch reads it). One per opened pane:
  * destroy() stops every timer and listener, and its late responses do nothing.
  */
 import { ansiToHtml } from './ansi.ts';
-import { apiGet, apiPost } from './api.ts';
+import { apiGet } from './api.ts';
 import { showToast } from './notify.ts';
 import { answerOutcome, parsePrompt, promptIdentity, stripAnsi } from './prompt.ts';
 import type { ParsedPrompt } from './prompt.ts';
@@ -20,7 +21,6 @@ import { createTerminal } from './terminal.ts';
 import { conversationItems, latestActivity, renderItems } from './transcript.ts';
 import type { TimelineItem } from './transcript.ts';
 import type { ReadResponse, TranscriptResponse, WsMessage, WsTranscriptItemsMessage } from './types.ts';
-import { BUILD } from './ui/Settings.tsx';
 import { onWsMessage, wsSendWatch } from './ws.ts';
 
 const STORAGE_VIEW = 'herdr_pane_view'; // preferred pane view: 'terminal' | 'chat'
@@ -35,6 +35,18 @@ export interface PaneViewOpts {
   modeChanged(): void;
   /** Home's "doing now": the orchestrator's latest tool call since it last spoke */
   activity(text: string | null): void;
+  /** the answer panel's content while the pane is blocked in chat; null: no panel */
+  prompt(p: PanelPrompt | null): void;
+}
+
+/** What the answer panel (ui/PromptPanel.tsx) shows. */
+export interface PanelPrompt {
+  /** the menu read off the screen (null: none); kept while its identity holds */
+  parsed: ParsedPrompt | null;
+  /** its identity ('' without a menu): an answer's expect_prompt */
+  id: string;
+  /** the live screen as HTML (ansiToHtml); null before the first read */
+  screen: string | null;
 }
 
 export interface PaneView {
@@ -44,15 +56,12 @@ export interface PaneView {
   onState(): void;
   /** after input: re-read the terminal at once (terminal.ts echo) */
   echo(): void;
+  /** a tapped answer to the prompt `id` is sent (`post`): once it lands and the agent resumes
+   *  work, go Back to where the pane was opened from (not from Home, nor for "Chat about this": `chat`) */
+  answered(id: string, chat: boolean, post: Promise<unknown>): void;
+  /** after a 409: read the prompt on screen now and show it, unless `current()` turned false */
+  reread(current: () => boolean): Promise<void>;
   destroy(): void;
-}
-
-function escHtml(s: unknown): string {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 // Chat is the default view; the terminal is only preferred if explicitly chosen.
@@ -70,7 +79,7 @@ function paneIsClaude(paneId: string): boolean {
 // A tapped answer until it is seen landing (settlePendingAnswer). `back`: where to go
 // once the agent resumes work ('' = stay); `prompt`: the identity of the prompt it answers.
 interface PendingAnswer {
-  gen: number; prompt: string; back: string;
+  prompt: string; back: string;
   sent: boolean; resumed: boolean; timer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -78,9 +87,8 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   const { view } = store;
   container.innerHTML =
     '<div class="terminal-output" id="terminal-output"></div>' +
-    '<div class="chat-log" id="chat-log" style="display:none;"></div>' +
-    '<div class="chat-prompt" id="chat-prompt" style="display:none;"></div>';
-  const [terminalEl, chatEl, promptEl] = Array.from(container.children) as HTMLElement[];
+    '<div class="chat-log" id="chat-log" style="display:none;"></div>';
+  const [terminalEl, chatEl] = Array.from(container.children) as HTMLElement[];
   const term = createTerminal(terminalEl, { paneId });
   const listeners = new AbortController();
   const { signal } = listeners;
@@ -100,14 +108,10 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   // Pending-prompt panel: when a claude pane is blocked (waiting for input), the
   // chat surfaces an answer UI — tappable options for a pending AskUserQuestion,
   // or the live terminal screen for any other prompt (permission, plan, y/n).
-  let promptPanelKind: 'none' | 'blocked' = 'none';
+  let prompt: PanelPrompt | null = null; // the panel's content (null: no panel)
   let promptScreenTimer: ReturnType<typeof setInterval> | null = null;
-  let promptScreenId = ''; // identity of the on-screen prompt whose buttons are rendered (avoids re-render churn; guards stale taps)
   let promptPollSeq = 0; // monotonic request id; bumped on stop to invalidate an in-flight poll
   let promptPollActive = 0; // reqId of the poll currently in flight (0 = none) — prevents overlap
-  let promptAnswerInFlight = false; // true while/just after a tapped answer is sent — blocks re-taps
-  let answerCooldownTimer: ReturnType<typeof setTimeout> | null = null; // floors the post-send re-tap block
-  let answerGen = 0; // per-answer token so a stale POST/timer can't clear the guard for a newer answer
   let pendingAnswer: PendingAnswer | null = null;
   let paneRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -275,78 +279,44 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   // ── Pending-prompt panel (answer UI when the pane is blocked) ────────────────
 
   // When a claude pane is blocked (waiting for input) and chat is active, show an
-  // answer panel above the input bar: the question and tappable option buttons
-  // parsed from the live prompt, with the raw terminal screen as collapsible
-  // context. The composer and quick-keys remain available.
+  // answer panel above the input bar (ui/PromptPanel.tsx): the question and tappable
+  // option buttons parsed from the live prompt, with the raw terminal screen as
+  // collapsible context. The composer and quick-keys remain available.
+  function showPrompt(p: PanelPrompt | null): void {
+    prompt = p;
+    opts.prompt(p);
+  }
+
   function updatePromptPanel(): void {
     const status = findPane(paneId)?.pane?.agent?.status;
     const blocked = view.paneViewMode === 'chat' && status === 'blocked';
     if (!blocked) {
-      // Pane is no longer waiting: the answer (if one was just sent) has landed, so
-      // end the post-send cooldown that was suppressing re-taps.
-      if (promptPanelKind !== 'none') { promptEl.style.display = 'none'; promptEl.innerHTML = ''; promptPanelKind = 'none'; promptScreenId = ''; }
-      endAnswerCooldown();
+      // Pane is no longer waiting: the answer (if one was just sent) has landed. The
+      // panel goes, and with it the post-send cooldown that was suppressing re-taps.
+      if (prompt) showPrompt(null);
       stopPromptScreenPoll();
       return;
     }
-    if (promptPanelKind !== 'blocked') {
-      // A fresh blocked episode (panel was hidden, now shown): a distinct prompt, so
-      // clear any lingering cooldown from a prior answer before rendering its buttons.
-      endAnswerCooldown();
-      promptEl.style.display = '';
-      promptEl.innerHTML =
-        `<div class="chat-prompt-head">&#9203; Waiting for your input <span class="chat-prompt-build">${BUILD}</span></div>` +
-        '<div class="chat-prompt-q" id="chat-prompt-q"></div>' +
-        '<div class="chat-prompt-options" id="chat-prompt-options"></div>' +
-        // starts open (no buttons yet, so the terminal is the only UI);
-        // renderPromptPanel collapses it once a menu is parsed.
-        '<details class="chat-prompt-term" id="chat-prompt-term" open><summary>Terminal</summary>' +
-        '<div class="chat-prompt-screen" id="chat-prompt-screen"><span class="loading-spinner"></span></div></details>';
-      promptPanelKind = 'blocked';
-      promptScreenId = '';
-    }
+    // A fresh blocked episode (panel was hidden, now shown): a distinct prompt, on a
+    // new panel with no cooldown left from a prior answer.
+    if (!prompt) showPrompt({ parsed: null, id: '', screen: null });
     startPromptScreenPoll();
   }
 
-  // Clear the "answer just sent" state: re-enable the option buttons and drop the
-  // in-flight guard. Called when the pane leaves `blocked` (answer landed) or a fresh
-  // prompt appears, and by a timeout floor in case neither is observed.
-  function endAnswerCooldown(): void {
-    if (answerCooldownTimer) { clearTimeout(answerCooldownTimer); answerCooldownTimer = null; }
-    promptAnswerInFlight = false;
-    promptEl.classList.remove('chat-prompt-sending');
-  }
-
-  // Render the question + option buttons. Rebuild only when the prompt identity
-  // changes, so a poll tick can't wipe a button the instant the user taps it, and a
-  // genuinely new prompt (even one with the same parsed signature) does get fresh
-  // buttons. `sid` is the identity of the screen `parsed` came from.
-  function renderPromptPanel(parsed: ParsedPrompt | null, sid: string): void {
-    const optsEl = promptEl.querySelector<HTMLElement>('#chat-prompt-options');
-    if (!optsEl) return;
-    if (sid === promptScreenId) return; // same prompt still on screen — don't rebuild (keeps a tap from being wiped)
-    promptScreenId = sid;
+  // The prompt on screen: a new one only when its identity changes, so a poll tick
+  // can't wipe a button the instant the user taps it, and a genuinely new prompt (even
+  // one with the same parsed signature) does get fresh buttons. `sid` is the identity
+  // of the screen `parsed` came from; `screen`, that screen (HTML).
+  function renderPromptPanel(parsed: ParsedPrompt | null, sid: string, screen = prompt?.screen ?? null): void {
+    if (!prompt) return; // the panel went meanwhile
+    if (sid === prompt.id) { // same prompt still on screen — same buttons (keeps a tap from being wiped)
+      if (screen !== prompt.screen) showPrompt({ ...prompt, screen });
+      return;
+    }
     // The answer moved the agent on to another prompt (the next question, the Submit tab
     // of several): it landed, and the user stays for that one.
     if (parsed && pendingAnswer && sid !== pendingAnswer.prompt) dropPendingAnswer();
-    const qEl = promptEl.querySelector('#chat-prompt-q');
-    if (qEl) qEl.textContent = parsed?.question ?? '';
-    optsEl.innerHTML = (parsed?.options ?? []).map((o) =>
-      `<button class="ask-opt" type="button" data-ask-send="${escHtml(o.send)}"><span class="ask-opt-num">${escHtml(o.send)}</span>` +
-      `<span class="ask-opt-text"><span class="ask-opt-label">${escHtml(o.label)}</span>` +
-      (o.description ? `<span class="ask-opt-desc">${escHtml(o.description)}</span>` : '') + '</span></button>',
-    ).join('');
-    const termEl = promptEl.querySelector<HTMLDetailsElement>('#chat-prompt-term');
-    // Collapse the terminal only when we have a question to show above the buttons.
-    // If a menu parsed but its question couldn't be extracted, bare "Yes/No" buttons
-    // would have no context — keep the terminal open so the user can read the prompt.
-    if (termEl) termEl.open = !parsed?.question;
-    // A different prompt is now on screen (its buttons were just rebuilt, so they are
-    // NOT the stale answered ones) — end any post-answer cooldown so these fresh buttons
-    // are immediately tappable, even if the pane went blocked→blocked without an observed
-    // unblock. A transient unparsable screen (parsed === null) is left to the
-    // unblock/floor path, not treated as a new prompt.
-    if (parsed) endAnswerCooldown();
+    showPrompt({ parsed, id: sid, screen });
   }
 
   function startPromptScreenPoll(): void {
@@ -366,9 +336,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
         const ansi = data.ansi ?? data.text ?? '';
         const stripped = stripAnsi(ansi);
         const parsed = parsePrompt(stripped);
-        renderPromptPanel(parsed, parsed ? promptIdentity(stripped) : '');
-        const screen = promptEl.querySelector('#chat-prompt-screen');
-        if (screen) screen.innerHTML = ansiToHtml(ansi);
+        renderPromptPanel(parsed, parsed ? promptIdentity(stripped) : '', ansiToHtml(ansi));
       } catch { /* transient — keep the last screen */ } finally {
         if (promptPollActive === reqId) promptPollActive = 0; // only our own poll clears the guard
       }
@@ -416,88 +384,6 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     dropPendingAnswer();
     if (outcome === 'back' && a.back) location.hash = a.back;
   }
-
-  // Answer by selecting the tapped option. Pressing an option's digit in a numbered
-  // menu selects AND submits it in one atomic keystroke — verified live: sending "3"
-  // to an AskUserQuestion answered "cherry" with no Enter and no cursor movement. The
-  // digit goes as a raw keystroke via send_text (`press`): a digit through send_input
-  // is bracketed-paste-wrapped and ignored, and keys:[digit] is dropped by herdr (both
-  // verified live). Selection is by number, so the ❯ cursor's position is irrelevant.
-  //
-  // The buttons are only re-rendered on the ~1.2s poll, so the prompt on screen may
-  // have changed (answered on the desktop, timed out) since they were drawn. We send
-  // the buttons' prompt identity as `expect_prompt`; the bridge re-reads the screen and
-  // presses the digit ONLY if it still matches — check and send back-to-back on the
-  // server, so nothing can slip in between (a client-side check would leave a round-trip
-  // gap). A mismatch returns 409 and we refresh. An in-flight guard and a per-answer
-  // generation token keep double-taps and stale async work off the shared guard.
-  async function sendAskAnswer(target: string, btn: HTMLElement): Promise<void> {
-    if (destroyed || promptAnswerInFlight) return;
-    const to = parseInt(target, 10);
-    // Claude's prompts never exceed ~6 options, so every option is a single digit; a
-    // multi-digit option would submit on its first digit, so refuse it and leave the
-    // terminal (always shown below) as the way to answer that out-of-range case.
-    if (!Number.isInteger(to) || to < 1 || to > 9) return;
-    const expectedId = promptScreenId; // region identity of the prompt these buttons belong to
-    if (!expectedId) return;
-    const myGen = ++answerGen; // token for THIS answer; a stale POST/timer must not touch a newer one
-    promptAnswerInFlight = true;
-    if (answerCooldownTimer) { clearTimeout(answerCooldownTimer); answerCooldownTimer = null; }
-    promptEl.classList.add('chat-prompt-sending'); // disable the buttons while the answer settles
-    btn.classList.add('ask-opt-sent');
-    // Go Back once the agent resumes work — not from Home, and not for "Chat about this",
-    // which hands the turn back to the user in this pane. Tracked before the POST: the
-    // `working` push can beat its response.
-    const chat = /^Chat about this/i.test(btn.querySelector('.ask-opt-label')?.textContent ?? '');
-    dropPendingAnswer();
-    const pending: PendingAnswer = {
-      gen: myGen, prompt: expectedId, back: view.homeMode || chat ? '' : view.paneBackRoute,
-      sent: false, resumed: false, timer: null,
-    };
-    pendingAnswer = pending;
-    try {
-      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { press: String(to), expect_prompt: expectedId });
-      if (destroyed || myGen !== answerGen) return; // left, or a newer tap superseded this — don't touch shared state
-      if (pendingAnswer === pending) {
-        pending.sent = true;
-        pending.timer = setTimeout(() => {
-          if (pendingAnswer !== pending) return;
-          dropPendingAnswer();
-          showToast('Answer not confirmed', 'The prompt is still waiting. Check the terminal.');
-        }, ANSWER_CONFIRM_MS);
-        settlePendingAnswer();
-      }
-      // The digit already submitted this prompt, but the panel keeps showing it (with
-      // tappable buttons) until the pane's status refreshes. Hold the guard through
-      // that window so a double-tap can't fire the same digit again into the *next*
-      // prompt or the terminal. It's released the moment the pane leaves `blocked` or a
-      // fresh prompt renders (endAnswerCooldown); this timer is only a floor, and it
-      // no-ops if a newer answer has since started.
-      answerCooldownTimer = setTimeout(() => { if (myGen === answerGen) endAnswerCooldown(); }, 1500);
-    } catch (err) {
-      if (myGen !== answerGen) return; // superseded — the newer answer owns the guard now
-      if (pendingAnswer === pending) dropPendingAnswer(); // not pressed: stay
-      btn.classList.remove('ask-opt-sent');
-      endAnswerCooldown();
-      if ((err as { code?: string }).code === 'prompt_changed') {
-        // The prompt advanced before the digit landed — refresh to the live prompt and
-        // let the user retap; never send into a different prompt.
-        const live = await readPromptScreen();
-        if (myGen === answerGen && !destroyed) renderPromptPanel(live?.parsed ?? null, live?.id ?? '');
-        showToast('Prompt changed', 'The prompt updated before your tap was sent — try again.');
-      } else {
-        showToast('Send failed', (err as Error).message);
-      }
-    }
-  }
-
-  // Answer a pending prompt: tapping an option sends its menu key.
-  promptEl.addEventListener('click', (e) => {
-    const btn = (e.target as HTMLElement).closest('.ask-opt') as HTMLElement | null;
-    if (!btn) return;
-    const send = btn.dataset.askSend;
-    if (send) void sendAskAnswer(send, btn);
-  }, { signal });
 
   // ── Server messages, polling, visibility ────────────────────────────────────
 
@@ -570,13 +456,35 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       settlePendingAnswer(); // ...because a tapped answer landed
     },
     echo: term.echo,
+    answered(id, chat, post) {
+      if (destroyed) return;
+      // Tracked before the POST answers: the `working` push can beat its response.
+      dropPendingAnswer();
+      const pending: PendingAnswer = { prompt: id, back: view.homeMode || chat ? '' : view.paneBackRoute, sent: false, resumed: false, timer: null };
+      pendingAnswer = pending;
+      post.then(() => {
+        if (pendingAnswer !== pending) return; // left, or a newer answer took over
+        pending.sent = true;
+        pending.timer = setTimeout(() => {
+          if (pendingAnswer !== pending) return;
+          dropPendingAnswer();
+          showToast('Answer not confirmed', 'The prompt is still waiting. Check the terminal.');
+        }, ANSWER_CONFIRM_MS);
+        settlePendingAnswer();
+      }, () => {
+        if (pendingAnswer === pending) dropPendingAnswer(); // not pressed: stay
+      });
+    },
+    async reread(current) {
+      const live = await readPromptScreen();
+      if (current() && !destroyed) renderPromptPanel(live?.parsed ?? null, live?.id ?? '');
+    },
     destroy() {
       destroyed = true;
       listeners.abort();
       unsubscribe();
       if (paneRefreshTimer) clearInterval(paneRefreshTimer);
       stopPromptScreenPoll();
-      if (answerCooldownTimer) clearTimeout(answerCooldownTimer);
       dropPendingAnswer(); // left the pane: nothing to go back from
       term.destroy();
     },
