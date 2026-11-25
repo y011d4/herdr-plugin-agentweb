@@ -1,4 +1,4 @@
-# herdr-plugin-yoicks
+# herdr-yoicks
 
 **English** | [日本語](./README.ja.md)
 
@@ -60,12 +60,12 @@ herdr server
 Install a release straight from GitHub:
 
 ```bash
-herdr plugin install y011d4/herdr-plugin-yoicks --ref v0.1.0
+herdr plugin install y011d4/herdr-yoicks --ref v0.1.0
 ```
 
 No clone, no build: `herdr plugin install` runs the manifest `[[build]]` step,
 `scripts/plugin-build.sh release`, which downloads that version's binary for your OS and CPU from the
-[GitHub releases](https://github.com/y011d4/herdr-plugin-yoicks/releases) and checks it
+[GitHub releases](https://github.com/y011d4/herdr-yoicks/releases) and checks it
 against the SHA-256 in `release/checksums.txt`, committed in the repo at that tag. A binary that
 doesn't match is not installed. (Without `--ref`, herdr installs the default branch, which
 downloads the release its `herdr-plugin.toml` names.) To hack on the plugin from a local
@@ -117,7 +117,7 @@ To go back to an earlier release, stop the bridge, reinstall that version, start
 ```bash
 herdr plugin action invoke y011d4.yoicks.stop   # wait until it has finished
 herdr plugin uninstall y011d4.yoicks            # keeps the token, config and orchestrator dirs
-herdr plugin install y011d4/herdr-plugin-yoicks --ref v<earlier version>
+herdr plugin install y011d4/herdr-yoicks --ref v<earlier version>
 herdr plugin action invoke y011d4.yoicks.start
 ```
 
@@ -552,8 +552,8 @@ Building from source needs Go (the version in `go.mod`) and Node.js >= 23.6 with
 web UI's TypeScript build and tests).
 
 ```bash
-git clone https://github.com/y011d4/herdr-plugin-yoicks
-cd herdr-plugin-yoicks
+git clone https://github.com/y011d4/herdr-yoicks
+cd herdr-yoicks
 sh scripts/plugin-build.sh          # web UI, then bin/yoicks (Go), from this checkout
 herdr plugin link "$(pwd)"
 ```

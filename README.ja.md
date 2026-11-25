@@ -1,4 +1,4 @@
-# herdr-plugin-yoicks
+# herdr-yoicks
 
 [English](./README.md) | **日本語**
 
@@ -52,12 +52,12 @@ herdr サーバー
 リリースを GitHub から直接インストールします:
 
 ```bash
-herdr plugin install y011d4/herdr-plugin-yoicks --ref v0.1.0
+herdr plugin install y011d4/herdr-yoicks --ref v0.1.0
 ```
 
 clone もビルドも不要です。`herdr plugin install` はマニフェストの `[[build]]`
 (`scripts/plugin-build.sh release`) を実行します。これは、その版の OS と CPU に合うバイナリを
-[GitHub のリリース](https://github.com/y011d4/herdr-plugin-yoicks/releases) から取得し、そのタグの
+[GitHub のリリース](https://github.com/y011d4/herdr-yoicks/releases) から取得し、そのタグの
 リポジトリにコミットされた `release/checksums.txt` の SHA-256 と照らし合わせます。合わないバイナリは
 インストールしません。(`--ref` を付けないと herdr は既定のブランチを入れ、その `herdr-plugin.toml` に
 書かれた版のリリースを取得します。) ローカルのチェックアウトで開発したい場合は「開発」の節を参照してください。
@@ -107,7 +107,7 @@ Claude Code のメモリ、会話の履歴、フォルダの信頼設定もそ�
 ```bash
 herdr plugin action invoke y011d4.yoicks.stop   # 終わるまで待つ
 herdr plugin uninstall y011d4.yoicks            # トークン、config、orchestrator のディレクトリは残る
-herdr plugin install y011d4/herdr-plugin-yoicks --ref v<前の版>
+herdr plugin install y011d4/herdr-yoicks --ref v<前の版>
 herdr plugin action invoke y011d4.yoicks.start
 ```
 
@@ -393,8 +393,8 @@ glibc でも musl でも、どの Linux ディストリビューションでも�
 Node.js 23.6 以上と `npm` が要ります。
 
 ```bash
-git clone https://github.com/y011d4/herdr-plugin-yoicks
-cd herdr-plugin-yoicks
+git clone https://github.com/y011d4/herdr-yoicks
+cd herdr-yoicks
 sh scripts/plugin-build.sh          # web UI、続いて bin/yoicks (Go)。このチェックアウトから
 herdr plugin link "$(pwd)"
 ```

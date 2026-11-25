@@ -39,12 +39,12 @@ name=yoicks_${version}_${os}_${arch}
 want=$(awk -v n="$name" '$2 == n { print $1 }' release/checksums.txt 2>/dev/null || true)
 if [ -z "$want" ]; then
 	echo "plugin-build: release/checksums.txt has no $name: install a released version" \
-		"(herdr plugin install y011d4/herdr-plugin-yoicks --ref v<version>)," \
+		"(herdr plugin install y011d4/herdr-yoicks --ref v<version>)," \
 		"or build from source with: sh scripts/plugin-build.sh" >&2
 	exit 1
 fi
 
-url=${YOICKS_RELEASE_URL:-https://github.com/y011d4/herdr-plugin-yoicks/releases/download}/v$version/$name
+url=${YOICKS_RELEASE_URL:-https://github.com/y011d4/herdr-yoicks/releases/download}/v$version/$name
 mkdir -p bin
 tmp=bin/yoicks.download
 trap 'rm -f "$tmp"' EXIT

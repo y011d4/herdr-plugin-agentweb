@@ -7,8 +7,8 @@ import (
 	"io/fs"
 	"os"
 
-	yoicks "github.com/y011d4/herdr-plugin-yoicks"
-	"github.com/y011d4/herdr-plugin-yoicks/internal/bridge"
+	yoicks "github.com/y011d4/herdr-yoicks"
+	"github.com/y011d4/herdr-yoicks/internal/bridge"
 )
 
 func main() {

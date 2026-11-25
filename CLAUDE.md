@@ -1,4 +1,4 @@
-# herdr-plugin-yoicks
+# herdr-yoicks
 
 herdr plugin: a bridge server (one Go binary, `yoicks`) that translates the herdr
 unix-socket API into HTTP/WebSocket, plus a mobile-first PWA it serves. Lets a phone monitor

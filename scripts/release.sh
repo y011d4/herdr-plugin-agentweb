@@ -28,7 +28,7 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
 	arch=${target#*/}
 	(cd "$work/src" && GOTOOLCHAIN=$toolchain CGO_ENABLED=0 GOOS=$os GOARCH=$arch GOAMD64=v1 GOARM64=v8.0 \
 		go build -trimpath -buildvcs=false \
-		-ldflags "-s -w -X github.com/y011d4/herdr-plugin-yoicks/internal/bridge.Version=$version" \
+		-ldflags "-s -w -X github.com/y011d4/herdr-yoicks/internal/bridge.Version=$version" \
 		-o "$out/yoicks_${version}_${os}_${arch}" ./cmd/yoicks)
 done
 sum=sha256sum

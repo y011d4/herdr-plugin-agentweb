@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/y011d4/herdr-plugin-yoicks/tools/fakeherdr"
+	"github.com/y011d4/herdr-yoicks/tools/fakeherdr"
 )
 
 func TestMain(m *testing.M) {
