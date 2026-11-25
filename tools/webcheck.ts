@@ -469,6 +469,7 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
   record(c.rec, { workspace: ws, tab: w.tab.tab_id, pane: w.root_pane.pane_id });
   const shell = needs.has('shell') ? await newTab(c, ws, 'wc-shell') : '';
   const less = needs.has('less') ? await newTab(c, ws, 'wc-less') : '';
+  const stop = needs.has('stop') ? await newTab(c, ws, 'wc-stop') : ''; // a shell for P15 to stop
   for (const id of [...c.rec.workspaces, ...c.rec.tabs, ...c.rec.panes]) {
     try { guard(c.rec, id); } catch { throw env(`wc- label not found for ${id}`); }
   }
@@ -480,7 +481,7 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     try { guard({ ...c.rec, tabs: [real.tab_id] }, real.tab_id); } catch { refused = true; }
     if (!refused) throw env(`guard accepted the non-wc- tab ${real.tab_id}`);
   }
-  for (const p of [shell, less].filter(Boolean)) {
+  for (const p of [shell, less, stop].filter(Boolean)) {
     if ((await waitFn(() => screen(p).trim(), 15_000, 300)).timeout) throw env(`no shell prompt in ${p}`);
   }
   if (shell) mutate(c.rec, shell, ['pane', 'run', shell, 'seq 1 3000; echo wc-A']);
@@ -900,6 +901,98 @@ async function p17(c: Ctx) {
   result(c, Math.abs(h - vv) <= 1, 'P17', `--app-height=${h},visualViewport=${vv}`, 'at 390x844 --app-height = visualViewport.height (+-1)');
 }
 
+/** Reports wc-less's status and waits for /api/state to show it (the agent_status push goes out with it).
+ *  idle after a turn shows as done until herdr counts it seen. */
+async function reportLess(c: Ctx, state: string): Promise<void> {
+  const less = c.rec.names.less;
+  const want = state === 'idle' ? ['idle', 'done'] : [state];
+  mutate(c.rec, less, ['pane', 'report-agent', '--source', 'webcheck', '--agent', 'claude', '--state', state, less]);
+  if ((await waitFn(async () => want.includes((await paneOf(c, less))?.agent?.status), 5000, 100)).timeout) throw env(`wc-less not ${state}`);
+}
+
+/** P4-T1: notifications on and permitted, the page hidden: wc-less reported blocked -> one OS notification tagged
+ *  with its pane id; opening the pane closes it. (Other agents' notifications may come and go: only this tag counts.) */
+async function p4t1(c: Ctx) {
+  const { pg } = c;
+  const less = c.rec.names.less;
+  const tagged = `navigator.serviceWorker.ready.then((r) => r.getNotifications({ tag: ${js(less)} })).then((ns) => ns.length)`;
+  await pg.ev(`localStorage.setItem('herdr_notifications', 'true')`);
+  await pg.goto('#/agents');
+  const other = await pg.cdp.send('Target.createTarget', { url: 'about:blank' });
+  await pg.cdp.send('Target.activateTarget', { targetId: other.targetId });
+  try {
+    if ((await pg.until('document.hidden', 3000)).timeout) throw env('could not hide the page');
+    await reportLess(c, 'blocked');
+    const n = await pg.until(`${tagged}.then((k) => k === 1)`, 10_000, 200);
+    await pg.cdp.send('Target.activateTarget', { targetId: pg.targetId });
+    await pg.until('!document.hidden', 3000);
+    await pg.ev(`location.hash = ${js(`#/pane/${enc(less)}`)}`);
+    const z = await pg.until(`${tagged}.then((k) => k === 0)`, 2000);
+    result(c, !n.timeout && !z.timeout, 'P4-T1', `notif=${ms(n)},cleared=${ms(z)}`,
+      'hidden page: wc-less reported blocked -> 1 OS notification tagged with its pane id within 10s; opening the pane clears it within 2s');
+  } finally {
+    await pg.cdp.send('Target.activateTarget', { targetId: pg.targetId });
+    await pg.cdp.send('Target.closeTarget', { targetId: other.targetId }).catch(() => {});
+    await reportLess(c, 'idle'); // on the pane: no toast for it
+    await sleep(500);
+    await pg.goto('#/agents');
+  }
+}
+
+/** P5: from the list, wc-less idle -> working adds a toast for it, whose tap opens the pane; back on the list,
+ *  working -> idle adds another, which a 120px right swipe removes without changing the hash. */
+async function p5(c: Ctx) {
+  const { pg } = c;
+  const less = c.rec.names.less;
+  const sel = `.toast[data-pane-id=${js(less)}]`;
+  const count = `document.querySelectorAll(${js(sel)}).length`;
+  const last = `[...document.querySelectorAll(${js(sel)})].pop()`;
+  await pg.goto('#/agents');
+  const n0 = await pg.ev(count);
+  await reportLess(c, 'working');
+  const added = await pg.until(`${count} === ${n0 + 1}`, 5000);
+  await pg.tapEl(last);
+  const nav = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)}`, 2000);
+
+  await pg.goto('#/agents');
+  await pg.until(`${count} === 0`, 2000); // opening the pane dismissed its toasts
+  const n1 = await pg.ev(count);
+  await reportLess(c, 'idle');
+  const added2 = await pg.until(`${count} === ${n1 + 1}`, 5000);
+  const h0 = await pg.hash();
+  const p = await pg.at(last);
+  const x = p.x - 60; // left of center: the swipe stays on screen and off the close button
+  await pg.touch('touchStart', [[x, p.y]]);
+  for (let i = 1; i <= 8; i++) { await sleep(16); await pg.touch('touchMove', [[x + 15 * i, p.y]]); }
+  await pg.touch('touchEnd', []);
+  const gone = await pg.until(`${count} === ${n1}`, 1000);
+  await sleep(500); // a swipe that also tapped would navigate by now
+  const h1 = await pg.hash();
+  result(c, !added.timeout && !nav.timeout && !added2.timeout && !gone.timeout && h1 === h0, 'P5',
+    `toast=${ms(added)},tap=${ms(nav)},toast2=${ms(added2)},swipedOff=${ms(gone)},hash=${h0}->${h1}`,
+    'idle->working adds a wc-less .toast, whose tap opens #/pane/<it> within 2s; a 120px right swipe removes one, the hash unchanged');
+}
+
+/** P15: wc-stop opened from #/agents/wc-o1 and stopped (⋮ → Stop agent… → Stop): back to that list, the pane gone. */
+async function p15(c: Ctx) {
+  const { pg } = c;
+  const stop = c.rec.names.stop;
+  const list = '#/agents/wc-o1'; // not the default #/agents: the way back is remembered
+  await pg.goto(list);
+  await pg.goto(`#/pane/${enc(stop)}`);
+  await pg.until(`!!document.getElementById('btn-agent-menu')`, 5000);
+  guard(c.rec, stop);
+  await pg.tapEl(`document.getElementById('btn-agent-menu')`);
+  await pg.tapEl(`document.getElementById('am-stop')`);
+  const t = await pg.tapEl(`document.getElementById('cf-ok')`);
+  const back = await pg.until(`location.hash === ${js(list)}`, 3000);
+  const del = pg.reqs.find((q) => q.t >= t - 1000 && q.method === 'DELETE' && q.url.endsWith(`/api/panes/${enc(stop)}`));
+  const gone = await waitFn(async () => !(await paneOf(c, stop)), 5000, 200);
+  result(c, !back.timeout && !!del && !gone.timeout, 'P15', `back=${ms(back)}(${await pg.hash()}),delete=${!!del},paneGone=${ms(gone)}`,
+    `stopping wc-stop returns to ${list} within 3s (DELETE /api/panes/<it>), and /api/state drops the pane within 5s`);
+  await pg.goto('#/agents');
+}
+
 // ── Tier 2 items (real Claude in wc-claude; wc-o1/wc-o2 are only started, cleared, stopped) ──
 
 async function sendPrompt(c: Ctx, pane: string, text: string) {
@@ -1099,6 +1192,9 @@ const ITEMS: Item[] = [
   { id: 'P16', tier: 1, run: p16 },
   { id: 'P7', tier: 1, needs: ['less'], run: p7 },
   { id: 'P3', tier: 1, needs: ['less'], run: p3 },
+  { id: 'P4-T1', tier: 1, needs: ['less'], run: p4t1 },
+  { id: 'P5', tier: 1, needs: ['less'], run: p5 },
+  { id: 'P15', tier: 1, needs: ['stop'], run: p15 },
   { id: 'P10', tier: 1, needs: ['shell', 'less'], run: p10 },
   { id: 'P12', tier: 1, needs: ['shell'], run: p12 },
   { id: 'P13', tier: 1, run: p13 },
