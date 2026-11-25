@@ -825,6 +825,21 @@ async function p10(c: Ctx) {
   result(c, reads >= 2, 'P10.app-quickkey', `reads600ms=${reads}`, 'a quick key is followed by >= 2 GET /read within 600ms');
 }
 
+/** Stale responses: a pane left at once (its first reads still in flight) must not paint the next pane. */
+async function p14(c: Ctx) {
+  const { pg } = c;
+  const { shell, less } = c.rec.names;
+  await pg.goto('#/agents');
+  const gap = await pg.ev(`new Promise((res) => { location.hash = ${js(`#/pane/${enc(shell)}`)}; const t = performance.now();
+    setTimeout(() => { location.hash = ${js(`#/pane/${enc(less)}`)}; res(Math.round(performance.now() - t)); }, 20); })`);
+  await sleep(3000);
+  const [hash, live] = await pg.ev(`[location.hash, document.getElementById('term-live')?.textContent ?? '']`);
+  const b = live.includes('wc-B');
+  const a = live.includes('wc-A');
+  result(c, gap <= 50 && hash === `#/pane/${enc(less)}` && b && !a, 'P14', `switchAfter=${gap}ms,onLess=${hash === `#/pane/${enc(less)}`},wc-B=${b},wc-A=${a}`,
+    '#/pane/<wc-shell>, then #/pane/<wc-less> within 50ms: 3s later #term-live has wc-B and no wc-A');
+}
+
 async function p12(c: Ctx) {
   const p = c.preview;
   if (!p) { result(c, false, 'P12', `ENV:no-preview.json-for-${c.port}`, 'needs a preview started by `webcheck preview start` (to stop/start it)'); return; }
@@ -1324,6 +1339,7 @@ const ITEMS: Item[] = [
   { id: 'P5', tier: 1, needs: ['less'], run: p5 },
   { id: 'P15', tier: 1, needs: ['stop'], run: p15 },
   { id: 'P10', tier: 1, needs: ['shell', 'less'], run: p10 },
+  { id: 'P14', tier: 1, needs: ['shell', 'less'], run: p14 },
   { id: 'P12', tier: 1, needs: ['shell'], run: p12 },
   { id: 'P13', tier: 1, run: p13 },
   ...['P2.old', 'P2.upgrade', 'P2.downgrade'].map((id): Item => ({ id, tier: 1, manual: true, run: (c) => p2Round(c, id) })),
