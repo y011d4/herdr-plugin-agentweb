@@ -348,6 +348,30 @@ vendor-neutrality is preserved.
   (`Input.dispatchTouchEvent`, mobile metrics, fresh profile). "The screen
   changed" is not proof by itself on a busy pane — assert on content moving
   to *older* lines and on the composer staying clean.
+- **webcheck** (`tools/webcheck.ts`: headless Chrome over CDP, no dependencies) is the gate before
+  deploying a web change: all of Tier 1 passes.
+  ```bash
+  node tools/webcheck.ts preview start --bin bin/yoicks --port 8395  # throwaway bridge over the real herdr
+  node tools/webcheck.ts check --base http://127.0.0.1:8395 --tier 1  # lock, setup, checks, teardown
+  node tools/webcheck.ts preview stop --port 8395
+  ```
+  Each check prints `PASS|FAIL <id> <measured> <condition>`; the exit code is the failure count.
+  `--only P10,P12` picks checks; `--profile DIR` reuses a Chrome profile, for the old-SW round trip
+  (`P2.old` → `P2.upgrade` → `P2.downgrade`, the old build served with `preview start --web-dir`).
+  The file's header lists the rest (`setup --gonogo`, `block`, `teardown`).
+  - Tier 1 is deterministic, shell panes only: `wc-shell` (`seq`) and `wc-less` (`less --mouse`,
+    `report-agent`ed as claude, so it takes the app-scroll path). Tier 2 (`--tier 2`) drives a
+    real Claude (`wc-claude`, orchestrators `wc-o1`/`wc-o2`) and refuses to run until
+    `$WC_ROOT/.envrc` sets the account's `CLAUDE_CONFIG_DIR` (`direnv allow`ed).
+  - Safety: the preview controls the real herdr, and production (so the phone, notifications
+    included) sees the scratch agents: say so before a run. It mutates only what the run created
+    and recorded whose live tab or workspace label starts with `wc-` (one guard, which the page's
+    own API requests pass too), refuses port 8390, and runs one at a time (`$WC_ROOT/lock`, held by
+    a separate `flock` process the bridge and Chrome never inherit). Teardown also runs on Ctrl+C;
+    the next run cleans up an unfinished one. `WC_ROOT` = `$WEBCHECK_ROOT` or
+    `~/.local/state/herdr-yoicks-webcheck`.
+  - A new check first passes on the current UI (the main before a screen's port), so it isn't
+    written to fit the new code.
 
 ## Conventions
 
