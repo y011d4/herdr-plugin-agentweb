@@ -41,6 +41,12 @@ export function emit(): void {
   for (const fn of listeners) fn();
 }
 
+/** A new State (null: signed out), with an emit(); app.ts's onStateUpdate stays its caller's job. */
+export function setAppState(state: AppState | null): void {
+  store.appState = state;
+  emit();
+}
+
 /** Records a done pane as seen on this phone (see SeenDone). */
 export function markPaneSeen(paneId: string): void {
   store.seenDone = markSeen(store.seenDone, store.appState?.workspaces ?? [], paneId);
