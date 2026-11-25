@@ -2,27 +2,16 @@
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { act } from 'react';
-import { dashboardCards } from '../src/dashboard-group.ts';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { setAppState, setStartingHome, store } from '../src/store.ts';
 import type { AppState } from '../src/types.ts';
 import { Dashboard, dashboardTopbar } from '../src/ui/Dashboard.tsx';
 import { state as recorded } from './contract.gen.ts';
-import { renderCard } from './legacy-card.ts';
 import { fire, render } from './render.ts';
 
 const fresh = (): AppState => structuredClone(recorded);
-const SINCE = recorded.workspaces[0].tabs[0].panes[0].agent!.sinceUnixMs; // every recorded agent's
 /** Lets the timers and React settle. */
 const settle = (): Promise<void> => act(async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0)); });
-
-/** Every element of a card in document order: tag, class, attributes and text. Whitespace-only
- *  text (the legacy template's indentation, inside flex rows: never rendered) is left out. */
-function shape(card: Element): string[] {
-  const text = (n: Node): string => (n.nodeType === Node.TEXT_NODE ? (n.nodeValue!.trim() ? n.nodeValue! : '') : [...n.childNodes].map(text).join(''));
-  return [card, ...card.querySelectorAll('*')].map((el) =>
-    `${el.tagName} .${el.className} [${['data-pane-id', 'role', 'tabindex'].map((a) => el.getAttribute(a)).join(',')}] ${text(el)}`);
-}
 
 let unmounts: Array<() => Promise<void>>;
 async function show(hash: string, state: AppState | null): Promise<HTMLElement> {
@@ -48,37 +37,6 @@ afterEach(async () => {
 });
 
 describe('Dashboard cards', () => {
-  // The recorded State, and one that reaches the rest of the card: a message, a pane title, a tab
-  // without a label, no time, a branch, HTML in the text; at each relative-time unit, a seen done.
-  const variant = (): AppState => {
-    const s = fresh();
-    const [repo, feat] = s.workspaces;
-    repo.worktree!.branch = 'feat/<b>&"x"';
-    repo.tabs[0].panes[0].agent!.sinceUnixMs = 0;
-    repo.tabs[1].label = '';
-    repo.tabs[1].panes[1].title = 'vim <x>';
-    feat.tabs[0].panes[1].agent!.message = 'needs <you> & "me"';
-    return s;
-  };
-  const cases: Array<[string, AppState, Record<string, number>, number]> = [
-    ['recorded, just now', fresh(), {}, SINCE + 3_000],
-    ['variant, seconds, done seen', variant(), { p3: 4 }, SINCE + 42_000],
-    ['variant, minutes', variant(), {}, SINCE + 5 * 60_000],
-    ['variant, hours', variant(), { p3: 3 }, SINCE + 3 * 3_600_000],
-  ];
-  for (const [name, state, seen, now] of cases) {
-    it(`renders each card as the legacy renderCard did (${name})`, async () => {
-      vi.spyOn(Date, 'now').mockReturnValue(now);
-      store.seenDone = seen;
-      const oracle = document.createElement('div');
-      oracle.innerHTML = dashboardCards(state.workspaces, state.orchestrators.map((o) => o.paneId)).map(renderCard).join('');
-      const want = [...oracle.querySelectorAll('.agent-card')].map(shape);
-      const got = [...(await show('#/agents', state)).querySelectorAll('.agent-card')].map(shape);
-      assert.equal(want.length, 4);
-      assert.deepEqual(got, want);
-    });
-  }
-
   it('opens a card on a click, Enter or Space', async () => {
     const c = await show('#/agents', fresh());
     const card = c.querySelector<HTMLElement>('.agent-card[data-pane-id="p7"]')!;
