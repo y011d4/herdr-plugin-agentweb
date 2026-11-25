@@ -1,6 +1,6 @@
-# herdr-plugin-agentweb
+# herdr-yoicks
 
-herdr plugin: a bridge server (one Go binary, `agentwebctl`) that translates the herdr
+herdr plugin: a bridge server (one Go binary, `yoicks`) that translates the herdr
 unix-socket API into HTTP/WebSocket, plus a mobile-first PWA it serves. Lets a phone monitor
 and control every coding agent running in herdr. herdr itself is never
 modified — everything goes through its public socket API.
@@ -10,7 +10,7 @@ modified — everything goes through its public socket API.
 ```
 phone (PWA: web/src/*.ts → built to web/*.js)
   │ REST /api/* + WS /ws (bearer token)
-bridge (Go: cmd/agentwebctl + internal/bridge, web/ embedded; binds 127.0.0.1:8390)
+bridge (Go: cmd/yoicks + internal/bridge, web/ embedded; binds 127.0.0.1:8390)
   │ ndjson over $HERDR_SOCKET_PATH
 herdr server
 ```
@@ -33,12 +33,12 @@ All in `internal/bridge/` (one package):
   fixed `launch_profiles` allowlist (never a caller-supplied command). http.go wires the routes
   (`POST /api/agents`, `DELETE /api/panes/:id`, `POST /api/panes/:id/rename`, `POST /api/agents/:target/clear`,
   `POST /api/worktrees`). The New agent UI's "＋ New worktree…" option creates a worktree, then starts
-  the agent in its checkout. Every new worktree (phone, API, `agentwebctl agent start --worktree`) goes
+  the agent in its checkout. Every new worktree (phone, API, `yoicks agent start --worktree`) goes
   next to its repo as `<repo>-wt-<branch>` (`placeWorktreeNextToRepo` in worktree_resolve.go), so a
   parent-dir `.envrc` (e.g. the Claude account per org dir) covers it; herdr's own default dir wouldn't.
 - `auth.go` / `notify.go` / `config.go` — token, agent-status fanout + optional ntfy, config
   (config also parses `launch_profiles`, merged over built-in defaults)
-- `cli.go` (`cmd/agentwebctl` is its main) — plugin entrypoints: serve (the bridge) | run |
+- `cli.go` (`cmd/yoicks` is its main) — plugin entrypoints: serve (the bridge) | run |
   start | stop | status | qr, plus the
   orchestrator's commands: `overview` (read-only text summary of the other agents; pure part in
   `overview.go`), `agent get|read|prompt|wait|start` and `worktree remove` (plus
@@ -57,11 +57,13 @@ All in `internal/bridge/` (one package):
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker
 - **Orchestrator homes**: config `orchestrators: [{name,label,env}]` — each is *managed*:
   `orchestrator.go` writes `<data>/orchestrators/<name>/` (data = `$XDG_DATA_HOME` or
-  `~/.local/share`, + `herdr-agentweb`) at bridge start and before each start: CLAUDE.md
+  `~/.local/share`, + `herdr-yoicks`; `herdr-agentweb`, the dir from before the rename, while it
+  exists, so the orchestrators' cwds and with them Claude Code's memory/transcripts/folder trust
+  never move: `dataDir`) at bridge start and before each start: CLAUDE.md
   (imports rules.md, then the user's local.md, which is created once and never overwritten),
-  rules.md (the bundled `orchestrator/rules.md` with the real agentwebctl command filled in) and
+  rules.md (the bundled `orchestrator/rules.md` with the real yoicks command filled in) and
   `.claude/settings.json` (dontAsk allowlist). It starts (phone Start button →
-  `POST /api/orchestrators/:name/start`, or `agentwebctl orchestrator start <name>`) in a new
+  `POST /api/orchestrators/:name/start`, or `yoicks orchestrator start <name>`) in a new
   workspace whose shell gets the entry's `env` (herdr `workspace.create`/`tab.create`/`pane.split`
   take `env`; `worktree.create` does not), and the started agent's account is checked against it.
   Clear relaunches with the old agent's account (`accountEnv` → `clearAgent`'s `envFor`). Without
@@ -87,9 +89,9 @@ All in `internal/bridge/` (one package):
   with Back to the Home; a pane opened from there goes Back to that list. Any route to
   its pane (`#/pane/<id>`: notification clicks, stale links) is replaced by its Home. herdr's
   `pane.agent_detected` (fires on detect *and* release) is rebuild-triggering, so agent presence and
-  `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `agentwebctl agent …`, waking on background
+  `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `yoicks agent …`, waking on background
   `agent prompt --wait`) lives in that dir's `CLAUDE.md`, not in this repo.
-- `herdr-plugin.toml` — actions/panes call `./bin/agentwebctl`. `[[build]]` (`scripts/plugin-build.sh release`) runs on
+- `herdr-plugin.toml` — actions/panes call `./bin/yoicks`. `[[build]]` (`scripts/plugin-build.sh release`) runs on
   `herdr plugin install`/`update` only — never for a linked plugin (not on link, relink, update,
   enable or a herdr restart; checked on 0.9.5): it downloads the GitHub release binary of the
   manifest's `version` and checks it against the committed `release/checksums.txt` (no line or a
@@ -110,8 +112,8 @@ and the TypeScript web share only this contract — change both sides together
 npm ci && npm run build:web   # tsc ×2 (web/src → web/, sw); the binary embeds web/
 npm test                      # web tests (node --test runs .ts natively: Node >= 23.6)
 go test ./...                 # bridge + CLI (CI: go test -race ./...)
-go build -o bin/agentwebctl ./cmd/agentwebctl
-HERDR_PLUGIN_STATE_DIR=$(mktemp -d) HERDR_AGENTWEB_PORT=8392 ./bin/agentwebctl run   # dev run
+go build -o bin/yoicks ./cmd/yoicks
+HERDR_PLUGIN_STATE_DIR=$(mktemp -d) HERDR_YOICKS_PORT=8392 ./bin/yoicks run   # dev run
 ```
 
 Deploying a change to the running bridge. The Go binary embeds the built web UI, so a web
@@ -119,9 +121,9 @@ change needs this rebuild too. `herdr plugin action invoke` returns before the a
 let `stop` finish before `start`.
 
 ```bash
-sh scripts/plugin-build.sh   # web build + go build -o bin/agentwebctl, from this checkout
-herdr plugin action invoke y011d4.agentweb.stop
-herdr plugin action invoke y011d4.agentweb.start
+sh scripts/plugin-build.sh   # web build + go build -o bin/yoicks, from this checkout
+herdr plugin action invoke y011d4.yoicks.stop
+herdr plugin action invoke y011d4.yoicks.start
 curl -s http://127.0.0.1:8390/healthz   # expect {"ok":true,"herdrConnected":true}
 ```
 
@@ -134,7 +136,10 @@ caches the linked manifest.
 tag and run `sh scripts/plugin-build.sh release`, which downloads that release's binary), `start`, check `/healthz`. The binary path doesn't change, so the orchestrators'
 allowlists still match; Clear them when `orchestrator/rules.md` differs between the versions.
 Return with `git switch main`, rebuild, restart. (The last Node bridge is `423f49d`; going back
-there takes `npm ci && npm run build`, re-linking, and Clearing the orchestrators.)
+there takes `npm ci && npm run build`, re-linking, and Clearing the orchestrators.) A commit from
+before the rename to yoicks is the plugin `y011d4.agentweb` with `bin/agentwebctl`: going back
+across it means the README "Renamed from agentweb" steps in reverse (stop, re-link, its own
+config/state dirs, Clear); the data dir is the same `herdr-agentweb` on both sides.
 
 **Service worker cache**: bump `CACHE_VERSION` in `web/src/sw.ts` on every
 change to any web asset. Cached assets refresh only when sw.js itself changes;
@@ -159,8 +164,8 @@ Verified live against herdr 0.7.3 / protocol 16:
   a single `send_input` carrying both `text` and `keys:["enter"]` (verified live
   against Claude Code: single-line, multi-line, and large pastes all submit) — the
   enter is a real keypress, not swallowed by the paste.
-- **Clearing a Claude Code composer before sending (so an agentweb message can't
-  merge with a draft the user typed straight into the pane, which agentweb can't
+- **Clearing a Claude Code composer before sending (so a yoicks message can't
+  merge with a draft the user typed straight into the pane, which yoicks can't
   read).** Send raw `Ctrl+U` (0x15) via `pane.send_text`: it kills to the start of
   the current line, so a multi-line draft needs it repeated — the bridge sends
   ~30, which walks up any realistic draft and is a no-op once empty (verified
@@ -307,7 +312,7 @@ vendor-neutrality is preserved.
 
 - Every `/api` and `/ws` request requires the bearer token
   (`timingSafeEqual`); `/healthz` is the only open endpoint.
-- The tokenized connect URL is printed only by the bridge's startup (`agentwebctl serve`/`run`: run
+- The tokenized connect URL is printed only by the bridge's startup (`yoicks serve`/`run`: run
   pane + 0600 bridge.log) and the `qr` entrypoint. **Never print the token in
   action stdout** — herdr captures action output into its plugin logs.
 - Bind stays loopback-only by default; remote access is Tailscale's job

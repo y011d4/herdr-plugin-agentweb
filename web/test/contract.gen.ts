@@ -53,8 +53,8 @@ export const state: AppState = {
       {
        "paneId": "p4",
        "focused": false,
-       "cwd": "/home/u/.local/share/herdr-agentweb/orchestrators/personal",
-       "launchCwd": "/home/u/.local/share/herdr-agentweb/orchestrators/personal",
+       "cwd": "/home/u/.local/share/herdr-yoicks/orchestrators/personal",
+       "launchCwd": "/home/u/.local/share/herdr-yoicks/orchestrators/personal",
        "title": null,
        "agent": {
         "name": "claude",
@@ -253,8 +253,8 @@ export const messages: WsMessage[] = [
         {
          "paneId": "p4",
          "focused": false,
-         "cwd": "/home/u/.local/share/herdr-agentweb/orchestrators/personal",
-         "launchCwd": "/home/u/.local/share/herdr-agentweb/orchestrators/personal",
+         "cwd": "/home/u/.local/share/herdr-yoicks/orchestrators/personal",
+         "launchCwd": "/home/u/.local/share/herdr-yoicks/orchestrators/personal",
          "title": null,
          "agent": {
           "name": "claude",

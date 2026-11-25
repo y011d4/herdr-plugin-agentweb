@@ -2,7 +2,7 @@ package bridge
 
 // Which Claude account a process / pane / directory belongs to, a port of
 // server/account.ts, so an orchestrator only sees and drives agents of its own
-// account (agentwebctl overview + `agent` commands). An account is its transcript
+// account (yoicks overview + `agent` commands). An account is its transcript
 // projects root — CLAUDE_CONFIG_DIR/projects, default ~/.claude/projects — the same
 // key projectsRootForPid derives from a process. Every lookup answers "" (TS: null)
 // when it can't tell, and callers treat that as "not yours" (fail closed).

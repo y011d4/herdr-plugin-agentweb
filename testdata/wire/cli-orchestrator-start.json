@@ -7,7 +7,7 @@
    "test"
   ],
   "exit": 0,
-  "stdout": "started orchestrator test (pane p10) in $TMP/data/herdr-agentweb/orchestrators/test\n",
+  "stdout": "started orchestrator test (pane p10) in $TMP/data/herdr-yoicks/orchestrators/test\n",
   "stderr": ""
  },
  "herdr": [
@@ -18,7 +18,7 @@
   {
    "method": "workspace.create",
    "params": {
-    "cwd": "$TMP/data/herdr-agentweb/orchestrators/test",
+    "cwd": "$TMP/data/herdr-yoicks/orchestrators/test",
     "env": {
      "CLAUDE_CONFIG_DIR": "$TMP/claude-b"
     },

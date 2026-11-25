@@ -1,4 +1,4 @@
-// Command record-wire drives the bridge (agentwebctl serve) and its CLI through one
+// Command record-wire drives the bridge (yoicks serve) and its CLI through one
 // operation at a time against a fake herdr and writes, per operation, what herdr
 // received plus the HTTP answer or the CLI output to testdata/wire/<op>.json, which
 // TestGoMatchesWireRecordings compares the current build with. The recordings were
@@ -15,7 +15,7 @@
 //
 // Each CLI call runs detached (setsid -f), as the CLI takes its nearest claude
 // ancestor's account as its own. From the repo root, with the web UI built (it builds
-// ./cmd/agentwebctl; needs setsid):
+// ./cmd/yoicks; needs setsid):
 //
 //	go build -o /tmp/record-wire ./tools/fakeherdr/cmd/record-wire && /tmp/record-wire
 //
@@ -41,7 +41,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/y011d4/herdr-plugin-agentweb/tools/fakeherdr"
+	"github.com/y011d4/herdr-yoicks/tools/fakeherdr"
 )
 
 // the bridge's port and where the recordings go (main_test.go repoints both)
@@ -50,7 +50,7 @@ var (
 	outDir = filepath.Join("testdata", "wire")
 )
 
-// goBin is the agentwebctl recorded, as `agentwebctl serve` and its commands: main
+// goBin is the yoicks recorded, as `yoicks serve` and its commands: main
 // builds it, main_test.go its own.
 var goBin string
 
@@ -67,15 +67,15 @@ func main() {
 	_ = os.WriteFile(filepath.Join(outDir, "DONE"), nil, 0o644)
 }
 
-// buildThenRun builds ./cmd/agentwebctl into a temp dir and records it.
+// buildThenRun builds ./cmd/yoicks into a temp dir and records it.
 func buildThenRun() error {
 	dir, err := os.MkdirTemp("", "record-wire")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(dir)
-	goBin = filepath.Join(dir, "agentwebctl") // the CLI knows a bridge by this name
-	if out, err := exec.Command("go", "build", "-o", goBin, "./cmd/agentwebctl").CombinedOutput(); err != nil {
+	goBin = filepath.Join(dir, "yoicks") // the CLI knows a bridge by this name
+	if out, err := exec.Command("go", "build", "-o", goBin, "./cmd/yoicks").CombinedOutput(); err != nil {
 		return fmt.Errorf("go build: %v\n%s", err, out)
 	}
 	return run()
@@ -449,7 +449,7 @@ func run() error {
 		"HERDR_PLUGIN_STATE_DIR=" + filepath.Join(tmp, "state"),
 		"HERDR_PLUGIN_CONFIG_DIR=" + filepath.Join(tmp, "config"),
 		"XDG_DATA_HOME=" + filepath.Join(tmp, "data"),
-		"HERDR_AGENTWEB_PORT=" + port,
+		"HERDR_YOICKS_PORT=" + port,
 	}
 	// something else on the port would answer the health check in our bridge's place
 	if ln, err := net.Listen("tcp", "127.0.0.1:"+port); err != nil {

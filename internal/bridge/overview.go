@@ -1,7 +1,7 @@
 package bridge
 
 // Pure text overview of every herdr agent, a port of server/overview.ts, for an
-// orchestrator agent to read via `agentwebctl overview`. No I/O: the CLI fetches
+// orchestrator agent to read via `yoicks overview`. No I/O: the CLI fetches
 // agent.list / session.snapshot, each agent's transcript items or screen text,
 // and passes them in. Output is plain, compact, ANSI-free text.
 

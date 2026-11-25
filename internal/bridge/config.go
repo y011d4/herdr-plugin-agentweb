@@ -42,8 +42,15 @@ func loadFileConfig() map[string]any {
 }
 
 // dataDir is where the plugin keeps its data, the managed orchestrators' dirs among it.
+// The dir from before the rename (herdr-agentweb) stays in use while it exists: moving
+// it would move the orchestrators' cwds, and Claude Code keys their memory, transcripts
+// and folder trust by cwd.
 func dataDir(home string) string {
-	return filepath.Join(firstNonEmpty(os.Getenv("XDG_DATA_HOME"), filepath.Join(home, ".local", "share")), "herdr-agentweb")
+	base := firstNonEmpty(os.Getenv("XDG_DATA_HOME"), filepath.Join(home, ".local", "share"))
+	if legacy := filepath.Join(base, "herdr-agentweb"); fileExists(legacy) {
+		return legacy
+	}
+	return filepath.Join(base, "herdr-yoicks")
 }
 
 // nonEmpty is v as a string when it is one with more than white space.
@@ -147,7 +154,7 @@ func loadConfig() Config {
 
 	fileHost, _ := file["host"].(string)
 	port := 8390
-	if v := os.Getenv("HERDR_AGENTWEB_PORT"); v != "" {
+	if v := os.Getenv("HERDR_YOICKS_PORT"); v != "" {
 		port = jsParseInt(v)
 	} else if f, ok := file["port"].(float64); ok {
 		// a fraction stays unusable, as it is for Node: -1
@@ -165,7 +172,7 @@ func loadConfig() Config {
 	}
 
 	return Config{
-		Host:           firstNonEmpty(os.Getenv("HERDR_AGENTWEB_HOST"), fileHost, "127.0.0.1"),
+		Host:           firstNonEmpty(os.Getenv("HERDR_YOICKS_HOST"), fileHost, "127.0.0.1"),
 		Port:           port,
 		NotifyURL:      notifyURL,
 		PublicURL:      publicURL,
