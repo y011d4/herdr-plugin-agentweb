@@ -18,7 +18,7 @@ import { stripAnsi, parsePrompt, promptIdentity, displayCols, answerOutcome } fr
 import type { PromptOption, ParsedPrompt } from './prompt.ts';
 import { homeSummary, shownStatus } from './dashboard-group.ts';
 import { DESKTOP_QUERY, enterSends } from './composer-keys.ts';
-import type { AppState, ClearResponse, OrchestratorView, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
+import type { AppState, ClearResponse, OkResponse, OrchestratorView, ReadResponse, TranscriptResponse, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
 import { apiDelete, apiGet, apiPost, getToken, loadToken, onUnauthorized, setToken } from './api.ts';
 import { STORAGE_HOME, findPane, keptTasks, lastHome, markPaneSeen, setAppState, setStartingHome, store, subscribe } from './store.ts';
 import { dismissNotificationsForPane, dismissToastsForPane, notifyAgentStatus, showToast } from './notify.ts';
@@ -633,15 +633,6 @@ async function renderPaneDetail(paneId: string): Promise<void> {
 
 // ── Chat view ─────────────────────────────────────────────────────────────────
 
-interface TranscriptResponse {
-  available: boolean;
-  sessionId?: string;
-  items?: TimelineItem[];
-  cursor?: number;
-  reset?: boolean;
-  truncated?: boolean;
-}
-
 // Chat is the default view; the terminal is only preferred if explicitly chosen.
 function preferredView(): 'terminal' | 'chat' {
   return localStorage.getItem(STORAGE_VIEW) === 'terminal' ? 'terminal' : 'chat';
@@ -667,7 +658,7 @@ async function initChatAvailability(paneId: string): Promise<void> {
   const probeId = ++chatProbeSeq;
   chatProbeActive = probeId;
   try {
-    const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript`) as TranscriptResponse;
+    const data = await apiGet<TranscriptResponse>(`/api/panes/${encodeURIComponent(paneId)}/transcript`);
     // gen/paneId invalidate a probe from a prior pane; the in-flight guard means
     // no concurrent re-probe supersedes this one, so a slow probe still applies.
     if (probeId !== chatProbeSeq || gen !== paneViewGen || paneId !== view.activePaneId) return;
@@ -727,7 +718,7 @@ async function loadChatInitial(): Promise<void> {
   const reqSession = chatSessionId;
   const reqCursor = chatCursor;
   try {
-    const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript`) as TranscriptResponse;
+    const data = await apiGet<TranscriptResponse>(`/api/panes/${encodeURIComponent(paneId)}/transcript`);
     if (gen !== paneViewGen || paneId !== view.activePaneId || view.paneViewMode !== 'chat') return;
     if (chatSessionId !== reqSession || chatCursor !== reqCursor) return; // superseded in flight
     if (!data.available) { chatAvailable = false; showViewToggle(false); switchToTerminal(false); return; }
@@ -810,7 +801,7 @@ async function pollChatFallback(): Promise<void> {
   const reqSession = chatSessionId;
   const q = chatSessionId ? `?session=${encodeURIComponent(chatSessionId)}&after=${reqCursor}` : '';
   try {
-    const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/transcript${q}`) as TranscriptResponse;
+    const data = await apiGet<TranscriptResponse>(`/api/panes/${encodeURIComponent(paneId)}/transcript${q}`);
     if (gen !== paneViewGen || paneId !== view.activePaneId || view.paneViewMode !== 'chat') return;
     // Drop any response whose request start no longer matches the current state
     // BEFORE acting on it — a stale available:false must not force the terminal
@@ -1078,7 +1069,7 @@ async function flushWheelQueue(): Promise<void> {
     wheelFlushTimer = setTimeout(() => { void flushWheelQueue(); }, 70);
   }
   try {
-    await apiPost(`/api/panes/${encodeURIComponent(view.activePaneId)}/scroll`, { direction, steps });
+    await apiPost<OkResponse>(`/api/panes/${encodeURIComponent(view.activePaneId)}/scroll`, { direction, steps });
   } catch { /* transient send failures just skip a scroll step */ }
   const now = Date.now();
   if (now - lastWheelRefreshAt > 200) {
@@ -1129,9 +1120,9 @@ async function loadHistoryPrefix(): Promise<void> {
   const paneId = view.activePaneId;
   historyRefreshing = true;
   try {
-    const data = await apiGet(
+    const data = await apiGet<ReadResponse>(
       `/api/panes/${encodeURIComponent(paneId)}/read?source=recent&lines=${HISTORY_LINES}&format=ansi`
-    ) as Record<string, string | null>;
+    );
     if (gen !== paneViewGen || paneId !== view.activePaneId) return; // navigated away
     // A gesture may have started while the fetch was in flight; replacing the
     // history DOM / adjusting scrollTop now would cancel or jump it. Bail and
@@ -1234,9 +1225,9 @@ async function refreshPaneOutput(): Promise<void> {
   const reqId = ++refreshReqSeq;
   const paneId = view.activePaneId;
   try {
-    const data = await apiGet(
+    const data = await apiGet<ReadResponse>(
       `/api/panes/${encodeURIComponent(paneId)}/read?source=visible&lines=200&format=ansi`
-    ) as Record<string, unknown>;
+    );
     if (gen !== paneViewGen || paneId !== view.activePaneId) return; // navigated away
     // A later read started while this one was in flight — let the newest win, so
     // an earlier HTTP read can't overwrite a newer one's fresher output.
@@ -1248,7 +1239,7 @@ async function refreshPaneOutput(): Promise<void> {
     // Keep app-scroll fresh on the HTTP fallback path (WS down); the server
     // computes it the same way it does for pane_output pushes.
     if (typeof data.appScroll === 'boolean') appScrollPane = data.appScroll;
-    renderPaneOutput((data.ansi ?? data.text ?? '') as string);
+    renderPaneOutput(data.ansi ?? data.text ?? '');
   } catch (err) {
     const message = (err as Error).message;
     if (message === '401') return;
@@ -1369,11 +1360,11 @@ function startPromptScreenPoll(): void {
     promptPollActive = reqId;
     const paneId = view.activePaneId;
     try {
-      const data = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
+      const data = await apiGet<ReadResponse>(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`);
       // stopPromptScreenPoll bumps promptPollSeq to invalidate a poll from a prior
       // session; the in-flight guard means no concurrent tick supersedes this one.
       if (reqId !== promptPollSeq || view.paneViewMode !== 'chat' || paneId !== view.activePaneId) return;
-      const ansi = (data.ansi ?? data.text ?? '') as string;
+      const ansi = data.ansi ?? data.text ?? '';
       const stripped = stripAnsi(ansi);
       const parsed = parsePrompt(stripped);
       renderPromptPanel(parsed, parsed ? promptIdentity(stripped) : '');
@@ -1397,8 +1388,8 @@ function stopPromptScreenPoll(): void {
 // (null if the read fails). `id` is '' when no prompt/menu is present.
 async function readPromptScreen(paneId: string): Promise<{ parsed: ParsedPrompt | null; id: string } | null> {
   try {
-    const d = await apiGet(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`) as Record<string, unknown>;
-    const stripped = stripAnsi((d.ansi ?? d.text ?? '') as string);
+    const d = await apiGet<ReadResponse>(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`);
+    const stripped = stripAnsi(d.ansi ?? d.text ?? '');
     const parsed = parsePrompt(stripped);
     return { parsed, id: parsed ? promptIdentity(stripped) : '' };
   } catch { return null; }

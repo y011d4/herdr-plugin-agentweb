@@ -122,6 +122,30 @@ export interface ClearResponse {
   oldPaneId: string;
 }
 
+/** POST /api/panes/:id/scroll (and the other bare acknowledgements) */
+export interface OkResponse {
+  ok: true;
+}
+
+/** GET /api/panes/:id/read: `ansi` for format=ansi, else `text`; appScroll on a visible read
+ *  (the decision the WS pane_output push carries) */
+export interface ReadResponse {
+  ansi?: string | null;
+  text?: string | null;
+  appScroll?: boolean;
+}
+
+/** GET /api/panes/:id/transcript: available=false → no Claude transcript for the pane (the
+ *  terminal stays); with ?session=&after= only the items past the cursor, else the tail (reset) */
+export interface TranscriptResponse {
+  available: boolean;
+  sessionId?: string;
+  items?: TimelineItem[];
+  cursor?: number;
+  reset?: boolean;
+  truncated?: boolean;
+}
+
 /** Every /api error */
 export interface ApiErrorResponse {
   error: { code: string; message: string };
