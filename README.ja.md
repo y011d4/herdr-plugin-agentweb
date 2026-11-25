@@ -402,8 +402,8 @@ sh scripts/plugin-build.sh          # web UI、続いて bin/yoicks (Go)。こ�
 herdr plugin link "$(pwd)"
 ```
 
-bridge と CLI は Go (`cmd/yoicks`、`internal/bridge`) です。PWA は `web/src/` の TypeScript で、
-Vite で `web/dist` にビルドされ、バイナリに埋め込まれます。
+bridge と CLI は Go (`cmd/yoicks`、`internal/bridge`) です。PWA は `web/src/` の TypeScript と React で
+(`main.tsx` がシェルの `ui/App.tsx` を起動します)、Vite で `web/dist` にビルドされ、バイナリに埋め込まれます。
 
 ```bash
 sh scripts/plugin-build.sh          # 変更後に再ビルド。web の変更も (バイナリが web UI を埋め込むため)
