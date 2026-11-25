@@ -78,9 +78,10 @@ fi
 [ -x bin/yoicks ] || die "no bin/yoicks to fall back to: build it first (sh scripts/plugin-build.sh)"
 
 # Build output goes: what this commit's .gitignore ignores among web/*.js (tsc's output,
-# before Vite) and web/dist (since). Anything else must be committed: nothing uncommitted
-# may end up in the build.
-git ls-files -z --others --ignored --exclude-standard --directory -- ':(glob)web/*.js' web/dist |
+# before Vite) and web/dist (since). Only the committed .gitignore files count, not a
+# personal ignore (core.excludesFile, .git/info/exclude). Anything else must be committed:
+# nothing uncommitted may end up in the build.
+git ls-files -z --others --ignored --exclude-per-directory=.gitignore --directory -- ':(glob)web/*.js' web/dist |
 	xargs -0 rm -rf --
 changes=$(git status --porcelain)
 [ -z "$changes" ] || die "the checkout has uncommitted or untracked files: commit or remove them first
