@@ -55,7 +55,9 @@ All in `internal/bridge/` (one package):
   checking the started agent's account.
 - `web/src/app.ts` — SPA shell (hash routing) over `api.ts` (token, REST; a 401 → callback),
   `store.ts` (State, WS link, `view`, seen done; subscribe/emit), `ws.ts` (socket, ping, backoff,
-  state polling, watches) and `routes.ts` (pure `resolveRoute`); `ansi.ts` — pure ANSI→HTML,
+  state polling, watches) and `routes.ts` (pure `resolveRoute`). Screens moving to React live in
+  `web/src/ui/` (Settings, Token); until app.ts is gone, `ui/mount.tsx` (temporary glue) is the
+  only writer of `#screen`, the topbar and the connection dot/banner. `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
   (manifest, icons) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one
@@ -394,7 +396,8 @@ vendor-neutrality is preserved.
   source — write ESC as the literal six characters `\u001b` in string escapes.
 - Dependencies: the binary's only one is `github.com/coder/websocket`; don't add more without a
   strong reason (QR uses the system `qrencode`, falling back to a plain URL). Node and the npm
-  dependencies (TypeScript, Vite, Vitest) are development-only, for the web UI's build and tests.
+  dependencies are development-only: React is bundled into the web UI; the rest (TypeScript,
+  Vite, Vitest, happy-dom) is for its build and tests.
 - herdr's API schema (`herdr api schema --json`, protocol 22 = herdr 0.9.5) is saved in
   `testdata/herdr-schema/`; `internal/bridge/herdr_schema_test.go` checks every method,
   parameter, decoded field and event field the bridge uses against it. A new herdr field or
