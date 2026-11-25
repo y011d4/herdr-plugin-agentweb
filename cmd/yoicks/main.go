@@ -16,14 +16,15 @@ func main() {
 }
 
 // webFS is the embedded web UI, or YOICKS_WEB_DIR's files when set (development:
-// rebuild the web UI without rebuilding the binary).
+// YOICKS_WEB_DIR=web/dist with `npx vite build --watch` rebuilds the web UI without
+// rebuilding the binary).
 func webFS() fs.FS {
 	if dir := os.Getenv("YOICKS_WEB_DIR"); dir != "" {
 		return os.DirFS(dir)
 	}
-	web, err := fs.Sub(yoicks.Web, "web")
+	web, err := fs.Sub(yoicks.Web, "web/dist")
 	if err != nil {
-		panic(err) // "web" is a valid path, so never
+		panic(err) // "web/dist" is a valid path, so never
 	}
 	return web
 }

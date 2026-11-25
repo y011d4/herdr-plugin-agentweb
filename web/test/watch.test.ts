@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import { watchMessages } from '../src/watch.ts';
 import type { WatchMessage } from '../src/watch.ts';

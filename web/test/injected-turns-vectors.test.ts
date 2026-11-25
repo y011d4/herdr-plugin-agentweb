@@ -1,4 +1,4 @@
-import { it } from 'node:test';
+import { it } from 'vitest';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { conversationItems } from '../src/transcript.ts';

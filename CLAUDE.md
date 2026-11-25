@@ -8,9 +8,9 @@ modified — everything goes through its public socket API.
 ## Architecture
 
 ```
-phone (PWA: web/src/*.ts → built to web/*.js)
+phone (PWA: web/src/*.ts → built by Vite to web/dist)
   │ REST /api/* + WS /ws (bearer token)
-bridge (Go: cmd/yoicks + internal/bridge, web/ embedded; binds 127.0.0.1:8390)
+bridge (Go: cmd/yoicks + internal/bridge, web/dist embedded; binds 127.0.0.1:8390)
   │ ndjson over $HERDR_SOCKET_PATH
 herdr server
 ```
@@ -54,7 +54,12 @@ All in `internal/bridge/` (one package):
   foreground), so `agent start` waits for `agent.get` to report the detected agent before
   checking the started agent's account.
 - `web/src/app.ts` — SPA (hash routing), `ansi.ts` — pure ANSI→HTML,
-  `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker
+  `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
+  into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
+  (manifest, icons) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one
+  JS and one CSS file under `assets/`, named by content hash (no code splitting: an open PWA would
+  ask for a deleted chunk after a deploy). The bridge serves `assets/*` as `immutable`,
+  `index.html` and `sw.js` as `no-cache`; `embed_test.go` checks the build and its size budget
 - **Orchestrator homes**: config `orchestrators: [{name,label,env}]` — each is *managed*:
   `orchestrator.go` writes `<data>/orchestrators/<name>/` (data = `$XDG_DATA_HOME` or
   `~/.local/share`, + `herdr-yoicks`; `herdr-agentweb`, the dir from before the rename, while it
@@ -109,42 +114,52 @@ and the TypeScript web share only this contract — change both sides together
 ## Build / test / deploy loop
 
 ```bash
-npm ci && npm run build:web   # tsc ×2 (web/src → web/, sw); the binary embeds web/
-npm test                      # web tests (node --test runs .ts natively: Node >= 23.6)
-go test ./...                 # bridge + CLI (CI: go test -race ./...)
+npm ci && npm run build:web   # tsc type checks (web, sw), then vite build → web/dist (embedded)
+npm test                      # web tests (Vitest; Node per package.json engines)
+go test ./...                 # bridge + CLI (CI: go test -race ./...); needs web/dist
 go build -o bin/yoicks ./cmd/yoicks
 HERDR_PLUGIN_STATE_DIR=$(mktemp -d) HERDR_YOICKS_PORT=8392 ./bin/yoicks run   # dev run
 ```
 
-Deploying a change to the running bridge. The Go binary embeds the built web UI, so a web
-change needs this rebuild too. `herdr plugin action invoke` returns before the action ends:
-let `stop` finish before `start`.
+The web UI from source (Vite on :5174, hot reload, no service worker: it registers only in a
+build), against a dev bridge:
 
 ```bash
-sh scripts/plugin-build.sh   # web build + go build -o bin/yoicks, from this checkout
-herdr plugin action invoke y011d4.yoicks.stop
-herdr plugin action invoke y011d4.yoicks.start
-curl -s http://127.0.0.1:8390/healthz   # expect {"ok":true,"herdrConnected":true}
+STATE=$(mktemp -d)   # the bridge's state (token, bridge.log) and data (orchestrator dirs)
+HERDR_PLUGIN_STATE_DIR=$STATE XDG_DATA_HOME=$STATE HERDR_YOICKS_PORT=8392 ./bin/yoicks start   # stop: the same, with stop
+echo "http://localhost:5174/?token=$(cat "$STATE/token")"   # the URL to open
+YOICKS_DEV_BRIDGE=http://127.0.0.1:8392 npm run dev          # /api and /ws proxied to that bridge
 ```
 
-Re-run `herdr plugin link <repo>` only when `herdr-plugin.toml` changed — herdr
-caches the linked manifest.
+To check the built app, SW included, without rebuilding the binary: `npx vite build --watch`
+and run the bridge with `YOICKS_WEB_DIR=web/dist`.
 
-**Rolling back** the running bridge (the binary of the checkout herdr links, normally main's):
-`stop` (wait for it), check out the last good commit and `sh scripts/plugin-build.sh source`
-(`source` builds from source with every version of the script; without Go, check out a release
-tag and run `sh scripts/plugin-build.sh release`, which downloads that release's binary), `start`, check `/healthz`. The binary path doesn't change, so the orchestrators'
-allowlists still match; Clear them when `orchestrator/rules.md` differs between the versions.
-Return with `git switch main`, rebuild, restart. (The last Node bridge is `423f49d`; going back
-there takes `npm ci && npm run build`, re-linking, and Clearing the orchestrators.) A commit from
-before the rename to yoicks is the plugin `y011d4.agentweb` with `bin/agentwebctl`: going back
-across it means the README "Renamed from agentweb" steps in reverse (stop, re-link, its own
-config/state dirs, Clear); the data dir is the same `herdr-agentweb` on both sides.
+Deploying to the running bridge (the binary of the checkout herdr links, normally main's), in
+that checkout, with the PC at hand:
 
-**Service worker cache**: bump `CACHE_VERSION` in `web/src/sw.ts` on every
-change to any web asset. Cached assets refresh only when sw.js itself changes;
-without the bump phones keep serving the old app. Headless-browser checks have
-the same problem — always use a fresh `--user-data-dir` profile.
+```bash
+sh scripts/redeploy.sh main      # fetch, fast-forward main, rebuild, stop/start, wait for /healthz
+sh scripts/redeploy.sh <commit>  # rolling back: the same, to <commit> (detached)
+```
+
+It refuses (before stopping anything) outside the linked checkout, on a dirty tree, when local
+main can't fast-forward, and when `herdr-plugin.toml` would change: herdr caches the linked
+manifest, so that switch is by hand (it prints the steps: stop, switch, build, `herdr plugin link`,
+start). Any failure after the stop puts the old binary back and starts it. It prints the `BUILD`
+and `CACHE` that Settings → App version should show on the phone. A commit from before the script
+(before the Vite build) has no copy: `t=$(mktemp) && git show main:scripts/redeploy.sh > "$t" && sh
+"$t" main`. The binary path doesn't change, so the orchestrators' allowlists still match; Clear them
+when `orchestrator/rules.md` differs between the versions. (The last Node bridge is `423f49d`;
+going back there takes `npm ci && npm run build`, re-linking, and Clearing the orchestrators.) A
+commit from before the rename to yoicks is the plugin `y011d4.agentweb` with `bin/agentwebctl`:
+going back across it means the README "Renamed from agentweb" steps in reverse (stop, re-link,
+its own config/state dirs, Clear); the data dir is the same `herdr-agentweb` on both sides.
+
+**Service worker cache**: the build generates `CACHE_VERSION` (`herdr-yoicks-` + 8 hex of a hash
+over every built file's name and content) and the SW's asset list: never bump or edit them by
+hand. Any change to a served file renames the cache, so phones pick the new build up; Settings →
+App version shows `<version> (<BUILD = the JS hash>) cache <8 hex>`. Headless-browser checks keep
+a registered SW across runs — always use a fresh `--user-data-dir` profile.
 
 ## Verified herdr socket API behavior (hard-won; don't rediscover)
 
@@ -340,16 +355,42 @@ vendor-neutrality is preserved.
   (`Input.dispatchTouchEvent`, mobile metrics, fresh profile). "The screen
   changed" is not proof by itself on a busy pane — assert on content moving
   to *older* lines and on the composer staying clean.
+- **webcheck** (`tools/webcheck.ts`: headless Chrome over CDP, no dependencies) is the gate before
+  deploying a web change: all of Tier 1 passes.
+  ```bash
+  node tools/webcheck.ts preview start --bin bin/yoicks --port 8395  # throwaway bridge over the real herdr
+  node tools/webcheck.ts check --base http://127.0.0.1:8395 --tier 1  # lock, setup, checks, teardown
+  node tools/webcheck.ts preview stop --port 8395
+  ```
+  Each check prints `PASS|FAIL <id> <measured> <condition>`; the exit code is the failure count.
+  `--only P10,P12` picks checks; `--profile DIR` reuses a Chrome profile, for the old-SW round trip
+  (`P2.old` → `P2.upgrade` → `P2.downgrade`, the old build served with `preview start --web-dir`).
+  The file's header lists the rest (`setup --gonogo`, `block`, `teardown`).
+  - Tier 1 is deterministic, shell panes only: `wc-shell` (`seq`) and `wc-less` (`less --mouse`,
+    `report-agent`ed as claude, so it takes the app-scroll path). Tier 2 (`--tier 2`) drives a
+    real Claude (`wc-claude`, orchestrators `wc-o1`/`wc-o2`) and refuses to run until
+    `$WC_ROOT/.envrc` sets the account's `CLAUDE_CONFIG_DIR` (`direnv allow`ed). `preview start`
+    then gives the orchestrators that account as `env` (start the preview after the `.envrc`), and
+    a `wc-claude` in another account stops the run (`ENV: wc-claude account mismatch`).
+  - Safety: the preview controls the real herdr, and production (so the phone, notifications
+    included) sees the scratch agents: say so before a run. It mutates only what the run created
+    and recorded whose live tab or workspace label starts with `wc-` (one guard, which the page's
+    own API requests pass too), and refuses port 8390. Runs and `preview start`/`stop` take turns
+    on `$WC_ROOT/lock`, held by a separate `flock` process the bridge and Chrome never inherit.
+    Teardown also runs on Ctrl+C; what it can't close stays recorded, and the next run retries it.
+    `WC_ROOT` = `$WEBCHECK_ROOT` or `~/.local/state/herdr-yoicks-webcheck`.
+  - A new check first passes on the current UI (the main before a screen's port), so it isn't
+    written to fit the new code.
 
 ## Conventions
 
 - Lowercase conventional commits, no emojis, no AI co-author lines.
-- TS sources use explicit `.ts` relative-import extensions
-  (`rewriteRelativeImportExtensions` emits `.js`). No raw control bytes in
+- TS sources use explicit `.ts` relative-import extensions (`node` runs `tools/vectors/*.ts`
+  on them directly; Vite bundles them). No raw control bytes in
   source — write ESC as the literal six characters `\u001b` in string escapes.
 - Dependencies: the binary's only one is `github.com/coder/websocket`; don't add more without a
-  strong reason (QR uses the system `qrencode`, falling back to a plain URL). Node and TypeScript
-  (the only npm dependency) are development-only, for the web UI's build and tests.
+  strong reason (QR uses the system `qrencode`, falling back to a plain URL). Node and the npm
+  dependencies (TypeScript, Vite, Vitest) are development-only, for the web UI's build and tests.
 - herdr's API schema (`herdr api schema --json`, protocol 22 = herdr 0.9.5) is saved in
   `testdata/herdr-schema/`; `internal/bridge/herdr_schema_test.go` checks every method,
   parameter, decoded field and event field the bridge uses against it. A new herdr field or
