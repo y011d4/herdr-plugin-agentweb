@@ -5,7 +5,7 @@ import { act } from 'react';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { keptTasks, setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
-import { Pane, paneTopbar } from '../src/ui/Pane.tsx';
+import { Pane, paneTopbar, paneViewOnState } from '../src/ui/Pane.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
 import { fire, render } from './render.ts';
 
@@ -161,6 +161,31 @@ describe('composer', () => {
     assert.deepEqual(shown, ['', 'none', ''], 'each push re-rendered the screen');
     assert.ok(ta() === node, 'the same textarea');
     assert.equal(ta().value, 'half-typed');
+  });
+});
+
+describe('answer panel', () => {
+  const ASK = ['─'.repeat(28), ' ☐ Fruit', 'Pick a fruit', '', '❯ 1. apple', '  2. banana', '  3. cherry',
+    'Enter to select · ↑/↓ to navigate · Esc to cancel'].join('\n');
+
+  it('shows under the pane body while the pane is blocked in chat; a double tap sends one press', async () => {
+    await show('p6'); // claude, blocked
+    await answer('/read?source=visible', read[1]);
+    await answer('/transcript', transcript[0]);
+    await answer('/read?source=visible&format=ansi', { ansi: ASK });
+    const panel = $('#chat-prompt');
+    assert.ok(panel.previousElementSibling === $('#pane-view') && panel.nextElementSibling === $('.input-bar'), 'between the body and the input bar');
+    const opts = [...container.querySelectorAll<HTMLButtonElement>('#chat-prompt .ask-opt')];
+    assert.deepEqual(opts.map((b) => b.textContent), ['1apple', '2banana', '3cherry']);
+    await fire(() => opts[1].click());
+    await fire(() => opts[1].click());
+    assert.equal(posts('p6').length, 1);
+    assert.equal(posts('p6')[0].press, '2');
+    assert.ok(posts('p6')[0].expect_prompt, 'expect_prompt is set');
+    const s = fresh();
+    s.workspaces[1].tabs[0].panes.find((p) => p.paneId === 'p6')!.agent!.status = 'working';
+    await fire(() => { setAppState(s); paneViewOnState(); });
+    assert.equal(container.querySelector('#chat-prompt'), null, 'unblocked: the panel goes');
   });
 });
 
