@@ -9,8 +9,9 @@
     "skipLibCheck": true,
     "noEmit": true,
     "isolatedModules": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx"
   },
-  "include": ["web/src/**/*"],
+  "include": ["web/src/**/*.ts", "web/src/**/*.tsx"],
   "exclude": ["web/src/sw.ts"]
 }

@@ -3,6 +3,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import react from '@vitejs/plugin-react';
 import { defineConfig, transformWithOxc, type Plugin, type ResolvedConfig } from 'vite';
 
 export default defineConfig(({ command, mode }) => ({
@@ -16,7 +17,7 @@ export default defineConfig(({ command, mode }) => ({
     cssCodeSplit: false,
     rolldownOptions: { output: { codeSplitting: false } },
   },
-  plugins: [sw()],
+  plugins: [react(), sw()],
   server: {
     port: 5174,
     strictPort: true,
