@@ -916,11 +916,14 @@ async function p4t1(c: Ctx) {
   const { pg } = c;
   const less = c.rec.names.less;
   const tagged = `navigator.serviceWorker.ready.then((r) => r.getNotifications({ tag: ${js(less)} })).then((ns) => ns.length)`;
-  await pg.ev(`localStorage.setItem('herdr_notifications', 'true')`);
-  await pg.goto('#/agents');
-  const other = await pg.cdp.send('Target.createTarget', { url: 'about:blank' });
-  await pg.cdp.send('Target.activateTarget', { targetId: other.targetId });
+  // a reused --profile keeps its own setting: put it back however the check ends
+  const prev: string | null = await pg.ev(`localStorage.getItem('herdr_notifications')`);
+  let other: { targetId: string } | null = null;
   try {
+    await pg.ev(`localStorage.setItem('herdr_notifications', 'true')`);
+    await pg.goto('#/agents');
+    other = await pg.cdp.send('Target.createTarget', { url: 'about:blank' });
+    await pg.cdp.send('Target.activateTarget', { targetId: other!.targetId });
     if ((await pg.until('document.hidden', 3000)).timeout) throw env('could not hide the page');
     await reportLess(c, 'blocked');
     const n = await pg.until(`${tagged}.then((k) => k === 1)`, 10_000, 200);
@@ -931,8 +934,9 @@ async function p4t1(c: Ctx) {
     result(c, !n.timeout && !z.timeout, 'P4-T1', `notif=${ms(n)},cleared=${ms(z)}`,
       'hidden page: wc-less reported blocked -> 1 OS notification tagged with its pane id within 10s; opening the pane clears it within 2s');
   } finally {
+    await pg.ev(prev === null ? `localStorage.removeItem('herdr_notifications')` : `localStorage.setItem('herdr_notifications', ${js(prev)})`);
     await pg.cdp.send('Target.activateTarget', { targetId: pg.targetId });
-    await pg.cdp.send('Target.closeTarget', { targetId: other.targetId }).catch(() => {});
+    if (other) await pg.cdp.send('Target.closeTarget', { targetId: other.targetId }).catch(() => {});
     await reportLess(c, 'idle'); // on the pane: no toast for it
     await sleep(500);
     await pg.goto('#/agents');
