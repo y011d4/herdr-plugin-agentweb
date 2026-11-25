@@ -1078,6 +1078,10 @@ func (s *server) serveStatic(w http.ResponseWriter, urlPath string) {
 	if path.Base(name) == "sw.js" || ext == ".html" {
 		w.Header().Set("Cache-Control", "no-cache")
 	}
+	// The build names everything under assets/ by its content hash: a new build has new names.
+	if strings.HasPrefix(name, "assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
 	w.WriteHeader(http.StatusOK)
 	io.Copy(w, f)
 }
