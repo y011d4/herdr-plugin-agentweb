@@ -63,8 +63,8 @@ function herdr(args: string[]): any {
   return j?.result ?? r.stdout;
 }
 
-/** gonogo: the pid of the `setup --gonogo` holding this run, the only record `block` may act on */
-interface Rec { dir: string; base: string; gonogo?: number; chrome?: { pid: number; dir: string };
+/** gonogo: the `setup --gonogo` process holding this run (pid + start time), the only record `block` may act on */
+interface Rec { dir: string; base: string; gonogo?: { pid: number; start: string }; chrome?: { pid: number; dir: string };
   workspaces: string[]; tabs: string[]; panes: string[]; reported: string[]; names: Record<string, string> }
 
 const save = (rec: Rec) => fs.writeFileSync(path.join(rec.dir, 'webcheck.json'), js(rec, null, 1));
@@ -1048,7 +1048,8 @@ async function locked(base: string, body: (c: Ctx) => Promise<void>, needs: Set<
   const dir = path.join(WC_ROOT, 'run', String(Date.now()));
   fs.mkdirSync(dir, { recursive: true });
   const c: Ctx = { base, port, token: fs.readFileSync(tokenFile, 'utf8').trim(), preview: readPreview(port), failures: 0, out: [],
-    rec: { dir, base, gonogo: gonogo ? process.pid : undefined, workspaces: [], tabs: [], panes: [], reported: [], names: {} }, pg: null!, build: null! };
+    rec: { dir, base, gonogo: gonogo ? { pid: process.pid, start: procStart(process.pid)! } : undefined,
+      workspaces: [], tabs: [], panes: [], reported: [], names: {} }, pg: null!, build: null! };
   save(c.rec);
   let done = false;
   const finish = () => {
@@ -1105,7 +1106,16 @@ async function check(o: Record<string, any>): Promise<number> {
   return c.failures;
 }
 
+/** A process's start time (/proc/<pid>/stat field 22): with the pid, an identity a reused pid can't fake. Linux only. */
+function procStart(pid: number): string | null {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] ?? null; // fields 3.. follow the "(comm)" field
+  } catch { return null; }
+}
+
 async function gonogo(o: Record<string, any>): Promise<number> {
+  if (!procStart(process.pid)) throw env('go/no-go needs Linux /proc (block checks the holder by pid + start time)');
   await locked(o.base, async (c) => {
     const cl = c.rec.names.claude;
     const t0 = Date.now();
@@ -1120,12 +1130,12 @@ async function gonogo(o: Record<string, any>): Promise<number> {
 }
 
 function block(): number {
+  if (!procStart(process.pid)) throw env('block needs Linux /proc (it checks the go/no-go holder by pid + start time)');
   const runs = path.join(WC_ROOT, 'run');
   const rec: Rec | undefined = (fs.existsSync(runs) ? fs.readdirSync(runs) : [])
     .map((d) => { try { return JSON.parse(fs.readFileSync(path.join(runs, d, 'webcheck.json'), 'utf8')); } catch { return null; } })
-    .find((r) => { // only the run whose setup --gonogo is still holding it, never a stale record
-      try { return !!r?.gonogo && fs.readFileSync(`/proc/${r.gonogo}/cmdline`, 'utf8').includes('webcheck.ts'); } catch { return false; }
-    });
+    // only the run whose setup --gonogo still holds it (same pid AND start time), never a stale record
+    .find((r) => typeof r?.gonogo?.pid === 'number' && !!r.gonogo.start && procStart(r.gonogo.pid) === r.gonogo.start);
   if (!rec?.names.less) throw env('no active go/no-go run (start `setup --gonogo` first)');
   if (spawnSync('flock', ['-n', LOCK, 'true']).status === 0) throw env('run without lock');
   mutate(rec, rec.names.less, ['pane', 'report-agent', '--source', 'webcheck', '--agent', 'claude', '--state', 'blocked', rec.names.less]);
