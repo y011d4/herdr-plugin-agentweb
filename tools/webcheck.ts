@@ -97,24 +97,38 @@ function record(rec: Rec, o: { workspace?: string; tab?: string; pane?: string }
   save(rec);
 }
 
-/** Close what a run recorded (report-agent released first); idempotent, also for an earlier unfinished run. */
+/** Close what a run recorded (report-agent released first); idempotent, also for an earlier unfinished run.
+ *  The record goes only once everything is closed or gone: what failed stays recorded for the next run. */
 function teardown(dir: string): void {
   let rec: Rec | null = null;
   try { rec = JSON.parse(fs.readFileSync(path.join(dir, 'webcheck.json'), 'utf8')); } catch { /* nothing recorded */ }
+  const c = rec?.chrome;
+  try { if (c && fs.readFileSync(`/proc/${c.pid}/cmdline`, 'utf8').includes(c.dir)) process.kill(c.pid, 'SIGKILL'); } catch { /* gone */ }
+  // a just-killed Chrome's helpers may still write to its profile: retry, and never stop the closing for it
+  const rm = (p: string) => { try { fs.rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) { console.log(`WARN ${(e as Error).message}`); } };
   if (rec) {
-    const c = rec.chrome;
-    try { if (c && fs.readFileSync(`/proc/${c.pid}/cmdline`, 'utf8').includes(c.dir)) process.kill(c.pid, 'SIGKILL'); } catch { /* gone */ }
-    const step = (id: string, args: string[]) => {
-      try { mutate(rec!, id, args); } catch (e) {
-        if (!/_not_found$/.test((e as { code?: string }).code ?? '')) console.log(`WARN teardown ${id}: ${(e as Error).message}`);
+    const r = rec;
+    const step = (id: string, args: string[]): boolean => {
+      try { mutate(r, id, args); return false; } catch (e) {
+        if (/_not_found$/.test((e as { code?: string }).code ?? '')) return false;
+        console.log(`WARN teardown ${id}: ${(e as Error).message}`);
+        return true;
       }
     };
-    // herdr 0.9.5's release-agent parses the pane id only before the options
-    for (const p of rec.reported) step(p, ['pane', 'release-agent', p, '--source', 'webcheck', '--agent', 'claude']);
-    for (const t of rec.tabs) step(t, ['tab', 'close', t]);
-    for (const w of rec.workspaces) step(w, ['workspace', 'close', w]);
+    const left = {
+      // herdr 0.9.5's release-agent parses the pane id only before the options
+      reported: r.reported.filter((p) => step(p, ['pane', 'release-agent', p, '--source', 'webcheck', '--agent', 'claude'])),
+      tabs: r.tabs.filter((t) => step(t, ['tab', 'close', t])),
+      workspaces: r.workspaces.filter((w) => step(w, ['workspace', 'close', w])),
+    };
+    if (left.reported.length + left.tabs.length + left.workspaces.length) {
+      save({ ...r, ...left, chrome: undefined });
+      console.log(`WARN kept ${path.join(dir, 'webcheck.json')}: ${js(left)} not closed`);
+      rm(path.join(dir, 'chrome'));
+      return;
+    }
   }
-  fs.rmSync(dir, { recursive: true, force: true });
+  rm(dir);
 }
 
 function teardownAll(): void {
@@ -137,7 +151,11 @@ async function lock(): Promise<() => void> {
   fs.mkdirSync(WC_ROOT, { recursive: true });
   const p = spawn('flock', ['-n', '-E', '75', '-o', LOCK, 'sh', '-c', 'echo locked; exec cat >/dev/null'],
     { stdio: ['pipe', 'pipe', 'inherit'], detached: true });
-  const got = await new Promise<boolean>((res) => { p.stdout!.once('data', () => res(true)); p.once('exit', () => res(false)); });
+  const got = await new Promise<boolean>((res, rej) => {
+    p.stdout!.once('data', () => res(true));
+    p.once('exit', () => res(false));
+    p.once('error', (e) => rej(env(`flock: ${e.message}`)));
+  });
   if (!got) throw env('another webcheck run');
   if (spawnSync('flock', ['-n', LOCK, 'true']).status === 0) throw env('run without lock');
   return () => p.stdin!.end();
@@ -166,6 +184,7 @@ async function previewCtl(p: Preview, action: 'start' | 'stop'): Promise<void> {
   await new Promise<void>((res, rej) => {
     const c = spawn(p.bin, [action], { env: previewEnv(p), stdio: ['ignore', 'pipe', 'inherit'] });
     c.stdout!.resume();
+    c.once('error', rej);
     c.once('exit', (code) => (code === 0 ? res() : rej(new Error(`${p.bin} ${action} exited ${code}`))));
   });
   if (action === 'start') {
@@ -174,22 +193,42 @@ async function previewCtl(p: Preview, action: 'start' | 'stop'): Promise<void> {
   }
 }
 
+/** The account $WC_ROOT/.envrc pins: CLAUDE_CONFIG_DIR as direnv resolves it in wc-claude's dir. */
+function pinnedAccount(): string {
+  const envrc = path.join(WC_ROOT, '.envrc');
+  if (!fs.existsSync(envrc)) throw env(`no account pinned (${envrc} missing)`);
+  const e = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'CLAUDE_CONFIG_DIR' && !k.startsWith('DIRENV_')));
+  fs.mkdirSync(path.join(WORK, 'wc-claude'), { recursive: true });
+  const v = spawnSync('direnv', ['exec', path.join(WORK, 'wc-claude'), 'printenv', 'CLAUDE_CONFIG_DIR'], { encoding: 'utf8', env: e }).stdout?.trim();
+  if (!v) throw env(`${envrc} not allowed or sets no CLAUDE_CONFIG_DIR`);
+  return path.resolve(v);
+}
+
+const orchConfig = (account: string | null) => js({ orchestrators: ['wc-o1', 'wc-o2'].map((name) =>
+  ({ name, label: name.toUpperCase(), ...(account ? { env: { CLAUDE_CONFIG_DIR: account } } : {}) })) });
+
 async function previewCmd(sub: string, o: Record<string, any>): Promise<number> {
   const port = String(o.port ?? '8395');
   if (port === PROD_PORT) throw env(`refusing port ${PROD_PORT} (production)`);
-  const old = readPreview(port);
-  if (old) await previewCtl(old, 'stop').catch((e) => console.log(`WARN ${e.message}`));
-  if (sub === 'stop') { console.log(`preview ${port} stopped`); return 0; }
-  if (sub !== 'start' || !o.bin) throw new Error('usage: preview start --bin PATH [--port N] [--web-dir DIR] | preview stop [--port N]');
-  const p: Preview = { bin: path.resolve(o.bin), port, webDir: o['web-dir'] && path.resolve(o['web-dir']) };
-  fs.rmSync(previewDir(port), { recursive: true, force: true });
-  for (const d of ['state', 'config']) fs.mkdirSync(path.join(previewDir(port), d), { recursive: true });
-  fs.writeFileSync(path.join(previewDir(port), 'config', 'config.json'),
-    js({ orchestrators: [{ name: 'wc-o1', label: 'WC-O1' }, { name: 'wc-o2', label: 'WC-O2' }] }));
-  fs.writeFileSync(path.join(previewDir(port), 'preview.json'), js(p));
-  await previewCtl(p, 'start');
-  console.log(`preview ${port} up: http://127.0.0.1:${port} (token ${path.join(previewDir(port), 'state', 'token')})`);
-  return 0;
+  if (sub !== 'stop' && (sub !== 'start' || !o.bin)) throw new Error('usage: preview start --bin PATH [--port N] [--web-dir DIR] | preview stop [--port N]');
+  const unlock = await lock(); // never under a run; the holder process keeps the lock from the bridge
+  try {
+    const old = readPreview(port);
+    if (old) await previewCtl(old, 'stop').catch((e) => console.log(`WARN ${e.message}`));
+    if (sub === 'stop') { console.log(`preview ${port} stopped`); return 0; }
+    const p: Preview = { bin: path.resolve(o.bin), port, webDir: o['web-dir'] && path.resolve(o['web-dir']) };
+    // the orchestrators start with Tier 2's account (the bridge checks the started agent against it)
+    const account = fs.existsSync(path.join(WC_ROOT, '.envrc')) ? pinnedAccount() : null;
+    fs.rmSync(previewDir(port), { recursive: true, force: true });
+    for (const d of ['state', 'config']) fs.mkdirSync(path.join(previewDir(port), d), { recursive: true });
+    fs.writeFileSync(path.join(previewDir(port), 'config', 'config.json'), orchConfig(account));
+    fs.writeFileSync(path.join(previewDir(port), 'preview.json'), js(p));
+    await previewCtl(p, 'start');
+    console.log(`preview ${port} up: http://127.0.0.1:${port} (token ${path.join(previewDir(port), 'state', 'token')}, account ${account ?? 'none: Tier 1 only'})`);
+    return 0;
+  } finally {
+    unlock();
+  }
 }
 
 // ── CDP over Node's WebSocket ────────────────────────────────────────────────
@@ -301,9 +340,11 @@ async function openPage(c: Ctx, profile?: string): Promise<Page> {
   // headless Linux swallows touchmoves within ~30px of the touchstart; 3 makes it ~8px, a phone's 8dp
   pg.proc = spawn('google-chrome-stable', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${dir}`,
     '--touch-slop-distance=3', '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' });
-  c.rec.chrome = { pid: pg.proc.pid!, dir };
-  save(c.rec);
-  const port = await waitFn(() => fs.readFileSync(path.join(dir, 'DevToolsActivePort'), 'utf8').split('\n')[0], 15_000);
+  // a spawn failure ('error') rejects into the run's normal teardown instead of crashing past it
+  const failed = new Promise<never>((_, rej) => pg.proc.on('error', (e) => rej(env(`chrome: ${e.message}`))));
+  failed.catch(() => {});
+  if (pg.proc.pid) { c.rec.chrome = { pid: pg.proc.pid, dir }; save(c.rec); }
+  const port = await Promise.race([waitFn(() => fs.readFileSync(path.join(dir, 'DevToolsActivePort'), 'utf8').split('\n')[0], 15_000), failed]);
   if (port.timeout) throw env('chrome did not start');
   const ver = await (await fetch(`http://127.0.0.1:${port.v}/json/version`)).json();
   pg.cdp = await connectCdp(ver.webSocketDebuggerUrl);
@@ -387,14 +428,23 @@ async function agentReady(c: Ctx, pane: string, ms: number): Promise<void> {
   if (r.timeout) throw env('no trust prompt or agent not started');
 }
 
+/** The CLAUDE_CONFIG_DIR of a pane's agent (its foreground process group leader), '' when unset, null without one. */
+function paneConfigDir(pane: string): string | null {
+  const pi = herdr(['pane', 'process-info', '--pane', pane]).process_info;
+  const pid = pi?.foreground_process_group_id;
+  if (!pid || pid === pi.shell_pid) return null;
+  const v = fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').find((kv) => kv.startsWith('CLAUDE_CONFIG_DIR='));
+  return v ? path.resolve(v.slice('CLAUDE_CONFIG_DIR='.length)) : '';
+}
+
 async function setup(c: Ctx, needs: Set<string>): Promise<void> {
+  let account = '';
   if (needs.has('claude') || needs.has('orch')) {
-    const envrc = path.join(WC_ROOT, '.envrc');
-    if (!fs.existsSync(envrc)) throw env(`no account pinned (${envrc} missing)`);
-    const e = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'CLAUDE_CONFIG_DIR' && !k.startsWith('DIRENV_')));
-    fs.mkdirSync(path.join(WORK, 'wc-claude'), { recursive: true });
-    const r = spawnSync('direnv', ['exec', path.join(WORK, 'wc-claude'), 'printenv', 'CLAUDE_CONFIG_DIR'], { encoding: 'utf8', env: e });
-    if (!r.stdout?.trim()) throw env(`${envrc} not allowed or sets no CLAUDE_CONFIG_DIR`);
+    account = pinnedAccount();
+    // preview start gives the orchestrators that account as env; a preview from before the .envrc has none
+    let cfg = '';
+    try { cfg = fs.readFileSync(path.join(previewDir(c.port), 'config', 'config.json'), 'utf8'); } catch { /* not ours */ }
+    if (cfg !== orchConfig(account)) throw env(`the preview's orchestrators are not pinned to ${account} (restart it with preview start)`);
   }
   if (!needs.size) return;
   fs.mkdirSync(WORK, { recursive: true });
@@ -421,7 +471,9 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
   if (less) {
     const file = path.join(WORK, 'wc-B.txt');
     fs.writeFileSync(file, Array.from({ length: 3000 }, (_, i) => `wc-B-${i + 1}\n`).join(''));
-    mutate(c.rec, less, ['pane', 'run', less, `less --mouse ${file}`]);
+    // typed into the pane's shell (sh-like or fish): single quotes mean the same in both unless ' or \ is inside
+    if (/['\\]/.test(file)) throw env(`WC_ROOT must not contain ' or \\: ${WC_ROOT}`);
+    mutate(c.rec, less, ['pane', 'run', less, `less --mouse '${file}'`]);
     c.rec.reported.push(less);
     save(c.rec);
     mutate(c.rec, less, ['pane', 'report-agent', '--source', 'webcheck', '--agent', 'claude', '--state', 'idle', less]);
@@ -438,6 +490,8 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     record(c.rec, { pane: out.paneId, tab: herdr(['pane', 'get', out.paneId]).pane.tab_id }, 'claude');
     guard(c.rec, out.paneId);
     await agentReady(c, out.paneId, 30_000);
+    // it gets its account from .envrc via direnv in its dir (POST /api/agents takes no env)
+    if (paneConfigDir(out.paneId) !== account) throw env('wc-claude account mismatch');
   }
   if (needs.has('orch')) for (const name of ['wc-o1', 'wc-o2']) await startOrch(c, name);
 }
@@ -986,6 +1040,7 @@ async function locked(base: string, body: (c: Ctx) => Promise<void>, needs: Set<
   if (port === PROD_PORT) throw env(`refusing ${base}: port ${PROD_PORT} is production`);
   const tokenFile = path.join(previewDir(port), 'state', 'token');
   if (!fs.existsSync(tokenFile)) throw env(`no token at ${tokenFile} (start the preview with \`preview start\`)`);
+  if (!(await fetch(`${base}/healthz`).then((r) => r.ok, () => false))) throw env(`no preview answering at ${base}`);
   const unlock = await lock();
   teardownAll();
   const dir = path.join(WC_ROOT, 'run', String(Date.now()));
@@ -998,9 +1053,7 @@ async function locked(base: string, body: (c: Ctx) => Promise<void>, needs: Set<
     if (done) return;
     done = true;
     c.pg?.proc?.kill('SIGKILL');
-    teardown(dir);
-    teardownAll();
-    unlock();
+    try { teardown(dir); teardownAll(); } finally { unlock(); }
   };
   const onSignal = () => { console.log('interrupted: tearing down'); finish(); process.exit(130); };
   process.once('SIGINT', onSignal);
