@@ -195,15 +195,26 @@ async function previewCtl(p: Preview, action: 'start' | 'stop'): Promise<void> {
 }
 
 /** The account $WC_ROOT/.envrc pins: CLAUDE_CONFIG_DIR as direnv resolves it in wc-claude's dir. */
+/** '' when it leaves CLAUDE_CONFIG_DIR unset: the default account (set even to ~/.claude, Claude Code reads a
+ *  stale ~/.claude/.claude.json instead of ~/.claude.json, so "default" means unset). */
 function pinnedAccount(): string {
   const envrc = path.join(WC_ROOT, '.envrc');
   if (!fs.existsSync(envrc)) throw env(`no account pinned (${envrc} missing)`);
   const e = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'CLAUDE_CONFIG_DIR' && !k.startsWith('DIRENV_')));
   fs.mkdirSync(path.join(WORK, 'wc-claude'), { recursive: true });
-  const v = spawnSync('direnv', ['exec', path.join(WORK, 'wc-claude'), 'printenv', 'CLAUDE_CONFIG_DIR'], { encoding: 'utf8', env: e }).stdout?.trim();
-  if (!v) throw env(`${envrc} not allowed or sets no CLAUDE_CONFIG_DIR`);
-  if (!path.isAbsolute(v)) throw env('CLAUDE_CONFIG_DIR must be absolute');
-  return path.normalize(v);
+  const out = spawnSync('direnv', ['exec', path.join(WORK, 'wc-claude'), 'sh', '-c', 'printf "ok:%s" "${CLAUDE_CONFIG_DIR-}"'],
+    { encoding: 'utf8', env: e }).stdout ?? '';
+  if (!out.startsWith('ok:')) throw env(`${envrc} not allowed (direnv allow it)`);
+  const v = out.slice(3);
+  if (v && !path.isAbsolute(v)) throw env('CLAUDE_CONFIG_DIR must be absolute');
+  return v && path.normalize(v);
+}
+
+const accountName = (account: string) => account || 'the default account (CLAUDE_CONFIG_DIR unset)';
+
+/** Every Claude webcheck starts runs in the pinned account: the same CLAUDE_CONFIG_DIR, or none for the default. */
+function checkAccount(pane: string, name: string, account: string): void {
+  if (paneConfigDir(pane) !== account) throw env(`${name} account mismatch (want ${accountName(account)})`);
 }
 
 const orchConfig = (account: string | null) => js({ orchestrators: ['wc-o1', 'wc-o2'].map((name) =>
@@ -226,7 +237,7 @@ async function previewCmd(sub: string, o: Record<string, any>): Promise<number> 
     fs.writeFileSync(path.join(previewDir(port), 'config', 'config.json'), orchConfig(account));
     fs.writeFileSync(path.join(previewDir(port), 'preview.json'), js(p));
     await previewCtl(p, 'start');
-    console.log(`preview ${port} up: http://127.0.0.1:${port} (token ${path.join(previewDir(port), 'state', 'token')}, account ${account ?? 'none: Tier 1 only'})`);
+    console.log(`preview ${port} up: http://127.0.0.1:${port} (token ${path.join(previewDir(port), 'state', 'token')}, account ${account === null ? 'none: Tier 1 only' : accountName(account)})`);
     return 0;
   } finally {
     unlock();
@@ -446,7 +457,7 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     // preview start gives the orchestrators that account as env; a preview from before the .envrc has none
     let cfg = '';
     try { cfg = fs.readFileSync(path.join(previewDir(c.port), 'config', 'config.json'), 'utf8'); } catch { /* not ours */ }
-    if (cfg !== orchConfig(account)) throw env(`the preview's orchestrators are not pinned to ${account} (restart it with preview start)`);
+    if (cfg !== orchConfig(account)) throw env(`the preview's orchestrators are not pinned to ${accountName(account)} (restart it with preview start)`);
   }
   if (!needs.size) return;
   fs.mkdirSync(WORK, { recursive: true });
@@ -493,7 +504,7 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     guard(c.rec, out.paneId);
     await agentReady(c, out.paneId, 30_000);
     // it gets its account from .envrc via direnv in its dir (POST /api/agents takes no env)
-    if (paneConfigDir(out.paneId) !== account) throw env('wc-claude account mismatch');
+    checkAccount(out.paneId, 'wc-claude', account);
   }
   if (needs.has('orch')) for (const name of ['wc-o1', 'wc-o2']) await startOrch(c, name);
 }
@@ -502,6 +513,7 @@ async function startOrch(c: Ctx, name: string): Promise<string> {
   const out = await api(c, 'POST', `/api/orchestrators/${name}/start`);
   recordPane(c, out.paneId, name.slice(3));
   await agentReady(c, out.paneId, 60_000);
+  checkAccount(out.paneId, name, pinnedAccount());
   return out.paneId;
 }
 
