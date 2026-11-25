@@ -438,7 +438,7 @@ async function agentReady(c: Ctx, pane: string, ms: number): Promise<void> {
     if (st === 'idle' || st === 'done') return true;
     const s = screen(pane);
     if (!/Yes, I trust this folder/.test(s)) return false;
-    mutate(c.rec, pane, ['pane', 'send-keys', pane, /❯\s*Yes, I trust/.test(s) ? 'enter' : 'down']);
+    mutate(c.rec, pane, ['pane', 'send-keys', pane, /❯\s*(?:\d+\.\s*)?Yes, I trust/.test(s) ? 'enter' : 'down']);
     return false;
   }, ms, 1000);
   if (r.timeout) throw env('no trust prompt or agent not started');
@@ -969,6 +969,9 @@ async function clearOrch(c: Ctx, name: string): Promise<string> {
   guard(c.rec, old);
   const out = await api(c, 'POST', `/api/agents/${enc(old)}/clear`);
   recordPane(c, out.paneId, name.slice(3));
+  // the replacement is a new Claude: it must come up in the pinned account too
+  await agentReady(c, out.paneId, 60_000);
+  checkAccount(out.paneId, name, pinnedAccount());
   return out.paneId;
 }
 async function stayFor(c: Ctx, hash: string, msHold: number): Promise<boolean> {
@@ -987,10 +990,13 @@ async function p15t2(c: Ctx) {
   await pg.tapEl(`document.getElementById('btn-agent-menu')`);
   await pg.tapEl(`document.getElementById('am-rename')`);
   await pg.ev(`document.getElementById('rn-name').value = 'wc-renamed'`);
-  const tr = await pg.tapEl(`document.getElementById('rn-save')`);
+  const tr = Date.now(); // before the tap: a fast response still counts
+  await pg.tapEl(`document.getElementById('rn-save')`);
   const toast = await pg.until(`[...document.querySelectorAll('.toast')].some((t) => /Renamed/.test(t.textContent))`, 3000);
   const ok = pg.resps.find((x) => x.t >= tr && x.url.endsWith(`/api/panes/${enc(cl)}/rename`))?.status;
-  const named = await waitFn(() => herdr(['agent', 'get', cl]).agent?.name === 'wc-renamed', 3000 - (Date.now() - tr), 200);
+  // the herdr CLI call is synchronous: its answer counts only if it came back by the deadline
+  const deadline = tr + 3000;
+  const named = await waitFn(() => herdr(['agent', 'get', cl]).agent?.name === 'wc-renamed' && Date.now() <= deadline, deadline - Date.now(), 200);
   const r = { timeout: toast.timeout || named.timeout || ok !== 200, ms: Date.now() - tr };
   await pg.goto('#/home/wc-o1');
   const t0 = Date.now();
