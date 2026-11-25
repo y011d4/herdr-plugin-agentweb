@@ -15,7 +15,7 @@ import { showToast } from '../notify.ts';
 import { agentsScope, defaultHome, homeHash, paneRoute } from '../routes.ts';
 import { findPane, lastHome, setStartingHome, store, subscribe } from '../store.ts';
 import type { AppState, OrchestratorView } from '../types.ts';
-import type { Topbar } from './mount.tsx';
+import type { Topbar } from './App.tsx';
 import { openNewAgent } from './Modals.tsx';
 
 /** A card's label: its tab name (the agent kind if a tab somehow has no label), with a per-tab
@@ -48,7 +48,7 @@ function relativeTime(ms: number): string {
 const openPane = (paneId: string): void => { location.hash = paneRoute(store.appState, paneId); };
 
 async function startOrchestrator(name: string): Promise<void> {
-  setStartingHome(name); // the button shows it's starting; app.ts opens its Home once it runs
+  setStartingHome(name); // the button shows it's starting; the shell (ui/App.tsx) opens its Home once it runs
   try {
     await apiPost(`/api/orchestrators/${encodeURIComponent(name)}/start`);
   } catch (err) {

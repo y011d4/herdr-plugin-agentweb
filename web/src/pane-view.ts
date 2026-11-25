@@ -85,10 +85,10 @@ interface PendingAnswer {
 
 export function createPaneView(container: HTMLElement, paneId: string, opts: PaneViewOpts): PaneView {
   const { view } = store;
-  container.innerHTML =
-    '<div class="terminal-output" id="terminal-output"></div>' +
-    '<div class="chat-log" id="chat-log" style="display:none;"></div>';
-  const [terminalEl, chatEl] = Array.from(container.children) as HTMLElement[];
+  const terminalEl = Object.assign(document.createElement('div'), { className: 'terminal-output', id: 'terminal-output' });
+  const chatEl = Object.assign(document.createElement('div'), { className: 'chat-log', id: 'chat-log' });
+  chatEl.style.display = 'none';
+  container.replaceChildren(terminalEl, chatEl);
   const term = createTerminal(terminalEl, { paneId });
   const listeners = new AbortController();
   const { signal } = listeners;
@@ -198,7 +198,8 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       opts.activity(activity);
       items = conversationItems(items);
     }
-    chatEl.innerHTML = items.length ? renderItems(items) : '<div class="chat-empty">No messages yet.</div>';
+    if (items.length) chatEl.innerHTML = renderItems(items);
+    else chatEl.replaceChildren(Object.assign(document.createElement('div'), { className: 'chat-empty', textContent: 'No messages yet.' }));
     chatEl.scrollTop = preserveScroll
       ? (prevFromBottom < 40 ? chatEl.scrollHeight : prevTop)
       : chatEl.scrollHeight;

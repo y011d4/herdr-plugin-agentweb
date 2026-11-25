@@ -53,18 +53,25 @@ All in `internal/bridge/` (one package):
   herdr's `agent.start` RPC answers before the agent's process exists (the shell is still in the
   foreground), so `agent start` waits for `agent.get` to report the detected agent before
   checking the started agent's account.
-- `web/src/app.ts` — SPA shell (hash routing) over `api.ts` (token, REST; a 401 → callback),
-  `store.ts` (State, WS link, `view`, seen done, kept tasks; subscribe/emit), `ws.ts` (socket, ping, backoff,
-  state polling, watches) and `routes.ts` (pure `resolveRoute`). Screens moving to React live in
-  `web/src/ui/` (Settings, Token, the agents list `Dashboard.tsx`); until app.ts is gone, `ui/mount.tsx` (temporary glue) is the
-  only writer of `#screen`, the topbar and the connection dot/banner. `notify.ts` holds the toast
-  store and the OS notifications; `ui/Toasts.tsx` and `ui/Modals.tsx` (Confirm, agent actions,
-  Rename, New agent) are React roots of their own in `#toast-container` and `#modal-root`. An opened
+- `web/src/main.tsx` (index.html's entry) starts `ui/App.tsx`, the SPA shell, and draws it into
+  `#app` over index.html's static first paint (the same topbar, banner and `#screen`): hash routing
+  (`routes.ts`, pure `resolveRoute`; each route render gives the screen and its topbar a new key,
+  so they mount afresh), the topbar (each screen fills its three slots), the connection dot and the
+  reconnect banner, the SW's `navigate` message, visibilitychange's global part (the watch, the
+  open pane's OS notifications, seen done), `visualViewport` → `--app-height` and the startup (token,
+  WS, first `/api/state`, a 401 → the token screen). Under it: `api.ts` (token, REST; a 401 →
+  callback), `store.ts` (State, WS link, `view`, seen done, kept tasks; subscribe/emit), `ws.ts`
+  (socket, ping, backoff, state polling, watches) and `notify.ts` (the toast store and the OS
+  notifications). The screens are in `web/src/ui/`: Settings, Token, the agents list `Dashboard.tsx`,
+  `Pane.tsx` and `PromptPanel.tsx`; `Toasts.tsx` draws into `#toast-container` and `Modals.tsx`
+  (Confirm, agent actions, Rename, New agent) is portalled into `#modal-root`. An opened
   pane's body is `pane-view.ts` (`createPaneView` → setMode/onState/echo/destroy, one per opened
   pane or Home: the chat log, the transcript probe, its own WS messages and agent_status, the 3s
   refresh, the pane's visibilitychange, the prompt poll and going Back after an answer) over `terminal.ts` (`createTerminal`:
-  the continuous buffer, fit/pinch, wheel forwarding and fling); `ui/Pane.tsx` draws the topbar, Home's
-  bits, the composer (an uncontrolled textarea) and the quick keys around it in `#pane-view`, and
+  the continuous buffer, fit/pinch, wheel forwarding and fling). These two are the imperative
+  engines, and an engine owns only its own DOM subtree: `#pane-view`'s children, an empty
+  container React draws and never renders into. `ui/Pane.tsx` draws the topbar, Home's
+  bits, the composer (an uncontrolled textarea) and the quick keys around `#pane-view`, and
   `ui/PromptPanel.tsx` the answer panel pane-view reports (`opts.prompt`: taps, in-flight guard, cooldown, 409). `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
@@ -99,7 +106,7 @@ All in `internal/bridge/` (one package):
   (`conversationItems` hides tools/injected turns), a "doing now" line (`latestActivity`) and a
   composer (the terminal + quick keys stay one `>_` tap away — the only way to send Esc/Ctrl+C, and
   the fallback when there's no transcript). Orchestrators get no card in any agents list (`agentCards`
-  in app.ts feeds both the list and `homeSummary`); the full list's ← Home opens `defaultHome()`.
+  in `ui/Dashboard.tsx` feeds both the list and `homeSummary`); the full list's ← Home opens `defaultHome()`.
   Home's Agents / All agents open `#/agents/<name>`: only the panes in its state `agents` (its Claude
   account's, via `paneAccount`, cached per agent pane and re-checked every 60s by `paneAccountCache`;
   `null` = unknown → every agent),
@@ -134,7 +141,8 @@ HERDR_PLUGIN_STATE_DIR=$(mktemp -d) HERDR_YOICKS_PORT=8392 ./bin/yoicks run   # 
 ```
 
 The web UI from source (Vite on :5174, hot reload, no service worker: it registers only in a
-build), against a dev bridge:
+build; React's StrictMode runs each effect twice there, so an opened pane reads twice), against a
+dev bridge:
 
 ```bash
 STATE=$(mktemp -d)   # the bridge's state (token, bridge.log) and data (orchestrator dirs)
@@ -316,22 +324,32 @@ vendor-neutrality is preserved.
 
 ## Touch/DOM rules in the web UI (regression-prone)
 
-- **Never replace terminal DOM during an active touch** — the browser cancels
+Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only escaped HTML:
+`ansiToHtml`'s and `renderItem(s)`'s output.
+
+- **`terminal.ts`: never replace terminal DOM during an active touch** — the browser cancels
   the in-progress scroll gesture. Renders defer via `pendingAnsi` while
   `terminalTouchActive` or scrolled above the bottom, and flush on touchend /
-  return-to-bottom (`terminal.ts`).
-- **The agents list (`ui/Dashboard.tsx`) has the same hazard.** `#screen-agents` is the scroll
+  return-to-bottom.
+- **`ui/Dashboard.tsx`: the agents list has the same hazard.** `#screen-agents` is the scroll
   container; state pushes (agent_status_changed etc.) arrive constantly, so it must stay the
   **same element** while the list is shown, with the cards keyed by pane id (`data-ready` marks
   the real container; the loading spinner lacks it). Recreating `#screen-agents` snaps
   `scrollTop` to 0 (the "scroll jumps to top" bug) and cancels an in-progress drag. Like the
   terminal, the list holds still while a finger is down and shows the latest State on the
   macrotask after touchend (`setTimeout(0)`, so a still tap's click lands first).
-- Each opened pane gets its own `createPaneView` / `createTerminal` instance, and the shell
-  destroys it on leaving (`closePaneView`): `destroy()` stops its timers and listeners, and
+- **`pane-view.ts` / `terminal.ts`: one instance per opened pane.** Each opened pane gets its own
+  `createPaneView` / `createTerminal`, and the shell destroys it on leaving (`ui/App.tsx`'s
+  `handleRoute` → `closePaneView`): `destroy()` stops its timers and listeners, and
   every async continuation checks `destroyed`, so a stale response can't poison the next pane's
   view. Within a pane, reads also drop a response a newer read or WS push superseded.
-- Double-tap detection requires two *stationary* taps (movement > 10px within
+- **`ui/Pane.tsx`: the composer is uncontrolled.** The textarea has no `value` prop, so a state
+  push never resets what is being typed, an IME composition included. Enter sends only on a PC
+  (Shift+Enter: a newline), never the Enter that confirms an IME conversion (`isComposing`, or
+  keyCode 229), and once per held key (`composer-keys.ts`); on a touch device only Send sends.
+- **`ui/App.tsx`: `#topbar`, `#reconnect-banner` and `#screen` stay the same elements** for the
+  app's life (webcheck observes `#screen`); a route render swaps what is inside them only.
+- `terminal.ts`: double-tap detection requires two *stationary* taps (movement > 10px within
   a touch disqualifies it) — fast swipe flicks must not trigger it.
 - WS pushes are deduped server-side against the last serialized state;
   `sinceUnixMs` carries over across re-snapshots so rebuilds don't defeat it.

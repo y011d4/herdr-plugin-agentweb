@@ -52,9 +52,10 @@ function measureMonoRatio(el: HTMLElement): number {
 
 export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: string }): Terminal {
   // Two sections updated independently, so live pushes never touch the scrollback DOM above.
-  outputEl.innerHTML = '<div id="term-history"></div><div id="term-live"><span class="loading-spinner"></span></div>';
-  const historyEl = outputEl.firstElementChild as HTMLElement;
-  const liveEl = outputEl.lastElementChild as HTMLElement;
+  const historyEl = Object.assign(document.createElement('div'), { id: 'term-history' });
+  const liveEl = Object.assign(document.createElement('div'), { id: 'term-live' });
+  liveEl.append(Object.assign(document.createElement('span'), { className: 'loading-spinner' }));
+  outputEl.replaceChildren(historyEl, liveEl);
   const listeners = new AbortController();
   const { signal } = listeners;
   let destroyed = false;
@@ -313,9 +314,8 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
       // no marker.
       // anchor by distance from the bottom: content only changes above the fold
       const fromBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight;
-      historyEl.innerHTML = prefix
-        ? ansiToHtml(prefix)
-        : (appScrollPane ? '' : '<div class="history-start">&#183; start of output &#183;</div>');
+      if (prefix) historyEl.innerHTML = ansiToHtml(prefix);
+      else historyEl.replaceChildren(...(appScrollPane ? [] : [Object.assign(document.createElement('div'), { className: 'history-start', textContent: '\u00b7 start of output \u00b7' })]));
       // Throttle refetches, but retry an empty result much sooner (see the scroll
       // handler): output may scroll off the live screen and become fetchable
       // history well before the normal 10s window, yet a per-scroll refetch would
