@@ -63,8 +63,8 @@ All in `internal/bridge/` (one package):
   pane's body is `pane-view.ts` (`createPaneView` → setMode/onState/echo/destroy, one per opened
   pane or Home: the chat log, the transcript probe, its own WS messages and agent_status, the 3s
   refresh, the pane's visibilitychange and the answer panel) over `terminal.ts` (`createTerminal`:
-  the continuous buffer, fit/pinch, wheel forwarding and fling); app.ts draws the header, the
-  composer and Home's bits around it in `#pane-view`. `ansi.ts` — pure ANSI→HTML,
+  the continuous buffer, fit/pinch, wheel forwarding and fling); `ui/Pane.tsx` draws the topbar, Home's
+  bits, the composer (an uncontrolled textarea) and the quick keys around it in `#pane-view`. `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
   (manifest, icons) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one

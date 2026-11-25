@@ -369,9 +369,11 @@ async function openPage(c: Ctx, profile?: string): Promise<Page> {
   const dir = profile ? path.resolve(profile) : path.join(c.rec.dir, 'chrome');
   fs.mkdirSync(dir, { recursive: true });
   fs.rmSync(path.join(dir, 'DevToolsActivePort'), { force: true });
-  // headless Linux swallows touchmoves within ~30px of the touchstart; 3 makes it ~8px, a phone's 8dp
+  // headless Linux swallows touchmoves within ~30px of the touchstart; 3 makes it ~8px, a phone's 8dp. Without touch
+  // emulation headless has no pointer: the blink settings make it a PC's mouse (hover, fine), from the next document on
   pg.proc = spawn('google-chrome-stable', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${dir}`,
-    '--touch-slop-distance=3', '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' });
+    '--touch-slop-distance=3', '--blink-settings=primaryPointerType=4,primaryHoverType=2,availablePointerTypes=4,availableHoverTypes=2',
+    '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' });
   // a spawn failure ('error') rejects into the run's normal teardown instead of crashing past it
   const failed = new Promise<never>((_, rej) => pg.proc.on('error', (e) => rej(env(`chrome: ${e.message}`))));
   failed.catch(() => {});
@@ -1143,6 +1145,98 @@ async function p18(c: Ctx) {
   }
 }
 
+/** P6: wc-shell's composer (what reaches the shell is a comment line). On a PC Enter sends once and Shift+Enter
+ *  inserts a newline; an IME composition survives a state push (a rename of wc-shell's tab, wc- kept): the same
+ *  textarea, its value kept, then committed and sent once by Enter. On a phone Enter never sends. */
+async function p6(c: Ctx) {
+  const { pg, rec } = c;
+  const shell = rec.names.shell;
+  const tab = herdr(['pane', 'get', shell]).pane.tab_id;
+  const TA = `document.getElementById('pane-input')`;
+  const DESKTOP = `matchMedia('(hover: hover) and (pointer: fine)').matches`;
+  const enter = async (modifiers = 0) => {
+    const k = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, modifiers };
+    await pg.S('Input.dispatchKeyEvent', { type: 'keyDown', text: '\r', unmodifiedText: '\r', ...k });
+    await pg.S('Input.dispatchKeyEvent', { type: 'keyUp', ...k });
+  };
+  /** empties the composer, then types text into it */
+  const type = async (text: string) => { await pg.ev(`(() => { const t = ${TA}; t.value = ''; t.focus(); return 1; })()`); await pg.S('Input.insertText', { text }); };
+  /** the bodies of the POST /input this pane got from t on, after a second */
+  const sent = async (t: number) => { await sleep(1000); return pg.posts(t, `/api/panes/${enc(shell)}/input`).map((q) => q.body); };
+  try {
+    await mobile(pg, false);
+    await loadApp(c, `#/pane/${enc(shell)}`); // a new document: a PC's pointer (openPage)
+    if ((await pg.until(`!!${TA}`, 5000)).timeout) throw new Error('no #pane-input');
+    const desk = await pg.ev(DESKTOP);
+    guard(rec, shell);
+    await type('# wc-p6-enter');
+    let t = Date.now();
+    await enter();
+    const e1 = await sent(t);
+    await type('# wc-p6-shift');
+    t = Date.now();
+    await enter(8); // Shift
+    const s1 = await sent(t);
+    const nl: string = await pg.ev(`${TA}.value`);
+
+    await type('# ');
+    await pg.S('Input.imeSetComposition', { text: 'にほんご', selectionStart: 4, selectionEnd: 4 });
+    const v0: string = await pg.ev(`window.__wcTa = ${TA}, ${TA}.value`);
+    const label = `wc-shell-${Date.now() % 100000}`;
+    pg.stateMark = js(label);
+    pg.stateMarkT = 0;
+    mutate(rec, tab, ['tab', 'rename', tab, label]);
+    const pushed = !(await waitFn(() => pg.stateMarkT > 0, 5000, 5)).timeout;
+    await sleep(300);
+    const [same, v1]: [boolean, string] = await pg.ev(`[${TA} === window.__wcTa, ${TA}.value]`);
+    await pg.S('Input.insertText', { text: 'にほんご' }); // commits the composition
+    const v2: string = await pg.ev(`${TA}.value`);
+    t = Date.now();
+    await enter();
+    const i1 = await sent(t);
+
+    await mobile(pg, true);
+    const touch = await pg.ev(DESKTOP);
+    await type('# wc-p6-touch');
+    t = Date.now();
+    await enter();
+    const t1 = await sent(t);
+    result(c, desk && js(e1) === js([{ text: '# wc-p6-enter', enter: true }]) && s1.length === 0 && nl === '# wc-p6-shift\n' &&
+      pushed && same && v0 === '# にほんご' && v1 === v0 && v2 === v0 && js(i1) === js([{ text: '# にほんご', enter: true }]) && !touch && t1.length === 0,
+      'P6', `pc=${desk},enter=${js(e1)},shiftEnter=${s1.length}:${js(nl)},ime:push=${pushed},sameNode=${same},value=${js(v0)}->${js(v1)}->${js(v2)},enter=${js(i1)},` +
+        `phone=${!touch},enter=${t1.length}`,
+      "PC: Enter -> exactly 1 POST /input {text, enter:true}; Shift+Enter -> 0 and a '\\n'; mid-IME a state push keeps the textarea (===) and its value, " +
+        'insertText commits, Enter -> exactly 1 POST {text, enter:true}; phone: Enter -> 0 POSTs');
+  } finally {
+    pg.stateMark = '';
+    await mobile(pg, true);
+    mutate(rec, tab, ['tab', 'rename', tab, 'wc-shell']);
+    await pg.goto('#/agents');
+  }
+}
+
+/** P19: wc-shell's quick keys: Esc POSTs exactly {keys:['esc']}, 1 exactly {text:'1'}. */
+async function p19(c: Ctx) {
+  const { pg, rec } = c;
+  const shell = rec.names.shell;
+  await pg.goto(`#/pane/${enc(shell)}`);
+  if ((await pg.until(`document.querySelectorAll('.qkey').length === 12`, 5000)).timeout) throw new Error('no 12 .qkey');
+  guard(rec, shell);
+  let ok = true;
+  const got: string[] = [];
+  for (const [label, want] of [['Esc', { keys: ['esc'] }], ['1', { text: '1' }]] as const) {
+    const p = await pg.at(`[...document.querySelectorAll('.qkey')].find((b) => b.textContent === ${js(label)})`);
+    const t = Date.now();
+    await pg.tap(p.x, p.y);
+    await sleep(1000);
+    const bodies = pg.posts(t, `/api/panes/${enc(shell)}/input`).map((q) => q.body);
+    ok &&= bodies.length === 1 && js(bodies[0]) === js(want);
+    got.push(`${label}=${js(bodies)}`);
+  }
+  result(c, ok, 'P19', got.join(','), "on wc-shell: Esc -> exactly 1 POST /input {keys:['esc']}; 1 -> exactly 1 {text:'1'}");
+  await pg.goto('#/agents');
+}
+
 // ── Tier 2 items (real Claude in wc-claude; wc-o1/wc-o2 are only started, cleared, stopped) ──
 
 async function sendPrompt(c: Ctx, pane: string, text: string) {
@@ -1219,9 +1313,21 @@ async function p9(c: Ctx) {
     "panel within 3s, options 1-3 = apple/banana/cherry (Claude adds its own after); option 2 tapped twice in 200ms -> exactly one POST {press:'2', expect_prompt}; unblocked within 10s");
 }
 
+/** wc-claude's transcript, for the chat items: a fresh wc-claude has none until a turn, so one goes first (P4-T2's prompt). */
+async function ensureTranscript(c: Ctx): Promise<void> {
+  const cl = c.rec.names.claude;
+  const has = async () => (await api(c, 'GET', `/api/panes/${enc(cl)}/transcript`)).available === true;
+  if (await has()) return;
+  const t0 = Date.now();
+  await sendPrompt(c, cl, OK_PROMPT);
+  if ((await statusFrame(c, cl, 'done', t0, 90_000)).timeout) throw new Error('wc-claude never done');
+  if ((await waitFn(has, 10_000, 300)).timeout) throw new Error('wc-claude has no transcript after a turn');
+}
+
 async function p11(c: Ctx) {
   const { pg } = c;
   const cl = c.rec.names.claude;
+  await ensureTranscript(c);
   await pg.ev(`localStorage.removeItem('herdr_pane_view')`);
   await pg.goto('#/agents');
   await pg.goto(`#/pane/${enc(cl)}`);
@@ -1245,6 +1351,31 @@ async function p11(c: Ctx) {
   result(c, !shown.timeout && !user.timeout && same && !det.timeout && !app.timeout && open && Math.abs(top1 - top0) <= 1 && !term.timeout && !chat.timeout,
     'P11', `chat=${ms(shown)},userAdded=${ms(user)},firstNodeKept=${same},result=${ms(det)},append=${ms(app)},detailsOpen=${open},scrollDelta=${top1 - top0},toggleSaved=${!term.timeout && !chat.timeout}`,
     'chat within 5s; send adds 1 .chat-user, first node kept; an open tool result stays open and scrollTop holds (+-1px) across an append; the view toggle is saved');
+}
+
+/** P10-T2: from wc-claude in chat, straight to #/pane/<wc-shell> (no transcript): its server watch is the terminal's,
+ *  so with the socket up (no polling) a line wc-shell prints reaches #term-live within 3s. */
+async function p10t2(c: Ctx) {
+  const { pg, rec } = c;
+  const { claude: cl, shell } = rec.names;
+  await ensureTranscript(c);
+  await pg.ev(`localStorage.removeItem('herdr_pane_view')`); // chat is the default view
+  await pg.goto('#/agents');
+  await pg.goto(`#/pane/${enc(cl)}`);
+  const chat = await pg.until(`(() => { const l = document.getElementById('chat-log'); return !!l && l.style.display !== 'none'; })()`, 5000);
+  if (chat.timeout) throw new Error('wc-claude not shown in chat');
+  const t0 = Date.now();
+  await pg.ev(`location.hash = ${js(`#/pane/${enc(shell)}`)}`);
+  if ((await pg.until(`document.getElementById('term-live')?.textContent.includes('wc-A')`, 5000)).timeout) throw new Error("wc-shell's screen not shown");
+  await sleep(1000);
+  const watch = pg.wsSent.filter((f) => f.t >= t0 && /"type":"(un)?watch_/.test(f.payload)).map((f) => JSON.parse(f.payload).type);
+  const connected = await pg.ev(`document.getElementById('conn-dot').classList.contains('connected')`);
+  const mark = `wc-live-${Date.now() % 100000}`;
+  mutate(rec, shell, ['pane', 'run', shell, `# ${mark}`]);
+  const live = await pg.until(`document.getElementById('term-live').textContent.includes(${js(mark)})`, 3000);
+  result(c, connected && !live.timeout, 'P10-T2', `connected=${connected},watchesSent=${watch.join('+') || 'none'},marker=${ms(live)}`,
+    "from wc-claude's chat to #/pane/<wc-shell>: a line wc-shell prints shows in #term-live within 3s (the socket up, so no polling)");
+  await pg.goto('#/agents');
 }
 
 /** Clears an orchestrator from its Home. stayed: #/home/<name> held from the clear request through 8s and
@@ -1387,10 +1518,13 @@ const ITEMS: Item[] = [
   { id: 'P14', tier: 1, needs: ['shell', 'less'], run: p14 },
   { id: 'P12', tier: 1, needs: ['shell'], run: p12 },
   { id: 'P13', tier: 1, run: p13 },
+  { id: 'P6', tier: 1, needs: ['shell'], run: p6 }, // late: its lines reach wc-shell
+  { id: 'P19', tier: 1, needs: ['shell'], run: p19 }, // last: it leaves a 1 typed in wc-shell
   ...['P2.old', 'P2.upgrade', 'P2.downgrade'].map((id): Item => ({ id, tier: 1, manual: true, run: (c) => p2Round(c, id) })),
   { id: 'P4-T2', tier: 2, needs: ['claude'], run: p4t2 },
   { id: 'P17-T2', tier: 2, needs: ['claude'], run: p17t2 },
   { id: 'P11', tier: 2, needs: ['claude'], run: p11 },
+  { id: 'P10-T2', tier: 2, needs: ['claude', 'shell'], run: p10t2 },
   { id: 'P9', tier: 2, needs: ['claude'], run: p9 },
   { id: 'P15-T2', tier: 2, needs: ['claude', 'orch'], run: p15t2 },
   { id: 'P8-T2', tier: 2, needs: ['orch'], run: p8t2 },
