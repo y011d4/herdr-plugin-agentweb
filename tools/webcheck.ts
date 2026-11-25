@@ -1341,6 +1341,29 @@ async function p11(c: Ctx) {
     'chat within 5s; send adds 1 .chat-user, first node kept; an open tool result stays open and scrollTop holds (+-1px) across an append; the view toggle is saved');
 }
 
+/** P10-T2: from wc-claude in chat, straight to #/pane/<wc-shell> (no transcript): its server watch is the terminal's,
+ *  so with the socket up (no polling) a line wc-shell prints reaches #term-live within 3s. */
+async function p10t2(c: Ctx) {
+  const { pg, rec } = c;
+  const { claude: cl, shell } = rec.names;
+  await pg.goto('#/agents');
+  await pg.goto(`#/pane/${enc(cl)}`);
+  const chat = await pg.until(`(() => { const l = document.getElementById('chat-log'); return !!l && l.style.display !== 'none'; })()`, 5000);
+  if (chat.timeout) throw env('wc-claude not in chat (needs a transcript: run after P11)');
+  const t0 = Date.now();
+  await pg.ev(`location.hash = ${js(`#/pane/${enc(shell)}`)}`);
+  if ((await pg.until(`document.getElementById('term-live')?.textContent.includes('wc-A')`, 5000)).timeout) throw new Error("wc-shell's screen not shown");
+  await sleep(1000);
+  const watch = pg.wsSent.filter((f) => f.t >= t0 && /"type":"(un)?watch_/.test(f.payload)).map((f) => JSON.parse(f.payload).type);
+  const connected = await pg.ev(`document.getElementById('conn-dot').classList.contains('connected')`);
+  const mark = `wc-live-${Date.now() % 100000}`;
+  mutate(rec, shell, ['pane', 'run', shell, `# ${mark}`]);
+  const live = await pg.until(`document.getElementById('term-live').textContent.includes(${js(mark)})`, 3000);
+  result(c, connected && !live.timeout, 'P10-T2', `connected=${connected},watchesSent=${watch.join('+') || 'none'},marker=${ms(live)}`,
+    "from wc-claude's chat to #/pane/<wc-shell>: a line wc-shell prints shows in #term-live within 3s (the socket up, so no polling)");
+  await pg.goto('#/agents');
+}
+
 /** Clears an orchestrator from its Home. stayed: #/home/<name> held from the clear request through 8s and
  *  through the wait for the replacement (ready, in the pinned account), however long that took. */
 async function clearOrch(c: Ctx, name: string): Promise<{ fresh: string; stayed: boolean }> {
@@ -1487,6 +1510,7 @@ const ITEMS: Item[] = [
   { id: 'P4-T2', tier: 2, needs: ['claude'], run: p4t2 },
   { id: 'P17-T2', tier: 2, needs: ['claude'], run: p17t2 },
   { id: 'P11', tier: 2, needs: ['claude'], run: p11 },
+  { id: 'P10-T2', tier: 2, needs: ['claude', 'shell'], run: p10t2 }, // after P11: wc-claude opens in chat
   { id: 'P9', tier: 2, needs: ['claude'], run: p9 },
   { id: 'P15-T2', tier: 2, needs: ['claude', 'orch'], run: p15t2 },
   { id: 'P8-T2', tier: 2, needs: ['orch'], run: p8t2 },
