@@ -41,7 +41,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/y011d4/herdr-plugin-yoicks/tools/fakeherdr"
+	"github.com/y011d4/herdr-yoicks/tools/fakeherdr"
 )
 
 // the bridge's port and where the recordings go (main_test.go repoints both)
