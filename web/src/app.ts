@@ -294,6 +294,9 @@ async function stopAgentFlow(paneId: string): Promise<void> {
 // ── Pane detail ───────────────────────────────────────────────────────────────
 
 function renderPaneDetail(paneId: string): void {
+  // A pane view opens on the terminal (pane-view.ts) but mounts after the route's watch goes
+  // out (handleRoute's wsSendWatch): set its mode now, or that watch follows the last pane's chat.
+  view.paneViewMode = 'terminal';
   mountScreen('pane', createElement(Pane, { paneId, home: view.homeMode }),
     { topbar: paneTopbar(paneId, view.homeMode, view.paneBackRoute, () => agentMenu(paneId)) });
 }
