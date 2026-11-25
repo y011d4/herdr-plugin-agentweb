@@ -509,7 +509,12 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     // it gets its account from .envrc via direnv in its dir (POST /api/agents takes no env)
     checkAccount(out.paneId, 'wc-claude', account);
   }
-  if (needs.has('orch')) for (const name of ['wc-o1', 'wc-o2']) await startOrch(c, name);
+  // wc-o1/wc-o2 start later (startOrchs), so the items before them (P8) see no orchestrator running
+}
+
+/** Starts wc-o1/wc-o2 once, when the first item that needs them begins. */
+async function startOrchs(c: Ctx): Promise<void> {
+  for (const name of ['wc-o1', 'wc-o2']) if (!c.rec.names[name.slice(3)]) await startOrch(c, name);
 }
 
 async function startOrch(c: Ctx, name: string): Promise<string> {
@@ -666,6 +671,41 @@ async function p7(c: Ctx) {
   const nav = await c.pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)}`, 2000);
   result(c, ok && btns === 2 && !nav.timeout, 'P7', `cards(dom/state):${counts.join(',')},topbarButtons=${btns},tap=${nav.timeout ? 'timeout' : `${nav.ms}ms`}`,
     '.agent-card count = /api/state (#/agents, #/agents/wc-o1); 2 topbar buttons; tapping wc-less opens #/pane/<it> within 2s');
+}
+
+/** Without a running orchestrator, a fresh open (/) and #/home land on #/agents by location.replace. */
+async function p8(c: Ctx) {
+  const { pg } = c;
+  const running = (await api(c, 'GET', '/api/state')).orchestrators.filter((o: any) => o.paneId).map((o: any) => o.name);
+  if (running.length) {
+    result(c, true, 'P8', `n/a(running:${running.join('+')})`, 'needs no orchestrator running (/api/state)');
+    return;
+  }
+  /** #/agents within 3s, then its .agent-card count = /api/state's (within 5s, as P7) */
+  const landed = async (): Promise<{ ok: boolean; s: string }> => {
+    const r = await pg.until(`location.hash === '#/agents' && !!document.querySelector('#screen-agents[data-ready]')`, 3000);
+    let last = '';
+    const n = await waitFn(async () => {
+      const dom = await pg.ev(`document.querySelectorAll('.agent-card').length`);
+      const want = expectedCards(await api(c, 'GET', '/api/state'));
+      last = `${dom}/${want}`;
+      return dom === want;
+    }, 5000, 300);
+    return { ok: !r.timeout && !n.timeout, s: `${ms(r)}:cards=${last}` };
+  };
+  // a fresh document's history.length already counts its own entry: a replace keeps it, a push adds one
+  const { identifier } = await pg.S('Page.addScriptToEvaluateOnNewDocument', { source: 'window.__wcHist0 = history.length' });
+  try { await pg.load(`${c.base}/`); } finally { await pg.S('Page.removeScriptToEvaluateOnNewDocument', { identifier }); }
+  const root = await landed();
+  const [h1, h0] = await pg.ev(`[history.length, window.__wcHist0]`);
+  // in the app: the hash assignment adds one entry, the redirect none
+  const g0 = await pg.ev('history.length');
+  await pg.ev(`location.hash = '#/home'`);
+  const home = await landed();
+  const g1 = await pg.ev('history.length');
+  result(c, root.ok && h1 === h0 && home.ok && g1 === g0 + 1, 'P8',
+    `/=${root.s},history=${h0}->${h1};#/home=${home.s},history=${g0}->${g1}`,
+    'no orchestrator running: / and #/home are replaced by #/agents within 3s (history.length +0, +1 for the #/home assignment itself); .agent-card count = /api/state');
 }
 
 async function p10(c: Ctx) {
@@ -1053,6 +1093,7 @@ async function p8t2(c: Ctx) {
 interface Item { id: string; tier: 1 | 2; manual?: boolean; needs?: string[]; run: (c: Ctx) => Promise<void> }
 const ITEMS: Item[] = [
   { id: 'P2', tier: 1, run: p2 }, // first: the profile is fresh and the first load carried ?token=
+  { id: 'P8', tier: 1, needs: ['less'], run: p8 }, // early: Chrome caps history.length at 50
   { id: 'P1', tier: 1, run: p1 },
   { id: 'P17', tier: 1, run: p17 },
   { id: 'P16', tier: 1, run: p16 },
@@ -1124,6 +1165,7 @@ async function check(o: Record<string, any>): Promise<number> {
     c.pg = await openPage(c, o.profile);
     await loadApp(c);
     for (const item of items) {
+      if (item.needs?.includes('orch')) await startOrchs(c); // a failed start ends the run, as in setup
       for (let attempt = 1; ; attempt++) {
         const mark = c.out.length;
         const fails = c.failures;
