@@ -88,7 +88,7 @@ func TestRedeploy(t *testing.T) {
 			"herdr-plugin.toml":       "id = \"t.yoicks\"\nversion = \"1.0.0\"\n\n[[actions]]\nid = \"start\"\n",
 			"scripts/redeploy.sh":     string(script),
 			"scripts/plugin-build.sh": stubBuild,
-			".gitignore":              "bin/\nweb/dist/\n",
+			".gitignore":              "bin/\nweb/dist/\nweb/app.js\n", // tsc output by name, as before Vite
 			"web/src/app.ts":          "",
 		} {
 			write(t, filepath.Join(w.seed, path), body)
@@ -149,7 +149,7 @@ func TestRedeploy(t *testing.T) {
 	t.Run("deploys main", func(t *testing.T) {
 		w := setup(t)
 		head := push(t, w, "README", "x")
-		write(t, filepath.Join(w.prod, "web/app.js"), "") // tsc output of web/src/app.ts: removed
+		write(t, filepath.Join(w.prod, "web/app.js"), "") // ignored build output: removed
 		out, err := redeploy(t, w, "main")
 		if err != nil || !strings.Contains(out, "BUILD AbCd1234\nCACHE herdr-yoicks-0123abcd") {
 			t.Fatalf("err %v, want BUILD and CACHE:\n%s", err, out)
@@ -158,7 +158,7 @@ func TestRedeploy(t *testing.T) {
 			t.Errorf("bin/yoicks = %q, want built %s", got, head)
 		}
 		if _, err := os.Stat(filepath.Join(w.prod, "web/app.js")); err == nil {
-			t.Error("web/app.js, build output of web/src/app.ts, was left")
+			t.Error("the ignored web/app.js was left")
 		}
 		if calls := read(filepath.Join(w.fake, "calls")); !strings.Contains(calls, "t.yoicks.stop") || !strings.Contains(calls, "start built "+head) {
 			t.Errorf("calls:\n%s", calls)
@@ -177,11 +177,13 @@ func TestRedeploy(t *testing.T) {
 	})
 	t.Run("refuses a dirty tree", func(t *testing.T) {
 		w := setup(t)
-		write(t, filepath.Join(w.prod, "web/foo.js"), "mine") // no web/src/foo.ts: not build output
+		push(t, w, ".gitignore", "bin/\nweb/dist/\n") // a commit since Vite: web/app.js isn't ignored
+		must(t, w.prod, "git", "pull", "-q", "--ff-only")
+		write(t, filepath.Join(w.prod, "web/app.js"), "mine") // beside web/src/app.ts, yet not build output
 		out, err := redeploy(t, w, "main")
-		refused(t, w, out, err, "the checkout has changes")
-		if read(filepath.Join(w.prod, "web/foo.js")) != "mine" {
-			t.Error("web/foo.js was deleted")
+		refused(t, w, out, err, "?? web/app.js")
+		if read(filepath.Join(w.prod, "web/app.js")) != "mine" {
+			t.Error("web/app.js was deleted")
 		}
 	})
 	t.Run("refuses a main that can't fast-forward, before the stop", func(t *testing.T) {

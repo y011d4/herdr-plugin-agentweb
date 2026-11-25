@@ -77,14 +77,14 @@ if [ -z "$linked" ] || [ "$(cd "$linked" 2>/dev/null && pwd -P)" != "$(pwd -P)" 
 fi
 [ -x bin/yoicks ] || die "no bin/yoicks to fall back to: build it first (sh scripts/plugin-build.sh)"
 
-# Build output of either layout (web/dist since Vite; before it, tsc's web/X.js for each
-# web/src/X.ts) goes; anything else must be committed: nothing uncommitted may end up in
-# the build.
-rm -rf web/dist
-for js in web/*.js; do
-	if [ -f "$js" ] && [ -f "web/src/$(basename "$js" .js).ts" ]; then rm -f "$js"; fi
-done
-[ -z "$(git status --porcelain)" ] || die "the checkout has changes (git status): commit or remove them first"
+# Build output goes: what this commit's .gitignore ignores among web/*.js (tsc's output,
+# before Vite) and web/dist (since). Anything else must be committed: nothing uncommitted
+# may end up in the build.
+git ls-files -z --others --ignored --exclude-standard --directory -- ':(glob)web/*.js' web/dist |
+	xargs -0 rm -rf --
+changes=$(git status --porcelain)
+[ -z "$changes" ] || die "the checkout has uncommitted or untracked files: commit or remove them first
+$changes"
 
 if [ "$ref" = main ]; then
 	git fetch -q origin
