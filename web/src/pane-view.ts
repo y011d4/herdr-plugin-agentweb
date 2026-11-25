@@ -4,7 +4,7 @@
  * panel of a blocked one. It owns that DOM and everything that feeds it: the transcript
  * availability probe (one at a time), its WS messages (pane_output, transcript_items, the
  * pane's agent_status), the 3s refresh / fallback polling, the pane's part of
- * visibilitychange, and the answer guards. The shell owns the rest (header, toggle button,
+ * visibilitychange, and the answer guards. ui/Pane.tsx draws the rest (header, toggle button,
  * composer, Home's status bar and "doing now" line) and hears back through opts.
  * store.view.paneViewMode is its mode (wsSendWatch reads it). One per opened pane:
  * destroy() stops every timer and listener, and its late responses do nothing.
@@ -29,7 +29,7 @@ const PROMPT_SCREEN_INTERVAL_MS = 1200;
 const ANSWER_CONFIRM_MS = 10_000; // still on the same prompt this long after the press → say so
 
 export interface PaneViewOpts {
-  /** the shell's terminal ⇄ chat toggle: shown once the pane has a transcript */
+  /** the terminal ⇄ chat toggle: shown once the pane has a transcript */
   showToggle(visible: boolean): void;
   /** store.view.paneViewMode was set (the toggle's label; Home's terminal keys) */
   modeChanged(): void;

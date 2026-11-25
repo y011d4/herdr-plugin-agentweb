@@ -8,28 +8,24 @@
  *   #/pane/:id  — pane terminal detail
  *   #/settings  — settings
  *
- * A pane's body (terminal, chat, answer panel) is pane-view.ts; this shell draws around it.
+ * A pane or a Home is ui/Pane.tsx (its body: pane-view.ts); this shell routes to it and leaves it.
  */
 
-import { homeSummary, shownStatus } from './dashboard-group.ts';
-import { DESKTOP_QUERY, enterSends } from './composer-keys.ts';
 import type { AppState, ClearResponse, OrchestratorView, WsMessage } from './types.ts';
 import { apiDelete, apiGet, apiPost, getToken, loadToken, onUnauthorized, setToken } from './api.ts';
-import { STORAGE_HOME, findPane, keptTasks, lastHome, markPaneSeen, setAppState, setStartingHome, store, subscribe } from './store.ts';
+import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, setStartingHome, store, subscribe } from './store.ts';
 import { dismissNotificationsForPane, dismissToastsForPane, notifyAgentStatus, showToast } from './notify.ts';
 import { onWsMessage, wsConnect, wsSendWatch } from './ws.ts';
-import { createPaneView, type PaneView } from './pane-view.ts';
-import { homeAgentsHash, homeHash, homeOf, isAgentsRoute, nextPaneBackRoute, orchestratorOfPane,
-  paneGoneRoute, paneRoute, resolveRoute } from './routes.ts';
+import { homeHash, homeOf, isAgentsRoute, nextPaneBackRoute, paneGoneRoute, paneRoute, resolveRoute } from './routes.ts';
 import { createElement } from 'react';
-import { agentCards, cardTitle, Dashboard, dashboardTopbar, orchestratorLabel } from './ui/Dashboard.tsx';
+import { Dashboard, dashboardTopbar } from './ui/Dashboard.tsx';
 import { confirmModal, openAgentMenu } from './ui/Modals.tsx';
-import { mountOverlays, mountScreen, setConnIndicator, setLegacyScreen, setLegacyTopbar } from './ui/mount.tsx';
+import { mountOverlays, mountScreen, setConnIndicator, setLegacyScreen } from './ui/mount.tsx';
+import { closePaneView, Pane, paneTopbar, paneViewOnState } from './ui/Pane.tsx';
 import { Settings, settingsTopbar } from './ui/Settings.tsx';
 import { Token } from './ui/Token.tsx';
 
 // ── Module-level state ────────────────────────────────────────────────────────
-let paneView: PaneView | null = null; // the open pane's body (pane-view.ts), else null
 
 // What is on screen (store.ts): the pane shown (activePaneId), whether it is a Home,
 // its terminal/chat mode and where its Back goes. Mutated in place.
@@ -52,16 +48,6 @@ function markActivePaneSeen(): void {
 
 // ── DOM refs (populated after DOMContentLoaded) ───────────────────────────────
 let elApp: HTMLElement | null;
-
-// ── Utility ───────────────────────────────────────────────────────────────────
-
-function escHtml(s: unknown): string {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 // ── Server messages ───────────────────────────────────────────────────────────
 
@@ -138,16 +124,11 @@ function onStateUpdate(): void {
       return;
     }
     markActivePaneSeen(); // it may have just finished while on screen
-    // Pane detail auto-refreshes via its own poller; header may need updating
-    refreshPaneHeader();
-    paneView?.onState(); // the answer panel: the agent may have just become (un)blocked
+    paneViewOnState(); // the answer panel: the agent may have just become (un)blocked (the rest follows the store: ui/Pane.tsx)
   } else if (hash.startsWith('#/home/')) {
     if (homeReplaced(hash)) return;
     markActivePaneSeen(); // the orchestrator may have just finished while on screen
-    refreshPaneHeader();
-    renderHomeStatus();
-    renderHomeActivity();
-    paneView?.onState();
+    paneViewOnState();
   }
 }
 
@@ -178,9 +159,7 @@ let routeRendered = false;
 // Home (#/home) is the orchestrator's chat as the app's main screen: the pane view
 // (view.homeMode) with its own chrome — a status bar of its account's agents,
 // dialogue-only chat (no tool calls or injected notifications), a "doing now" line
-// while it works, and a plain messenger composer without terminal keys.
-let homeActivity: string | null = null; // latest tool call since the orchestrator last spoke
-let homeStatusHtml = ''; // last rendered status bar, to skip no-op DOM writes
+// while it works, and a plain messenger composer without terminal keys (ui/Pane.tsx).
 
 // A cleared or restarted orchestrator leaves a gap: its old pane is gone before the
 // replacement is detected as an agent. Home holds through that gap instead of
@@ -276,13 +255,12 @@ function signIn(token: string): void {
 
 // ── Agent lifecycle UI (start / rename / clear / stop) ────────────────────────
 
-// The pane's ⋮ (ui/Modals.tsx): Rename… (then the header here), Clear, Stop.
+// The pane's ⋮ (ui/Modals.tsx): Rename… (the header follows the store), Clear, Stop.
 function agentMenu(paneId: string): void {
   const agent = findPane(paneId)?.pane.agent;
   openAgentMenu(paneId, agent?.displayName || agent?.name || '', {
     clear: () => { void clearAgentFlow(paneId); },
     stop: () => { void stopAgentFlow(paneId); },
-    renamed: refreshPaneHeader,
   });
 }
 
@@ -315,261 +293,12 @@ async function stopAgentFlow(paneId: string): Promise<void> {
 
 // ── Pane detail ───────────────────────────────────────────────────────────────
 
-function paneHeaderHtml(found: ReturnType<typeof findPane>, paneId: string): string {
-  const label = found?.pane?.agent?.displayName || found?.pane?.agent?.name || found?.pane?.title || paneId;
-  const context = found ? `${found.ws.label} / ${found.tab.label}` : '';
-  return `${escHtml(label)}${context ? `<span class="topbar-subtitle">&#183; ${escHtml(context)}</span>` : ''}`;
-}
-
-// Home's title: the orchestrator's name and what it's up to.
-function homeHeaderHtml(found: ReturnType<typeof findPane>): string {
-  const st = found?.pane?.agent?.status ?? '';
-  const sub = st === 'working' ? 'working…' : st === 'blocked' ? 'needs you' : 'ready';
-  return `${escHtml(orchestratorLabel(orchestratorOfPane(store.appState, view.activePaneId)))}<span class="topbar-subtitle home-state ${escHtml(st)}">&#183; ${sub}</span>`;
-}
-
-function refreshPaneHeader(): void {
-  if (!view.activePaneId) return;
-  const found = findPane(view.activePaneId);
-  if (found) setLegacyTopbar({ titleHtml: view.homeMode ? homeHeaderHtml(found) : paneHeaderHtml(found, view.activePaneId) });
-}
-
-// Home status bar: its agents waiting on the user (tap → that agent) and counts of
-// the rest (tap → its list). Rewritten only when its content changes, so the
-// constant state pushes don't replace a chip under a finger.
-function renderHomeStatus(): void {
-  const el = document.getElementById('home-status');
-  if (!el || !store.appState) return;
-  const s = homeSummary(agentCards(store.appState, orchestratorOfPane(store.appState, view.activePaneId)), store.seenDone);
-  // With several orchestrators running, a switcher between their Homes (tap = that
-  // orchestrator's pane, which routes to its Home like any chip), each with its status.
-  const running = orchestrators().filter((o) => o.paneId);
-  const switcher = running.length < 2 ? '' : '<div class="home-switch">' + running.map((o) => {
-    const pane = findPane(o.paneId!)?.pane;
-    const st = pane?.agent ? shownStatus(pane, store.seenDone) : 'unknown';
-    return `<button class="home-switch-btn${o.paneId === view.activePaneId ? ' active' : ''}" data-pane-id="${escHtml(o.paneId!)}">` +
-      `<i class="home-dot ${escHtml(st)}"></i>${escHtml(orchestratorLabel(o))}</button>`;
-  }).join('') + '</div>';
-  const chips = s.blocked.map((c) =>
-    `<button class="home-chip" data-pane-id="${escHtml(c.pane.paneId)}">${escHtml(cardTitle(c))}<span class="home-chip-ws">${escHtml(c.workspaceLabel)}</span></button>`).join('');
-  const html = switcher + (chips ? `<div class="home-attn"><span class="home-attn-label">Needs you</span>${chips}</div>` : '') +
-    '<button class="home-counts" data-go="agents">' +
-    `<span><i class="home-dot working"></i>${s.working} working</span>` +
-    `<span><i class="home-dot done"></i>${s.done} done</span>` +
-    `<span><i class="home-dot idle"></i>${s.idle} idle</span>` +
-    '<span class="home-counts-more">All agents &#8250;</span></button>';
-  if (html === homeStatusHtml) return;
-  homeStatusHtml = html;
-  el.innerHTML = html;
-}
-
-// Home "doing now" line: shown only while the orchestrator works — its latest
-// tool call, or "thinking…" between them.
-function renderHomeActivity(): void {
-  const el = document.getElementById('home-activity');
-  if (!el) return;
-  const working = view.activePaneId !== null && findPane(view.activePaneId)?.pane?.agent?.status === 'working';
-  el.style.display = working ? '' : 'none';
-  if (working) el.textContent = homeActivity ? `▸ ${homeActivity}` : 'thinking…';
-}
-
 function renderPaneDetail(paneId: string): void {
-  const found = findPane(paneId);
-  if (view.homeMode) {
-    const { right } = setLegacyTopbar({
-      titleHtml: homeHeaderHtml(found),
-      leftHtml: '',
-      rightHtml: `<button class="topbar-action home-agents-btn" id="btn-home-agents">Agents</button>` +
-        // terminal ⇄ chat, as on any pane (Esc / Ctrl+C / arrows live in the terminal's keys)
-        `<button class="topbar-action view-toggle home-view-toggle" id="btn-view-toggle" style="display:none;" aria-label="Toggle terminal">&gt;_</button>` +
-        `<button class="topbar-action" id="btn-agent-menu" aria-label="Agent actions">&#8942;</button>`,
-    });
-    right.querySelector('#btn-home-agents')!.addEventListener('click', () => navigate(homeAgentsHash(location.hash)));
-    right.querySelector('#btn-view-toggle')!.addEventListener('click', () => {
-      paneView?.setMode(view.paneViewMode === 'chat' ? 'terminal' : 'chat', false);
-    });
-    right.querySelector('#btn-agent-menu')!.addEventListener('click', () => agentMenu(paneId));
-  } else {
-    const backRoute = view.paneBackRoute;
-    const { left, right } = setLegacyTopbar({
-      titleHtml: paneHeaderHtml(found, paneId),
-      leftHtml: `<button class="topbar-back" aria-label="Back">&#8592; ${backRoute.startsWith('#/home/') ? 'Home' : 'Agents'}</button>`,
-      // View toggle (terminal ⇄ chat, hidden until a claude transcript is found) +
-      // the agent-actions kebab (rename / clear / stop).
-      rightHtml: `<button class="topbar-action view-toggle" id="btn-view-toggle" style="display:none;">Chat</button>` +
-        `<button class="topbar-action" id="btn-agent-menu" aria-label="Agent actions">&#8942;</button>`,
-    });
-    right.querySelector('#btn-view-toggle')!.addEventListener('click', () => {
-      paneView?.setMode(view.paneViewMode === 'chat' ? 'terminal' : 'chat', true);
-    });
-    right.querySelector('#btn-agent-menu')!.addEventListener('click', () => agentMenu(paneId));
-    left.querySelector('button')!.addEventListener('click', () => navigate(backRoute));
-  }
-
-  // The pane's body (terminal, chat, answer panel) goes in #pane-view (pane-view.ts);
-  // the shell draws Home's status bar and "doing now" line and the composer around it.
-  setLegacyScreen('pane', `
-    <div id="screen-pane"${view.homeMode ? ' class="screen-home"' : ''} style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
-      ${view.homeMode ? '<div class="home-status" id="home-status"></div>' : ''}
-      <div id="pane-view" style="display:contents;"></div>
-      ${view.homeMode ? '<div class="home-activity" id="home-activity" style="display:none;"></div>' : ''}
-      <div class="input-bar">
-        <div class="input-row">
-          <textarea id="pane-input" rows="1" placeholder="${view.homeMode ? `Message ${escHtml(orchestratorLabel(orchestratorOfPane(store.appState, paneId)))}…` : 'Send text…'}" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
-          <button class="input-send-btn" id="btn-send-enter">Send</button>
-        </div>
-        <div class="quickkey-row" id="quickkey-row"${view.homeMode ? ' style="display:none;"' : ''}></div>
-      </div>
-    </div>
-  `);
-
-  if (view.homeMode) {
-    homeStatusHtml = '';
-    homeActivity = null;
-    document.getElementById('home-status')!.addEventListener('click', (e) => {
-      const t = e.target as HTMLElement;
-      const chip = t.closest('[data-pane-id]') as HTMLElement | null;
-      if (chip) navigate(paneRoute(store.appState, chip.dataset.paneId!));
-      else if (t.closest('[data-go="agents"]')) navigate(homeAgentsHash(location.hash));
-    });
-    renderHomeStatus();
-  }
-
-  // Reads the screen first, then the scrollback, then polls and probes for a transcript.
-  paneView = createPaneView(document.getElementById('pane-view')!, paneId, {
-    showToggle: showViewToggle,
-    modeChanged: updateViewToggleLabel,
-    activity: (text) => { homeActivity = text; renderHomeActivity(); },
-  });
-
-  // Send button. On a touch device Enter in the field inserts a newline — sending
-  // happens only via the button, so the phone keyboard can't fire off half-typed
-  // commands. On a PC Enter sends and Shift+Enter inserts a newline (composer-keys.ts).
-  // This is the one composer: an agent's pane and an orchestrator's Home alike.
-  const paneInput = document.getElementById('pane-input') as HTMLTextAreaElement;
-  const sendBtn = document.getElementById('btn-send-enter') as HTMLButtonElement;
-  paneInput.addEventListener('keydown', (e) => {
-    if (!enterSends(e, matchMedia(DESKTOP_QUERY).matches)) return;
-    e.preventDefault();
-    if (!e.repeat) sendBtn.click(); // a held Enter sends once, not once per auto-repeat
-  });
-
-  const autoGrow = (): void => {
-    paneInput.style.height = 'auto';
-    paneInput.style.height = `${Math.min(paneInput.scrollHeight, 120)}px`;
-  };
-  paneInput.addEventListener('input', autoGrow);
-  // A new agent's first task the bridge couldn't deliver lands here, ready to send, and
-  // stays (with the user's edits) until sent, so leaving the pane doesn't lose it. While
-  // its send is in flight the composer is locked, here and in a view reopened meanwhile.
-  const keptDraft = keptTasks.draft(paneId);
-  if (keptDraft !== null) {
-    paneInput.value = keptDraft;
-    autoGrow();
-  }
-  paneInput.disabled = keptTasks.sending(paneId);
-  paneInput.addEventListener('input', () => keptTasks.edit(paneId, paneInput.value));
-
-  const clearInput = (): void => {
-    paneInput.value = '';
-    autoGrow();
-  };
-
-  sendBtn.addEventListener('click', async () => {
-    const text = paneInput.value;
-    if (!text || keptTasks.sending(paneId)) return;
-    const kept = keptTasks.beginSend(paneId, text); // false unless the pane has a kept task
-    if (kept) paneInput.disabled = true;
-    let restored: string | null = null;
-    try {
-      // clear:true wipes the pane's composer first so this message submits on its
-      // own — never merged with a half-typed draft the user left in the pane that
-      // yoicks can't see. Scope it to Claude Code panes: Ctrl+U safely clears
-      // Claude's input box, but to another app it's a raw control byte a
-      // full-screen / non-readline TUI could act on. Other panes just get
-      // text+enter. enter:true then submits in the same request.
-      const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
-      await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { text, enter: true, ...(isClaude ? { clear: true } : {}) });
-      if (kept) keptTasks.finishSend(paneId, true);
-      if (paneInput.value === text) clearInput(); // clear on success, but keep text typed mid-send
-      paneView?.echo();
-    } catch (err) {
-      if (kept) restored = keptTasks.finishSend(paneId, false);
-      showToast('Send failed', (err as Error).message);
-    } finally {
-      if (kept) {
-        // Unlock the pane's composer as displayed now — this view's, or one reopened
-        // during the send (this textarea is then detached) — and on failure show the
-        // task in it again.
-        paneInput.disabled = false;
-        const live = view.activePaneId === paneId ? document.getElementById('pane-input') as HTMLTextAreaElement | null : null;
-        if (live) {
-          live.disabled = false;
-          if (restored !== null) {
-            live.value = restored;
-            live.dispatchEvent(new Event('input')); // resize it
-          }
-        }
-      }
-    }
-  });
-
-  // Quick-key row
-  buildQuickKeys(paneId);
-}
-
-/** Leaving the pane (or Home) on screen: its view stops, and its late responses do nothing. */
-function closePaneView(): void {
-  paneView?.destroy();
-  paneView = null;
-}
-
-// The terminal ⇄ chat toggle (pane-view.ts reports the mode and whether chat exists).
-function updateViewToggleLabel(): void {
-  const btn = document.getElementById('btn-view-toggle');
-  if (btn) btn.textContent = view.homeMode ? (view.paneViewMode === 'chat' ? '>_' : 'Chat') : (view.paneViewMode === 'chat' ? 'Terminal' : 'Chat');
-  // Home hides the terminal keys while chatting; they come back with the terminal
-  if (view.homeMode) document.getElementById('quickkey-row')?.style.setProperty('display', view.paneViewMode === 'chat' ? 'none' : '');
-}
-
-function showViewToggle(visible: boolean): void {
-  const btn = document.getElementById('btn-view-toggle');
-  if (btn) btn.style.display = visible ? '' : 'none';
-}
-
-function buildQuickKeys(paneId: string): void {
-  const KEYS: Array<{ label: string; payload: Record<string, unknown> }> = [
-    { label: 'Enter',  payload: { keys: ['enter'] } },
-    { label: '⌫',      payload: { keys: ['backspace'] } },
-    { label: 'Esc',    payload: { keys: ['esc'] } },
-    { label: 'Ctrl+C', payload: { keys: ['ctrl+c'] } },
-    { label: '↑',      payload: { keys: ['up'] } },
-    { label: '↓',      payload: { keys: ['down'] } },
-    { label: 'Tab',    payload: { keys: ['tab'] } },
-    { label: 'y',      payload: { text: 'y', enter: true } },
-    { label: 'n',      payload: { text: 'n', enter: true } },
-    { label: '1',      payload: { text: '1' } },
-    { label: '2',      payload: { text: '2' } },
-    { label: '3',      payload: { text: '3' } },
-  ];
-
-  const row = document.getElementById('quickkey-row');
-  if (!row) return;
-
-  for (const key of KEYS) {
-    const btn = document.createElement('button');
-    btn.className = 'qkey';
-    btn.textContent = key.label;
-    btn.addEventListener('click', async () => {
-      try {
-        await apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, key.payload);
-        paneView?.echo();
-      } catch (err) {
-        showToast('Key send failed', (err as Error).message);
-      }
-    });
-    row.appendChild(btn);
-  }
+  // A pane view opens on the terminal (pane-view.ts) but mounts after the route's watch goes
+  // out (handleRoute's wsSendWatch): set its mode now, or that watch follows the last pane's chat.
+  view.paneViewMode = 'terminal';
+  mountScreen('pane', createElement(Pane, { paneId, home: view.homeMode }),
+    { topbar: paneTopbar(paneId, view.homeMode, view.paneBackRoute, () => agentMenu(paneId)) });
 }
 
 // ── Service Worker registration ───────────────────────────────────────────────
