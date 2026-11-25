@@ -527,7 +527,7 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
 - `POST /api/worktrees` `{"cwd": "/repo", "branch": "feat/x", "base": "origin/main"}` — create a git
   worktree next to the repo, as above (herdr `worktree.create`; `cwd` is any path in the source repo,
   `branch`/`base` optional) and return `{"workspaceId", "checkoutPath", "branch", "paneId"}`. Standalone (create a worktree
-  without an agent); the New agent form's "＋ New worktree…" option instead uses the atomic
+  without an agent); the New agent form's "Create a new worktree" toggle instead uses the atomic
   `worktree` spec on `POST /api/agents` above.
 - `DELETE /api/panes/:paneId` — stop an agent by closing its pane
 - `POST /api/panes/:paneId/rename` `{"name": "worker-2"}` — rename the agent running in the pane

@@ -32,7 +32,7 @@ All in `internal/bridge/` (one package):
   agents launch only from a
   fixed `launch_profiles` allowlist (never a caller-supplied command). http.go wires the routes
   (`POST /api/agents`, `DELETE /api/panes/:id`, `POST /api/panes/:id/rename`, `POST /api/agents/:target/clear`,
-  `POST /api/worktrees`). The New agent UI's "＋ New worktree…" option creates a worktree, then starts
+  `POST /api/worktrees`). The New agent UI's "Create a new worktree" toggle creates a worktree, then starts
   the agent in its checkout. Every new worktree (phone, API, `yoicks agent start --worktree`) goes
   next to its repo as `<repo>-wt-<branch>` (`placeWorktreeNextToRepo` in worktree_resolve.go), so a
   parent-dir `.envrc` (e.g. the Claude account per org dir) covers it; herdr's own default dir wouldn't.
