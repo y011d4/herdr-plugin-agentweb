@@ -13,16 +13,23 @@ export interface Topbar { title?: ReactNode; left?: ReactNode; right?: ReactNode
 
 const el = (id: string): HTMLElement => document.getElementById(id)!;
 let root: Root | null = null; // the React screen on show, if any
+let linkUp: boolean | null = null; // the last setConnIndicator (null: none yet)
 
 function unmountReact(): void {
   root?.unmount();
   root = null;
 }
 
+// The reconnect banner, never over the token screen: re-applied on every screen change,
+// so leaving the token screen while the link is down shows it.
+function showBanner(): void {
+  el('reconnect-banner').classList.toggle('visible', linkUp === false && store.view.screen !== 'token');
+}
+
 function takeScreen(kind: View['screen']): HTMLElement {
   unmountReact();
   store.view.screen = kind;
-  if (kind === 'token') el('reconnect-banner').classList.remove('visible');
+  showBanner();
   return el('screen');
 }
 
@@ -45,10 +52,11 @@ export function setLegacyTopbar(t: { titleHtml?: string; leftHtml?: string; righ
 
 /** The connection dot, and the reconnect banner (never over the token screen). */
 export function setConnIndicator(connected: boolean): void {
+  linkUp = connected;
   const dot = el('conn-dot');
   dot.classList.toggle('connected', connected);
   dot.title = connected ? 'Connected' : 'Reconnecting…';
-  el('reconnect-banner').classList.toggle('visible', !connected && store.view.screen !== 'token');
+  showBanner();
 }
 
 /** A React screen, in a display:contents wrapper in #screen, its topbar portalled into
