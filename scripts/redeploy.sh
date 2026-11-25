@@ -77,15 +77,18 @@ if [ -z "$linked" ] || [ "$(cd "$linked" 2>/dev/null && pwd -P)" != "$(pwd -P)" 
 fi
 [ -x bin/yoicks ] || die "no bin/yoicks to fall back to: build it first (sh scripts/plugin-build.sh)"
 
-# Build output goes: what this commit's .gitignore ignores among web/*.js (tsc's output,
-# before Vite) and web/dist (since). Only the committed .gitignore files count, not a
-# personal ignore (core.excludesFile, .git/info/exclude). Anything else must be committed:
-# nothing uncommitted may end up in the build.
+# A clean tree first: nothing uncommitted may end up in the build. git status leaves out
+# ignored files, so build output passes, but a changed or new .gitignore doesn't (nor one
+# that ignores itself, listed separately): the cleanup below goes by the .gitignore files,
+# and one of those could make it take someone's file for build output.
+changes=$(git status --porcelain && git ls-files --others -- ':(glob)**/.gitignore')
+[ -z "$changes" ] || die "the checkout has uncommitted or untracked files (a .gitignore too): commit or remove them first
+$changes"
+# Then the build output goes: what the .gitignore files ignore among web/*.js (tsc's
+# output, before Vite) and web/dist (since); not a personal ignore (core.excludesFile,
+# .git/info/exclude).
 git ls-files -z --others --ignored --exclude-per-directory=.gitignore --directory -- ':(glob)web/*.js' web/dist |
 	xargs -0 rm -rf --
-changes=$(git status --porcelain)
-[ -z "$changes" ] || die "the checkout has uncommitted or untracked files: commit or remove them first
-$changes"
 
 if [ "$ref" = main ]; then
 	git fetch -q origin

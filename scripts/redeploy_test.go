@@ -186,6 +186,22 @@ func TestRedeploy(t *testing.T) {
 			t.Error("web/app.js was deleted")
 		}
 	})
+	t.Run("refuses an ignore file changed locally", func(t *testing.T) {
+		for change, ignore := range map[string]struct{ path, body string }{
+			"M .gitignore":      {".gitignore", "bin/\nweb/dist/\nweb/app.js\nweb/mine.js\n"},
+			"?? web/.gitignore": {"web/.gitignore", "*.js\n"},
+			"web/.gitignore":    {"web/.gitignore", "*\n"}, // ignores itself: git status shows nothing
+		} {
+			w := setup(t)
+			write(t, filepath.Join(w.prod, ignore.path), ignore.body)
+			write(t, filepath.Join(w.prod, "web/mine.js"), "mine") // ignored only by that change
+			out, err := redeploy(t, w, "main")
+			refused(t, w, out, err, change)
+			if read(filepath.Join(w.prod, "web/mine.js")) != "mine" {
+				t.Errorf("%s: web/mine.js was deleted", change)
+			}
+		}
+	})
 	t.Run("refuses a main that can't fast-forward, before the stop", func(t *testing.T) {
 		w := setup(t)
 		push(t, w, "README", "x")
