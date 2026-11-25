@@ -3,12 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "^22.18.0 || ^24.0.0 || >=26.0.0"
+  },
   "scripts": {
-    "build:web": "tsc -p tsconfig.web.json && tsc -p tsconfig.sw.json",
-    "test": "node --test 'web/test/*.test.ts'",
+    "build:web": "tsc -p tsconfig.web.json && tsc -p tsconfig.sw.json && vite build",
+    "dev": "vite",
+    "test": "vitest run",
     "check:contract": "tsc -p tsconfig.contract.json"
   },
   "devDependencies": {
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
   }
 }

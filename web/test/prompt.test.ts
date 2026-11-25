@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 // The live-prompt parser is DOM-free, so it runs under node --test.
 import { parsePrompt, stripAnsi, answerOutcome } from '../src/prompt.ts';

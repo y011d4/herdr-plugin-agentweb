@@ -113,6 +113,8 @@ herdr plugin action invoke y011d4.yoicks.start
 
 そのあと、更新のときと同じく、動いている orchestrator を Clear してください。
 
+link したチェックアウト ([開発](#開発) を参照) は、代わりに `sh scripts/redeploy.sh <commit>` で戻します。
+
 ### アンインストール
 
 ```bash
@@ -389,8 +391,9 @@ glibc でも musl でも、どの Linux ディストリビューションでも�
 **link** します — `herdr plugin link` は herdr にあなたのチェックアウトを指させるので、編集が
 そのまま反映されます:
 
-ソースからのビルドには、Go (`go.mod` の版) と、web UI の TypeScript のビルドとテストのための
-Node.js 23.6 以上と `npm` が要ります。
+ソースからのビルドには、Go (`go.mod` の版) と、web UI の Vite によるビルドと Vitest のテストのための
+Node.js (22.x の 22.18 以降、24.x、26 以降のいずれか。23 と 25 は不可。`package.json` の `engines`) と
+`npm` が要ります。
 
 ```bash
 git clone https://github.com/y011d4/herdr-yoicks
@@ -400,13 +403,15 @@ herdr plugin link "$(pwd)"
 ```
 
 bridge と CLI は Go (`cmd/yoicks`、`internal/bridge`) です。PWA は `web/src/` の TypeScript で、
-`web/` にビルドされ、バイナリに埋め込まれます。
+Vite で `web/dist` にビルドされ、バイナリに埋め込まれます。
 
 ```bash
 sh scripts/plugin-build.sh          # 変更後に再ビルド。web の変更も (バイナリが web UI を埋め込むため)
 go test ./...                       # Go のテスト
-npm test                            # web UI のテスト (node --test)
-./bin/yoicks run               # ライブの herdr に対しフォアグラウンドで実行 (config は「設定」の節を参照)
+npm test                            # web UI のテスト (Vitest)
+./bin/yoicks run                    # ライブの herdr に対しフォアグラウンドで実行 (config は「設定」の節を参照)
+YOICKS_DEV_BRIDGE=http://127.0.0.1:8390 npm run dev   # ソースの web UI を :5174 で (ホットリロード)。
+                                    # /api と /ws は動いているブリッジへ中継。?token=<そのトークン> で開く
 ```
 
 herdr は link したプラグインの build コマンドを実行**しません** (`herdr plugin link` でも、link したものを
@@ -414,6 +419,19 @@ herdr は link したプラグインの build コマンドを実行**しませ�
 (`herdr plugin link` の再実行は `herdr-plugin.toml` を変更したときだけ)。これは常にチェックアウトをそのまま
 ビルドします。`sh scripts/plugin-build.sh release` は、インストールのときと同じく、`herdr-plugin.toml` の版の
 リリースのバイナリを取得します。
+
+link したチェックアウトの新しいコミットを動いているブリッジに出すときや、前のコミットに戻すときは、
+そのチェックアウトで次を実行します:
+
+```bash
+sh scripts/redeploy.sh main         # main を origin/main に fast-forward し、ビルドして再起動
+sh scripts/redeploy.sh <commit>     # 前のコミットに同じことをする (detached)
+```
+
+stop と start のアクションと `/healthz` を待ち、そのあと設定 → App version に出るはずの `BUILD` と
+`CACHE` を表示します。変更の残ったツリーや、`herdr-plugin.toml` が変わる切り替えは、何も止めずに断ります
+(herdr は link した manifest をキャッシュするため。`herdr plugin link` を含む手作業の手順を表示します)。
+stop の後に失敗したときは、元のバイナリを起動し直します。
 
 デタッチしたデーモンのログは `<state dir>/bridge.log` に出力されます
 (`~/.local/state/herdr/plugins/y011d4.yoicks`、プラグインコマンド内では `$HERDR_PLUGIN_STATE_DIR`)。

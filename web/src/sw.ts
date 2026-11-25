@@ -2,8 +2,9 @@
  * sw.ts — Service Worker for Yoicks PWA
  *
  * Strategy:
- *   - Static assets (index.html, app.js, ansi.js, style.css, manifest, icons):
- *     cache-first, served from versioned cache.
+ *   - Static assets (index.html, the hashed JS and CSS, manifest, icons):
+ *     network-first; a versioned cache answers offline, and for an error response
+ *     when it has the URL (an old build's asset, asked for mid-deploy).
  *   - /api/* and /ws*: network passthrough, never cached.
  *   - On activate: delete caches from previous versions.
  */
@@ -12,26 +13,13 @@
 // service-worker type so service-worker-specific APIs type-check correctly.
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
-// Bump on every release that changes any static asset: cached assets are only
-// refreshed when the service worker itself changes.
-const CACHE_VERSION = 'herdr-yoicks-v124';
-
-const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/app.js',
-  '/ansi.js',
-  '/transcript.js',
-  '/prompt.js',
-  '/dashboard-group.js',
-  '/watch.js',
-  '/kept-tasks.js',
-  '/composer-keys.js',
-  '/style.css',
-  '/manifest.webmanifest',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-];
+// Filled in by the build (vite.config.ts, sw()): every file it produced, and a cache
+// name hashed from their contents, so a change to any of them installs a new service
+// worker and replaces the cached assets. Never edit or bump these by hand.
+declare const __SW_VERSION__: string;
+declare const __SW_ASSETS__: string[];
+const CACHE_VERSION = __SW_VERSION__;
+const STATIC_ASSETS = __SW_ASSETS__;
 
 sw.addEventListener('install', (event: ExtendableEvent) => {
   event.waitUntil(
@@ -76,7 +64,10 @@ sw.addEventListener('fetch', (event: FetchEvent) => {
         const responseClone = response.clone();
         caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, responseClone));
       }
-      return response;
+      if (response.ok) return response;
+      // A page of the previous build can ask the new bridge for its old hashed asset
+      // names (a 404) mid-deploy: serve the cached copy when there is one.
+      return caches.match(event.request).then((cached) => cached ?? response);
     }).catch(() => caches.match(event.request).then((cached) => {
       if (cached) return cached;
       throw new Error('offline and not cached');

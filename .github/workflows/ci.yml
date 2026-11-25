@@ -37,8 +37,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The web UI's build and tests. Node >= 23.6 is required: the suite runs
-        # .ts files natively via `node --test` (unflagged type stripping).
+        # The web UI's build (Vite) and tests (Vitest). Node: package.json's engines
+        # (^22.18 || ^24 || >=26).
         # 24 = current LTS floor, 26 = current.
         node-version: ['24', '26']
     steps:
@@ -61,12 +61,12 @@ jobs:
       # surface. All commands below are static.
       # --ignore-scripts: a fork PR's dependency lifecycle scripts (pre/post
       # install) never execute in the runner. This repo needs none
-      # (typescript ships no build step). Drop this flag if you ever
+      # (vite's native parts come as prebuilt platform packages). Drop this flag if you ever
       # add a dependency that legitimately requires a postinstall.
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      - name: Build the web UI (tsc x2)
+      - name: Build the web UI (tsc type checks, vite build)
         run: npm run build:web
 
       # The Go bridge's JSON (testdata/contract, as typed literals in
@@ -94,7 +94,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # The Go binary embeds the built web UI, so the web build comes first.
+      # The Go binary embeds the built web UI (web/dist), so the web build comes first.
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
