@@ -44,6 +44,8 @@ var testWeb = fstest.MapFS{
 	"style.css":          {Data: []byte("body{}")},
 	"icons/icon-192.png": {Data: []byte("png")},
 	"notes.bin":          {Data: []byte("?")},
+
+	"assets/index-abcd1234.js": {Data: []byte("app()")},
 }
 
 // startBridge runs the bridge on a fake herdr (World's three panes, plus over) and
@@ -257,6 +259,7 @@ func TestStaticFiles(t *testing.T) {
 		{"/style.css", 200, "text/css; charset=utf-8", ""},
 		{"/icons/icon-192.png", 200, "image/png", ""},
 		{"/notes.bin", 200, "application/octet-stream", ""},
+		{"/assets/index-abcd1234.js", 200, "application/javascript; charset=utf-8", "public, max-age=31536000, immutable"},
 		{"/icons", 404, "application/json", ""},
 		{"/missing.js", 404, "application/json", ""},
 	} {
