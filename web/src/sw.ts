@@ -3,7 +3,8 @@
  *
  * Strategy:
  *   - Static assets (index.html, the hashed JS and CSS, manifest, icons):
- *     network-first, with a versioned cache for offline use.
+ *     network-first; a versioned cache answers offline, and for an error response
+ *     when it has the URL (an old build's asset, asked for mid-deploy).
  *   - /api/* and /ws*: network passthrough, never cached.
  *   - On activate: delete caches from previous versions.
  */
@@ -63,7 +64,10 @@ sw.addEventListener('fetch', (event: FetchEvent) => {
         const responseClone = response.clone();
         caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, responseClone));
       }
-      return response;
+      if (response.ok) return response;
+      // A page of the previous build can ask the new bridge for its old hashed asset
+      // names (a 404) mid-deploy: serve the cached copy when there is one.
+      return caches.match(event.request).then((cached) => cached ?? response);
     }).catch(() => caches.match(event.request).then((cached) => {
       if (cached) return cached;
       throw new Error('offline and not cached');
