@@ -1215,6 +1215,28 @@ async function p6(c: Ctx) {
   }
 }
 
+/** P19: wc-shell's quick keys: Esc POSTs exactly {keys:['esc']}, 1 exactly {text:'1'}. */
+async function p19(c: Ctx) {
+  const { pg, rec } = c;
+  const shell = rec.names.shell;
+  await pg.goto(`#/pane/${enc(shell)}`);
+  if ((await pg.until(`document.querySelectorAll('.qkey').length === 12`, 5000)).timeout) throw new Error('no 12 .qkey');
+  guard(rec, shell);
+  let ok = true;
+  const got: string[] = [];
+  for (const [label, want] of [['Esc', { keys: ['esc'] }], ['1', { text: '1' }]] as const) {
+    const p = await pg.at(`[...document.querySelectorAll('.qkey')].find((b) => b.textContent === ${js(label)})`);
+    const t = Date.now();
+    await pg.tap(p.x, p.y);
+    await sleep(1000);
+    const bodies = pg.posts(t, `/api/panes/${enc(shell)}/input`).map((q) => q.body);
+    ok &&= bodies.length === 1 && js(bodies[0]) === js(want);
+    got.push(`${label}=${js(bodies)}`);
+  }
+  result(c, ok, 'P19', got.join(','), "on wc-shell: Esc -> exactly 1 POST /input {keys:['esc']}; 1 -> exactly 1 {text:'1'}");
+  await pg.goto('#/agents');
+}
+
 // ── Tier 2 items (real Claude in wc-claude; wc-o1/wc-o2 are only started, cleared, stopped) ──
 
 async function sendPrompt(c: Ctx, pane: string, text: string) {
@@ -1460,6 +1482,7 @@ const ITEMS: Item[] = [
   { id: 'P12', tier: 1, needs: ['shell'], run: p12 },
   { id: 'P13', tier: 1, run: p13 },
   { id: 'P6', tier: 1, needs: ['shell'], run: p6 }, // late: its lines reach wc-shell
+  { id: 'P19', tier: 1, needs: ['shell'], run: p19 }, // last: it leaves a 1 typed in wc-shell
   ...['P2.old', 'P2.upgrade', 'P2.downgrade'].map((id): Item => ({ id, tier: 1, manual: true, run: (c) => p2Round(c, id) })),
   { id: 'P4-T2', tier: 2, needs: ['claude'], run: p4t2 },
   { id: 'P17-T2', tier: 2, needs: ['claude'], run: p17t2 },
