@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import { dashboardCards, homeSummary, markSeen, shownStatus } from '../src/dashboard-group.ts';
 import type { AgentStatus, PaneNode, WorkspaceNode, WorktreeInfo } from '../src/types.ts';

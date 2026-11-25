@@ -2,8 +2,8 @@
  * sw.ts — Service Worker for Yoicks PWA
  *
  * Strategy:
- *   - Static assets (index.html, app.js, ansi.js, style.css, manifest, icons):
- *     cache-first, served from versioned cache.
+ *   - Static assets (index.html, the hashed JS and CSS, manifest, icons):
+ *     network-first, with a versioned cache for offline use.
  *   - /api/* and /ws*: network passthrough, never cached.
  *   - On activate: delete caches from previous versions.
  */
@@ -12,26 +12,13 @@
 // service-worker type so service-worker-specific APIs type-check correctly.
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
-// Bump on every release that changes any static asset: cached assets are only
-// refreshed when the service worker itself changes.
-const CACHE_VERSION = 'herdr-yoicks-v124';
-
-const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/app.js',
-  '/ansi.js',
-  '/transcript.js',
-  '/prompt.js',
-  '/dashboard-group.js',
-  '/watch.js',
-  '/kept-tasks.js',
-  '/composer-keys.js',
-  '/style.css',
-  '/manifest.webmanifest',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-];
+// Filled in by the build (vite.config.ts, sw()): every file it produced, and a cache
+// name hashed from their contents, so a change to any of them installs a new service
+// worker and replaces the cached assets. Never edit or bump these by hand.
+declare const __SW_VERSION__: string;
+declare const __SW_ASSETS__: string[];
+const CACHE_VERSION = __SW_VERSION__;
+const STATIC_ASSETS = __SW_ASSETS__;
 
 sw.addEventListener('install', (event: ExtendableEvent) => {
   event.waitUntil(
