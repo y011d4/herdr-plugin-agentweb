@@ -1010,7 +1010,7 @@ async function p15(c: Ctx) {
 
 /** P18: the list (390x400) under state pushes, each a rename of wc-less's tab (wc- kept), so its card changes:
  *  scrolled to 200px the scroller keeps its node and scrollTop; a finger down (moved 50px) holds every card until
- *  it lifts; a tap on wc-less's card right after a push still opens it. */
+ *  it lifts; a still tap on wc-less's card with a push arriving while the finger is down still opens it. */
 async function p18(c: Ctx) {
   const { pg, rec } = c;
   const less = rec.names.less;
@@ -1060,16 +1060,20 @@ async function p18(c: Ctx) {
     result(c, p2 && down === 0 && d !== null && d <= 50, 'P18.touch', `push=${p2},mutationsWhileDown=${down},firstAfterLift=${d === null ? 'none' : `${d}ms`}`,
       'with a finger down (moved 50px) a push records 0 mutations in the list; the first comes within 50ms of touchend');
 
-    // a tap on wc-less's card right after a push
+    // a still tap on wc-less's card with a push arriving while the finger is down: what the push changed
+    // shows only after touchend, and that mustn't swallow the tap's click
     const q = await pg.at(CARD);
     await pg.uncovered(CARD, q);
+    await pg.touch('touchStart', [[q.x, q.y]]);
+    const tDown = Date.now();
     const p3 = await push();
-    const tt = Date.now();
-    await pg.tap(q.x, q.y);
+    await sleep(50); // the page handles the frame (CDP saw it arrive) before the touchend
+    const tUp = Date.now();
+    await pg.touch('touchEnd', []);
     const nav = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)}`, 1000);
-    const lag = tt - pg.stateMarkT;
-    result(c, p3 && lag <= 100 && !nav.timeout, 'P18.tap', `push=${p3},tapAfterPush=${lag}ms,nav=${ms(nav)}`,
-      "a tap on wc-less's card within 100ms of a push opens #/pane/<it> within 1s");
+    const whileDown = p3 && pg.stateMarkT >= tDown && pg.stateMarkT < tUp;
+    result(c, whileDown && !nav.timeout, 'P18.tap', `push=${p3},pushAt=${pg.stateMarkT - tDown}ms,liftAt=${tUp - tDown}ms,nav=${ms(nav)}`,
+      "a push arriving while a finger is down on wc-less's card: lifting it (a still tap) opens #/pane/<it> within 1s");
   } finally {
     pg.stateMark = '';
     await pg.ev(`(() => { const s = ${SC}; if (s) s.style.paddingBottom = ''; })()`);
@@ -1255,9 +1259,17 @@ async function p8t2(c: Ctx) {
   if ((await pg.until(`!!${btn}`, 5000)).timeout) throw new Error('no Start button for wc-o2');
   const at = await pg.at(btn);
   await pg.uncovered(btn, at); // wc-o1's start raised toasts
+  // the busy button is recorded in the page as it happens: the push of wc-o2 running can take the page Home
+  // before a poll from here would see it
+  await pg.ev(`(() => { window.__wcBusy = 0; window.__wcBusyMo?.disconnect(); const t0 = performance.now();
+    window.__wcBusyMo = new MutationObserver(() => { const b = ${btn};
+      if (!window.__wcBusy && b && b.disabled && b.textContent.endsWith(' \\u2026')) window.__wcBusy = Math.max(1, Math.round(performance.now() - t0)); });
+    window.__wcBusyMo.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true }); })()`);
   const tb = Date.now();
   await pg.tap(at.x, at.y);
-  const busy = await pg.until(`(() => { const b = ${btn}; return !!b && b.disabled && b.textContent.endsWith(' \\u2026'); })()`, 1000);
+  const seen = await pg.until('window.__wcBusy', 1000);
+  await pg.ev('window.__wcBusyMo.disconnect()');
+  const busy = { timeout: seen.timeout || seen.v > 1000, ms: seen.v };
   const up = await waitFn(() => running('wc-o2'), 60_000, 200);
   if (up.timeout) {
     const post = pg.resps.find((x) => x.t >= tb && x.url.endsWith('/api/orchestrators/wc-o2/start'))?.status ?? 'none';
