@@ -551,7 +551,8 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
 For local development, clone and **link** a working tree instead of installing from
 GitHub — `herdr plugin link` points herdr at your checkout so your edits take effect:
 
-Building from source needs Go (the version in `go.mod`) and Node.js 22.18+, 24 or 26+ with `npm`
+Building from source needs Go (the version in `go.mod`) and Node.js 22.x from 22.18, 24.x, or 26
+or later (not 23 or 25) with `npm`
 (`engines` in `package.json`; the web UI's Vite build and Vitest tests).
 
 ```bash

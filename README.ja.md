@@ -392,7 +392,8 @@ glibc でも musl でも、どの Linux ディストリビューションでも�
 そのまま反映されます:
 
 ソースからのビルドには、Go (`go.mod` の版) と、web UI の Vite によるビルドと Vitest のテストのための
-Node.js 22.18 以上、24、26 以上のいずれか (`package.json` の `engines`) と `npm` が要ります。
+Node.js (22.x の 22.18 以降、24.x、26 以降のいずれか。23 と 25 は不可。`package.json` の `engines`) と
+`npm` が要ります。
 
 ```bash
 git clone https://github.com/y011d4/herdr-yoicks

@@ -123,7 +123,7 @@ YOICKS_DEV_BRIDGE=http://127.0.0.1:8392 npm run dev   # Vite on :5174 (HMR), /ap
 ```
 
 `npm run dev` serves the sources with no service worker (it registers only in a build); open
-`http://localhost:5174/?token=<that bridge's state dir>/token`. To check the built app, SW
+`http://localhost:5174/?token=$(cat <that bridge's state dir>/token)`. To check the built app, SW
 included, without rebuilding the binary: `npx vite build --watch` and run the bridge with
 `YOICKS_WEB_DIR=web/dist`.
 
