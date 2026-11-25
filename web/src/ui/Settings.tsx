@@ -1,6 +1,7 @@
 /** ui/Settings.tsx — #/settings: notifications, the connection, sign-out and the app's build. */
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { clearToken } from '../api.ts';
+import { STORAGE_NOTIF } from '../notify.ts';
 import { setAppState, store, subscribe } from '../store.ts';
 import { wsSignOut } from '../ws.ts';
 
@@ -8,7 +9,6 @@ const APP_VERSION = '0.1.0';
 // The built JS file's content hash (assets/index-<hash>.js), shown here and in the prompt
 // panel, so a stale cached bundle is immediately visible. 'dev' unbuilt.
 export const BUILD = import.meta.url.match(/-([\w-]{8})\.js$/)?.[1] ?? 'dev';
-export const STORAGE_NOTIF = 'herdr_notifications';
 
 export const settingsTopbar = {
   title: 'Settings',

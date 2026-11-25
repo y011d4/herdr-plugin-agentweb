@@ -32,7 +32,7 @@ All in `internal/bridge/` (one package):
   agents launch only from a
   fixed `launch_profiles` allowlist (never a caller-supplied command). http.go wires the routes
   (`POST /api/agents`, `DELETE /api/panes/:id`, `POST /api/panes/:id/rename`, `POST /api/agents/:target/clear`,
-  `POST /api/worktrees`). The New agent UI's "＋ New worktree…" option creates a worktree, then starts
+  `POST /api/worktrees`). The New agent UI's "Create a new worktree" toggle creates a worktree, then starts
   the agent in its checkout. Every new worktree (phone, API, `yoicks agent start --worktree`) goes
   next to its repo as `<repo>-wt-<branch>` (`placeWorktreeNextToRepo` in worktree_resolve.go), so a
   parent-dir `.envrc` (e.g. the Claude account per org dir) covers it; herdr's own default dir wouldn't.
@@ -54,10 +54,12 @@ All in `internal/bridge/` (one package):
   foreground), so `agent start` waits for `agent.get` to report the detected agent before
   checking the started agent's account.
 - `web/src/app.ts` — SPA shell (hash routing) over `api.ts` (token, REST; a 401 → callback),
-  `store.ts` (State, WS link, `view`, seen done; subscribe/emit), `ws.ts` (socket, ping, backoff,
+  `store.ts` (State, WS link, `view`, seen done, kept tasks; subscribe/emit), `ws.ts` (socket, ping, backoff,
   state polling, watches) and `routes.ts` (pure `resolveRoute`). Screens moving to React live in
   `web/src/ui/` (Settings, Token); until app.ts is gone, `ui/mount.tsx` (temporary glue) is the
-  only writer of `#screen`, the topbar and the connection dot/banner. `ansi.ts` — pure ANSI→HTML,
+  only writer of `#screen`, the topbar and the connection dot/banner. `notify.ts` holds the toast
+  store and the OS notifications; `ui/Toasts.tsx` and `ui/Modals.tsx` (Confirm, agent actions,
+  Rename, New agent) are React roots of their own in `#toast-container` and `#modal-root`. `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
   (manifest, icons) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one
