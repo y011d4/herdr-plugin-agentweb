@@ -119,13 +119,20 @@ npm test                      # web tests (Vitest; Node per package.json engines
 go test ./...                 # bridge + CLI (CI: go test -race ./...); needs web/dist
 go build -o bin/yoicks ./cmd/yoicks
 HERDR_PLUGIN_STATE_DIR=$(mktemp -d) HERDR_YOICKS_PORT=8392 ./bin/yoicks run   # dev run
-YOICKS_DEV_BRIDGE=http://127.0.0.1:8392 npm run dev   # Vite on :5174 (HMR), /api + /ws proxied to that bridge
 ```
 
-`npm run dev` serves the sources with no service worker (it registers only in a build); open
-`http://localhost:5174/?token=$(cat <that bridge's state dir>/token)`. To check the built app, SW
-included, without rebuilding the binary: `npx vite build --watch` and run the bridge with
-`YOICKS_WEB_DIR=web/dist`.
+The web UI from source (Vite on :5174, hot reload, no service worker: it registers only in a
+build), against a dev bridge:
+
+```bash
+STATE=$(mktemp -d)   # the bridge's state (token, bridge.log) and data (orchestrator dirs)
+HERDR_PLUGIN_STATE_DIR=$STATE XDG_DATA_HOME=$STATE HERDR_YOICKS_PORT=8392 ./bin/yoicks start   # stop: the same, with stop
+echo "http://localhost:5174/?token=$(cat "$STATE/token")"   # the URL to open
+YOICKS_DEV_BRIDGE=http://127.0.0.1:8392 npm run dev          # /api and /ws proxied to that bridge
+```
+
+To check the built app, SW included, without rebuilding the binary: `npx vite build --watch`
+and run the bridge with `YOICKS_WEB_DIR=web/dist`.
 
 Deploying to the running bridge (the binary of the checkout herdr links, normally main's), in
 that checkout, with the PC at hand:
