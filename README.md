@@ -562,8 +562,9 @@ sh scripts/plugin-build.sh          # web UI, then bin/yoicks (Go), from this ch
 herdr plugin link "$(pwd)"
 ```
 
-The bridge and CLI are Go (`cmd/yoicks`, `internal/bridge`). The PWA is TypeScript
-under `web/src/`, built by Vite to `web/dist` and embedded in the binary.
+The bridge and CLI are Go (`cmd/yoicks`, `internal/bridge`). The PWA is TypeScript and React
+under `web/src/` (`main.tsx` starts the shell, `ui/App.tsx`), built by Vite to `web/dist` and
+embedded in the binary.
 
 ```bash
 sh scripts/plugin-build.sh          # rebuild after changes, web ones too (the binary embeds the web UI)

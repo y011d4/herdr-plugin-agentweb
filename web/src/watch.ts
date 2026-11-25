@@ -1,6 +1,6 @@
 /**
- * Which server-side watches the active pane should have, extracted from app.ts
- * (DOM-coupled) so it is unit-testable. Sent on reconnect, route changes, view
+ * Which server-side watches the active pane should have, kept out of the
+ * DOM-coupled shell so it is unit-testable. Sent on reconnect, route changes, view
  * mode switches and visibilitychange — all through this one decision, so a
  * reconnect while hidden can't silently restart a paused watch.
  */

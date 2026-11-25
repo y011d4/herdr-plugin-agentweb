@@ -636,13 +636,16 @@ async function p2(c: Ctx) {
     'P2.headers', `sw.js=${sws},/=${root},assets=${vite ? js1 : 'legacy:no-/assets'}`, 'Cache-Control: /sw.js and / no-cache; /assets/*.js immutable (Vite build only)');
 }
 
+// The old build (P2.old, P2.downgrade) is a legacy one from before S0 or an earlier Vite build; the
+// new one (P2.upgrade) a Vite build. P2.old records what it was served in the reused --profile, and
+// the next two compare against that record: the upgrade must be served another cache and BUILD, the
+// downgrade the recorded ones again. Without a record they fail.
 async function p2Round(c: Ctx, id: string) {
-  const want = id === 'P2.upgrade' ? 'vite' : 'legacy';
-  if ((want === 'vite') !== c.build.vite) {
-    result(c, false, id, `ENV:${c.build.vite ? 'vite' : 'legacy'}-build-served`, `${id} needs the ${want} build served (see the S0 old-SW round trip)`);
+  if (id === 'P2.upgrade' && !c.build.vite) {
+    result(c, false, id, 'ENV:legacy-build-served', `${id} needs the vite build served (see the S0 old-SW round trip)`);
     return;
   }
-  const re = want === 'vite' ? /^herdr-yoicks-[0-9a-f]{8}$/ : /^herdr-yoicks-v\d+$/;
+  const re = c.build.vite ? /^herdr-yoicks-[0-9a-f]{8}$/ : /^herdr-yoicks-v\d+$/;
   const st = await c.pg.until(`${swState(1000)}.then((s) => s === 'activated' && s)`, 15_000, 200);
   if (id !== 'P2.old') for (let i = 0; i < 2; i++) { await c.pg.load(`${c.base}/#/agents`); await sleep(1500); }
   await sleep(1000);
@@ -653,10 +656,20 @@ async function p2Round(c: Ctx, id: string) {
     await c.pg.goto('#/settings');
     build = (await c.pg.until(`[...document.querySelectorAll('.settings-row')].find((r) => /App version/.test(r.textContent))?.textContent.match(/\\(([^)]+)\\)/)?.[1]`, 3000)).v ?? '';
   }
-  const appBuild = (await (await fetch(`${c.base}/app.js`)).text()).match(/BUILD\s*=\s*['"]([^'"]+)['"]/)?.[1];
-  result(c, !st.timeout && ks.length === 1 && ks[0] === c.build.swName && re.test(ks[0]) && !n404.length && (id !== 'P2.downgrade' || build === appBuild),
-    id, `sw=${st.v},caches=${ks.join('+')},404=${n404.join('+') || 0}${id === 'P2.downgrade' ? `,build=${build}(app.js ${appBuild})` : ''}`,
-    `only sw.js's cache (${re}) after ${id === 'P2.old' ? 'install' : '2 reloads'}; no 404${id === 'P2.downgrade' ? '; Settings shows the old BUILD' : ''}`);
+  // the served BUILD: a Vite build's JS hash, a legacy build's app.js constant
+  const appBuild = c.build.vite ? c.build.hash : (await (await fetch(`${c.base}/app.js`)).text()).match(/BUILD\s*=\s*['"]([^'"]+)['"]/)?.[1];
+  const served = { cache: c.build.swName, build: appBuild ?? '' };
+  const recFile = path.join(c.rec.chrome?.dir ?? c.rec.dir, 'webcheck-p2-old.json');
+  let old: typeof served | null = null;
+  if (id === 'P2.old') fs.writeFileSync(recFile, js(served));
+  else try { old = JSON.parse(fs.readFileSync(recFile, 'utf8')); } catch { /* no P2.old in this profile */ }
+  // An upgrade renames the cache; BUILD (the JS hash) may stay, e.g. for a CSS-only change.
+  const round = id === 'P2.old' || (old !== null && (id === 'P2.upgrade'
+    ? old.cache !== served.cache
+    : old.cache === served.cache && old.build === served.build));
+  result(c, round && !st.timeout && ks.length === 1 && ks[0] === c.build.swName && re.test(ks[0]) && !n404.length && (id !== 'P2.downgrade' || build === appBuild),
+    id, `served=${served.build}/${served.cache}${id === 'P2.old' ? '(recorded)' : `,old=${old ? `${old.build}/${old.cache}` : 'none'}`},sw=${st.v},caches=${ks.join('+')},404=${n404.join('+') || 0}${id === 'P2.downgrade' ? `,build=${build}` : ''}`,
+    `only sw.js's cache (${re}) after ${id === 'P2.old' ? 'install' : '2 reloads'}; no 404${id === 'P2.old' ? '' : `; P2.old's record in the profile, and ${id === 'P2.upgrade' ? 'another cache' : 'its cache and BUILD again'}`}${id === 'P2.downgrade' ? '; Settings shows the old BUILD' : ''}`);
 }
 
 async function p3(c: Ctx) {

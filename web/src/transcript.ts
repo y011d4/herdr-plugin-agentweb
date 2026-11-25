@@ -1,6 +1,6 @@
 /**
  * transcript.ts — render Claude Code transcript TimelineItems to HTML for the
- * chat view. Pure string-building; no DOM state. app.ts owns the container and
+ * chat view. Pure string-building; no DOM state. pane-view.ts owns the container and
  * live updates.
  *
  * TimelineItem mirrors the Go bridge's (internal/bridge/types.go): the two share
@@ -245,7 +245,7 @@ function renderTodos(todos: TodoEntry[]): string {
 }
 
 // Render AskUserQuestion questions + options read-only, for transcript history.
-// Interactive answering (buttons) is owned by the prompt panel in app.ts, which
+// Interactive answering (buttons) is owned by the answer panel (ui/PromptPanel.tsx), which
 // unifies AskUserQuestion options and options parsed from a live TUI prompt.
 export function renderAskQuestions(ask: AskQuestion[]): string {
   return ask.map((q) => {

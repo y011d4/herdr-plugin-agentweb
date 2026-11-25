@@ -1,6 +1,6 @@
 /**
- * Pure flattening + ordering for the agents dashboard, extracted from app.ts
- * (which is DOM-coupled) so the logic is unit-testable. Every agent pane across
+ * Pure flattening + ordering for the agents dashboard, kept out of ui/Dashboard.tsx
+ * so the logic is unit-testable on its own. Every agent pane across
  * all workspaces becomes one card in a single list, most recent status change
  * (sinceUnixMs) first. Each card carries its own workspace label and git context
  * since there are no per-workspace group headers.
