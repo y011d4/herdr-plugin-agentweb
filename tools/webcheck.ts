@@ -543,12 +543,11 @@ async function p2Round(c: Ctx, id: string) {
     return;
   }
   const re = want === 'vite' ? /^herdr-yoicks-[0-9a-f]{8}$/ : /^herdr-yoicks-v\d+$/;
-  const t0 = Date.now();
   const st = await c.pg.until(`${swState(1000)}.then((s) => s === 'activated' && s)`, 15_000, 200);
   if (id !== 'P2.old') for (let i = 0; i < 2; i++) { await c.pg.load(`${c.base}/#/agents`); await sleep(1500); }
   await sleep(1000);
   const { ks } = await c.pg.ev(cachesJs);
-  const n404 = c.pg.resps.filter((r) => r.t >= t0 && r.status === 404).map((r) => new URL(r.url).pathname);
+  const n404 = c.pg.resps.filter((r) => r.status === 404).map((r) => new URL(r.url).pathname); // the first load's too
   let build = '';
   if (id === 'P2.downgrade') {
     await c.pg.goto('#/settings');
@@ -770,8 +769,11 @@ async function p16(c: Ctx) {
   result(c, hv === String(want), 'P16.herdr', `shown=${hv},state=${want}`, 'herdr version = /api/state');
 
   if (c.build.vite) {
-    const text = (await pg.ev(`document.getElementById('app-version')?.textContent ?? ''`)).trim();
-    const m = text.match(/\(([^)]+)\) cache ([0-9a-f]{8}|-)$/);
+    // ' cache X' lands a moment after the render (caches.keys() is async)
+    const re = /\(([^)]+)\) cache ([0-9a-f]{8}|-)$/;
+    const text = ((await pg.until(`(() => { const t = document.getElementById('app-version')?.textContent.trim() ?? ''; return ${re}.test(t) && t; })()`, 3000)).v ||
+      await pg.ev(`document.getElementById('app-version')?.textContent ?? ''`)).trim();
+    const m = text.match(re);
     const cache = c.build.swName.slice(-8);
     result(c, !!m && m[1] === c.build.hash && m[2] === cache, 'P16.version', `shown=${text},index=${c.build.hash},sw=${cache}`,
       "#app-version '(BUILD) cache XXXXXXXX': BUILD = index.html's /assets/index-<hash>.js, cache = sw.js's CACHE_VERSION suffix");
