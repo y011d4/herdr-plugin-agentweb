@@ -371,7 +371,9 @@ vendor-neutrality is preserved.
     real Claude (`wc-claude`, orchestrators `wc-o1`/`wc-o2`) and refuses to run until
     `$WC_ROOT/.envrc` sets the account's `CLAUDE_CONFIG_DIR` (`direnv allow`ed). `preview start`
     then gives the orchestrators that account as `env` (start the preview after the `.envrc`), and
-    a `wc-claude` in another account stops the run (`ENV: wc-claude account mismatch`).
+    a Claude it starts in another account stops the run (`ENV: … account mismatch`). The default
+    account is `unset CLAUDE_CONFIG_DIR`, not `~/.claude`: set, Claude Code reads a stale
+    `~/.claude/.claude.json` instead of `~/.claude.json`.
   - Safety: the preview controls the real herdr, and production (so the phone, notifications
     included) sees the scratch agents: say so before a run. It mutates only what the run created
     and recorded whose live tab or workspace label starts with `wc-` (one guard, which the page's

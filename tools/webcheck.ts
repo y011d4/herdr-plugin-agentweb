@@ -195,15 +195,27 @@ async function previewCtl(p: Preview, action: 'start' | 'stop'): Promise<void> {
 }
 
 /** The account $WC_ROOT/.envrc pins: CLAUDE_CONFIG_DIR as direnv resolves it in wc-claude's dir. */
+/** '' when it leaves CLAUDE_CONFIG_DIR unset: the default account (set even to ~/.claude, Claude Code reads a
+ *  stale ~/.claude/.claude.json instead of ~/.claude.json, so "default" means unset). */
 function pinnedAccount(): string {
   const envrc = path.join(WC_ROOT, '.envrc');
   if (!fs.existsSync(envrc)) throw env(`no account pinned (${envrc} missing)`);
   const e = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'CLAUDE_CONFIG_DIR' && !k.startsWith('DIRENV_')));
   fs.mkdirSync(path.join(WORK, 'wc-claude'), { recursive: true });
-  const v = spawnSync('direnv', ['exec', path.join(WORK, 'wc-claude'), 'printenv', 'CLAUDE_CONFIG_DIR'], { encoding: 'utf8', env: e }).stdout?.trim();
-  if (!v) throw env(`${envrc} not allowed or sets no CLAUDE_CONFIG_DIR`);
-  if (!path.isAbsolute(v)) throw env('CLAUDE_CONFIG_DIR must be absolute');
-  return path.normalize(v);
+  const out = spawnSync('direnv', ['exec', path.join(WORK, 'wc-claude'), 'sh', '-c', 'printf "ok:%s" "${CLAUDE_CONFIG_DIR-}"'],
+    { encoding: 'utf8', env: e }).stdout ?? '';
+  if (!out.startsWith('ok:')) throw env(`${envrc} not allowed (direnv allow it)`);
+  const v = out.slice(3);
+  if (v && !path.isAbsolute(v)) throw env('CLAUDE_CONFIG_DIR must be absolute');
+  return v && path.normalize(v);
+}
+
+const accountName = (account: string) => account || 'the default account (CLAUDE_CONFIG_DIR unset)';
+
+/** Every Claude webcheck starts runs in the pinned account: the same CLAUDE_CONFIG_DIR, or none for the default. */
+function checkAccount(pane: string, name: string, account: string): void {
+  const got = paneConfigDir(pane);
+  if (got !== account) throw env(`${name} account mismatch (want ${accountName(account)}, got ${got === null ? 'no agent process' : got || 'unset'})`);
 }
 
 const orchConfig = (account: string | null) => js({ orchestrators: ['wc-o1', 'wc-o2'].map((name) =>
@@ -226,7 +238,7 @@ async function previewCmd(sub: string, o: Record<string, any>): Promise<number> 
     fs.writeFileSync(path.join(previewDir(port), 'config', 'config.json'), orchConfig(account));
     fs.writeFileSync(path.join(previewDir(port), 'preview.json'), js(p));
     await previewCtl(p, 'start');
-    console.log(`preview ${port} up: http://127.0.0.1:${port} (token ${path.join(previewDir(port), 'state', 'token')}, account ${account ?? 'none: Tier 1 only'})`);
+    console.log(`preview ${port} up: http://127.0.0.1:${port} (token ${path.join(previewDir(port), 'state', 'token')}, account ${account === null ? 'none: Tier 1 only' : accountName(account)})`);
     return 0;
   } finally {
     unlock();
@@ -418,13 +430,15 @@ async function newTab(c: Ctx, ws: string, label: string): Promise<string> {
   return r.root_pane.pane_id;
 }
 
-/** A just-started claude: pass the trust prompt (Enter) if it shows, then wait until it is idle. */
+/** A just-started claude: accept the folder-trust prompt if it shows, then wait until it is idle. The prompt's
+ *  default is "No, exit" (Enter alone would quit), so Enter goes only once the cursor is on "Yes, I trust…". */
 async function agentReady(c: Ctx, pane: string, ms: number): Promise<void> {
-  let trusted = false;
   const r = await waitFn(async () => {
     const st = (await paneOf(c, pane))?.agent?.status;
     if (st === 'idle' || st === 'done') return true;
-    if (!trusted && /trust/i.test(screen(pane))) { mutate(c.rec, pane, ['pane', 'send-keys', pane, 'enter']); trusted = true; }
+    const s = screen(pane);
+    if (!/Yes, I trust this folder/.test(s)) return false;
+    mutate(c.rec, pane, ['pane', 'send-keys', pane, /❯\s*(?:\d+\.\s*)?Yes, I trust/.test(s) ? 'enter' : 'down']);
     return false;
   }, ms, 1000);
   if (r.timeout) throw env('no trust prompt or agent not started');
@@ -446,7 +460,7 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     // preview start gives the orchestrators that account as env; a preview from before the .envrc has none
     let cfg = '';
     try { cfg = fs.readFileSync(path.join(previewDir(c.port), 'config', 'config.json'), 'utf8'); } catch { /* not ours */ }
-    if (cfg !== orchConfig(account)) throw env(`the preview's orchestrators are not pinned to ${account} (restart it with preview start)`);
+    if (cfg !== orchConfig(account)) throw env(`the preview's orchestrators are not pinned to ${accountName(account)} (restart it with preview start)`);
   }
   if (!needs.size) return;
   fs.mkdirSync(WORK, { recursive: true });
@@ -493,7 +507,7 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     guard(c.rec, out.paneId);
     await agentReady(c, out.paneId, 30_000);
     // it gets its account from .envrc via direnv in its dir (POST /api/agents takes no env)
-    if (paneConfigDir(out.paneId) !== account) throw env('wc-claude account mismatch');
+    checkAccount(out.paneId, 'wc-claude', account);
   }
   if (needs.has('orch')) for (const name of ['wc-o1', 'wc-o2']) await startOrch(c, name);
 }
@@ -502,6 +516,7 @@ async function startOrch(c: Ctx, name: string): Promise<string> {
   const out = await api(c, 'POST', `/api/orchestrators/${name}/start`);
   recordPane(c, out.paneId, name.slice(3));
   await agentReady(c, out.paneId, 60_000);
+  checkAccount(out.paneId, name, pinnedAccount());
   return out.paneId;
 }
 
@@ -902,7 +917,10 @@ async function p9(c: Ctx) {
   await sendPrompt(c, cl, ASK_PROMPT);
   const b = await statusFrame(c, cl, 'blocked', t0, 90_000);
   await pg.goto(`#/pane/${enc(cl)}`);
-  const panel = await pg.until(`document.querySelectorAll('#chat-prompt .ask-opt').length`, 3000);
+  const panel = await pg.until(`document.querySelectorAll('#chat-prompt .ask-opt').length >= 3`, 3000);
+  // Claude Code appends its own options (type something, chat about this) after the 3 asked for
+  const labels: string[] = await pg.ev(`[...document.querySelectorAll('#chat-prompt .ask-opt')].map((b) => (b.querySelector('.ask-opt-label') ?? b).textContent.trim())`);
+  const asked = ['apple', 'banana', 'cherry'].every((f, i) => (labels[i] ?? '').toLowerCase().includes(f));
   guard(c.rec, cl);
   const opt = await pg.at(`document.querySelectorAll('#chat-prompt .ask-opt')[1]`);
   const tt = Date.now();
@@ -912,9 +930,10 @@ async function p9(c: Ctx) {
   await sleep(1500);
   const posts = pg.posts(tt, `/api/panes/${enc(cl)}/input`).map((q) => q.body);
   const unb = await waitFn(async () => (await paneOf(c, cl))?.agent?.status !== 'blocked', 10_000, 300);
-  result(c, !b.timeout && panel.v === 3 && posts.length === 1 && posts[0].press === '2' && !!posts[0].expect_prompt && !unb.timeout,
-    'P9', `blocked=${ms(b)},options=${panel.v},posts=${js(posts)},unblocked=${ms(unb)}`,
-    "panel within 3s with 3 .ask-opt; option 2 tapped twice in 200ms -> exactly one POST {press:'2', expect_prompt}; unblocked within 10s");
+  const sent = posts.map((p) => `{press:${p.press},expect_prompt:${p.expect_prompt ? `${String(p.expect_prompt).length}chars` : 'none'}}`);
+  result(c, !b.timeout && !panel.timeout && asked && posts.length === 1 && posts[0].press === '2' && !!posts[0].expect_prompt && !unb.timeout,
+    'P9', `blocked=${ms(b)},options=${labels.length}[${labels.join('|')}],posts=${sent.join('+') || 0},unblocked=${ms(unb)}`,
+    "panel within 3s, options 1-3 = apple/banana/cherry (Claude adds its own after); option 2 tapped twice in 200ms -> exactly one POST {press:'2', expect_prompt}; unblocked within 10s");
 }
 
 async function p11(c: Ctx) {
@@ -945,34 +964,59 @@ async function p11(c: Ctx) {
     'chat within 5s; send adds 1 .chat-user, first node kept; an open tool result stays open and scrollTop holds (+-1px) across an append; the view toggle is saved');
 }
 
-async function clearOrch(c: Ctx, name: string): Promise<string> {
+/** Clears an orchestrator from its Home. stayed: #/home/<name> held from the clear request through 8s and
+ *  through the wait for the replacement (ready, in the pinned account), however long that took. */
+async function clearOrch(c: Ctx, name: string): Promise<{ fresh: string; stayed: boolean }> {
   const old = c.rec.names[name.slice(3)];
   guard(c.rec, old);
-  const out = await api(c, 'POST', `/api/agents/${enc(old)}/clear`);
-  recordPane(c, out.paneId, name.slice(3));
-  return out.paneId;
-}
-async function stayFor(c: Ctx, hash: string, msHold: number): Promise<boolean> {
+  const hash = `#/home/${name}`;
   const t0 = Date.now();
-  while (Date.now() - t0 < msHold) { if ((await c.pg.hash()) !== hash) return false; await sleep(200); }
-  return true;
+  let waiting = true;
+  const watch = (async () => {
+    while (waiting || Date.now() - t0 < 8000) { if ((await c.pg.hash()) !== hash) return false; await sleep(200); }
+    return true;
+  })().catch(() => false);
+  try {
+    const out = await api(c, 'POST', `/api/agents/${enc(old)}/clear`);
+    recordPane(c, out.paneId, name.slice(3));
+    // the replacement is a new Claude: it must come up in the pinned account too
+    await agentReady(c, out.paneId, 60_000);
+    checkAccount(out.paneId, name, pinnedAccount());
+    waiting = false;
+    return { fresh: out.paneId, stayed: await watch };
+  } finally { waiting = false; }
 }
 
 async function p15t2(c: Ctx) {
   const { pg } = c;
   const cl = c.rec.names.claude;
   await pg.goto(`#/pane/${enc(cl)}`);
+  // rename through the UI (⋮ → Rename…): the POST answers ok, a "Renamed" toast shows, herdr has the new name.
+  // (The topbar shows the agent kind, not herdr's agent name, on legacy and S0 alike.)
   guard(c.rec, cl);
-  await api(c, 'POST', `/api/panes/${enc(cl)}/rename`, { name: 'wc-renamed' });
-  const r = await pg.until(`document.getElementById('topbar-title').textContent.includes('wc-renamed')`, 3000);
+  await pg.tapEl(`document.getElementById('btn-agent-menu')`);
+  await pg.tapEl(`document.getElementById('am-rename')`);
+  await pg.ev(`document.getElementById('rn-name').value = 'wc-renamed'`);
+  const save = await pg.at(`document.getElementById('rn-save')`);
+  const tr = Date.now(); // right before the tap: a fast response still counts
+  await pg.tap(save.x, save.y);
+  // the toast and herdr's name, polled side by side within the same 3s; the herdr CLI call is synchronous,
+  // so its answer counts only if it came back by the deadline
+  const deadline = tr + 3000;
+  const [toast, named] = await Promise.all([
+    pg.until(`[...document.querySelectorAll('.toast')].some((t) => /Renamed/.test(t.textContent))`, deadline - Date.now()),
+    waitFn(() => herdr(['agent', 'get', cl]).agent?.name === 'wc-renamed' && Date.now() <= deadline, deadline - Date.now(), 200),
+  ]);
+  const ok = pg.resps.find((x) => x.t >= tr && x.url.endsWith(`/api/panes/${enc(cl)}/rename`))?.status;
+  const r = { timeout: toast.timeout || named.timeout || ok !== 200, ms: Date.now() - tr };
   await pg.goto('#/home/wc-o1');
   const t0 = Date.now();
-  const fresh = await clearOrch(c, 'wc-o1');
-  const stayed = await stayFor(c, '#/home/wc-o1', 8000);
+  const { fresh, stayed } = await clearOrch(c, 'wc-o1');
   const now = (await api(c, 'GET', '/api/state')).orchestrators.find((o: any) => o.name === 'wc-o1')?.paneId;
   const watched = pg.wsSent.some((f) => f.t >= t0 && f.payload.includes(js(fresh)));
-  result(c, !r.timeout && stayed && now === fresh && watched, 'P15-T2', `rename=${ms(r)},stayedHome8s=${stayed},replaced=${now === fresh},followed=${watched}`,
-    'rename shows in the topbar within 3s; clearing wc-o1 keeps #/home/wc-o1 and follows the new pane');
+  result(c, !r.timeout && stayed && now === fresh && watched, 'P15-T2',
+    `renamePost=${ok},toast=${ms(toast)},herdrName=${ms(named)},stayedHome8s=${stayed},replaced=${now === fresh},followed=${watched}`,
+    "UI rename: POST ok, a 'Renamed' toast and herdr's agent name wc-renamed within 3s; clearing wc-o1 keeps #/home/wc-o1 and follows the new pane");
 }
 
 async function p8t2(c: Ctx) {
@@ -988,8 +1032,7 @@ async function p8t2(c: Ctx) {
   const sw = await pg.until(`document.querySelectorAll('.home-switch-btn').length === 2`, 3000);
   await pg.goto('#/home/wc-o1');
   const t0 = Date.now();
-  const fresh = await clearOrch(c, 'wc-o1');
-  const stayed = await stayFor(c, '#/home/wc-o1', 8000);
+  const { fresh, stayed } = await clearOrch(c, 'wc-o1');
   const followed = pg.wsSent.some((f) => f.t >= t0 && f.payload.includes(js(fresh)));
   await pg.goto('#/home/wc-o2');
   await sleep(1000);
