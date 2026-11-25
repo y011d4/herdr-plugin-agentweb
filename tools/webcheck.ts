@@ -964,20 +964,27 @@ async function p11(c: Ctx) {
     'chat within 5s; send adds 1 .chat-user, first node kept; an open tool result stays open and scrollTop holds (+-1px) across an append; the view toggle is saved');
 }
 
-async function clearOrch(c: Ctx, name: string): Promise<string> {
+/** Clears an orchestrator from its Home. stayed: #/home/<name> held from the clear request through 8s and
+ *  through the wait for the replacement (ready, in the pinned account), however long that took. */
+async function clearOrch(c: Ctx, name: string): Promise<{ fresh: string; stayed: boolean }> {
   const old = c.rec.names[name.slice(3)];
   guard(c.rec, old);
-  const out = await api(c, 'POST', `/api/agents/${enc(old)}/clear`);
-  recordPane(c, out.paneId, name.slice(3));
-  // the replacement is a new Claude: it must come up in the pinned account too
-  await agentReady(c, out.paneId, 60_000);
-  checkAccount(out.paneId, name, pinnedAccount());
-  return out.paneId;
-}
-async function stayFor(c: Ctx, hash: string, msHold: number): Promise<boolean> {
+  const hash = `#/home/${name}`;
   const t0 = Date.now();
-  while (Date.now() - t0 < msHold) { if ((await c.pg.hash()) !== hash) return false; await sleep(200); }
-  return true;
+  let waiting = true;
+  const watch = (async () => {
+    while (waiting || Date.now() - t0 < 8000) { if ((await c.pg.hash()) !== hash) return false; await sleep(200); }
+    return true;
+  })().catch(() => false);
+  try {
+    const out = await api(c, 'POST', `/api/agents/${enc(old)}/clear`);
+    recordPane(c, out.paneId, name.slice(3));
+    // the replacement is a new Claude: it must come up in the pinned account too
+    await agentReady(c, out.paneId, 60_000);
+    checkAccount(out.paneId, name, pinnedAccount());
+    waiting = false;
+    return { fresh: out.paneId, stayed: await watch };
+  } finally { waiting = false; }
 }
 
 async function p15t2(c: Ctx) {
@@ -990,18 +997,21 @@ async function p15t2(c: Ctx) {
   await pg.tapEl(`document.getElementById('btn-agent-menu')`);
   await pg.tapEl(`document.getElementById('am-rename')`);
   await pg.ev(`document.getElementById('rn-name').value = 'wc-renamed'`);
-  const tr = Date.now(); // before the tap: a fast response still counts
-  await pg.tapEl(`document.getElementById('rn-save')`);
-  const toast = await pg.until(`[...document.querySelectorAll('.toast')].some((t) => /Renamed/.test(t.textContent))`, 3000);
-  const ok = pg.resps.find((x) => x.t >= tr && x.url.endsWith(`/api/panes/${enc(cl)}/rename`))?.status;
-  // the herdr CLI call is synchronous: its answer counts only if it came back by the deadline
+  const save = await pg.at(`document.getElementById('rn-save')`);
+  const tr = Date.now(); // right before the tap: a fast response still counts
+  await pg.tap(save.x, save.y);
+  // the toast and herdr's name, polled side by side within the same 3s; the herdr CLI call is synchronous,
+  // so its answer counts only if it came back by the deadline
   const deadline = tr + 3000;
-  const named = await waitFn(() => herdr(['agent', 'get', cl]).agent?.name === 'wc-renamed' && Date.now() <= deadline, deadline - Date.now(), 200);
+  const [toast, named] = await Promise.all([
+    pg.until(`[...document.querySelectorAll('.toast')].some((t) => /Renamed/.test(t.textContent))`, deadline - Date.now()),
+    waitFn(() => herdr(['agent', 'get', cl]).agent?.name === 'wc-renamed' && Date.now() <= deadline, deadline - Date.now(), 200),
+  ]);
+  const ok = pg.resps.find((x) => x.t >= tr && x.url.endsWith(`/api/panes/${enc(cl)}/rename`))?.status;
   const r = { timeout: toast.timeout || named.timeout || ok !== 200, ms: Date.now() - tr };
   await pg.goto('#/home/wc-o1');
   const t0 = Date.now();
-  const fresh = await clearOrch(c, 'wc-o1');
-  const stayed = await stayFor(c, '#/home/wc-o1', 8000);
+  const { fresh, stayed } = await clearOrch(c, 'wc-o1');
   const now = (await api(c, 'GET', '/api/state')).orchestrators.find((o: any) => o.name === 'wc-o1')?.paneId;
   const watched = pg.wsSent.some((f) => f.t >= t0 && f.payload.includes(js(fresh)));
   result(c, !r.timeout && stayed && now === fresh && watched, 'P15-T2',
@@ -1022,8 +1032,7 @@ async function p8t2(c: Ctx) {
   const sw = await pg.until(`document.querySelectorAll('.home-switch-btn').length === 2`, 3000);
   await pg.goto('#/home/wc-o1');
   const t0 = Date.now();
-  const fresh = await clearOrch(c, 'wc-o1');
-  const stayed = await stayFor(c, '#/home/wc-o1', 8000);
+  const { fresh, stayed } = await clearOrch(c, 'wc-o1');
   const followed = pg.wsSent.some((f) => f.t >= t0 && f.payload.includes(js(fresh)));
   await pg.goto('#/home/wc-o2');
   await sleep(1000);
