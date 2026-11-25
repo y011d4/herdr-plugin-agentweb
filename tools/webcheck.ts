@@ -663,12 +663,13 @@ async function p2Round(c: Ctx, id: string) {
   let old: typeof served | null = null;
   if (id === 'P2.old') fs.writeFileSync(recFile, js(served));
   else try { old = JSON.parse(fs.readFileSync(recFile, 'utf8')); } catch { /* no P2.old in this profile */ }
+  // An upgrade renames the cache; BUILD (the JS hash) may stay, e.g. for a CSS-only change.
   const round = id === 'P2.old' || (old !== null && (id === 'P2.upgrade'
-    ? old.cache !== served.cache && old.build !== served.build
+    ? old.cache !== served.cache
     : old.cache === served.cache && old.build === served.build));
   result(c, round && !st.timeout && ks.length === 1 && ks[0] === c.build.swName && re.test(ks[0]) && !n404.length && (id !== 'P2.downgrade' || build === appBuild),
     id, `served=${served.build}/${served.cache}${id === 'P2.old' ? '(recorded)' : `,old=${old ? `${old.build}/${old.cache}` : 'none'}`},sw=${st.v},caches=${ks.join('+')},404=${n404.join('+') || 0}${id === 'P2.downgrade' ? `,build=${build}` : ''}`,
-    `only sw.js's cache (${re}) after ${id === 'P2.old' ? 'install' : '2 reloads'}; no 404${id === 'P2.old' ? '' : `; P2.old's record in the profile, and ${id === 'P2.upgrade' ? 'another cache and BUILD' : 'its cache and BUILD again'}`}${id === 'P2.downgrade' ? '; Settings shows the old BUILD' : ''}`);
+    `only sw.js's cache (${re}) after ${id === 'P2.old' ? 'install' : '2 reloads'}; no 404${id === 'P2.old' ? '' : `; P2.old's record in the profile, and ${id === 'P2.upgrade' ? 'another cache' : 'its cache and BUILD again'}`}${id === 'P2.downgrade' ? '; Settings shows the old BUILD' : ''}`);
 }
 
 async function p3(c: Ctx) {
