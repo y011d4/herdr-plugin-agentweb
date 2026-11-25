@@ -388,7 +388,7 @@ async function clearAgentFlow(paneId: string): Promise<void> {
   const ok = await confirmModal('Clear agent?', 'Starts a fresh session (same profile & directory) and closes the current one. In-session context is lost.', 'Clear', false);
   if (!ok) return;
   try {
-    const res = (await apiPost(`/api/agents/${encodeURIComponent(paneId)}/clear`)) as Partial<ClearResponse>;
+    const res = await apiPost<ClearResponse>(`/api/agents/${encodeURIComponent(paneId)}/clear`);
     showToast('Cleared', 'Started a fresh session');
     // Clearing an orchestrator keeps the user on its Home: the state may not know the
     // replacement yet, so stay on #/home/<name> and let onStateUpdate re-resolve it.
