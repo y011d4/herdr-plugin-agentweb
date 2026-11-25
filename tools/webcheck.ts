@@ -329,11 +329,12 @@ class Page {
     return r;
   }
   async tapEl(el: string) { const p = await this.at(el); await this.tap(p.x, p.y); return Date.now(); }
-  /** Waits (10s at most) until a touch at p lands on `el`, closing any toast over it: status changes raise
-   *  sticky ones, right where the list's top (the Start buttons) is. */
+  /** Waits (10s at most) until a touch at p lands on `el`, clearing the toasts over it: status changes raise
+   *  sticky ones, right where the list's top (the Start buttons) is. With two or more, the stack's own box
+   *  (beside its Clear all) takes the touch too, so any hit in #toast-container clears them all. */
   uncovered = (el: string, p: { x: number; y: number }) =>
     this.until(`(() => { const e = ${el}, hit = document.elementFromPoint(${p.x}, ${p.y}); if (e && e.contains(hit)) return true;
-      hit?.closest('.toast')?.querySelector('.toast-close')?.click(); return false; })()`, 10_000);
+      if (hit?.closest('#toast-container')) document.getElementById('toast-clear-all')?.click(); return false; })()`, 10_000);
   posts = (t: number, suffix: string) => this.reqs.filter((q) => q.t >= t && q.method === 'POST' && q.url.endsWith(suffix));
   /** The page's own API mutations go through the same guard: a UI bug must not reach a real agent. */
   async guardRequest(p: any) {
