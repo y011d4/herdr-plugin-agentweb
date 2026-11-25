@@ -13,8 +13,9 @@
 # A commit from before this script existed: run main's copy,
 #   t=$(mktemp) && git show main:scripts/redeploy.sh > "$t" && sh "$t" main
 #
-# REDEPLOY_HERDR (the herdr command) and REDEPLOY_HEALTHZ (the bridge's /healthz URL,
-# default http://127.0.0.1:8390/healthz) exist for testing and a non-default port.
+# REDEPLOY_HERDR (the herdr command), REDEPLOY_HEALTHZ (the bridge's /healthz URL,
+# default http://127.0.0.1:8390/healthz) and REDEPLOY_HEALTHZ_WAIT (seconds, default 60)
+# exist for testing (scripts/redeploy_test.go) and a non-default port.
 set -eu
 
 # Run from a copy: git switch must not rewrite the running script.
@@ -27,6 +28,7 @@ fi
 
 herdr=${REDEPLOY_HERDR:-herdr}
 healthz=${REDEPLOY_HEALTHZ:-http://127.0.0.1:8390/healthz}
+healthz_wait=${REDEPLOY_HEALTHZ_WAIT:-60}
 say() { echo "redeploy: $*" >&2; }
 die() {
 	say "$*"
@@ -75,10 +77,13 @@ if [ -z "$linked" ] || [ "$(cd "$linked" 2>/dev/null && pwd -P)" != "$(pwd -P)" 
 fi
 [ -x bin/yoicks ] || die "no bin/yoicks to fall back to: build it first (sh scripts/plugin-build.sh)"
 
-# Build leftovers of either layout (tsc's web/*.js before Vite, web/dist since), then a
-# clean tree: nothing uncommitted may end up in the build.
+# Build output of either layout (web/dist since Vite; before it, tsc's web/X.js for each
+# web/src/X.ts) goes; anything else must be committed: nothing uncommitted may end up in
+# the build.
 rm -rf web/dist
-rm -f web/*.js
+for js in web/*.js; do
+	if [ -f "$js" ] && [ -f "web/src/$(basename "$js" .js).ts" ]; then rm -f "$js"; fi
+done
 [ -z "$(git status --porcelain)" ] || die "the checkout has changes (git status): commit or remove them first"
 
 if [ "$ref" = main ]; then
@@ -129,10 +134,10 @@ action() {
 	return 1
 }
 
-# healthy polls /healthz (≤60s) until the bridge is up and connected to herdr.
+# healthy polls /healthz (≤REDEPLOY_HEALTHZ_WAIT, 60s) until the bridge is up and connected to herdr.
 healthy() {
 	i=0
-	while [ $i -lt 60 ]; do
+	while [ $i -lt "$healthz_wait" ]; do
 		if curl -fsS --max-time 2 "$healthz" 2>/dev/null | jq -e '.ok == true and .herdrConnected == true' >/dev/null 2>&1; then
 			return 0
 		fi
@@ -152,7 +157,7 @@ sh -c "$switch"
 npm_config_prefer_offline=true sh scripts/plugin-build.sh source
 say "starting $id"
 action start
-healthy || die "$healthz not ok within 60s"
+healthy || die "$healthz not ok within ${healthz_wait}s"
 stopped=
 
 if [ -f web/dist/sw.js ]; then
