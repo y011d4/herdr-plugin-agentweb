@@ -95,7 +95,7 @@ a {
 #app {
   display: flex;
   flex-direction: column;
-  /* --app-height tracks window.visualViewport.height (set in app.ts) so the
+  /* --app-height tracks window.visualViewport.height (set in ui/App.tsx) so the
      shell exactly fills the space above the soft keyboard; falls back to 100%
      before JS runs or where visualViewport is unavailable. */
   height: var(--app-height, 100%);

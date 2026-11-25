@@ -1,31 +1,78 @@
 /**
- * app.ts — Yoicks PWA
- *
- * Single-page application with hash routing:
- *   #/agents    — dashboard (default; ui/Dashboard.tsx)
- *   #/agents/:name — the dashboard of one orchestrator's Claude account (from its Home)
- *   #/home/:name — an orchestrator's chat (Home); #/home opens the last one used
- *   #/pane/:id  — pane terminal detail
- *   #/settings  — settings
- *
- * A pane or a Home is ui/Pane.tsx (its body: pane-view.ts); this shell routes to it and leaves it.
+ * ui/App.tsx — the app shell, drawn into #app: the topbar (the screen on show fills its three
+ * slots), the connection dot and the reconnect banner, #screen, the toasts, and the modals
+ * (portalled into #modal-root). Hash routing:
+ *   #/agents        — the list (ui/Dashboard.tsx); #/agents/:name one orchestrator's account's agents
+ *   #/home/:name    — an orchestrator's Home; #/home opens the last one used
+ *   #/pane/:id      — a pane (ui/Pane.tsx; its body: pane-view.ts)
+ *   #/settings      — settings
+ * What a hash shows is decided in routes.ts (resolveRoute); handleRoute renders it. Each render
+ * of a route replaces the screen and its topbar with fresh instances (a new key), so a screen's
+ * effects always start over. start() (main.tsx) loads the token, connects, fetches the first
+ * State and listens: hashchange, the SW's navigate message, visibilitychange, the viewport.
  */
+import { Fragment, useSyncExternalStore, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { apiDelete, apiGet, apiPost, getToken, loadToken, onUnauthorized, setToken } from '../api.ts';
+import { dismissNotificationsForPane, dismissToastsForPane, notifyAgentStatus, showToast } from '../notify.ts';
+import { homeHash, homeOf, isAgentsRoute, nextPaneBackRoute, paneGoneRoute, paneRoute, resolveRoute } from '../routes.ts';
+import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, setStartingHome, store, subscribe, type View } from '../store.ts';
+import type { AppState, ClearResponse, OrchestratorView, WsMessage } from '../types.ts';
+import { onWsMessage, wsConnect, wsSendWatch } from '../ws.ts';
+import { Dashboard, dashboardTopbar } from './Dashboard.tsx';
+import { Modals, confirmModal, openAgentMenu } from './Modals.tsx';
+import { closePaneView, Pane, paneTopbar, paneViewOnState } from './Pane.tsx';
+import { Settings, settingsTopbar } from './Settings.tsx';
+import { Toasts } from './Toasts.tsx';
+import { Token } from './Token.tsx';
 
-import type { AppState, ClearResponse, OrchestratorView, WsMessage } from './types.ts';
-import { apiDelete, apiGet, apiPost, getToken, loadToken, onUnauthorized, setToken } from './api.ts';
-import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, setStartingHome, store, subscribe } from './store.ts';
-import { dismissNotificationsForPane, dismissToastsForPane, notifyAgentStatus, showToast } from './notify.ts';
-import { onWsMessage, wsConnect, wsSendWatch } from './ws.ts';
-import { homeHash, homeOf, isAgentsRoute, nextPaneBackRoute, paneGoneRoute, paneRoute, resolveRoute } from './routes.ts';
-import { createElement } from 'react';
-import { Dashboard, dashboardTopbar } from './ui/Dashboard.tsx';
-import { confirmModal, openAgentMenu } from './ui/Modals.tsx';
-import { mountOverlays, mountScreen, setConnIndicator, setLegacyScreen } from './ui/mount.tsx';
-import { closePaneView, Pane, paneTopbar, paneViewOnState } from './ui/Pane.tsx';
-import { Settings, settingsTopbar } from './ui/Settings.tsx';
-import { Token } from './ui/Token.tsx';
+export interface Topbar { title?: ReactNode; left?: ReactNode; right?: ReactNode }
 
-// ── Module-level state ────────────────────────────────────────────────────────
+// ── The shell's own state: the screen on show and the link ────────────────────
+
+// The topbar before anything is routed (as index.html paints it) and while a Home waits for
+// the first State.
+const BARE: Topbar = { title: 'Herdr' };
+
+interface Shown { kind: View['screen']; node: ReactNode; topbar?: Topbar; key: number }
+let shown: Shown = { kind: 'loading', node: null, topbar: BARE, key: 0 };
+// End-to-end connectivity, updated on every store change (null: none yet, so a fresh open's
+// first connect shows no banner)
+let linkUp: boolean | null = null;
+const listeners = new Set<() => void>();
+const changed = (): void => { for (const fn of listeners) fn(); };
+const subscribeShell = (fn: () => void): (() => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
+
+/** Puts a screen on show (no topbar: hidden). */
+function show(kind: View['screen'], node: ReactNode, topbar?: Topbar): void {
+  store.view.screen = kind;
+  shown = { kind, node, topbar, key: shown.key + 1 };
+  changed();
+}
+
+export function App() {
+  const { kind, node, topbar, key } = useSyncExternalStore(subscribeShell, () => shown);
+  const link = useSyncExternalStore(subscribeShell, () => linkUp);
+  const slot = (content: ReactNode): ReactNode => <Fragment key={key}>{content}</Fragment>;
+  return (
+    <>
+      <header id="topbar" className="topbar" style={topbar ? undefined : { display: 'none' }}>
+        <div id="topbar-left">{slot(topbar?.left)}</div>
+        <div className="topbar-title" id="topbar-title">{slot(topbar?.title)}</div>
+        <div id="conn-dot" className={link ? 'conn-dot connected' : 'conn-dot'} title={link === null ? 'Disconnected' : link ? 'Connected' : 'Reconnecting…'}></div>
+        <div id="topbar-right">{slot(topbar?.right)}</div>
+      </header>
+      {/* never over the token screen: leaving it while the link is down shows it */}
+      <div id="reconnect-banner" role="status" aria-live="polite" className={link === false && kind !== 'token' ? 'visible' : undefined}>
+        <span className="loading-spinner" style={{ width: 14, height: 14, borderWidth: 2 }}></span>
+        Reconnecting&hellip;
+      </div>
+      <main id="screen">{slot(node)}</main>
+      <div id="toast-container" aria-live="assertive" aria-atomic="false"><Toasts /></div>
+      {createPortal(<Modals />, document.getElementById('modal-root')!)}
+    </>
+  );
+}
 
 // What is on screen (store.ts): the pane shown (activePaneId), whether it is a Home,
 // its terminal/chat mode and where its Back goes. Mutated in place.
@@ -44,11 +91,6 @@ function markActivePaneSeen(): void {
   markPaneSeen(view.activePaneId);
 }
 
-/** source toggle: 'visible' | 'recent' */
-
-// ── DOM refs (populated after DOMContentLoaded) ───────────────────────────────
-let elApp: HTMLElement | null;
-
 // ── Server messages ───────────────────────────────────────────────────────────
 
 // Every WS message lands here, a fallback-polled state as a `state` message (ws.ts);
@@ -65,14 +107,17 @@ function handleWsMessage(msg: WsMessage): void {
   // pane_output, transcript_items: the open pane's view (pane-view.ts); pong — no-op
 }
 
-// The badge reflects end-to-end connectivity: the WebSocket to the bridge AND
+// The dot (and the banner) reflect end-to-end connectivity: the WebSocket to the bridge AND
 // the bridge's own link to herdr (store.appState.connected). herdr can drop while the
 // WS stays open, so a green dot requires both to be up.
 function updateConnBadge(): void {
-  setConnIndicator(store.wsConnected && (store.appState?.connected ?? true));
+  const up = store.wsConnected && (store.appState?.connected ?? true);
+  if (up === linkUp) return;
+  linkUp = up;
+  changed();
 }
 
-// ── The open pane going away (the shell's transitions) ────────────────────────
+// ── The open pane going away ──────────────────────────────────────────────────
 // Pane views only show a pane; leaving it when it closes, and holding a Home while
 // its orchestrator is replaced, happen here.
 
@@ -133,7 +178,6 @@ function onStateUpdate(): void {
 }
 
 // ── Routing ───────────────────────────────────────────────────────────────────
-// What a hash shows is decided in routes.ts (resolveRoute); this shell renders it.
 
 function navigate(hash: string): void {
   location.hash = hash;
@@ -203,7 +247,7 @@ function handleRoute(e?: Event): void {
   if (route.kind === 'loading') {
     // can't resolve the orchestrator yet — the first state re-routes (onStateUpdate)
     routeRendered = false;
-    setLegacyScreen('loading', '<div style="display:flex;align-items:center;justify-content:center;flex:1;"><span class="loading-spinner"></span></div>');
+    show('loading', <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}><span className="loading-spinner"></span></div>, BARE);
   } else if (route.kind === 'home') {
     view.homeMode = true;
     view.activePaneId = route.paneId;
@@ -213,7 +257,7 @@ function handleRoute(e?: Event): void {
     markActivePaneSeen();
     renderPaneDetail(route.paneId);
   } else if (route.kind === 'agents') {
-    mountScreen('agents', createElement(Dashboard, { hash: location.hash }), { topbar: dashboardTopbar(location.hash) });
+    show('agents', <Dashboard hash={location.hash} />, dashboardTopbar(location.hash));
   } else if (route.kind === 'pane') {
     view.activePaneId = route.paneId;
     view.paneBackRoute = nextPaneBackRoute(e instanceof HashChangeEvent ? new URL(e.oldURL).hash : null, view.paneBackRoute);
@@ -223,7 +267,7 @@ function handleRoute(e?: Event): void {
     markActivePaneSeen();
     renderPaneDetail(route.paneId);
   } else {
-    mountScreen('settings', createElement(Settings, { toast: showToast, onSignedOut: () => renderTokenScreen() }), { topbar: settingsTopbar });
+    show('settings', <Settings toast={showToast} onSignedOut={() => renderTokenScreen()} />, settingsTopbar);
   }
 
   wsSendWatch(); // sync the server-side pane watch with the current route
@@ -234,7 +278,7 @@ function handleRoute(e?: Event): void {
 function renderTokenScreen(message?: string): void {
   closePaneView();
   view.activePaneId = null;
-  mountScreen('token', createElement(Token, { message, onToken: signIn }));
+  show('token', <Token message={message} onToken={signIn} />);
 }
 
 function signIn(token: string): void {
@@ -253,7 +297,7 @@ function signIn(token: string): void {
   });
 }
 
-// ── Agent lifecycle UI (start / rename / clear / stop) ────────────────────────
+// ── Agent lifecycle UI (rename / clear / stop) ────────────────────────────────
 
 // The pane's ⋮ (ui/Modals.tsx): Rename… (the header follows the store), Clear, Stop.
 function agentMenu(paneId: string): void {
@@ -297,31 +341,11 @@ function renderPaneDetail(paneId: string): void {
   // A pane view opens on the terminal (pane-view.ts) but mounts after the route's watch goes
   // out (handleRoute's wsSendWatch): set its mode now, or that watch follows the last pane's chat.
   view.paneViewMode = 'terminal';
-  mountScreen('pane', createElement(Pane, { paneId, home: view.homeMode }),
-    { topbar: paneTopbar(paneId, view.homeMode, view.paneBackRoute, () => agentMenu(paneId)) });
+  show('pane', <Pane paneId={paneId} home={view.homeMode} />,
+    paneTopbar(paneId, view.homeMode, view.paneBackRoute, () => agentMenu(paneId)));
 }
 
-// ── Service Worker registration ───────────────────────────────────────────────
-
-function registerServiceWorker(): void {
-  if (!window.isSecureContext) return;
-  if (!('serviceWorker' in navigator)) return;
-  // Only a build has a sw.js (npm run dev serves the sources, with no SW).
-  if (import.meta.env.PROD) {
-    navigator.serviceWorker.register('/sw.js').catch(() => {
-      // SW registration failure is non-fatal
-    });
-  }
-
-  // Handle navigate messages from SW notification clicks
-  navigator.serviceWorker.addEventListener('message', (evt: MessageEvent<{ type: string; url: string }>) => {
-    if (evt.data?.type === 'navigate') {
-      navigate(evt.data.url);
-    }
-  });
-}
-
-// ── Init ──────────────────────────────────────────────────────────────────────
+// ── Startup ───────────────────────────────────────────────────────────────────
 
 // Keep the app shell exactly as tall as the *visible* area. When the soft
 // keyboard opens the visual viewport shrinks; without this the body would stay
@@ -341,10 +365,9 @@ function bindViewportHeight(): void {
   vv.addEventListener('resize', apply);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  elApp = document.getElementById('app');
+/** Once, before the first render (main.tsx). */
+export function start(): void {
   bindViewportHeight();
-  mountOverlays(); // the toasts and the modals
 
   // A 401 drops the token (api.ts): ask for it again
   onUnauthorized(() => renderTokenScreen('Session expired or token invalid. Please enter your token.'));
@@ -375,7 +398,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  registerServiceWorker();
+  // A notification's tap (sw.ts) opens its pane
+  if (window.isSecureContext && 'serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (evt: MessageEvent<{ type: string; url: string }>) => {
+      if (evt.data?.type === 'navigate') navigate(evt.data.url);
+    });
+  }
 
   // Pause the pane watch while hidden, resume it when visible (the open pane's view
   // re-reads its screen or transcript from its own listener, pane-view.ts)
@@ -387,4 +415,4 @@ document.addEventListener('DOMContentLoaded', () => {
     dismissNotificationsForPane(view.activePaneId);
     markActivePaneSeen();
   });
-});
+}

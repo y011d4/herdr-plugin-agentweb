@@ -29,7 +29,7 @@
       Reconnecting&hellip;
     </div>
 
-    <!-- Main screen — content injected by app.ts -->
+    <!-- Main screen (ui/App.tsx draws over this first paint) -->
     <main id="screen"></main>
 
     <!-- Toast container — fixed overlay; Clear all and the toasts: ui/Toasts.tsx -->
@@ -39,6 +39,6 @@
   <!-- Modal dialogs (ui/Modals.tsx), above everything -->
   <div id="modal-root"></div>
 
-  <script type="module" src="/src/app.ts"></script>
+  <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

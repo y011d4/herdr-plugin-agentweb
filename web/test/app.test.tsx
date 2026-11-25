@@ -1,52 +1,292 @@
 // @vitest-environment happy-dom
-// The shell (app.ts) routing between panes, over the real screens, a fake bridge and socket.
-import { it, vi } from 'vitest';
+// The shell (ui/App.tsx) as main.tsx starts it, over index.html's first paint, with a token stored:
+// routing end to end over the real screens, the agent actions, the SW's navigate message,
+// visibilitychange, the viewport, the dot and the banner. A fake bridge and socket. The tests run
+// in order on one started app: each goes from where the one before left it.
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
-import { act } from 'react';
-import { store } from '../src/store.ts';
-import type { WsMessage } from '../src/types.ts';
-import { read, state, transcript } from './contract.gen.ts';
+import { StrictMode, act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { clearToasts, getToasts } from '../src/notify.ts';
+import { emit, setAppState, setStartingHome, store } from '../src/store.ts';
+import type { AppState, WsMessage } from '../src/types.ts';
+import { App, start } from '../src/ui/App.tsx';
+import { read, state as recorded, transcript } from './contract.gen.ts';
 import './render.ts'; // the act environment
 
-// The socket: each watch sent records the pane and the mode it was sent for.
+// The socket: the shell's message handler (the first to subscribe; pane views come later), and each
+// watch sent (the pane, its mode, hidden).
 const watches: string[] = [];
+let push: ((msg: WsMessage) => void) | null = null;
 vi.mock('../src/ws.ts', () => ({
-  onWsMessage: (_fn: (msg: WsMessage) => void) => () => {},
+  onWsMessage: (fn: (msg: WsMessage) => void) => { push ??= fn; return () => {}; },
   wsConnect: () => {},
-  wsSendWatch: () => { watches.push(`${store.view.activePaneId}:${store.view.paneViewMode}`); },
+  wsSendWatch: () => { watches.push(`${store.view.activePaneId}:${store.view.paneViewMode}${document.hidden ? ':hidden' : ''}`); },
 }));
 
 // The bridge: every request waits until the test answers it.
-interface Req { url: string; answered: boolean; answer: (body: unknown) => void }
+interface Req { method: string; url: string; answered: boolean; answer: (status: number, body: unknown) => void }
 const reqs: Req[] = [];
-vi.stubGlobal('fetch', (url: string) => new Promise((res) => {
-  reqs.push({ url, answered: false, answer: (body) => res({ ok: true, status: 200, json: async () => body }) });
+vi.stubGlobal('fetch', (url: string, init: RequestInit = {}) => new Promise((res) => {
+  reqs.push({ method: init.method ?? 'GET', url, answered: false, answer: (status, body) => res({ ok: status < 400, status, json: async () => body }) });
 }));
-/** Answers every open request whose URL contains `match` (StrictMode starts a screen's view twice). */
-async function answer(match: string, body: unknown): Promise<void> {
-  const open = reqs.filter((q) => !q.answered && q.url.includes(match));
+const settle = (ms = 20): Promise<void> => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
+/** Answers every open request `${method} ${url}` containing `match` (StrictMode starts a pane's view twice). */
+async function answer(match: string, body: unknown, status = 200): Promise<void> {
+  const open = reqs.filter((q) => !q.answered && `${q.method} ${q.url}`.includes(match));
   assert.ok(open.length, `no open request ${match}`);
   await act(async () => {
-    for (const r of open) { r.answered = true; r.answer(body); }
+    for (const r of open) { r.answered = true; r.answer(status, body); }
     for (let i = 0; i < 20; i++) await Promise.resolve();
   });
+  await settle(); // a hash it set routes on the next task
 }
+const reads = (paneId: string): number => reqs.filter((q) => q.url.startsWith(`/api/panes/${paneId}/read?source=visible`)).length;
 
-it('a pane opened from a chat pane has its terminal watched from the start', async () => {
-  document.body.innerHTML = '<div id="app"><header id="topbar"><div id="topbar-left"></div><div id="topbar-title"></div><div id="conn-dot"></div>' +
-    '<div id="topbar-right"></div></header><div id="reconnect-banner"></div><main id="screen"></main><div id="toast-container"></div></div><div id="modal-root"></div>';
-  localStorage.setItem('herdr_token', 't');
-  location.hash = '#/pane/p1';
-  await import('../src/app.ts');
-  await act(async () => { document.dispatchEvent(new Event('DOMContentLoaded')); });
-  await answer('/api/state', state);
-  await answer('/api/panes/p1/read?source=visible', read[1]);
-  await answer('/api/panes/p1/transcript', transcript[0]); // claude's transcript: chat
-  assert.equal(watches.at(-1), 'p1:chat');
+const go = async (hash: string): Promise<void> => { location.hash = hash; await settle(); };
+const click = async (el: Element | null): Promise<void> => {
+  assert.ok(el, 'nothing to click');
+  await act(async () => { (el as HTMLElement).click(); });
+  await settle();
+};
+const $ = (sel: string): HTMLElement | null => document.querySelector<HTMLElement>(sel);
+const fresh = (): AppState => structuredClone(recorded); // p4 runs the orchestrator "personal"; "work" isn't running
+const toastTitles = (): string[] => getToasts().map((t) => t.title);
 
-  await act(async () => { location.hash = '#/pane/p2'; await new Promise((r) => setTimeout(r, 20)); }); // a shell: terminal only
-  await answer('/api/panes/p2/read?source=visible', read[1]);
-  await answer('/api/panes/p2/transcript', { available: false });
-  assert.ok(document.getElementById('terminal-output')!.style.display !== 'none', 'the terminal is shown');
-  assert.deepEqual(watches.filter((w) => w.startsWith('p2:')), ['p2:terminal']);
+// The page outside a browser: the visual viewport, a secure context with a service worker
+// (its messages, and the OS notifications it shows), the page's visibility.
+const vv = Object.assign(new EventTarget(), { height: 700 });
+Object.defineProperty(window, 'visualViewport', { configurable: true, value: vv });
+Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
+const closed: string[] = [];
+const reg = { getNotifications: async ({ tag }: { tag: string }) => [{ close: () => closed.push(tag) }] };
+const sw = Object.assign(new EventTarget(), { getRegistration: async () => reg });
+Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: sw });
+let hidden = false;
+Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+
+afterEach(() => {
+  vi.useRealTimers();
+  clearToasts();
+});
+
+describe('App', () => {
+  it("draws over index.html's first paint; until the first State the screen is empty, then a fresh open lands on the Home used last", async () => {
+    const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../index.html'), 'utf8');
+    document.body.innerHTML = html.slice(html.indexOf('<body>') + '<body>'.length, html.indexOf('<script'));
+    localStorage.setItem('herdr_token', 't');
+    localStorage.setItem('herdr_home', 'work');
+    history.replaceState(null, '', '/');
+    const replace = vi.spyOn(location, 'replace');
+    start();
+    await act(async () => { createRoot(document.getElementById('app')!).render(<StrictMode><App /></StrictMode>); });
+
+    assert.equal(document.querySelectorAll('#topbar').length, 1, 'one topbar');
+    assert.equal(document.querySelectorAll('#screen').length, 1);
+    assert.equal(document.querySelectorAll('#toast-container').length, 1);
+    assert.equal($('#topbar')!.style.display, '');
+    assert.equal($('#topbar-title')!.textContent, 'Herdr');
+    assert.equal($('#screen')!.childElementCount, 0);
+    assert.equal($('#conn-dot')!.title, 'Disconnected');
+    assert.equal($('#reconnect-banner')!.classList.contains('visible'), false, 'no banner before the first link change');
+
+    const s = fresh();
+    s.orchestrators[1].paneId = 'p6'; // both run: "work", used last, wins over the first
+    store.wsConnected = true;
+    await answer('GET /api/state', s);
+    assert.deepEqual(replace.mock.calls.map((c) => c[0]), ['#/home/work']);
+    assert.equal(location.hash, '#/home/work');
+    assert.ok($('#screen #screen-pane.screen-home'), 'the Home');
+    assert.equal(store.view.activePaneId, 'p6');
+    assert.ok($('#topbar-right #btn-home-agents'), "the Home's topbar");
+    assert.equal($('#conn-dot')!.className, 'conn-dot connected');
+    assert.equal($('#conn-dot')!.title, 'Connected');
+    replace.mockRestore();
+  });
+
+  it('keeps --app-height at the visual viewport height', async () => {
+    assert.equal(document.documentElement.style.getPropertyValue('--app-height'), '700px');
+    vv.height = 512;
+    vv.dispatchEvent(new Event('resize'));
+    assert.equal(document.documentElement.style.getPropertyValue('--app-height'), '512px');
+  });
+
+  it("opens an orchestrator's pane as its Home, and a bare #/home as the Home used last", async () => {
+    await go('#/pane/p4');
+    assert.equal(location.hash, '#/home/personal');
+    assert.equal(store.view.activePaneId, 'p4');
+    assert.equal(localStorage.getItem('herdr_home'), 'personal');
+    await go('#/home/work');
+    await go('#/home'); // "personal" comes first; "work" was used last
+    assert.equal(location.hash, '#/home/work');
+    assert.equal(store.view.activePaneId, 'p6');
+  });
+
+  it("lists #/agents/<name>'s account; a pane opened from it goes Back there, and returns there when it closes", async () => {
+    await go('#/agents/personal');
+    const ids = [...document.querySelectorAll<HTMLElement>('#screen-agents .agent-card')].map((c) => c.dataset.paneId).sort();
+    assert.deepEqual(ids, ['p1', 'p3'], 'its account, never the orchestrator');
+    assert.match($('#topbar-title')!.textContent!, /Agents.*Personal/);
+    await click($('.agent-card[data-pane-id="p1"]'));
+    assert.equal(location.hash, '#/pane/p1');
+    assert.equal($('#topbar-left .topbar-back')!.textContent, '← Agents');
+    await act(async () => push!({ type: 'pane_gone', paneId: 'p1' }));
+    await settle();
+    assert.deepEqual(toastTitles(), ['Pane closed']);
+    assert.equal(location.hash, '#/agents/personal');
+    assert.ok($('#screen #screen-agents'));
+  });
+
+  it('leaves a pane a State no longer has', async () => {
+    await go('#/agents');
+    await go('#/pane/p2');
+    assert.equal($('#topbar-left .topbar-back')!.textContent, '← Agents');
+    const s = fresh();
+    s.workspaces[0].tabs[1].panes = s.workspaces[0].tabs[1].panes.filter((p) => p.paneId !== 'p2');
+    s.orchestrators[1].paneId = 'p6';
+    await act(async () => push!({ type: 'state', state: s }));
+    await settle();
+    assert.deepEqual(toastTitles(), ['Pane closed']);
+    assert.equal(location.hash, '#/agents');
+  });
+
+  it("opens an orchestrator's Home once it runs, after its Start on the list", async () => {
+    const s = fresh(); // "work" stopped
+    await act(async () => push!({ type: 'state', state: s }));
+    setStartingHome('work');
+    await act(async () => push!({ type: 'state', state: s }));
+    assert.equal(location.hash, '#/agents', 'not running yet');
+    s.orchestrators[1].paneId = 'p6';
+    await act(async () => push!({ type: 'state', state: s }));
+    await settle();
+    assert.equal(location.hash, '#/home/work');
+    assert.equal(store.startingHome, null);
+  });
+
+  it("holds a Home through its orchestrator's replacement: a new pane re-routes onto it; none in 8s goes to the list", async () => {
+    await go('#/home/personal');
+    const s = fresh();
+    s.orchestrators[0].paneId = null; // cleared: the old pane is gone, the new one not detected yet
+    await act(async () => push!({ type: 'state', state: s }));
+    assert.equal(location.hash, '#/home/personal');
+    assert.equal(store.view.activePaneId, 'p4');
+    s.orchestrators[0].paneId = 'p1';
+    await act(async () => push!({ type: 'state', state: s }));
+    assert.equal(location.hash, '#/home/personal');
+    assert.equal(store.view.activePaneId, 'p1', 're-routed onto the replacement');
+    assert.ok($('#screen #screen-pane.screen-home'));
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    s.orchestrators[0].paneId = null;
+    await act(async () => push!({ type: 'state', state: s }));
+    await act(async () => { vi.advanceTimersByTime(7_999); });
+    assert.equal(location.hash, '#/home/personal');
+    assert.deepEqual(toastTitles(), []);
+    await act(async () => { vi.advanceTimersByTime(1); });
+    assert.deepEqual(toastTitles(), ['Orchestrator stopped']);
+    assert.equal(location.hash, '#/agents');
+    vi.useRealTimers();
+    await settle();
+    assert.ok($('#screen #screen-agents'));
+  });
+
+  it('Stop goes back to the list the pane came from; Clear goes to the new pane, or stays on a Home', async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/agents/personal');
+    await go('#/pane/p3');
+    await click($('#btn-agent-menu'));
+    await click($('#modal-root #am-stop'));
+    await click($('#modal-root #cf-ok'));
+    await answer('DELETE /api/panes/p3', { ok: true });
+    assert.deepEqual(toastTitles(), ['Stopped']);
+    assert.equal(location.hash, '#/agents/personal');
+
+    await go('#/pane/p1');
+    await click($('#btn-agent-menu'));
+    await click($('#modal-root #am-clear'));
+    await click($('#modal-root #cf-ok'));
+    await answer('POST /api/agents/p1/clear', { ok: true, paneId: 'p8' });
+    assert.equal(location.hash, '#/pane/p8');
+
+    await go('#/home/personal');
+    await click($('#btn-agent-menu'));
+    await click($('#modal-root #am-clear'));
+    await click($('#modal-root #cf-ok'));
+    await answer('POST /api/agents/p4/clear', { ok: true, paneId: 'p9' });
+    assert.equal(location.hash, '#/home/personal', 'the State routes onto the replacement');
+  });
+
+  it("routes the SW's navigate message; an orchestrator's pane lands on its Home, drawn afresh", async () => {
+    await act(async () => { sw.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: '#/pane/p2' } })); });
+    await settle();
+    assert.equal(location.hash, '#/pane/p2');
+    await go('#/home/personal');
+    const before = reads('p4');
+    await act(async () => { sw.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: '#/pane/p4' } })); });
+    await settle();
+    assert.equal(location.hash, '#/home/personal');
+    assert.ok(reads('p4') > before, "a new view reads the orchestrator's screen");
+    assert.equal(store.view.activePaneId, 'p4');
+  });
+
+  it('pauses the watch while hidden; back on screen resumes it, closes the open pane’s OS notifications and marks it seen', async () => {
+    store.seenDone = {};
+    hidden = true;
+    await go('#/pane/p3'); // done (completionSeq 4)
+    assert.equal(watches.at(-1), 'p3:terminal:hidden');
+    assert.equal(store.seenDone.p3, undefined, 'not seen while hidden');
+    await settle();
+    closed.length = 0;
+    hidden = false;
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    await settle();
+    assert.equal(watches.at(-1), 'p3:terminal');
+    assert.deepEqual(closed, ['p3']);
+    assert.equal(store.seenDone.p3, 4);
+  });
+
+  it("follows the socket and herdr's link with the dot and the banner", async () => {
+    store.wsConnected = true;
+    await act(async () => setAppState({ ...fresh(), connected: false }));
+    assert.equal($('#conn-dot')!.className, 'conn-dot');
+    assert.equal($('#conn-dot')!.title, 'Reconnecting…');
+    assert.equal($('#reconnect-banner')!.classList.contains('visible'), true);
+    await act(async () => setAppState(fresh()));
+    assert.equal($('#conn-dot')!.className, 'conn-dot connected');
+    assert.equal($('#reconnect-banner')!.classList.contains('visible'), false);
+    store.wsConnected = false;
+    await act(async () => emit());
+    assert.equal($('#reconnect-banner')!.classList.contains('visible'), true);
+    store.wsConnected = true;
+    await act(async () => emit());
+  });
+
+  it('watches a pane opened from a chat pane on its terminal from the start', async () => {
+    await go('#/pane/p1');
+    await answer('/api/panes/p1/read?source=visible', read[1]);
+    await answer('/api/panes/p1/transcript', transcript[0]); // claude's transcript: chat
+    assert.equal(watches.at(-1), 'p1:chat');
+
+    await go('#/pane/p2'); // a shell: terminal only
+    await answer('/api/panes/p2/read?source=visible', read[1]);
+    await answer('/api/panes/p2/transcript', { available: false });
+    assert.ok($('#terminal-output')!.style.display !== 'none', 'the terminal is shown');
+    assert.deepEqual(watches.slice(watches.lastIndexOf('p1:chat') + 1).filter((w) => w.startsWith('p2:')), ['p2:terminal']);
+  });
+
+  it('a 401 shows the token screen with its message, without the topbar or the banner', async () => {
+    await go('#/agents');
+    store.wsConnected = false;
+    await act(async () => emit()); // the link is down
+    assert.equal($('#reconnect-banner')!.classList.contains('visible'), true);
+    await click($('#btn-new-agent'));
+    await answer('GET /api/profiles', {}, 401);
+    assert.equal($('#screen #screen-login .login-subtitle')!.textContent, 'Session expired or token invalid. Please enter your token.');
+    assert.equal(localStorage.getItem('herdr_token'), null);
+    assert.equal($('#topbar')!.style.display, 'none');
+    assert.equal($('#reconnect-banner')!.classList.contains('visible'), false);
+  });
 });

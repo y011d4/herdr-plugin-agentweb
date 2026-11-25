@@ -177,7 +177,7 @@ export function parsePrompt(text: string): ParsedPrompt | null {
   return { question, options: best.options, selected: best.selected };
 }
 
-// Where a tapped answer stands, from its pane's status (app.ts's settlePendingAnswer):
+// Where a tapped answer stands, from its pane's status (pane-view.ts's settlePendingAnswer):
 // 'back' once the press is confirmed and the agent has gone `working` (the answer
 // reached it and it moved on), 'stay' when it left the prompt without working (a
 // permission No: it waits for the user's instructions), else 'wait' (still blocked:
