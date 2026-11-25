@@ -59,7 +59,12 @@ All in `internal/bridge/` (one package):
   `web/src/ui/` (Settings, Token, the agents list `Dashboard.tsx`); until app.ts is gone, `ui/mount.tsx` (temporary glue) is the
   only writer of `#screen`, the topbar and the connection dot/banner. `notify.ts` holds the toast
   store and the OS notifications; `ui/Toasts.tsx` and `ui/Modals.tsx` (Confirm, agent actions,
-  Rename, New agent) are React roots of their own in `#toast-container` and `#modal-root`. `ansi.ts` — pure ANSI→HTML,
+  Rename, New agent) are React roots of their own in `#toast-container` and `#modal-root`. An opened
+  pane's body is `pane-view.ts` (`createPaneView` → setMode/onState/echo/destroy, one per opened
+  pane or Home: the chat log, the transcript probe, its own WS messages and agent_status, the 3s
+  refresh, the pane's visibilitychange and the answer panel) over `terminal.ts` (`createTerminal`:
+  the continuous buffer, fit/pinch, wheel forwarding and fling); app.ts draws the header, the
+  composer and Home's bits around it in `#pane-view`. `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
   (manifest, icons) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one
@@ -308,12 +313,12 @@ vendor-neutrality is preserved.
   next read. WS `watch_transcript` re-resolves the session id each tick so a
   mid-session reset (`/clear` → new session file) triggers a `reset` rebuild.
 
-## Touch/DOM rules in app.ts (regression-prone)
+## Touch/DOM rules in the web UI (regression-prone)
 
 - **Never replace terminal DOM during an active touch** — the browser cancels
   the in-progress scroll gesture. Renders defer via `pendingAnsi` while
   `terminalTouchActive` or scrolled above the bottom, and flush on touchend /
-  return-to-bottom.
+  return-to-bottom (`terminal.ts`).
 - **The agents list (`ui/Dashboard.tsx`) has the same hazard.** `#screen-agents` is the scroll
   container; state pushes (agent_status_changed etc.) arrive constantly, so it must stay the
   **same element** while the list is shown, with the cards keyed by pane id (`data-ready` marks
@@ -321,8 +326,10 @@ vendor-neutrality is preserved.
   `scrollTop` to 0 (the "scroll jumps to top" bug) and cancels an in-progress drag. Like the
   terminal, the list holds still while a finger is down and shows the latest State on the
   macrotask after touchend (`setTimeout(0)`, so a still tap's click lands first).
-- Async fetches capture `paneViewGen` + pane id and bail if the user navigated
-  away; stale responses must not poison the next pane's view.
+- Each opened pane gets its own `createPaneView` / `createTerminal` instance, and the shell
+  destroys it on leaving (`closePaneView`): `destroy()` stops its timers and listeners, and
+  every async continuation checks `destroyed`, so a stale response can't poison the next pane's
+  view. Within a pane, reads also drop a response a newer read or WS push superseded.
 - Double-tap detection requires two *stationary* taps (movement > 10px within
   a touch disqualifies it) — fast swipe flicks must not trigger it.
 - WS pushes are deduped server-side against the last serialized state;
