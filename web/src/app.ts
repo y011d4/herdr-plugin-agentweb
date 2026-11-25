@@ -21,20 +21,17 @@ import type { DashboardCard } from './dashboard-group.ts';
 import { KeptTasks, taskToKeep } from './kept-tasks.ts';
 import { DESKTOP_QUERY, enterSends } from './composer-keys.ts';
 import type { AppState, OrchestratorView, WsMessage, WsAgentStatusMessage, WsTranscriptItemsMessage } from './types.ts';
-import { apiDelete, apiGet, apiPost, clearToken, getToken, loadToken, onUnauthorized, setToken } from './api.ts';
-import { markPaneSeen, store, subscribe } from './store.ts';
-import { onWsMessage, wsConnect, wsSendWatch, wsSignOut } from './ws.ts';
+import { apiDelete, apiGet, apiPost, getToken, loadToken, onUnauthorized, setToken } from './api.ts';
+import { markPaneSeen, setAppState, store, subscribe } from './store.ts';
+import { onWsMessage, wsConnect, wsSendWatch } from './ws.ts';
 import { agentsScope, defaultHome, homeAgentsHash, homeHash, homeOf, isAgentsRoute, nextPaneBackRoute, orchestratorOfPane,
   paneGoneRoute, paneRoute, resolveRoute } from './routes.ts';
-
-// ── App version ──────────────────────────────────────────────────────────────
-const APP_VERSION = '0.1.0';
-// The built JS file's content hash (assets/index-<hash>.js), shown in the prompt
-// panel + settings, so a stale cached bundle is immediately visible. 'dev' unbuilt.
-const BUILD = import.meta.url.match(/-([\w-]{8})\.js$/)?.[1] ?? 'dev';
+import { createElement } from 'react';
+import { mountScreen, setConnIndicator, setLegacyScreen, setLegacyTopbar } from './ui/mount.tsx';
+import { BUILD, STORAGE_NOTIF, Settings, settingsTopbar } from './ui/Settings.tsx';
+import { Token } from './ui/Token.tsx';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
-const STORAGE_NOTIF = 'herdr_notifications';
 const STORAGE_VIEW = 'herdr_pane_view'; // preferred pane view: 'terminal' | 'chat'
 const STORAGE_HOME = 'herdr_home'; // the orchestrator whose Home was opened last
 
@@ -92,9 +89,6 @@ const ANSWER_CONFIRM_MS = 10_000; // still on the same prompt this long after th
 
 // ── DOM refs (populated after DOMContentLoaded) ───────────────────────────────
 let elApp: HTMLElement | null;
-let elScreen: HTMLElement | null;
-let elConnDot: HTMLElement | null;
-let elReconnectBanner: HTMLElement | null;
 let elToastContainer: HTMLElement | null;
 
 // ── Utility ───────────────────────────────────────────────────────────────────
@@ -121,7 +115,7 @@ function relativeTime(ms: number): string {
 // Every WS message lands here, a fallback-polled state as a `state` message (ws.ts).
 function handleWsMessage(msg: WsMessage): void {
   if (msg.type === 'state') {
-    store.appState = msg.state;
+    setAppState(msg.state);
     onStateUpdate();
   } else if (msg.type === 'agent_status') {
     onAgentStatus(msg);
@@ -142,14 +136,7 @@ function handleWsMessage(msg: WsMessage): void {
 // the bridge's own link to herdr (store.appState.connected). herdr can drop while the
 // WS stays open, so a green dot requires both to be up.
 function updateConnBadge(): void {
-  const connected = store.wsConnected && (store.appState?.connected ?? true);
-  if (elConnDot) {
-    elConnDot.classList.toggle('connected', connected);
-    elConnDot.title = connected ? 'Connected' : 'Reconnecting…';
-  }
-  if (elReconnectBanner) {
-    elReconnectBanner.classList.toggle('visible', !connected);
-  }
+  setConnIndicator(store.wsConnected && (store.appState?.connected ?? true));
 }
 
 // ── The open pane going away (the shell's transitions) ────────────────────────
@@ -184,7 +171,6 @@ function homeReplaced(hash: string): boolean {
 // Every state — WS push, startup/sign-in fetch, fallback poll — lands here, so
 // this is also where a first state routes the app, whichever source wins the race.
 function onStateUpdate(): void {
-  updateConnBadge(); // state carries the bridge->herdr link status
   if (goHomeToOrchestrator()) return; // first state of a fresh open: decide home
   // an orchestrator started from the list is up: open its Home, if the list is still on screen
   const started = startingHome ? orchestrators().find((o) => o.name === startingHome && o.paneId) : undefined;
@@ -543,8 +529,7 @@ function handleRoute(e?: Event): void {
   if (route.kind === 'loading') {
     // can't resolve the orchestrator yet — the first state re-routes (onStateUpdate)
     routeRendered = false;
-    view.screen = 'loading';
-    elScreen!.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;flex:1;"><span class="loading-spinner"></span></div>';
+    setLegacyScreen('loading', '<div style="display:flex;align-items:center;justify-content:center;flex:1;"><span class="loading-spinner"></span></div>');
   } else if (route.kind === 'home') {
     view.homeMode = true;
     view.activePaneId = route.paneId;
@@ -564,7 +549,7 @@ function handleRoute(e?: Event): void {
     markActivePaneSeen();
     renderPaneDetail(route.paneId);
   } else {
-    renderSettingsScreen();
+    mountScreen('settings', createElement(Settings, { toast: showToast, onSignedOut: () => renderTokenScreen() }), { topbar: settingsTopbar });
   }
 
   wsSendWatch(); // sync the server-side pane watch with the current route
@@ -575,44 +560,22 @@ function handleRoute(e?: Event): void {
 function renderTokenScreen(message?: string): void {
   stopPaneRefresh();
   view.activePaneId = null;
+  mountScreen('token', createElement(Token, { message, onToken: signIn }));
+}
 
-  view.screen = 'token';
-  elScreen!.innerHTML = `
-    <div id="screen-login" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:32px 24px;height:100%;overflow-y:auto;">
-      <div class="login-logo">&#128241;</div>
-      <div class="login-title">Yoicks</div>
-      <div class="login-subtitle">${message ? escHtml(message) : 'Enter the access token shown when the bridge server started.'}</div>
-      <form class="login-form" id="token-form" style="width:100%;max-width:360px;display:flex;flex-direction:column;gap:12px;">
-        <input type="password" id="token-input" placeholder="Paste access token…" autocomplete="off" autocorrect="off" spellcheck="false" />
-        <button type="submit" class="btn-primary">Connect</button>
-      </form>
-    </div>
-  `;
-
-  // Hide topbar for login screen
-  const topbar = document.getElementById('topbar');
-  if (topbar) topbar.style.display = 'none';
-  if (elReconnectBanner) elReconnectBanner.classList.remove('visible');
-
-  document.getElementById('token-form')!.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const val = (document.getElementById('token-input') as HTMLInputElement).value.trim();
-    if (!val) return;
-    setToken(val);
-    if (topbar) topbar.style.display = '';
-    store.appState = null; // drop pre-expiry state, so whichever of WS / HTTP lands first wins
-    wsConnect();
-    // Immediately fetch state
-    apiGet('/api/state').then((state) => {
-      if (store.appState) return; // a WS push landed first: it is newer and has routed already
-      store.appState = state as AppState;
-      onStateUpdate(); // routes off the login screen
-    }).catch((err: Error) => {
-      // a WS state push already proved the token and opened the app: keep it
-      if (err.message !== '401' && !store.appState) {
-        renderTokenScreen('Could not connect. Check the token and try again.');
-      }
-    });
+function signIn(token: string): void {
+  setToken(token);
+  setAppState(null); // drop pre-expiry state, so whichever of WS / HTTP lands first wins
+  wsConnect();
+  apiGet('/api/state').then((state) => {
+    if (store.appState) return; // a WS push landed first: it is newer and has routed already
+    setAppState(state as AppState);
+    onStateUpdate(); // routes off the token screen
+  }).catch((err: Error) => {
+    // a WS state push already proved the token and opened the app: keep it
+    if (err.message !== '401' && !store.appState) {
+      renderTokenScreen('Could not connect. Check the token and try again.');
+    }
   });
 }
 
@@ -938,25 +901,20 @@ function onAgentsTouchEnd(e: TouchEvent): void {
 function renderAgentsDashboard(): void {
   // #/agents/<name> (opened from that orchestrator's Home): its account's agents, with a Back to its Home
   const scope = agentsScope(location.hash, store.appState);
-  const topbar = document.getElementById('topbar');
-  if (topbar) {
-    topbar.style.display = '';
-    document.getElementById('topbar-title')!.innerHTML = 'Agents' +
-      (scope ? `<span class="topbar-subtitle">&#183; ${escHtml(orchestratorLabel(scope))}</span>` : '');
-    // Orchestrators have no cards, so this is the way to a Home: its own, else the one used last
-    const home = scope ?? defaultHome(store.appState, lastHome());
-    document.getElementById('topbar-left')!.innerHTML = home ? '<button class="topbar-back" aria-label="Home">&#8592; Home</button>' : '';
-    if (home) document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate(homeHash(home.name)));
-    document.getElementById('topbar-right')!.innerHTML =
-      `<button class="topbar-action" id="btn-new-agent" aria-label="New agent">+</button>` +
-      `<button class="topbar-action" id="btn-settings" aria-label="Settings">&#9881;</button>`;
-    document.getElementById('btn-new-agent')!.addEventListener('click', () => { void openNewAgentModal(); });
-    document.getElementById('btn-settings')!.addEventListener('click', () => navigate('#/settings'));
-  }
+  // Orchestrators have no cards, so this is the way to a Home: its own, else the one used last
+  const home = scope ?? defaultHome(store.appState, lastHome());
+  const { left, right } = setLegacyTopbar({
+    titleHtml: 'Agents' + (scope ? `<span class="topbar-subtitle">&#183; ${escHtml(orchestratorLabel(scope))}</span>` : ''),
+    leftHtml: home ? '<button class="topbar-back" aria-label="Home">&#8592; Home</button>' : '',
+    rightHtml: `<button class="topbar-action" id="btn-new-agent" aria-label="New agent">+</button>` +
+      `<button class="topbar-action" id="btn-settings" aria-label="Settings">&#9881;</button>`,
+  });
+  if (home) left.querySelector('button')!.addEventListener('click', () => navigate(homeHash(home.name)));
+  right.querySelector('#btn-new-agent')!.addEventListener('click', () => { void openNewAgentModal(); });
+  right.querySelector('#btn-settings')!.addEventListener('click', () => navigate('#/settings'));
 
   if (!store.appState) {
-    view.screen = 'agents';
-    elScreen!.innerHTML = `<div id="screen-agents" style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="loading-spinner"></span></div>`;
+    setLegacyScreen('agents', `<div id="screen-agents" style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="loading-spinner"></span></div>`);
     return;
   }
 
@@ -987,8 +945,7 @@ function renderAgentsDashboard(): void {
   // to the route) — the loading-spinner placeholder lacks data-ready.
   let scroller = document.getElementById('screen-agents') as HTMLElement | null;
   if (!scroller || !scroller.dataset.ready) {
-    view.screen = 'agents';
-    elScreen!.innerHTML = '<div id="screen-agents" data-ready="1"></div>';
+    setLegacyScreen('agents', '<div id="screen-agents" data-ready="1"></div>');
     scroller = document.getElementById('screen-agents') as HTMLElement;
     agentsTouchActive = false;
     agentsRenderPending = false;
@@ -1046,10 +1003,7 @@ function homeHeaderHtml(found: ReturnType<typeof findPane>): string {
 function updatePaneDetailHeader(): void {
   if (!view.activePaneId) return;
   const found = findPane(view.activePaneId);
-  const titleEl = document.getElementById('topbar-title');
-  if (titleEl && found) {
-    titleEl.innerHTML = view.homeMode ? homeHeaderHtml(found) : paneHeaderHtml(found, view.activePaneId);
-  }
+  if (found) setLegacyTopbar({ titleHtml: view.homeMode ? homeHeaderHtml(found) : paneHeaderHtml(found, view.activePaneId) });
 }
 
 // The agents a list or a Home shows, most recent status change first: never the
@@ -1099,38 +1053,36 @@ function renderHomeActivity(): void {
 }
 
 async function renderPaneDetail(paneId: string): Promise<void> {
-  const topbar = document.getElementById('topbar');
   const found = findPane(paneId);
-  if (topbar && view.homeMode) {
-    topbar.style.display = '';
-    document.getElementById('topbar-title')!.innerHTML = homeHeaderHtml(found);
-    document.getElementById('topbar-left')!.innerHTML = '';
-    document.getElementById('topbar-right')!.innerHTML =
-      `<button class="topbar-action home-agents-btn" id="btn-home-agents">Agents</button>` +
-      // terminal ⇄ chat, as on any pane (Esc / Ctrl+C / arrows live in the terminal's keys)
-      `<button class="topbar-action view-toggle home-view-toggle" id="btn-view-toggle" style="display:none;" aria-label="Toggle terminal">&gt;_</button>` +
-      `<button class="topbar-action" id="btn-agent-menu" aria-label="Agent actions">&#8942;</button>`;
-    document.getElementById('btn-home-agents')!.addEventListener('click', () => navigate(homeAgentsHash(location.hash)));
-    document.getElementById('btn-view-toggle')!.addEventListener('click', () => {
+  if (view.homeMode) {
+    const { right } = setLegacyTopbar({
+      titleHtml: homeHeaderHtml(found),
+      leftHtml: '',
+      rightHtml: `<button class="topbar-action home-agents-btn" id="btn-home-agents">Agents</button>` +
+        // terminal ⇄ chat, as on any pane (Esc / Ctrl+C / arrows live in the terminal's keys)
+        `<button class="topbar-action view-toggle home-view-toggle" id="btn-view-toggle" style="display:none;" aria-label="Toggle terminal">&gt;_</button>` +
+        `<button class="topbar-action" id="btn-agent-menu" aria-label="Agent actions">&#8942;</button>`,
+    });
+    right.querySelector('#btn-home-agents')!.addEventListener('click', () => navigate(homeAgentsHash(location.hash)));
+    right.querySelector('#btn-view-toggle')!.addEventListener('click', () => {
       if (view.paneViewMode === 'chat') switchToTerminal(false); else switchToChat(undefined, false);
     });
-    document.getElementById('btn-agent-menu')!.addEventListener('click', () => openAgentMenu(paneId));
-  } else if (topbar) {
-    topbar.style.display = '';
-    document.getElementById('topbar-title')!.innerHTML = paneHeaderHtml(found, paneId);
+    right.querySelector('#btn-agent-menu')!.addEventListener('click', () => openAgentMenu(paneId));
+  } else {
     const backRoute = view.paneBackRoute;
-    document.getElementById('topbar-left')!.innerHTML =
-      `<button class="topbar-back" aria-label="Back">&#8592; ${backRoute.startsWith('#/home/') ? 'Home' : 'Agents'}</button>`;
-    // View toggle (terminal ⇄ chat, hidden until a claude transcript is found) +
-    // the agent-actions kebab (rename / clear / stop).
-    document.getElementById('topbar-right')!.innerHTML =
-      `<button class="topbar-action view-toggle" id="btn-view-toggle" style="display:none;">Chat</button>` +
-      `<button class="topbar-action" id="btn-agent-menu" aria-label="Agent actions">&#8942;</button>`;
-    document.getElementById('btn-view-toggle')!.addEventListener('click', () => {
+    const { left, right } = setLegacyTopbar({
+      titleHtml: paneHeaderHtml(found, paneId),
+      leftHtml: `<button class="topbar-back" aria-label="Back">&#8592; ${backRoute.startsWith('#/home/') ? 'Home' : 'Agents'}</button>`,
+      // View toggle (terminal ⇄ chat, hidden until a claude transcript is found) +
+      // the agent-actions kebab (rename / clear / stop).
+      rightHtml: `<button class="topbar-action view-toggle" id="btn-view-toggle" style="display:none;">Chat</button>` +
+        `<button class="topbar-action" id="btn-agent-menu" aria-label="Agent actions">&#8942;</button>`,
+    });
+    right.querySelector('#btn-view-toggle')!.addEventListener('click', () => {
       if (view.paneViewMode === 'chat') switchToTerminal(); else switchToChat();
     });
-    document.getElementById('btn-agent-menu')!.addEventListener('click', () => openAgentMenu(paneId));
-    document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate(backRoute));
+    right.querySelector('#btn-agent-menu')!.addEventListener('click', () => openAgentMenu(paneId));
+    left.querySelector('button')!.addEventListener('click', () => navigate(backRoute));
   }
 
   // each pane opens fitted to width, scrolled to the bottom
@@ -1157,8 +1109,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
   // Build screen HTML. The terminal holds two sections that are updated
   // independently so live pushes never touch the scrollback DOM above:
   // #term-history (scrollback prefix) + #term-live (current screen).
-  view.screen = 'pane';
-  elScreen!.innerHTML = `
+  setLegacyScreen('pane', `
     <div id="screen-pane"${view.homeMode ? ' class="screen-home"' : ''} style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
       ${view.homeMode ? '<div class="home-status" id="home-status"></div>' : ''}
       <div class="terminal-output" id="terminal-output"><div id="term-history"></div><div id="term-live"><span class="loading-spinner"></span></div></div>
@@ -1173,7 +1124,7 @@ async function renderPaneDetail(paneId: string): Promise<void> {
         <div class="quickkey-row" id="quickkey-row"${view.homeMode ? ' style="display:none;"' : ''}></div>
       </div>
     </div>
-  `;
+  `);
 
   if (view.homeMode) {
     homeStatusHtml = '';
@@ -2197,121 +2148,6 @@ function stopPaneRefresh(): void {
   paneRefreshTimer = null;
 }
 
-// ── Settings screen ───────────────────────────────────────────────────────────
-
-function renderSettingsScreen(): void {
-  const topbar = document.getElementById('topbar');
-  if (topbar) {
-    topbar.style.display = '';
-    document.getElementById('topbar-title')!.textContent = 'Settings';
-    document.getElementById('topbar-left')!.innerHTML =
-      `<button class="topbar-back" aria-label="Back">&#8592;</button>`;
-    document.getElementById('topbar-right')!.innerHTML = '';
-    document.getElementById('topbar-left')!.querySelector('button')!.addEventListener('click', () => navigate('#/agents'));
-  }
-
-  const notifEnabled = localStorage.getItem(STORAGE_NOTIF) === 'true';
-  const herdrVersion = store.appState?.herdr?.version ?? '—';
-  const herdrProtocol = store.appState?.herdr?.protocol ?? '—';
-  const bridgeUrl = `${location.protocol}//${location.host}`;
-  const notifPermission = typeof Notification !== 'undefined' ? Notification.permission : 'unavailable';
-
-  view.screen = 'settings';
-  elScreen!.innerHTML = `
-    <div id="screen-settings">
-      <div class="settings-section">
-        <div class="settings-section-title">Notifications</div>
-        <div class="settings-row">
-          <span class="settings-row-label">Enable notifications</span>
-          <label class="toggle">
-            <input type="checkbox" id="toggle-notif" ${notifEnabled ? 'checked' : ''} />
-            <span class="toggle-track"></span>
-          </label>
-        </div>
-        <div class="settings-row">
-          <span class="settings-row-label">Permission status</span>
-          <span class="settings-row-value" id="notif-permission">${escHtml(notifPermission)}</span>
-        </div>
-        <div class="settings-row">
-          <button class="btn-secondary" id="btn-request-notif" style="width:100%;">Request Notification Permission</button>
-        </div>
-      </div>
-
-      <div class="settings-section">
-        <div class="settings-section-title">Connection</div>
-        <div class="settings-row">
-          <span class="settings-row-label">Bridge URL</span>
-          <span class="settings-row-value">${escHtml(bridgeUrl)}</span>
-        </div>
-        <div class="settings-row">
-          <span class="settings-row-label">herdr version</span>
-          <span class="settings-row-value">${escHtml(String(herdrVersion))}</span>
-        </div>
-        <div class="settings-row">
-          <span class="settings-row-label">Protocol</span>
-          <span class="settings-row-value">${escHtml(String(herdrProtocol))}</span>
-        </div>
-        <div class="settings-row">
-          <span class="settings-row-label">WS status</span>
-          <span class="settings-row-value">${store.wsConnected ? 'Connected' : 'Disconnected'}</span>
-        </div>
-      </div>
-
-      <div class="settings-section">
-        <div class="settings-section-title">Account</div>
-        <div class="settings-row">
-          <button class="btn-secondary" id="btn-clear-token" style="width:100%;color:#f47c2a;">Clear token &amp; sign out</button>
-        </div>
-      </div>
-
-      <div class="settings-section">
-        <div class="settings-section-title">About</div>
-        <div class="settings-row">
-          <span class="settings-row-label">App version</span>
-          <span class="settings-row-value" id="app-version">${escHtml(APP_VERSION)} (${escHtml(BUILD)})</span>
-        </div>
-      </div>
-    </div>
-  `;
-
-  // The SW's cache (sw.js, generated by the build): a CSS-only change keeps BUILD but
-  // renames the cache, so this tells whether the phone has the new build.
-  const appVersion = document.getElementById('app-version')!;
-  const showCache = (keys: string[]): void => {
-    const cache = keys.map((key) => /^herdr-yoicks-([0-9a-f]{8})$/.exec(key)?.[1]).find(Boolean) ?? '-';
-    appVersion.textContent = `${APP_VERSION} (${BUILD}) cache ${cache}`;
-  };
-  (typeof caches === 'undefined' ? Promise.resolve([]) : caches.keys()).then(showCache, () => showCache([]));
-
-  // Notification toggle
-  (document.getElementById('toggle-notif') as HTMLInputElement).addEventListener('change', (e) => {
-    localStorage.setItem(STORAGE_NOTIF, (e.target as HTMLInputElement).checked ? 'true' : 'false');
-  });
-
-  // Request permission
-  document.getElementById('btn-request-notif')!.addEventListener('click', async () => {
-    if (typeof Notification === 'undefined') {
-      showToast('Not supported', 'Notifications are not available in this browser.');
-      return;
-    }
-    const result = await Notification.requestPermission();
-    document.getElementById('notif-permission')!.textContent = result;
-    if (result === 'granted') {
-      localStorage.setItem(STORAGE_NOTIF, 'true');
-      (document.getElementById('toggle-notif') as HTMLInputElement).checked = true;
-    }
-  });
-
-  // Clear token
-  document.getElementById('btn-clear-token')!.addEventListener('click', () => {
-    wsSignOut();
-    stopPaneRefresh();
-    store.appState = null;
-    clearToken();
-    renderTokenScreen();
-  });
-}
-
 // ── Service Worker registration ───────────────────────────────────────────────
 
 function registerServiceWorker(): void {
@@ -2354,10 +2190,7 @@ function bindViewportHeight(): void {
 
 document.addEventListener('DOMContentLoaded', () => {
   elApp = document.getElementById('app');
-  elScreen = document.getElementById('screen');
   bindViewportHeight();
-  elConnDot = document.getElementById('conn-dot');
-  elReconnectBanner = document.getElementById('reconnect-banner');
   elToastContainer = document.getElementById('toast-container');
   document.getElementById('toast-clear-all')!.addEventListener('click', () => {
     elToastContainer!.querySelectorAll('.toast').forEach((el) => el.remove());
@@ -2376,16 +2209,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initial route
   if (!token) {
-    // Hide topbar until logged in
-    const topbar = document.getElementById('topbar');
-    if (topbar) topbar.style.display = 'none';
     renderTokenScreen();
   } else {
     // Connect WS and load initial state
     wsConnect();
     apiGet('/api/state').then((state) => {
       if (store.appState) return; // a WS push landed first: it is newer and has routed already
-      store.appState = state as AppState;
+      setAppState(state as AppState);
       onStateUpdate();
     }).catch((err: Error) => {
       if (err.message !== '401' && !routeRendered) {
