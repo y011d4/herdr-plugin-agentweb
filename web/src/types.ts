@@ -88,6 +88,45 @@ export interface OrchestratorView {
   agents: string[] | null;
 }
 
+// ── REST responses (the wire recordings in contract.gen.ts check them) ──
+
+/** GET /api/profiles: the launch profiles, name + label only */
+export interface ProfilesResponse {
+  profiles: Array<{ name: string; label: string }>;
+}
+
+/** POST /api/agents */
+export interface AgentStartResponse {
+  ok: true;
+  paneId: string;
+  name: string;
+  /** the agent herdr detected, null when none yet */
+  agent: string | null;
+  /** present only when a task was sent: false when the agent wasn't ready for it */
+  taskDelivered?: boolean;
+}
+
+/** POST /api/panes/:id/rename: the name herdr stored (fitted to its name rule) */
+export interface RenameResponse {
+  ok: true;
+  name: string;
+}
+
+/** POST /api/agents/:target/clear: the replacement pane */
+export interface ClearResponse {
+  ok: true;
+  paneId: string;
+  name: string;
+  closedOld: boolean;
+  profile: string;
+  oldPaneId: string;
+}
+
+/** Every /api error */
+export interface ApiErrorResponse {
+  error: { code: string; message: string };
+}
+
 export interface WsStateMessage {
   type: 'state';
   state: AppState;

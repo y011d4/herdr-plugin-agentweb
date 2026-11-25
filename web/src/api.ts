@@ -3,6 +3,8 @@
  * through onUnauthorized (the shell shows the token screen).
  */
 
+import type { ApiErrorResponse } from './types.ts';
+
 const STORAGE_TOKEN = 'herdr_token';
 
 let token: string | null = null;
@@ -57,35 +59,38 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
   return resp;
 }
 
-export async function apiGet(path: string): Promise<unknown> {
+// A failed request's body: the bridge's error envelope (types.ts, checked against its
+// recordings), or whatever came back instead ({} when it wasn't JSON).
+type ErrorBody = Partial<ApiErrorResponse> | null;
+
+// T: the response type the caller reads (types.ts's REST responses), unchecked at runtime.
+export async function apiGet<T = unknown>(path: string): Promise<T> {
   const resp = await apiFetch(path);
   if (!resp.ok) {
-    const body = await resp.json().catch(() => ({})) as Record<string, unknown>;
-    const err = body?.error as Record<string, unknown> | undefined;
-    throw new Error((err?.message as string | undefined) ?? `HTTP ${resp.status}`);
+    const body = await resp.json().catch(() => ({})) as ErrorBody;
+    throw new Error(body?.error?.message ?? `HTTP ${resp.status}`);
   }
-  return resp.json();
+  return resp.json() as Promise<T>;
 }
 
-export function apiError(data: Record<string, unknown>, status: number): Error & { code?: string; status?: number } {
-  const err = data?.error as Record<string, unknown> | undefined;
-  const e = new Error((err?.message as string | undefined) ?? `HTTP ${status}`) as Error & { code?: string; status?: number };
-  e.code = err?.code as string | undefined; // e.g. 'prompt_changed'/'no_profile' — lets callers branch on the reason
+export function apiError(data: ErrorBody, status: number): Error & { code?: string; status?: number } {
+  const e = new Error(data?.error?.message ?? `HTTP ${status}`) as Error & { code?: string; status?: number };
+  e.code = data?.error?.code; // e.g. 'prompt_changed'/'no_profile' — lets callers branch on the reason
   e.status = status;
   return e;
 }
 
-export async function apiPost(path: string, body: Record<string, unknown> = {}): Promise<unknown> {
+export async function apiPost<T = unknown>(path: string, body: Record<string, unknown> = {}): Promise<T> {
   const resp = await apiFetch(path, {
     method: 'POST',
     body: JSON.stringify(body),
   });
-  if (!resp.ok) throw apiError(await resp.json().catch(() => ({})) as Record<string, unknown>, resp.status);
-  return resp.json();
+  if (!resp.ok) throw apiError(await resp.json().catch(() => ({})) as ErrorBody, resp.status);
+  return resp.json() as Promise<T>;
 }
 
 export async function apiDelete(path: string): Promise<unknown> {
   const resp = await apiFetch(path, { method: 'DELETE' });
-  if (!resp.ok) throw apiError(await resp.json().catch(() => ({})) as Record<string, unknown>, resp.status);
+  if (!resp.ok) throw apiError(await resp.json().catch(() => ({})) as ErrorBody, resp.status);
   return resp.json();
 }
