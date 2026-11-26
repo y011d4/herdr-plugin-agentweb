@@ -1140,11 +1140,14 @@ a {
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
 }
+/* at most ~3 rows of chips, so the counts row below (the way to the list) stays on screen */
 .home-attn {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  max-height: 88px;
+  overflow-y: auto;
 }
 .home-attn-label {
   font-size: 12px;
@@ -1284,7 +1287,6 @@ a {
 }
 .topbar-subtitle.home-state.working { color: var(--color-working); }
 .topbar-subtitle.home-state.blocked { color: var(--color-blocked); }
-.topbar-action.home-agents-btn { font-size: 15px; font-weight: 600; color: var(--color-accent); }
 /* a stopped orchestrator's Home: dimmed in the switcher, Start in its body */
 .home-switch-btn.stopped { opacity: 0.55; }
 .home-dot.stopped { background: transparent; box-shadow: inset 0 0 0 1px var(--color-idle); }
