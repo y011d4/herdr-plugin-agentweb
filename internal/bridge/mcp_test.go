@@ -568,7 +568,7 @@ func TestHeadlessSavedWatchesOutliveARefusedStart(t *testing.T) {
 	b2.world.Add(fakeherdr.Pane{ID: "w1p", Tab: "t9", Workspace: "w1", Agent: "claude", Status: "working", Name: "w1"})
 	b2.start(t)
 	h := b2.srv.headless["h1"]
-	waitUntil(t, 5*time.Second, "re-armed", func() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.watches["w1p"] != nil && h.saved == nil })
+	waitUntil(t, 5*time.Second, "re-armed", func() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.watches["w1p"] != nil && len(h.saved) == 0 })
 	if got, _ := os.ReadFile(headlessPath(state, "h1", ".json")); !strings.Contains(string(got), `"pane":"w1p"`) {
 		t.Errorf("not saved once running: %s", got)
 	}
@@ -727,5 +727,28 @@ func TestHeadlessCallAcrossAClear(t *testing.T) {
 	}
 	if _, err := mcpClient(t, h.mcpURL, old); err == nil {
 		t.Error("the old bearer still connects")
+	}
+}
+
+// A saved watch that settles as soon as it is re-armed leaves no saved copy for a later
+// save to write back (a bridge stop then would bring back the watch beside its wake-up).
+func TestHeadlessRearmedWatchLeavesNoSavedCopy(t *testing.T) {
+	state := t.TempDir()
+	b := startHeadless(t, state, nil, nil)
+	b.world.Add(fakeherdr.Pane{ID: "w1p", Tab: "t9", Workspace: "w1", Agent: "claude", Status: "done", Name: "w1"})
+	h := b.srv.headless["h1"]
+	saved := hlWatch{Pane: "w1p", Name: "w1", Status: "working", Seq: 7}
+	h.mu.Lock()
+	h.saved, h.wanted = []hlWatch{saved}, true
+	gen := h.gen
+	h.mu.Unlock()
+	h.watch(&saved, "", nil, gen) // as rearm does
+	waitUntil(t, 5*time.Second, "settled", func() bool { h.mu.Lock(); defer h.mu.Unlock(); return len(h.watches) == 0 && len(h.wakes) == 1 })
+	h.mu.Lock()
+	h.persist() // any later save, a bridge stop's say
+	h.mu.Unlock()
+	got, _ := os.ReadFile(headlessPath(state, "h1", ".json"))
+	if !strings.Contains(string(got), "w1: working → done") || strings.Contains(string(got), `"pane":"w1p"`) {
+		t.Errorf("saved: %s", got)
 	}
 }
