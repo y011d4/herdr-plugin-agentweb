@@ -31,16 +31,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-test:
+  # The web UI (web/): type checks, the Vite build, the JSON contract with the Go side, and
+  # the Vitest tests. Node only builds and tests it (the shipped artifact is the Go binary),
+  # so CI runs the one Node line package.json's engines names, as local builds do.
+  web:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        # The web UI's build (Vite) and tests (Vitest). Node: package.json's engines
-        # (^22.18 || ^24 || >=26).
-        # 24 = current LTS floor, 26 = current.
-        node-version: ['24', '26']
     steps:
       # Pinned to a full commit SHA — a moved/retagged release cannot silently
       # swap the action out from under us. `persist-credentials: false` scrubs
@@ -50,10 +46,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Node.js ${{ matrix.node-version }}
+      - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version-file: package.json # its engines.node
           cache: npm
 
       # No `${{ github.event.* }}` (PR title, branch name, commit message, …)
@@ -77,11 +73,12 @@ jobs:
       - name: Test the web UI
         run: npm test
 
-  # The Go bridge and CLI, on each released OS/CPU family: linux/amd64 and linux/arm64
+  # The Go side (the bridge and CLI): vet, tests with the race detector, govulncheck.
+  # On each released OS/CPU family: linux/amd64 and linux/arm64
   # (supported), macOS on arm64 (experimental: unit tests; the /proc-based parts are refused
   # there). Same hardening as above: pinned SHAs, no persisted token, no scripts from
   # dependencies, read-only permissions.
-  go:
+  bridge:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -98,7 +95,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '26'
+          node-version-file: package.json
           cache: npm
 
       - name: Build the web UI
@@ -116,8 +113,18 @@ jobs:
       - name: Vet the claudelive test
         run: go vet -tags claudelive ./internal/bridge
 
+      # The time is in waiting, not CPU: internal/bridge's headless wake-up tests run on real
+      # timers (Linux only), TestHeadlessWakeUps ~100 s of them. They can't be t.Parallel (the
+      # fake claude's HOME etc. are t.Setenv), so that test runs in a go test of its own
+      # beside the rest: ~215 s → ~120 s on Linux, the same tests.
       - name: Test (race detector)
-        run: go test -race ./...
+        run: |
+          go test -race -run '^TestHeadlessWakeUps$' ./internal/bridge &
+          wake=$!
+          status=0
+          go test -race -skip '^TestHeadlessWakeUps$' ./... || status=1
+          wait "$wake" || status=1
+          exit "$status"
 
       # Known vulnerabilities in the module and its dependencies, pinned version.
       - name: govulncheck
