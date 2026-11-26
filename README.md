@@ -492,9 +492,14 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
 ## API surface (for scripting)
 
 - `GET /api/state` — normalized workspaces/tabs/panes/agents tree, plus `orchestrators`
-  (`[{ name, label, paneId, agents }]` in config order; `paneId` is the agent running in its dir, or
-  `null`; `agents` the agent panes of its Claude account, itself included, or `null` when unknown)
-  and `orchestratorPaneId` (the first running one's, or `null`). Each agent's `completionSeq` is herdr's
+  (`[{ name, label, paneId, agents, mode, headless }]` in config order; `paneId` is the agent running in its dir, or
+  `null`; `agents` the agent panes of its Claude account, itself included, or `null` when unknown;
+  `mode` is `"tui"`, or `"headless"` for one the bridge runs itself as `claude -p` (config
+  `"mode": "headless"`, managed entries only), whose `paneId` is `"hl:<name>"` while it runs and whose
+  `headless` is `{ status: stopped|idle|working|blocked|done|error, completionSeq, pending: null,
+  usage: { fiveHour, sevenDay: { utilization (0–1), resetsAt (ms) } | null, contextPct | null, at } | null,
+  warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }] }`, `null` for a tui one)
+  and `orchestratorPaneId` (the first running tui one's, or `null`). Each agent's `completionSeq` is herdr's
   `completion_seq` (which completion its idle/done status is; `null` until fetched), and its
   `stateChangeSeq` is herdr's `state_change_seq` (herdr's order of status changes, which the app
   lists by; `null` until fetched)
@@ -524,7 +529,12 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   direnv `.envrc` per org dir that picks the Claude account, say — covers the checkout too.
 - `POST /api/orchestrators/:name/start` — start a configured orchestrator (its directory and `env`
   come from the config; the request names it only) in a new workspace and return `{"paneId", "name"}`.
-  409 when it already runs.
+  409 when it already runs. A headless one starts as the bridge's child instead (resuming its session),
+  after checking it stays on the Claude subscription (409 otherwise), and returns `{"paneId": "hl:<name>", "name"}`.
+- `POST /api/orchestrators/:name/send` `{"text": "…"}`, `…/interrupt`, `…/clear` (a fresh session) and
+  `…/stop` — a headless orchestrator's message (also while it works), interrupt, clear and stop; 409
+  when it isn't running. A headless orchestrator has no herdr pane: `/api/panes/hl:<name>/…` and
+  `/api/agents/hl:<name>/…` answer 404, except `GET /api/panes/hl:<name>/transcript`.
 - `POST /api/worktrees` `{"cwd": "/repo", "branch": "feat/x", "base": "origin/main"}` — create a git
   worktree next to the repo, as above (herdr `worktree.create`; `cwd` is any path in the source repo,
   `branch`/`base` optional) and return `{"workspaceId", "checkoutPath", "branch", "paneId"}`. Standalone (create a worktree
@@ -543,7 +553,8 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
 - `POST /api/agents/:target/send` `{"text": "continue"}` — submit a prompt to a ready agent (herdr
   `agent.prompt`; `text` must be non-empty)
 - `WS /ws?token=…` — `{"type":"state"}` snapshots and `{"type":"agent_status"}`
-  transitions. `{"type":"watch_transcript","paneId":…}` starts a live tail that
+  transitions, and `{"type":"orchestrator_alert","name","kind","message"}` for a headless
+  orchestrator's new warning (once per session and kind; also to ntfy when `notify_url` is set). `{"type":"watch_transcript","paneId":…}` starts a live tail that
   pushes `{"type":"transcript_items",…}` (`reset` rebuilds, else appends);
   `{"type":"unwatch_transcript"}` stops it (mirrors `watch_pane`/`pane_output`).
 
