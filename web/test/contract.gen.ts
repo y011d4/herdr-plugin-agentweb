@@ -649,6 +649,10 @@ export const messages: WsMessage[] = [
         "resetsAt": 1795665000000
        },
        "sevenDay": null,
+       "fable": {
+        "utilization": 0.04,
+        "resetsAt": 1795928400000
+       },
        "contextPct": 12.5,
        "at": 1795478400000
       },

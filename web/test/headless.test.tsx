@@ -172,7 +172,7 @@ describe("a headless orchestrator's Home", () => {
     await home(withPilot((p) => {
       p.headless!.warnings.push({ kind: 'version', message: 'Claude Code 9.9.9 is not verified', since: Date.now(), actions: ['tui'] });
     }), { clear: () => { cleared++; }, stop: () => {} });
-    assert.deepEqual([...container.querySelectorAll('#home-usage span')].map((e) => `${e.textContent}|${e.className}`), ['5h 35%|stale', ' · ctx 13%|']);
+    assert.deepEqual([...container.querySelectorAll('#home-usage span')].map((e) => `${e.textContent}|${e.className}`), ['5h 35%|stale', ' · fable 4%|stale', ' · ctx 13%|']);
     const rows = [...container.querySelectorAll<HTMLElement>('.home-warning')];
     assert.deepEqual(rows.map((r) => `${r.dataset.kind}:${[...r.querySelectorAll<HTMLElement>('button')].map((b) => b.dataset.action).join(',')}`),
       ['silent:interrupt,clear', 'unknown_event:', 'version:tui']);
@@ -187,9 +187,11 @@ describe("a headless orchestrator's Home", () => {
 describe('around a headless orchestrator', () => {
   it('usageParts leaves out what is unknown', () => {
     const now = 1_000_000_000;
-    assert.deepEqual(usageParts({ fiveHour: { utilization: 0.344, resetsAt: 0 }, sevenDay: { utilization: 0.69, resetsAt: 0 }, contextPct: null, at: now - 1000 }, now),
+    assert.deepEqual(usageParts({ fiveHour: { utilization: 0.344, resetsAt: 0 }, sevenDay: { utilization: 0.69, resetsAt: 0 }, fable: null, contextPct: null, at: now - 1000 }, now),
       [{ text: '5h 34%', stale: false }, { text: '7d 69%', stale: false }]);
-    assert.deepEqual(usageParts({ fiveHour: null, sevenDay: null, contextPct: null, at: 0 }, now), []);
+    assert.deepEqual(usageParts({ fiveHour: null, sevenDay: null, fable: { utilization: 0.04, resetsAt: 0 }, contextPct: 7, at: now - 11 * 60_000 }, now),
+      [{ text: 'fable 4%', stale: true }, { text: 'ctx 7%', stale: false }]);
+    assert.deepEqual(usageParts({ fiveHour: null, sevenDay: null, fable: null, contextPct: null, at: 0 }, now), []);
   });
 
   it('the Claude Code check reads as off when none has run or the last is over a day old', () => {

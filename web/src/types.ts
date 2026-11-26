@@ -125,6 +125,8 @@ export interface UsageWindow {
 export interface HeadlessUsage {
   fiveHour: UsageWindow | null;
   sevenDay: UsageWindow | null;
+  /** Claude Code's "Fable limit": only in its answers to a Fable request */
+  fable: UsageWindow | null;
   /** percent of the context window; null until a turn has ended */
   contextPct: number | null;
   /** when the rate limits were read (ms); 0 = not yet */
