@@ -39,6 +39,9 @@ outer:
 			agent = a.Name
 		}
 	}
+	if strings.HasPrefix(change.PaneID, "hl:") { // a headless orchestrator: no pane, its label
+		workspaceLabel = agent
+	}
 	return WsAgentStatusMessage{
 		Type:           "agent_status",
 		PaneID:         change.PaneID,

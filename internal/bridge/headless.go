@@ -16,6 +16,8 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -41,15 +43,32 @@ const restartedNotice = "[yoicks] restarted while you were working; check overvi
 func claudeBin() string { return firstNonEmpty(os.Getenv("YOICKS_CLAUDE_BIN"), "claude") }
 
 // headlessArgv is the child's arguments: a resumed or a new session, no MCP server but the
-// bridge's (none yet), manual permissions and the one tool.
-func headlessArgv(sessionID string, resume bool, mcpConfig string) []string {
+// bridge's, manual permissions through its approve, one built-in tool, and (tools) the
+// bridge's six allowed unasked.
+func headlessArgv(sessionID string, resume bool, mcpConfig string, tools bool) []string {
 	session := "--session-id"
 	if resume {
 		session = "--resume"
 	}
-	return []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+	argv := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
 		session, sessionID, "--mcp-config", mcpConfig, "--strict-mcp-config",
-		"--permission-mode", "manual", "--tools", strings.Join(headlessTools, ",")}
+		"--permission-prompt-tool", "mcp__yoicks__approve", "--permission-mode", "manual", "--tools", "AskUserQuestion"}
+	if tools {
+		argv = append(argv, "--allowedTools", strings.Join(headlessTools(true)[1:], ","))
+	}
+	return argv
+}
+
+// headlessTools is the exact tool set a child reports at init: AskUserQuestion, then the
+// bridge's (approve is hidden by Claude Code itself, S0 row 19).
+func headlessTools(tools bool) []string {
+	out := []string{"AskUserQuestion"}
+	if tools {
+		for _, t := range yoicksTools {
+			out = append(out, "mcp__yoicks__"+t)
+		}
+	}
+	return out
 }
 
 // isBillingVar is a variable that could make Claude Code bill an API key or a cloud
@@ -219,10 +238,19 @@ type headlessRunner struct {
 	def      OrchestratorDef
 	stateDir string
 	rules    string
-	rpc      Rpc                           // to check that no TUI agent runs in its dir
-	onChange func()                        // its view changed
-	onAlert  func(kind, message string)    // a new warning: once per kind and session
-	log      func(format string, a ...any) // bridge.log
+	// herdr: requests, ones allowing git and an agent's start time, and waits (no deadline)
+	rpc, slowRPC Rpc
+	waitRPC      func(ctx context.Context, method string, params map[string]any) (json.RawMessage, error)
+	profiles     map[string]LaunchProfile   // agent_start's
+	onChange     func()                     // its view changed
+	onAlert      func(kind, message string) // a new warning: once per kind and session
+	onStatus     func(from, to string)      // it went done or blocked
+	log          func(format string, a ...any)
+
+	// its MCP server (mcp.go): its URL, its current child's bearer ("": none, r.mu); tools
+	// false: approve only (YOICKS_HEADLESS_NO_TOOLS, tests)
+	mcpURL, mcpBearer string
+	tools             bool
 
 	// timings (fields so tests can shorten them)
 	restartDelays []time.Duration // before each restart after a crash; one more crash in the window: error
@@ -237,8 +265,9 @@ type headlessRunner struct {
 	mu           sync.Mutex
 	sessionID    string
 	wanted       bool
-	interrupted  bool // the bridge stopped it mid-turn: tell it so when it resumes
-	closed       bool // the bridge is shutting down
+	interrupted  bool   // the bridge stopped it mid-turn: tell it so when it resumes
+	rulesHash    string // of the rules its session began with
+	closed       bool   // the bridge is shutting down
 	child        *hlChild
 	model        hlModel
 	warnings     []HeadlessWarning
@@ -248,6 +277,16 @@ type headlessRunner struct {
 	interrupts   map[string]chan struct{}
 	nInterrupt   int
 	lastEvent    time.Time
+	pending      *hlPending          // the question waiting for the user
+	asks         map[string]bool     // AskUserQuestion tool_use ids: did each reach approve?
+	watches      map[string]*hlWatch // by pane
+	saved        []hlWatch           // the watches saved by an earlier bridge, re-armed at the first start
+	wakes        []string
+	wakeTimer    *time.Timer
+	gen          int // its workers' generation: Stop and Clear begin a new one (forgetWorkers)
+	// its child's epoch: each start (a restart's too), Stop and Clear begin a new one; a call
+	// or a question from another child registers nothing (watch, ask)
+	epoch int
 }
 
 type hlChild struct {
@@ -258,25 +297,34 @@ type hlChild struct {
 	stderr   *tailWriter
 	done     chan struct{} // closed once it has exited and its stdout is read
 	expected bool          // its exit was asked for (r.mu)
+	failed   bool          // it is being killed for an error: what it still says is ignored (r.mu)
+	epoch    int           // the runner's epoch it began in: what it asks carries this, not a later Stop/Clear's
 }
 
 // headlessState is the persisted part (<state>/headless/<name>.json).
 type headlessState struct {
-	SessionID   string `json:"sessionId"`
-	Wanted      bool   `json:"wanted"`
-	Interrupted bool   `json:"interrupted,omitempty"`
+	SessionID   string    `json:"sessionId"`
+	Wanted      bool      `json:"wanted"`
+	Interrupted bool      `json:"interrupted,omitempty"`
+	RulesHash   string    `json:"rulesHash,omitempty"`
+	Watches     []hlWatch `json:"watches,omitempty"`
+	Wakes       []string  `json:"wakes,omitempty"` // wake-ups not written to it yet
 }
 
-func newHeadlessRunner(def OrchestratorDef, stateDir, rules string, rpc Rpc, onChange func(), onAlert func(kind, message string)) *headlessRunner {
-	r := &headlessRunner{def: def, stateDir: stateDir, rules: rules, rpc: rpc, onChange: onChange, onAlert: onAlert,
+// newHeadlessRunner is def's runner; the server fills in its herdr calls, profiles and
+// callbacks, the MCP host its server.
+func newHeadlessRunner(def OrchestratorDef, stateDir, rules string) *headlessRunner {
+	r := &headlessRunner{def: def, stateDir: stateDir, rules: rules,
+		onChange: func() {}, onAlert: func(string, string) {}, onStatus: func(string, string) {},
 		log:           func(f string, a ...any) { logf("[headless "+def.Name+"] "+f, a...) },
+		tools:         os.Getenv("YOICKS_HEADLESS_NO_TOOLS") != "1",
 		restartDelays: []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second},
 		crashWindow:   10 * time.Minute, interruptWait: 2 * time.Second, silence: 3 * time.Minute,
-		alerted: map[string]bool{}, interrupts: map[string]chan struct{}{}}
+		alerted: map[string]bool{}, interrupts: map[string]chan struct{}{}, asks: map[string]bool{}, watches: map[string]*hlWatch{}}
 	r.model.Status = "stopped"
 	var saved headlessState
-	if b, err := os.ReadFile(headlessPath(stateDir, def.Name, ".json")); err == nil && json.Unmarshal(b, &saved) == nil && sessionIDRe.MatchString(saved.SessionID) {
-		r.sessionID, r.wanted, r.interrupted = saved.SessionID, saved.Wanted, saved.Interrupted
+	if b, err := os.ReadFile(headlessPath(stateDir, def.Name, ".json")); err == nil && json.Unmarshal(b, &saved) == nil && (saved.SessionID == "" || sessionIDRe.MatchString(saved.SessionID)) {
+		r.sessionID, r.wanted, r.interrupted, r.rulesHash, r.saved, r.wakes = saved.SessionID, saved.Wanted, saved.Interrupted, saved.RulesHash, saved.Watches, saved.Wakes
 	}
 	if kind, msg := r.refusedEnv(); msg != "" {
 		r.model.Status = "error"
@@ -320,6 +368,9 @@ func (r *headlessRunner) view() (HeadlessView, bool) {
 		c := *u
 		v.Usage = &c
 	}
+	if p := r.pending; p != nil {
+		v.Pending = &HeadlessPending{ID: p.id, Questions: p.questions}
+	}
 	return v, r.child != nil
 }
 
@@ -337,7 +388,17 @@ func (r *headlessRunner) wantsToRun() bool {
 
 // persist writes the saved state; r.mu held. Best-effort, like the pane profile store.
 func (r *headlessRunner) persist() {
-	b, _ := json.Marshal(headlessState{r.sessionID, r.wanted, r.interrupted})
+	var watches []hlWatch
+	for _, w := range r.watches {
+		watches = append(watches, *w)
+	}
+	for _, w := range r.saved { // not re-armed yet
+		if r.watches[w.Pane] == nil {
+			watches = append(watches, w)
+		}
+	}
+	slices.SortFunc(watches, func(a, b hlWatch) int { return strings.Compare(a.Pane, b.Pane) })
+	b, _ := json.Marshal(headlessState{r.sessionID, r.wanted, r.interrupted, r.rulesHash, watches, r.wakes})
 	if os.MkdirAll(filepath.Join(r.stateDir, "headless"), 0o700) == nil {
 		writeFile0600(headlessPath(r.stateDir, r.def.Name, ".json"), b)
 	}
@@ -386,7 +447,7 @@ func (r *headlessRunner) recoverAt(where string) {
 	r.mu.Lock()
 	c := r.child
 	if c != nil {
-		c.expected = true
+		c.expected, c.failed = true, true
 	}
 	r.model.Status = "error"
 	alert := r.warn("panic", fmt.Sprintf("internal error in %s: %v; stopped", where, p))
@@ -476,27 +537,44 @@ func (r *headlessRunner) start(resume bool) error {
 	if found := r.scanSettings(); found != "" {
 		return r.fail("billing", &LifecycleError{Status: 409, Code: "billing_refused", Message: found + ": a headless orchestrator never runs with an API key"})
 	}
+	if r.mcpURL == "" {
+		return r.fail("start", &LifecycleError{Status: 500, Code: "error", Message: "the bridge's MCP listener isn't open (see bridge.log)"})
+	}
+	bearer := newBearer() // this child's own: a child from before reaches nothing
 	err = os.MkdirAll(filepath.Join(r.stateDir, "headless"), 0o700)
 	if err == nil {
-		err = writeFile0600(mcpConfig, []byte(`{"mcpServers":{}}`))
+		err = writeFile0600(mcpConfig, r.mcpConfig(bearer))
 	}
 	if err != nil {
 		return r.fail("start", &LifecycleError{Status: 500, Code: "error", Message: "could not write " + mcpConfig + ": " + err.Error()})
 	}
+	hash := sha256.Sum256([]byte(orchestratorFiles(r.def, r.rules, yoicksCommand())["rules.md"]))
 	r.mu.Lock()
 	if !resume {
 		r.sessionID = newUUID()
 	}
-	r.wanted = true
+	alert := func() {}
+	if !resume || r.rulesHash == "" {
+		r.rulesHash = hex.EncodeToString(hash[:])
+	} else if r.rulesHash != hex.EncodeToString(hash[:]) { // its system prompt keeps the rules it began with
+		alert = r.warn("rules", "the orchestrator rules changed since this session began: Clear to apply them")
+	}
+	r.wanted, r.mcpBearer = true, bearer
+	r.epoch++ // a new child: what the one before asked registers nothing
 	notice := r.interrupted
 	r.interrupted = false
 	r.persist()
 	r.mu.Unlock()
-	if err := r.spawn(headlessArgv(r.session(), resume, mcpConfig), env); err != nil {
+	alert()
+	if err := r.spawn(headlessArgv(r.session(), resume, mcpConfig, r.tools), env); err != nil {
 		return r.fail("start", &LifecycleError{Status: 500, Code: "claude_failed", Message: "could not start claude: " + err.Error()})
 	}
+	r.rearm()
+	r.mu.Lock()
+	r.scheduleWakes() // the ones it missed while down
+	r.mu.Unlock()
 	if notice {
-		r.Send(restartedNotice)
+		r.write(restartedNotice)
 	}
 	return nil
 }
@@ -603,8 +681,9 @@ func (r *headlessRunner) spawn(argv, env []string) error {
 		// it is the running child before its first line is read or its exit seen: neither may
 		// find another child (the init check would be skipped, a dead child left as running)
 		r.mu.Lock()
-		r.child, r.lastEvent = c, time.Now()
+		r.child, r.lastEvent, c.epoch = c, time.Now(), r.epoch
 		r.model.inited, r.model.unreadableRun = false, 0
+		r.model.expectTools, r.model.expectMCP = headlessTools(r.tools), true
 		r.model.Status = "idle"
 		r.mu.Unlock()
 		started <- nil
@@ -676,13 +755,16 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 	}
 	var alerts []func()
 	r.mu.Lock()
-	if r.child != c {
+	if r.child != c || c.failed {
 		r.mu.Unlock()
 		return
 	}
+	epoch := c.epoch // its own: a Stop or Clear may already have begun the next epoch while it still talks
 	r.lastEvent = time.Now()
 	r.warnings = slices.DeleteFunc(r.warnings, func(w HeadlessWarning) bool { return w.Kind == "silent" })
+	from := r.model.Status
 	step := r.model.apply(line, nowMs())
+	to := r.model.Status
 	for _, w := range step.Warnings {
 		alerts = append(alerts, r.warn(w.Kind, w.Message))
 	}
@@ -691,7 +773,7 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 		delete(r.interrupts, step.Acked)
 	}
 	if step.Fatal != "" {
-		c.expected = true
+		c.expected, c.failed = true, true
 		r.model.Status = "error"
 		alerts = append(alerts, r.warn("init", step.Fatal))
 	}
@@ -707,10 +789,43 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 	if step.Fatal != "" {
 		syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
 	}
+	if step.Ask != "" {
+		r.watchAsk(step.Ask)
+	}
+	if cu := step.CanUse; cu != nil {
+		r.canUse(c, cu, epoch)
+	}
 	for _, a := range alerts {
 		a()
 	}
+	r.statusChanged(from, to)
 	r.onChange()
+}
+
+// canUse answers a permission request that came over stdio as approve would: AskUserQuestion
+// waits for the Home's answer, anything else is denied.
+func (r *headlessRunner) canUse(c *hlChild, cu *hlCanUse, epoch int) {
+	reply := func(res map[string]any) {
+		c.write(controlResponse(cu.RequestID, map[string]any{"subtype": "success", "response": res}))
+	}
+	if cu.Tool != "AskUserQuestion" {
+		reply(map[string]any{"behavior": "deny", "message": "yoicks allows no tool but its own"})
+		return
+	}
+	p := r.ask(cu.Input, epoch)
+	if p == nil {
+		reply(map[string]any{"behavior": "deny", "message": "this orchestrator's session has ended"})
+		return
+	}
+	r.asked(cu.ToolUseID)
+	go func() { reply(<-p.reply) }() // every pending question gets its reply (answer, deny, the child's end)
+}
+
+// statusChanged tells the notifications of a change to done or blocked.
+func (r *headlessRunner) statusChanged(from, to string) {
+	if from != to && (to == "done" || to == "blocked") {
+		r.onStatus(from, to)
+	}
 }
 
 // watchSilence warns when it has been working without a single event (heartbeats included)
@@ -748,6 +863,7 @@ func (r *headlessRunner) exited(c *hlChild, werr error) {
 		close(ch)
 		delete(r.interrupts, id)
 	}
+	r.denyPending("the orchestrator ended")
 	busy := r.model.Status == "working" || r.model.Status == "blocked"
 	how := "exit 0"
 	if werr != nil {
@@ -838,17 +954,37 @@ func (r *headlessRunner) running() (*hlChild, error) {
 	return nil, &LifecycleError{Status: 409, Code: "not_running", Message: "orchestrator " + r.def.Name + " isn't running"}
 }
 
-// Send writes a user message, also mid-turn (Claude Code takes it in at the next tool boundary).
+// Send is the user's message: the answer to a pending question it isn't (that one is denied
+// with it as the message), else it is written, also mid-turn (Claude Code takes it in at the
+// next tool boundary).
 func (r *headlessRunner) Send(text string) error {
 	r.mu.Lock()
-	c, err := r.running()
-	if err == nil && r.model.Status != "working" && r.model.Status != "blocked" {
-		r.model.Status, r.lastEvent = "working", time.Now()
+	p := r.pending
+	r.mu.Unlock()
+	if p != nil && r.Answer(p.id, nil, text) == nil {
+		return nil
 	}
+	return r.write(text)
+}
+
+// write writes a user message (the user's, or yoicks's own).
+func (r *headlessRunner) write(text string) error {
+	r.mu.Lock()
+	c, err := r.running()
 	r.mu.Unlock()
 	if err != nil {
 		return err
 	}
+	return r.writeTo(c, text)
+}
+
+// writeTo writes a user message to child c (never to a later one); it works on it from then.
+func (r *headlessRunner) writeTo(c *hlChild, text string) error {
+	r.mu.Lock()
+	if r.child == c && r.model.Status != "working" && r.model.Status != "blocked" {
+		r.model.Status, r.lastEvent = "working", time.Now()
+	}
+	r.mu.Unlock()
 	if err := c.write(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}}); err != nil {
 		return &LifecycleError{Status: 502, Code: "write_failed", Message: "could not write to claude: " + err.Error()}
 	}
@@ -866,6 +1002,7 @@ func (r *headlessRunner) Interrupt() error {
 	acked := make(chan struct{})
 	if err == nil {
 		r.interrupts[id] = acked
+		r.denyPending("interrupted") // an approve call ends with its cancellation; a stdio request with this
 	}
 	r.mu.Unlock()
 	if err != nil {
@@ -936,6 +1073,7 @@ func (r *headlessRunner) Stop() error {
 		r.restartTimer = nil
 	}
 	r.wanted = false
+	r.forgetWorkers()
 	r.persist()
 	c := r.child
 	r.mu.Unlock()
@@ -958,17 +1096,37 @@ func (r *headlessRunner) Clear() error {
 	defer r.op.Unlock()
 	r.mu.Lock()
 	c := r.child
+	r.forgetWorkers() // the fresh session knows none of them
 	r.mu.Unlock()
 	if c != nil {
 		r.stopChild(c)
 	}
 	r.mu.Lock()
 	r.resetLocked()
-	r.sessionID, r.interrupted = "", false
+	r.sessionID, r.interrupted = "", false // saved now: a refused start leaves a fresh session to come
 	r.alerted = map[string]bool{}
 	r.model = hlModel{Status: r.model.Status, CompletionSeq: r.model.CompletionSeq}
+	r.persist()
 	r.mu.Unlock()
 	return r.start(false)
+}
+
+// forgetWorkers ends what it follows of its workers: the watches (and the saved ones) and the
+// queued wake-ups, with a new generation that every late callback of theirs finds changed, and
+// its child's bearer and epoch (that child's calls are refused, and register nothing);
+// r.mu held, the caller saves.
+func (r *headlessRunner) forgetWorkers() {
+	r.gen++
+	r.mcpBearer = "" // its child's calls are refused from now on
+	r.epoch++
+	for _, w := range r.watches {
+		w.cancel()
+	}
+	r.watches, r.saved, r.wakes = map[string]*hlWatch{}, nil, nil
+	if r.wakeTimer != nil {
+		r.wakeTimer.Stop()
+		r.wakeTimer = nil
+	}
 }
 
 // Shutdown ends the child for the bridge's exit (it resumes at the next bridge start). It
@@ -984,8 +1142,19 @@ func (r *headlessRunner) Shutdown() {
 		r.interrupted = true
 		r.persist()
 	}
+	for _, w := range r.watches { // their connections close; they stay saved, re-armed at the next start
+		w.cancel()
+	}
 	r.mu.Unlock()
 	if c != nil {
 		r.stopChild(c)
+	}
+}
+
+// denyPending ends the pending question unanswered; r.mu held.
+func (r *headlessRunner) denyPending(why string) {
+	if p := r.pending; p != nil {
+		r.pending = nil
+		p.reply <- map[string]any{"behavior": "deny", "message": why}
 	}
 }

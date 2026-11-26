@@ -133,12 +133,28 @@ All in `internal/bridge/` (one package):
   usage, warnings (unknown events, unreadable lines, the init check). Its state's `paneId` is
   `hl:<name>` while the child runs; the pane/agent routes and `watch_pane` refuse `hl:` (404 /
   nothing read), only the transcript route serves it (`resolvePaneTranscript`'s head). Saved in
-  `<state>/headless/<name>.json` (`{sessionId, wanted}`); `<state>/headless/<name>.mcp.json` (only the
+  `<state>/headless/<name>.json` (`{sessionId, wanted, rulesHash, watches}`); `<state>/headless/<name>.mcp.json` (only the
   bridge writes it, `--mcp-config` in the argv) is the marker that tells its own orphan from a user's
-  `claude --resume`. Warnings also go out once per session and kind as WS `orchestrator_alert` and
-  ntfy. `tools/fakeclaude` (built as `claude`; `YOICKS_CLAUDE_BIN` points the bridge at it) stands in
-  for Claude Code in tests and checks. Without a headless entry none of it runs: no child, no
-  `[headless` log line.
+  `claude --resume`. Warnings also go out once per session and kind as WS `orchestrator_alert`, ntfy
+  and herdr's `notification.show`; its working→done and →blocked go out as an agent's do, as
+  `StatusChange{PaneID: "hl:<name>"}` (WS `agent_status`, ntfy) and `notification.show` (never for
+  `wc-` names). `mcp.go`: the child's MCP server (go-sdk, streamable HTTP on its own `127.0.0.1:0`
+  listener; a bearer per child in its mcp.json, new at each start, revoked by Stop and Clear, so a
+  call from an old child reaches nothing; an admitted call binds to its child's epoch, new at each
+  start, Stop and Clear, and a watch or question it registers once that child is replaced is
+  refused; the workers' generation, which a restart keeps, is separate). Its tools
+  are the CLI's orchestrator commands as functions (`overview`, `agent_get`, `agent_read`, `agent_prompt`, `agent_start`,
+  `worktree_remove`), confined to the account its child runs under; `approve` is the child's
+  `--permission-prompt-tool`: AskUserQuestion becomes state `headless.pending` (answered by
+  `POST …/answer`; a `/send` meanwhile denies it with its text), held open with progress, anything
+  else is denied unasked. `agent_prompt` watches the worker (one goroutine, herdr's waits on a
+  closable no-deadline connection, `HerdrClient.Wait`) and wakes the orchestrator with `[yoicks]
+  <worker>: <from> → <to>` (names and status only, 3 s coalesced); the watches are saved and
+  re-armed after a restart. rules.md has `<!-- tui -->`/`<!-- headless -->` sections (`rulesFor`
+  keeps the mode's; the TUI output is pinned by `orchestrator_golden_test.go`). `tools/fakeclaude`
+  (built as `claude`; `YOICKS_CLAUDE_BIN` points the bridge at it) stands in for Claude Code in
+  tests and checks, MCP calls included. Without a headless entry none of it runs: no child, no MCP
+  listener, no `[headless` log line.
 - `herdr-plugin.toml` — actions/panes call `./bin/yoicks`. `[[build]]` (`scripts/plugin-build.sh release`) runs on
   `herdr plugin install`/`update` only — never for a linked plugin (not on link, relink, update,
   enable or a herdr restart; checked on 0.9.5): it downloads the GitHub release binary of the
@@ -254,6 +270,14 @@ Verified live against herdr 0.7.3 / protocol 16:
   `^[a-z][a-z0-9_-]{0,31}$` (also for `agent.rename`). `agent.send` is gone; use
   `agent.prompt { target, text }`, which answers `agent_not_ready` until `agent.get`
   shows `interactive_ready: true`.
+- **herdr's waits** (S0 row 15, 0.9.5): `agent.prompt { target, text, wait: { until } }` is
+  **edge** — it answers (`agent_prompted`) once the turn the prompt started ends in an `until`
+  status, or `agent_prompt_stalled` when no working/blocked came within 5 s (delivered, not taken
+  up yet). `agent.wait { target, until }` is **level** (`agent_info` at once when the status already
+  matches, exactly: `done` doesn't match `until: [idle]`). Neither has a deadline of its own, so
+  they go on a no-deadline connection (`HerdrClient.Wait`), and `until` always lists both idle
+  and done. `interactive_ready` is often null on a running agent: a prompt is tried, and only an
+  `agent_not_ready` answer is waited out.
 - herdr emits focus events ~10/s during desktop activity. Never let them
   trigger WS pushes; apply them to the model silently.
 - **`done` vs `idle` is the server's per-pane `seen` flag, and only focus sets it**
@@ -398,8 +422,14 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   logged: the output has the account's email), and no settings file it reads (the account's, the
   dir's `settings.json`/`settings.local.json`, the managed one) may set such an env or `apiKeyHelper`
   (auth status misses those); the child's first init must say `apiKeySource: none` and exactly its
-  tools, else it is stopped. The orphan scan kills only a claude carrying the bridge's marker (its
-  group only when it leads one); any other claude on that session is left alone (409).
+  tools, with the yoicks MCP server connected, else it is stopped. The orphan scan kills only a
+  claude carrying the bridge's marker (its group only when it leads one); any other claude on that
+  session is left alone (409).
+- The headless MCP listener is loopback-only (`127.0.0.1:0`, never the configured bind), opened only
+  with a headless entry. Each request needs its orchestrator's bearer (compared with
+  `subtle.ConstantTimeCompare`; anything else is a 401), written only into its 0600 mcp.json; go-sdk
+  also refuses a non-localhost Host. Its tools reach only that orchestrator's Claude account, as the
+  CLI's do; no shell, and every other permission is denied without asking.
 - Starting agents is gated to the `launch_profiles` allowlist: `POST /api/agents` takes a profile
   *name* → fixed argv, never a caller-supplied command/argv. (`cwd` is passed through and is not a
   new privilege — the bearer token already grants full pane input ≈ a shell — but choosing the
@@ -415,6 +445,10 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   the bridge + CLI are driven through `testdata/wire` (`tools/fakeherdr`, a fake herdr socket).
   Both were first recorded from the TypeScript bridge the Go one was ported from; `record-wire`
   re-records the wire ones from the current build (only for an intended change; review the diff).
+- Headless orchestrators (`headless_test.go`, `mcp_test.go`) run on `tools/fakeclaude` (stream-json,
+  scripts by message text, MCP calls through go-sdk's client as Claude Code makes them) and
+  fakeherdr's World, which answers the agent calls (`agent.get/read/prompt/wait`, a worker's script
+  via `OnPrompt`, `StallAfter`) and records `notification.show`; never a real Claude.
 - Live verification is expected before claiming completion: healthz, an
   `/api/state` sanity check, and (for input paths) a scratch-tab round trip
   (`herdr tab create` → POST input → read back → close the tab).
@@ -457,8 +491,11 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
 - TS sources use explicit `.ts` relative-import extensions (`node` runs `tools/vectors/*.ts`
   on them directly; Vite bundles them). No raw control bytes in
   source — write ESC as the literal six characters `\u001b` in string escapes.
-- Dependencies: the binary's only one is `github.com/coder/websocket`; don't add more without a
-  strong reason (QR uses the system `qrencode`, falling back to a plain URL). Node and the npm
+- Dependencies: the binary's are `github.com/coder/websocket` and, the one exception made,
+  `github.com/modelcontextprotocol/go-sdk` (v1.8.0: the stripped binary +2 MB, 8 indirect modules; S0 measured
+  them) for the headless orchestrator's MCP server: Claude Code's MCP client changes (`server/discover`,
+  protocol versions), and the official SDK follows it where a hand-written server would have to. Don't
+  add more without a strong reason (QR uses the system `qrencode`, falling back to a plain URL). Node and the npm
   dependencies are development-only: React is bundled into the web UI; the rest (TypeScript,
   Vite, Vitest, happy-dom) is for its build and tests.
 - herdr's API schema (`herdr api schema --json`, protocol 22 = herdr 0.9.5) is saved in

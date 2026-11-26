@@ -795,7 +795,7 @@ func (c cli) agentStart(args []string) int {
 	}
 	// agent.start waits for the agent to come up, and worktree.create runs git: allow time
 	profiles := func() map[string]LaunchProfile { return parseLaunchProfiles(readConfig()["launch_profiles"]) }
-	started, err := startOwnAgent(rpcWithin(60*time.Second), profiles, ownAccount(), name, opt)
+	_, started, err := startOwnAgent(rpcWithin(60*time.Second), profiles, ownAccount(), name, opt)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -806,9 +806,9 @@ func (c cli) agentStart(args []string) int {
 
 // startOwnAgent starts agent name from launch profile opt["profile"] (default claude) in
 // dir opt["cwd"], or in a new worktree opt["worktree"] (from opt["base"] when set) of the
-// repo there, when that place is under account own (see agentStart). It says where it started.
+// repo there, when that place is under account own (see agentStart): its pane, and where it started.
 // profiles is read only once the checks pass (the CLI reads config.json for it).
-func startOwnAgent(rpc Rpc, profiles func() map[string]LaunchProfile, own, name string, opt map[string]string) (string, error) {
+func startOwnAgent(rpc Rpc, profiles func() map[string]LaunchProfile, own, name string, opt map[string]string) (paneID, started string, err error) {
 	dir, _ := filepath.Abs(opt["cwd"])
 	profile, ok := opt["profile"]
 	if !ok {
@@ -825,7 +825,7 @@ func startOwnAgent(rpc Rpc, profiles func() map[string]LaunchProfile, own, name 
 		}
 		placed, err := placeWorktreeNextToRepo(spec, nil, nil)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		wt := worktreeInput(placed)
 		in.Worktree = &wt
@@ -845,7 +845,7 @@ func startOwnAgent(rpc Rpc, profiles func() map[string]LaunchProfile, own, name 
 			if in.Worktree != nil {
 				why = ", or can't be read"
 			}
-			return "", fmt.Errorf("refused: %s is not under this Claude account (its direnv CLAUDE_CONFIG_DIR differs%s)", p, why)
+			return "", "", fmt.Errorf("refused: %s is not under this Claude account (its direnv CLAUDE_CONFIG_DIR differs%s)", p, why)
 		}
 	}
 
@@ -853,7 +853,7 @@ func startOwnAgent(rpc Rpc, profiles func() map[string]LaunchProfile, own, name 
 		// the workspace already at this dir (a worktree checkout, or any pane launched there)
 		raw, err := rpc("session.snapshot", nil)
 		if err != nil {
-			return "", errors.New("start failed: " + err.Error())
+			return "", "", errors.New("start failed: " + err.Error())
 		}
 		var snap struct {
 			Snapshot RawSnapshot `json:"snapshot"`
@@ -893,9 +893,9 @@ func startOwnAgent(rpc Rpc, profiles func() map[string]LaunchProfile, own, name 
 		},
 	})
 	if err != nil {
-		return "", errors.New("start failed: " + err.Error())
+		return "", "", errors.New("start failed: " + err.Error())
 	}
-	return fmt.Sprintf("started %s (pane %s) in %s", out.Name, out.PaneID, where), nil
+	return out.PaneID, fmt.Sprintf("started %s (pane %s) in %s", out.Name, out.PaneID, where), nil
 }
 
 // worktree removes a finished worker's worktree: the checkout (herdr's

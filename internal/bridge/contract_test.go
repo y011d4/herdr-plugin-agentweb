@@ -81,8 +81,10 @@ func withHeadless(state ClientState) ClientState {
 	def := OrchestratorDef{Name: "pilot", Label: "Pilot", Dir: "/home/u/.local/share/herdr-yoicks/orchestrators/pilot", Managed: true, Mode: "headless"}
 	v := findOrchestrators(state.State, []OrchestratorDef{def}, nil)[0]
 	v.PaneID, v.Agents = new("hl:pilot"), []string{"p1", "p3", "p4"}
-	v.Headless = &HeadlessView{Status: "working", CompletionSeq: 3, Usage: &HeadlessUsage{
-		FiveHour: &UsageWindow{Utilization: 0.35, ResetsAt: 1795665000000}, SevenDay: nil, ContextPct: new(12.5), At: now},
+	v.Headless = &HeadlessView{Status: "blocked", CompletionSeq: 3, Pending: &HeadlessPending{ID: "1a2b3c4d", Questions: []AskQuestion{{
+		Question: "Which fruit?", Header: "Fruit", Options: []AskOption{{Label: "apple", Description: "red"}, {Label: "cherry"}}}}},
+		Usage: &HeadlessUsage{
+			FiveHour: &UsageWindow{Utilization: 0.35, ResetsAt: 1795665000000}, SevenDay: nil, ContextPct: new(12.5), At: now},
 		Warnings: []HeadlessWarning{{Kind: "silent", Message: "no event for 3m0s while working", Since: now, Actions: []string{"interrupt", "clear"}},
 			{Kind: "unknown_event", Message: "Claude Code sent an event yoicks doesn't know (mystery)", Since: now, Actions: []string{}}}}
 	state.Orchestrators = append(slices.Clone(state.Orchestrators), v)

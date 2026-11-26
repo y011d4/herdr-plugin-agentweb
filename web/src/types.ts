@@ -4,7 +4,7 @@
  * internal/bridge/contract_test.go and `npm run check:contract` keep the two in step.
  */
 
-import type { TimelineItem } from './transcript.ts';
+import type { AskQuestion, TimelineItem } from './transcript.ts';
 
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown';
 
@@ -97,8 +97,8 @@ export interface HeadlessView {
   status: 'stopped' | 'idle' | 'working' | 'blocked' | 'done' | 'error';
   /** counts its completed turns (an interrupted one isn't) */
   completionSeq: number;
-  /** a question waiting for the user: always null for now */
-  pending: null;
+  /** the question waiting for the user (AskUserQuestion): answered with POST /api/orchestrators/:name/answer and its id */
+  pending: { id: string; questions: AskQuestion[] } | null;
   usage: HeadlessUsage | null;
   /** what went wrong, kept until the next start or clear */
   warnings: HeadlessWarning[];

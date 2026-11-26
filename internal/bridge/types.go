@@ -158,10 +158,15 @@ type OrchestratorView struct {
 type HeadlessView struct {
 	Status        string `json:"status"` // stopped | idle | working | blocked | done | error
 	CompletionSeq int64  `json:"completionSeq"`
-	// a question waiting for the user: always null until the permission tool exists
-	Pending  *struct{}         `json:"pending"`
+	// the question waiting for the user (AskUserQuestion): answered with /answer and its id
+	Pending  *HeadlessPending  `json:"pending"`
 	Usage    *HeadlessUsage    `json:"usage"`
 	Warnings []HeadlessWarning `json:"warnings"`
+}
+
+type HeadlessPending struct {
+	ID        string        `json:"id"`
+	Questions []AskQuestion `json:"questions"`
 }
 
 // HeadlessUsage is what Claude Code last said of the account's rate limits and the
