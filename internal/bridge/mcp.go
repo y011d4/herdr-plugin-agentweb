@@ -591,14 +591,27 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 	}
 	for ctx.Err() == nil {
 		if w.Startup {
-			if _, err := r.waitRPC(ctx, "agent.wait", map[string]any{"target": w.Pane, "until": []string{"idle", "done"}}); err != nil {
+			raw, err := r.waitRPC(ctx, "agent.wait", map[string]any{"target": w.Pane, "until": untilMoved})
+			if err != nil {
 				if !r.retryWatch(ctx, w, err) {
 					return
 				}
 				continue
 			}
-			r.tell(w, w.Name+": ready, task not sent", w.Status, w.Seq, true)
-			return
+			if status, _, _ := agentState(raw); status != "working" {
+				r.tell(w, w.Name+": ready, task not sent", w.Status, w.Seq, true)
+				return
+			}
+			// answered, it works on (a question in the middle of a task of its own): followed from
+			// here as any watch, so its next question or its end wakes the orchestrator too
+			r.mu.Lock()
+			w.Startup = false
+			r.mu.Unlock()
+			until = untilMoved
+			if !r.settle(w, raw, &until) {
+				return
+			}
+			continue
 		}
 		raw, err := r.waitRPC(ctx, "agent.wait", map[string]any{"target": w.Pane, "until": until})
 		if err != nil {
