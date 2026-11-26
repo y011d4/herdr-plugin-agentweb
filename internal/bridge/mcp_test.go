@@ -467,3 +467,79 @@ func TestHeadlessPromptNeedsText(t *testing.T) {
 		t.Errorf("%d watches", n)
 	}
 }
+
+// A wake-up the child can't take (stopped, or the bridge restarting, before the coalesced
+// write) waits, saved, for its next start.
+func TestHeadlessWakeWaitsForTheChild(t *testing.T) {
+	script := func(w *fakeherdr.World, pane string) {
+		w.Set(pane, "working")
+		time.Sleep(300 * time.Millisecond)
+		w.Set(pane, "done")
+	}
+	t.Run("stopped, then started", func(t *testing.T) {
+		b := startHeadless(t, t.TempDir(), nil, nil)
+		worker(t, b, "idle", script)
+		b.start(t)
+		b.waitStatus(t, "idle")
+		b.prompt(t)
+		time.Sleep(time.Second) // the worker is done: its wake-up queued, not written yet
+		b.post(t, "stop", "")
+		time.Sleep(wakeCoalesce + time.Second)
+		if got := b.wakes(t); len(got) != 0 {
+			t.Fatalf("written to a stopped child: %q", got)
+		}
+		b.start(t)
+		b.waitWakes(t, "[yoicks] w1: working → done")
+	})
+	t.Run("across a bridge restart", func(t *testing.T) {
+		state := t.TempDir()
+		b := startHeadless(t, state, nil, nil)
+		worker(t, b, "idle", script)
+		b.start(t)
+		b.waitStatus(t, "idle")
+		b.prompt(t)
+		time.Sleep(time.Second)
+		b.srv.shutdownHeadless()
+		time.Sleep(wakeCoalesce + time.Second)
+		if saved, _ := os.ReadFile(headlessPath(state, "h1", ".json")); !strings.Contains(string(saved), `"wakes":["[yoicks] w1: working → done"]`) {
+			t.Fatalf("saved %s", saved)
+		}
+		b2 := startHeadless(t, state, nil, nil)
+		b2.srv.startHeadless()
+		b2.waitWakes(t, "[yoicks] w1: working → done")
+		if saved, _ := os.ReadFile(headlessPath(state, "h1", ".json")); strings.Contains(string(saved), "wakes") {
+			t.Errorf("still saved after the write: %s", saved)
+		}
+	})
+}
+
+// The saved watches stay saved until the child has started and each is re-armed: a start
+// refused on the way keeps them.
+func TestHeadlessSavedWatchesOutliveARefusedStart(t *testing.T) {
+	fakeClaudeEnv(t)
+	state := t.TempDir()
+	os.MkdirAll(filepath.Join(state, "headless"), 0o700)
+	saved := `{"sessionId":"` + newUUID() + `","wanted":true,"watches":[{"pane":"w1p","name":"w1","cwd":"","status":"working","seq":7,"startup":false}]}`
+	os.WriteFile(headlessPath(state, "h1", ".json"), []byte(saved), 0o600)
+	t.Setenv("FAKECLAUDE_AUTH", "api_key")
+	b := startHeadless(t, state, nil, nil)
+	if status, _ := b.post(t, "start", ""); status != 409 {
+		t.Fatalf("start: %d", status)
+	}
+	h0 := b.srv.headless["h1"] // anything saved meanwhile (a spawn failing, the bridge ending) keeps them
+	h0.mu.Lock()
+	h0.persist()
+	h0.mu.Unlock()
+	if got, _ := os.ReadFile(headlessPath(state, "h1", ".json")); !strings.Contains(string(got), `"pane":"w1p"`) {
+		t.Fatalf("lost: %s", got)
+	}
+	t.Setenv("FAKECLAUDE_AUTH", "claude.ai/max")
+	b2 := startHeadless(t, state, nil, nil)
+	b2.world.Add(fakeherdr.Pane{ID: "w1p", Tab: "t9", Workspace: "w1", Agent: "claude", Status: "working", Name: "w1"})
+	b2.start(t)
+	h := b2.srv.headless["h1"]
+	waitUntil(t, 5*time.Second, "re-armed", func() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.watches["w1p"] != nil && h.saved == nil })
+	if got, _ := os.ReadFile(headlessPath(state, "h1", ".json")); !strings.Contains(string(got), `"pane":"w1p"`) {
+		t.Errorf("not saved once running: %s", got)
+	}
+}

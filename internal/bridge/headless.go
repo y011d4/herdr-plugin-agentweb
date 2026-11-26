@@ -302,6 +302,7 @@ type headlessState struct {
 	Interrupted bool      `json:"interrupted,omitempty"`
 	RulesHash   string    `json:"rulesHash,omitempty"`
 	Watches     []hlWatch `json:"watches,omitempty"`
+	Wakes       []string  `json:"wakes,omitempty"` // wake-ups not written to it yet
 }
 
 // newHeadlessRunner is def's runner; the server fills in its herdr calls, profiles and
@@ -317,7 +318,7 @@ func newHeadlessRunner(def OrchestratorDef, stateDir, rules string) *headlessRun
 	r.model.Status = "stopped"
 	var saved headlessState
 	if b, err := os.ReadFile(headlessPath(stateDir, def.Name, ".json")); err == nil && json.Unmarshal(b, &saved) == nil && sessionIDRe.MatchString(saved.SessionID) {
-		r.sessionID, r.wanted, r.interrupted, r.rulesHash, r.saved = saved.SessionID, saved.Wanted, saved.Interrupted, saved.RulesHash, saved.Watches
+		r.sessionID, r.wanted, r.interrupted, r.rulesHash, r.saved, r.wakes = saved.SessionID, saved.Wanted, saved.Interrupted, saved.RulesHash, saved.Watches, saved.Wakes
 	}
 	if kind, msg := r.refusedEnv(); msg != "" {
 		r.model.Status = "error"
@@ -385,8 +386,13 @@ func (r *headlessRunner) persist() {
 	for _, w := range r.watches {
 		watches = append(watches, *w)
 	}
+	for _, w := range r.saved { // not re-armed yet
+		if r.watches[w.Pane] == nil {
+			watches = append(watches, w)
+		}
+	}
 	slices.SortFunc(watches, func(a, b hlWatch) int { return strings.Compare(a.Pane, b.Pane) })
-	b, _ := json.Marshal(headlessState{r.sessionID, r.wanted, r.interrupted, r.rulesHash, watches})
+	b, _ := json.Marshal(headlessState{r.sessionID, r.wanted, r.interrupted, r.rulesHash, watches, r.wakes})
 	if os.MkdirAll(filepath.Join(r.stateDir, "headless"), 0o700) == nil {
 		writeFile0600(headlessPath(r.stateDir, r.def.Name, ".json"), b)
 	}
@@ -549,15 +555,16 @@ func (r *headlessRunner) start(resume bool) error {
 	r.wanted = true
 	notice := r.interrupted
 	r.interrupted = false
-	saved := r.saved
-	r.saved = nil
 	r.persist()
 	r.mu.Unlock()
 	alert()
 	if err := r.spawn(headlessArgv(r.session(), resume, mcpConfig, r.tools), env); err != nil {
 		return r.fail("start", &LifecycleError{Status: 500, Code: "claude_failed", Message: "could not start claude: " + err.Error()})
 	}
-	r.rearm(saved)
+	r.rearm()
+	r.mu.Lock()
+	r.scheduleWakes() // the ones it missed while down
+	r.mu.Unlock()
 	if notice {
 		r.write(restartedNotice)
 	}
@@ -1050,6 +1057,10 @@ func (r *headlessRunner) Stop() error {
 	c := r.child
 	r.mu.Unlock()
 	r.unwatch(func(*hlWatch) bool { return true })
+	r.mu.Lock()
+	r.saved = nil // (its wake-ups still wait for its next start)
+	r.persist()
+	r.mu.Unlock()
 	if c != nil {
 		r.stopChild(c)
 	}
@@ -1071,6 +1082,9 @@ func (r *headlessRunner) Clear() error {
 	c := r.child
 	r.mu.Unlock()
 	r.unwatch(func(*hlWatch) bool { return true }) // the fresh session knows none of them
+	r.mu.Lock()
+	r.saved, r.wakes = nil, nil
+	r.mu.Unlock()
 	if c != nil {
 		r.stopChild(c)
 	}
