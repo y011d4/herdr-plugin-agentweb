@@ -852,6 +852,23 @@ func TestHeadlessQuestionFromAReplacedChild(t *testing.T) {
 	b.waitFor(t, "the turn's end", func(v OrchestratorView) bool { return v.Headless.Status == "done" && v.Headless.Pending == nil })
 }
 
+// A child still talking after a Stop or Clear began the next epoch (it hasn't exited yet) asks
+// with its own epoch: its stdio question is denied and never becomes the pending one.
+func TestHeadlessStdioQuestionFromAChildBeingReplaced(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	h := b.srv.headless["h1"]
+	b.start(t)
+	b.waitStatus(t, "idle")
+	h.mu.Lock()
+	h.epoch++ // as a Stop or Clear does before the old child has exited
+	h.mu.Unlock()
+	b.send(t, "askstdio") // its question comes as a can_use_tool on stdout
+	time.Sleep(1500 * time.Millisecond)
+	if v := b.view(t); v.Headless.Pending != nil || v.Headless.Status == "blocked" {
+		t.Fatalf("a question from the child being replaced became pending: %+v", v.Headless)
+	}
+}
+
 // needsAccounts skips a test whose worker must pass the account check: a pane's Claude account
 // is read from /proc (Linux only; macOS's needs sysctl, a CLAUDE.md follow-up).
 func needsAccounts(t *testing.T) {
