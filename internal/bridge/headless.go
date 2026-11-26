@@ -800,7 +800,7 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 	for _, res := range step.Results {
 		// an error for a call the bridge never served failed on the way (the MCP session, its
 		// bearer, the transport), whatever Claude Code's words for it
-		if res.Error != "" && !r.served[res.ID] {
+		if res.IsError && !r.served[res.ID] {
 			alerts = append(alerts, r.warn("mcp_call", res.Tool+" failed before reaching the bridge ("+res.Error+"); Clear to reconnect"))
 		}
 		delete(r.served, res.ID)
