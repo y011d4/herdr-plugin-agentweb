@@ -173,6 +173,22 @@ describe('renderItem — assistant + user turns use the markdown renderer', () =
     assert.match(h, /class="chat-bubble chat-md"/);
     assert.match(h, /<code>ls<\/code>/);
   });
+
+  it("splits the bridge's [yoicks] lines at either end of a user turn from the user's own words", () => {
+    const user = (text: string): string => renderItem({ kind: 'user', text, sidechain: false, ts: null });
+    const shown = (h: string): string[] => [...h.matchAll(/class="chat-item (chat-notice|chat-user)">(.*?)<\/div>/g)]
+      .map((m) => `${m[1]}: ${m[2].replace(/<[^>]+>/g, '')}`);
+    assert.deepEqual(shown(user('[yoicks] w-a: working → done')), ['chat-notice: [yoicks] w-a: working → done']);
+    assert.deepEqual(shown(user('[yoicks] w-a: working → done\n[yoicks] w-b: working → blocked')),
+      ['chat-notice: [yoicks] w-a: working → done', 'chat-notice: [yoicks] w-b: working → blocked']);
+    // one turn as Claude Code stores it (one string): the notice, then the user's own question
+    assert.deepEqual(shown(user('[yoicks] w-a: working → done\n\nこんな感じの表示が出ますが')),
+      ['chat-notice: [yoicks] w-a: working → done', 'chat-user: こんな感じの表示が出ますが']);
+    assert.deepEqual(shown(user('見て\n\n[yoicks] w-a: working → done')), ['chat-user: 見て', 'chat-notice: [yoicks] w-a: working → done']);
+    // only the ends: one in the middle, or not at a line's start, stays the user's
+    assert.deepEqual(shown(user('a\n[yoicks] x\nb')), ['chat-user: a[yoicks] xb']);
+    assert.deepEqual(shown(user('see [yoicks] x')), ['chat-user: see [yoicks] x']);
+  });
 });
 
 describe('conversationItems / latestActivity (home chat)', () => {
