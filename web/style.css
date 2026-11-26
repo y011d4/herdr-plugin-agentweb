@@ -1395,3 +1395,36 @@ a {
   overflow-wrap: anywhere;
   text-align: center;
 }
+
+/* ── Wide screens (a PC): 1024px and up ──
+   Nothing here applies below 1024px, so the phone layout is unchanged. The scroll containers stay
+   full width, so the wheel scrolls anywhere over them and their scrollbar sits at the screen's edge;
+   their padding makes the readable column. */
+@media (min-width: 1024px) {
+  :root {
+    color-scheme: dark; /* dark scrollbars and form controls */
+    /* resolved where it's used: 100% is that element's containing block */
+    --wide-gutter: max(16px, calc((100% - 880px) / 2));
+  }
+  /* the chat and everything around it (Home's bars, the answer panel, the composer, the keys) */
+  .chat-log, .chat-prompt, .home-status, .home-activity, .input-images, .input-row, .quickkey-row {
+    padding-left: var(--wide-gutter);
+    padding-right: var(--wide-gutter);
+  }
+  /* the chat's scrollbar takes its room off both edges: its column stays centered under the
+     composer's, and doesn't shift once the chat overflows */
+  .chat-log { scrollbar-gutter: stable both-edges; }
+  /* the agents list: cards side by side across the screen */
+  #screen-agents { max-width: none; margin: 0; }
+  #screen-agents .agent-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 10px;
+  }
+  #screen-agents .agent-card { margin-bottom: 0; }
+  .agent-card:hover { background: var(--color-surface-2); }
+  #screen-settings {
+    padding-left: max(16px, calc((100% - 760px) / 2));
+    padding-right: max(16px, calc((100% - 760px) / 2));
+  }
+}
