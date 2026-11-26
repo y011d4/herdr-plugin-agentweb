@@ -92,14 +92,15 @@ func (h *mcpHost) serverFor(req *http.Request) *mcp.Server {
 	return found
 }
 
-// caller is whether header carries its current child's bearer, and the workers' generation
-// then (a tool binds to it at its call: a Stop or Clear since makes it a call from before).
-func (r *headlessRunner) caller(header http.Header) (gen int, ok bool) {
+// caller is whether header carries its current child's bearer, and that child's epoch (a
+// call binds to it on arrival: the child replaced since, a watch or question of the call's
+// registers nothing).
+func (r *headlessRunner) caller(header http.Header) (epoch int, ok bool) {
 	got, has := strings.CutPrefix(header.Get("Authorization"), "Bearer ")
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ok = has && r.mcpBearer != "" && subtle.ConstantTimeCompare([]byte(got), []byte(r.mcpBearer)) == 1
-	return r.gen, ok
+	return r.epoch, ok
 }
 
 // newBearer is a fresh bearer.
@@ -167,29 +168,29 @@ func (r *headlessRunner) account() string {
 	return accountForConfigDir(r.def.Env["CLAUDE_CONFIG_DIR"], "")
 }
 
-type genKey struct{}
+type epochKey struct{}
 
 // boundCalls binds each tool call to its caller: one from a child that is no longer the
-// current one (a Stop or Clear revoked its bearer) is refused before its tool runs; the
-// others carry the workers' generation of their arrival (genOf), which a watch they start
-// must still match.
+// current one (a start, Stop or Clear revoked its bearer) is refused before its tool runs;
+// the others carry their child's epoch (epochOf), which what they register must still
+// match (watch, ask).
 func (r *headlessRunner) boundCalls(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 		if method != "tools/call" {
 			return next(ctx, method, req)
 		}
-		gen, ok := 0, false
+		epoch, ok := 0, false
 		if extra := req.GetExtra(); extra != nil {
-			gen, ok = r.caller(extra.Header)
+			epoch, ok = r.caller(extra.Header)
 		}
 		if !ok {
-			return textResult("this orchestrator's session has ended (stopped or cleared)", true), nil
+			return textResult("this orchestrator's session has ended (restarted, stopped or cleared)", true), nil
 		}
-		return next(context.WithValue(ctx, genKey{}, gen), method, req)
+		return next(context.WithValue(ctx, epochKey{}, epoch), method, req)
 	}
 }
 
-func genOf(ctx context.Context) int { gen, _ := ctx.Value(genKey{}).(int); return gen }
+func epochOf(ctx context.Context) int { epoch, _ := ctx.Value(epochKey{}).(int); return epoch }
 
 func (r *headlessRunner) mcpServer() *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "yoicks", Version: Version}, nil)
@@ -246,13 +247,13 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in promptIn) (*mcp.CallToolResult, any, error) {
 			r.log("tool agent_prompt %s", in.Name)
 			if strings.TrimSpace(in.Text) == "" {
-				return r.prompt("", in.Name, in.Text, genOf(ctx)), nil, nil // its error, before any herdr call
+				return r.prompt("", in.Name, in.Text, epochOf(ctx)), nil, nil // its error, before any herdr call
 			}
 			pane, err := ownAgentPane(r.rpc, in.Name, r.account())
 			if err != nil {
 				return errResult(err)
 			}
-			return r.prompt(pane, in.Name, in.Text, genOf(ctx)), nil, nil
+			return r.prompt(pane, in.Name, in.Text, epochOf(ctx)), nil, nil
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "agent_start", Description: "Start a worker from a launch profile in a directory of your account (a new tab where a workspace is already at it, else a new workspace), or in a new worktree of the repository there; optionally send it its first task."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in startIn) (*mcp.CallToolResult, any, error) {
@@ -273,7 +274,7 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 			if strings.TrimSpace(in.Task) == "" {
 				return textResult(started, false), nil, nil
 			}
-			res := r.prompt(pane, in.Name, in.Task, genOf(ctx))
+			res := r.prompt(pane, in.Name, in.Task, epochOf(ctx))
 			res.Content[0].(*mcp.TextContent).Text = started + "; " + res.Content[0].(*mcp.TextContent).Text
 			return res, nil, nil
 		})
@@ -308,8 +309,11 @@ func (r *headlessRunner) approve(ctx context.Context, req *mcp.CallToolRequest, 
 		r.log("approve %s: denied", in.ToolName)
 		return textResult(`{"behavior":"deny","message":"yoicks allows no tool but its own"}`, false), nil, nil
 	}
+	p := r.ask(in.Input, epochOf(ctx))
+	if p == nil {
+		return textResult(`{"behavior":"deny","message":"this orchestrator's session has ended"}`, false), nil, nil
+	}
 	r.asked(in.ToolUseID)
-	p := r.ask(in.Input)
 	defer r.dropQuestion(p)
 	tick := time.NewTicker(approveProgress)
 	defer tick.Stop()
@@ -329,11 +333,16 @@ func (r *headlessRunner) approve(ctx context.Context, req *mcp.CallToolRequest, 
 }
 
 // ask makes input (AskUserQuestion's) the pending question: it is blocked until answered.
-func (r *headlessRunner) ask(input map[string]any) *hlPending {
+// nil, the pending one untouched: the asking child (epoch) has been replaced since.
+func (r *headlessRunner) ask(input map[string]any, epoch int) *hlPending {
 	b, _ := json.Marshal(input)
 	o, _ := jsonParse(string(b))
 	p := &hlPending{id: newUUID()[:8], questions: extractAsk(o), input: input, reply: make(chan map[string]any, 1)}
 	r.mu.Lock()
+	if r.epoch != epoch {
+		r.mu.Unlock()
+		return nil
+	}
 	if old := r.pending; old != nil {
 		old.reply <- map[string]any{"behavior": "deny", "message": "another question came"}
 	}
@@ -447,9 +456,9 @@ func agentState(raw json.RawMessage) (status string, seq int64, cwd string) {
 }
 
 // prompt sends a worker text and watches it: delivered (the result says so), not
-// delivered (herdr's answer), or not sent because it waits on a startup question. gen is the
-// call's: after a Stop or Clear since, no watch is made.
-func (r *headlessRunner) prompt(pane, name, text string, gen int) *mcp.CallToolResult {
+// delivered (herdr's answer), or not sent because it waits on a startup question. epoch is
+// the calling child's: that child replaced since, no watch is made.
+func (r *headlessRunner) prompt(pane, name, text string, epoch int) *mcp.CallToolResult {
 	if strings.TrimSpace(text) == "" { // nothing to send: no watch to wait on
 		return textResult("text must be non-empty", true)
 	}
@@ -462,8 +471,8 @@ func (r *headlessRunner) prompt(pane, name, text string, gen int) *mcp.CallToolR
 		status, seq, cwd := agentState(raw)
 		w := &hlWatch{Pane: pane, Name: name, Cwd: cwd, Status: status, Seq: seq}
 		first := make(chan error, 1)
-		if !r.watch(w, text, first, gen) {
-			return textResult("not delivered to "+name+": the orchestrator was stopped or cleared", true)
+		if !r.watch(w, text, first, epoch) {
+			return textResult("not delivered to "+name+": the orchestrator was restarted, stopped or cleared", true)
 		}
 		err = <-first
 		if err == nil {
@@ -475,7 +484,7 @@ func (r *headlessRunner) prompt(pane, name, text string, gen int) *mcp.CallToolR
 		}
 		if raw, err := r.rpc("agent.get", map[string]any{"target": pane}); err == nil {
 			if status, seq, cwd := agentState(raw); status == "blocked" {
-				r.watch(&hlWatch{Pane: pane, Name: name, Cwd: cwd, Status: status, Seq: seq, Startup: true}, "", nil, gen)
+				r.watch(&hlWatch{Pane: pane, Name: name, Cwd: cwd, Status: status, Seq: seq, Startup: true}, "", nil, epoch)
 				return textResult("task not sent: "+name+" waits on a startup question (folder trust?) the user answers in its pane; you are woken when it is ready", false)
 			}
 		}
@@ -485,12 +494,12 @@ func (r *headlessRunner) prompt(pane, name, text string, gen int) *mcp.CallToolR
 
 // watch starts w's goroutine (text: first send it, reporting delivery on first) and keeps
 // it among the watches (one per pane: a newer one replaces it); false (and nothing started)
-// when its orchestrator was stopped or cleared since gen.
-func (r *headlessRunner) watch(w *hlWatch, text string, first chan<- error, gen int) bool {
+// when the child epoch isn't the current one (a restart, Stop or Clear since).
+func (r *headlessRunner) watch(w *hlWatch, text string, first chan<- error, epoch int) bool {
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
 	r.mu.Lock()
-	if r.gen != gen {
+	if r.epoch != epoch { // a call from a child since replaced (or a Stop or Clear meanwhile)
 		r.mu.Unlock()
 		cancel()
 		return false
@@ -707,9 +716,9 @@ func (r *headlessRunner) scheduleWakes() {
 // Each leaves the saved ones as it becomes a running one (watch), in the same save.
 func (r *headlessRunner) rearm() {
 	r.mu.Lock()
-	saved, gen := slices.Clone(r.saved), r.gen // (r.op held: no Stop or Clear meanwhile)
+	saved, epoch := slices.Clone(r.saved), r.epoch // (r.op held: no Stop or Clear meanwhile)
 	r.mu.Unlock()
 	for i := range saved {
-		r.watch(&saved[i], "", nil, gen)
+		r.watch(&saved[i], "", nil, epoch)
 	}
 }
