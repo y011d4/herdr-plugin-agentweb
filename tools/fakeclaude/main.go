@@ -1,0 +1,291 @@
+// Command fakeclaude stands in for Claude Code in the headless orchestrator's tests and
+// checks (YOICKS_CLAUDE_BIN), so no real Claude ever runs there. Build it as `claude`: the
+// bridge's orphan scan only looks at processes of that name.
+//
+//	claude --version                 FAKECLAUDE_VERSION (default 2.1.322)
+//	claude auth status --json        FAKECLAUDE_AUTH = <authMethod>/<subscriptionType> (default claude.ai/max)
+//	claude -p … stream-json …        a session over stdin/stdout, as Claude Code 2.1.322 does it
+//
+// In -p mode each turn starts with system/init (tools from --tools, apiKeySource from
+// FAKECLAUDE_APIKEYSOURCE, default none) and writes the transcript to
+// $CLAUDE_CONFIG_DIR (else ~/.claude)/projects/<slug of the cwd>/<session>.jsonl. A message
+// is a script by its text:
+//
+//	slow N    work N s, a tool_progress heartbeat each second
+//	hang N    work N s without a single event
+//	crash     exit 1 mid-turn
+//	garbage   a line that isn't JSON, then the reply
+//	unknown   an event of a type Claude Code doesn't have, then the reply
+//	ask       an AskUserQuestion tool_use and a can_use_tool control_request, then wait for its answer
+//	other     the reply "echo: <text>"
+//
+// A control_request interrupt is answered and ends the turn (result error_during_execution,
+// terminal_reason aborted_*). Stdin's end while idle exits 0; while working, after the turn.
+// FAKECLAUDE_LOG, when set, gets a JSON line for the argv (and env keys) and each stdin line.
+package main
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+func main() {
+	args := os.Args[1:]
+	logLine(map[string]any{"pid": os.Getpid(), "argv": args, "env": envKeys()})
+	switch {
+	case slices.Equal(args, []string{"--version"}):
+		fmt.Println(env("FAKECLAUDE_VERSION", "2.1.322") + " (Claude Code)")
+	case len(args) >= 2 && args[0] == "auth" && args[1] == "status":
+		method, sub, _ := strings.Cut(env("FAKECLAUDE_AUTH", "claude.ai/max"), "/")
+		out, _ := json.Marshal(map[string]any{"loggedIn": true, "authMethod": method, "apiProvider": "firstParty",
+			"email": "someone@example.com", "subscriptionType": sub})
+		fmt.Println(string(out))
+	case slices.Contains(args, "-p"):
+		session(args)
+	default:
+		fmt.Fprintln(os.Stderr, "fakeclaude: unsupported arguments")
+		os.Exit(2)
+	}
+}
+
+func env(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
+}
+
+func envKeys() []string {
+	var keys []string
+	for _, kv := range os.Environ() {
+		k, _, _ := strings.Cut(kv, "=")
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+var logMu sync.Mutex
+
+func logLine(v map[string]any) {
+	path := os.Getenv("FAKECLAUDE_LOG")
+	if path == "" {
+		return
+	}
+	logMu.Lock()
+	defer logMu.Unlock()
+	b, _ := json.Marshal(v)
+	if f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+		f.Write(append(b, '\n'))
+		f.Close()
+	}
+}
+
+func argAfter(args []string, flag string) string {
+	if i := slices.Index(args, flag); i >= 0 && i+1 < len(args) {
+		return args[i+1]
+	}
+	return ""
+}
+
+// ── a -p session ─────────────────────────────────────────────────────────────
+
+type fake struct {
+	id, cwd, transcript string
+	tools               []string
+
+	outMu sync.Mutex
+
+	mu      sync.Mutex
+	cancel  context.CancelFunc // the turn in progress
+	answers map[string]chan map[string]any
+}
+
+func session(args []string) {
+	f := &fake{id: firstNonEmpty(argAfter(args, "--session-id"), argAfter(args, "--resume")), answers: map[string]chan map[string]any{}}
+	if t := argAfter(args, "--tools"); t != "" {
+		f.tools = strings.Split(t, ",")
+	}
+	f.cwd, _ = os.Getwd()
+	root := os.Getenv("CLAUDE_CONFIG_DIR")
+	if root == "" {
+		root = filepath.Join(os.Getenv("HOME"), ".claude")
+	}
+	slug := strings.Map(func(r rune) rune {
+		if r == '/' || r == '.' || r == '_' {
+			return '-'
+		}
+		return r
+	}, f.cwd)
+	f.transcript = filepath.Join(root, "projects", slug, f.id+".jsonl")
+
+	msgs := make(chan string, 64)
+	go func() {
+		sc := bufio.NewScanner(os.Stdin)
+		sc.Buffer(make([]byte, 1<<20), 16<<20)
+		for sc.Scan() {
+			logLine(map[string]any{"stdin": sc.Text()})
+			var m map[string]any
+			if json.Unmarshal(sc.Bytes(), &m) != nil {
+				continue
+			}
+			switch m["type"] {
+			case "user":
+				msg, _ := m["message"].(map[string]any)
+				text, _ := msg["content"].(string)
+				msgs <- text
+			case "control_request":
+				req, _ := m["request"].(map[string]any)
+				if req["subtype"] == "interrupt" {
+					f.mu.Lock()
+					if f.cancel != nil {
+						f.cancel()
+					}
+					f.mu.Unlock()
+					f.emit(map[string]any{"type": "control_response", "response": map[string]any{
+						"subtype": "success", "request_id": m["request_id"], "response": map[string]any{"still_queued": []any{}}}})
+				}
+			case "control_response":
+				resp, _ := m["response"].(map[string]any)
+				id, _ := resp["request_id"].(string)
+				f.mu.Lock()
+				if ch := f.answers[id]; ch != nil {
+					ch <- resp
+				}
+				f.mu.Unlock()
+			}
+		}
+		close(msgs)
+	}()
+	for text := range msgs {
+		f.turn(text)
+	}
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func (f *fake) emit(v any) {
+	b, _ := json.Marshal(v)
+	f.emitRaw(string(b))
+}
+
+func (f *fake) emitRaw(line string) {
+	f.outMu.Lock()
+	defer f.outMu.Unlock()
+	if _, err := os.Stdout.WriteString(line + "\n"); err != nil {
+		os.Exit(0) // the bridge is gone
+	}
+}
+
+func (f *fake) record(v map[string]any) {
+	v["sessionId"], v["cwd"], v["timestamp"] = f.id, f.cwd, time.Now().UTC().Format(time.RFC3339Nano)
+	os.MkdirAll(filepath.Dir(f.transcript), 0o700)
+	b, _ := json.Marshal(v)
+	if file, err := os.OpenFile(f.transcript, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+		file.Write(append(b, '\n'))
+		file.Close()
+	}
+}
+
+func (f *fake) turn(text string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f.mu.Lock()
+	f.cancel = cancel
+	f.mu.Unlock()
+	f.emit(map[string]any{"type": "system", "subtype": "init", "session_id": f.id, "cwd": f.cwd, "tools": f.tools,
+		"mcp_servers": []any{}, "model": "fake", "permissionMode": "default",
+		"apiKeySource": env("FAKECLAUDE_APIKEYSOURCE", "none"), "claude_code_version": env("FAKECLAUDE_VERSION", "2.1.322")})
+	f.record(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}})
+	word, arg, _ := strings.Cut(text, " ")
+	seconds, _ := strconv.Atoi(arg)
+	switch word {
+	case "crash":
+		f.emit(assistant([]any{map[string]any{"type": "text", "text": "about to crash"}}))
+		fmt.Fprintln(os.Stderr, "fakeclaude: crashing as asked")
+		os.Exit(1)
+	case "garbage":
+		f.emitRaw("this is not json")
+	case "unknown":
+		f.emit(map[string]any{"type": "mystery_event", "session_id": f.id})
+	case "ask":
+		f.ask(ctx)
+	case "slow", "hang":
+		f.emit(assistant([]any{map[string]any{"type": "tool_use", "id": "toolu_slow", "name": "Bash", "input": map[string]any{"command": "sleep " + arg}}}))
+		for i := 1; i <= seconds; i++ {
+			select {
+			case <-ctx.Done():
+				f.aborted("aborted_tools")
+				return
+			case <-time.After(time.Second):
+			}
+			if word == "slow" {
+				f.emit(map[string]any{"type": "tool_progress", "tool_name": "Bash", "tool_use_id": "toolu_slow", "elapsed_time_seconds": i, "heartbeat": true, "session_id": f.id})
+			}
+		}
+		f.emit(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "toolu_slow", "content": "finished"}}}})
+	}
+	if ctx.Err() != nil {
+		f.aborted("aborted_streaming")
+		return
+	}
+	f.reply("echo: " + text)
+}
+
+func assistant(content []any) map[string]any {
+	return map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "model": "fake", "content": content,
+		"usage": map[string]any{"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 1990, "output_tokens": 5}}}
+}
+
+func (f *fake) reply(text string) {
+	content := []any{map[string]any{"type": "text", "text": text}}
+	f.emit(assistant(content))
+	f.record(map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "model": "fake", "content": content}})
+	f.emit(map[string]any{"type": "rate_limit_event", "session_id": f.id, "rate_limit_info": map[string]any{"status": "allowed",
+		"unifiedWindows": map[string]any{"five_hour": map[string]any{"utilization": 0.25, "resetsAt": 1795665000, "status": "allowed"},
+			"seven_day": map[string]any{"utilization": 0.5, "resetsAt": 1795928400, "status": "allowed"}}}})
+	f.emit(map[string]any{"type": "result", "subtype": "success", "is_error": false, "terminal_reason": "completed", "result": text,
+		"session_id": f.id, "modelUsage": map[string]any{"fake": map[string]any{"contextWindow": 200000}}})
+}
+
+func (f *fake) aborted(reason string) {
+	f.emit(map[string]any{"type": "result", "subtype": "error_during_execution", "is_error": true, "terminal_reason": reason, "session_id": f.id})
+}
+
+// ask: an AskUserQuestion, then (as when the permission tool isn't used) a can_use_tool
+// request on stdout, answered on stdin.
+func (f *fake) ask(ctx context.Context) {
+	input := map[string]any{"questions": []any{map[string]any{"question": "Which fruit?", "header": "Fruit", "multiSelect": false,
+		"options": []any{map[string]any{"label": "apple", "description": "red"}, map[string]any{"label": "cherry", "description": ""}}}}}
+	f.emit(assistant([]any{map[string]any{"type": "tool_use", "id": "toolu_ask", "name": "AskUserQuestion", "input": input}}))
+	id := "fake-ask-" + strconv.Itoa(os.Getpid())
+	ch := make(chan map[string]any, 1)
+	f.mu.Lock()
+	f.answers[id] = ch
+	f.mu.Unlock()
+	f.emit(map[string]any{"type": "control_request", "request_id": id, "request": map[string]any{
+		"subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": input, "tool_use_id": "toolu_ask"}})
+	result := "no answer"
+	select {
+	case resp := <-ch:
+		b, _ := json.Marshal(resp)
+		result = string(b)
+	case <-ctx.Done():
+	case <-time.After(10 * time.Second):
+	}
+	f.emit(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "toolu_ask", "content": result}}}})
+}
