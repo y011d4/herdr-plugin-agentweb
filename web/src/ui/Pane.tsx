@@ -39,6 +39,9 @@ const useToggle = () => useSyncExternalStore(subscribe, () => toggle);
 const useAppState = (): AppState | null => useSyncExternalStore(subscribe, () => store.appState);
 let shownInput: HTMLTextAreaElement | null = null; // the composer on screen
 let shownKey = ''; // and its draft's key (drafts.ts)
+// The text of each draft key's send in flight (the latest): a composer reopened meanwhile doesn't show
+// it, so it isn't sent twice. Storage keeps it until the send succeeds: a reload mid-send can't lose it.
+const sendingDrafts = new Map<string, string>();
 
 /** A new State: the answer panel follows the open pane's status. */
 export function paneViewOnState(): void {
@@ -293,7 +296,8 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
     const t = input.current!;
     shownInput = t;
     shownKey = key;
-    const draft = keptTasks.draft(paneId) ?? getDraft(key);
+    const stored = getDraft(key);
+    const draft = keptTasks.draft(paneId) ?? (sendingDrafts.get(key) === stored ? '' : stored);
     if (draft) {
       t.value = draft;
       autoGrow(t);
@@ -310,8 +314,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
     sendingImages.current = sent.length > 0; // an upload takes a while: a second tap mustn't send them twice
     const kept = keptTasks.beginSend(paneId, text); // false unless the pane has a kept task
     if (kept) t.disabled = true;
-    // the send takes the draft: a composer reopened meanwhile starts empty, so it can't send it again
-    if (text) setDraft(key, '');
+    if (text) sendingDrafts.set(key, text);
     let restored: string | null = null;
     try {
       // clear:true wipes the pane's composer first so this message submits on its own — never
@@ -326,23 +329,22 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
         t.value = '';
         autoGrow(t);
       }
+      if (text && getDraft(key) === text) setDraft(key, '');
       if (sent.length) setImages((cur) => cur.filter((i) => !sent.includes(i))); // and images added mid-send
       paneView?.echo();
     } catch (err) {
       if (kept) restored = keptTasks.finishSend(paneId, false);
-      // the draft again, unless something new was typed meanwhile; a composer reopened empty under its
-      // key (a Home's survives a Clear's new pane) shows it
-      if (text && !getDraft(key)) {
-        setDraft(key, text);
-        const live = shownKey === key ? shownInput : null;
-        if (live && !live.value) {
-          live.value = text;
-          autoGrow(live);
-        }
+      // still the stored draft (unless replaced meanwhile): a composer reopened empty under its key
+      // (a Home's survives a Clear's new pane) shows it again
+      const live = shownKey === key ? shownInput : null;
+      if (text && live && !live.value && getDraft(key) === text) {
+        live.value = text;
+        autoGrow(live);
       }
       showToast('Send failed', (err as Error).message);
     } finally {
       sendingImages.current = false;
+      if (sendingDrafts.get(key) === text) sendingDrafts.delete(key);
       if (kept) {
         // Unlock the pane's composer as displayed now — this one, or one reopened during the send
         // (this textarea is then detached) — and on failure show the task in it again.
