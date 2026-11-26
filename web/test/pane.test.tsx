@@ -168,16 +168,32 @@ describe('composer', () => {
     assert.equal(ta().value, 'p2 draft', 'a failed send keeps it');
     await key({});
     await reopen('p2');
-    assert.equal(ta().value, '', 'reopened while it is sent: the send took it, so it is not sent twice');
+    assert.equal(ta().value, '', 'reopened while it is sent: not shown, so not sent twice');
+    assert.equal(JSON.parse(localStorage.getItem('herdr_drafts')!)['pane:p2'], 'p2 draft', 'but stored: a reload mid-send keeps it');
     await answer('POST /api/panes/p2/input', { ok: true });
     assert.equal(ta().value, '');
     await reopen('p2');
     assert.equal(ta().value, '', 'sent: forgotten');
+    await type('a');
+    await key({});
+    await type('ab');
+    await type('a'); // edited mid-send, back to what went out
+    await answer('POST /api/panes/p2/input', { ok: true });
+    await reopen('p2');
+    assert.equal(ta().value, '', 'sent: forgotten too');
+    await type('one');
+    await key({});
+    await type('two');
+    await key({});
+    await answer('POST /api/panes/p2/input', { error: { code: 'x', message: 'boom' } }, 500);
+    await answer('POST /api/panes/p2/input', { error: { code: 'x', message: 'boom' } }, 500);
+    await reopen('p2');
+    assert.equal(ta().value, 'two', 'two failed sends: the last one stays');
     await reopen('p1');
     assert.equal(ta().value, 'p1 draft');
     await reopen('p4', true);
     assert.equal(ta().value, 'home draft');
-    assert.deepEqual(JSON.parse(localStorage.getItem('herdr_drafts')!), { 'pane:p1': 'p1 draft', 'home:personal': 'home draft' });
+    assert.deepEqual(JSON.parse(localStorage.getItem('herdr_drafts')!), { 'pane:p1': 'p1 draft', 'pane:p2': 'two', 'home:personal': 'home draft' });
     await key({});
     await reopen('p9', true, 'personal'); // a Clear gave the Home a new pane while it was sent
     assert.equal(ta().value, '');
