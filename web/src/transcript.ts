@@ -358,22 +358,30 @@ export function askAnswer(text: string): string | null {
   return pairs.length === 1 ? pairs[0][1] : pairs.map(([q, a]) => `${q}: ${a}`).join('\n');
 }
 
+// a headless orchestrator's tool that starts a worker (its result says whether the first task reached it)
+const START_TOOL = 'mcp__yoicks__agent_start';
+
 /**
  * The home (orchestrator) chat shows only the dialogue: the user's and the
  * assistant's own words, and its questions (AskUserQuestion) with what the user
- * answered as their own bubble. Other tool calls/results, thinking, subagent
- * traffic and injected user turns are hidden. `asks` (kept across appends: a
- * question and its answer arrive apart) holds the questions' tool_use ids.
+ * answered as their own bubble, and the workers it started (a headless one's
+ * agent_start: what the bridge answered, as a [yoicks] notice). Other tool
+ * calls/results, thinking, subagent traffic and injected user turns are hidden.
+ * `calls` (kept across appends: a call and its result arrive apart) maps those
+ * calls' tool_use ids to their tool.
  */
-export function conversationItems(items: TimelineItem[], asks = new Set<string>()): TimelineItem[] {
+export function conversationItems(items: TimelineItem[], calls = new Map<string, string>()): TimelineItem[] {
   const out: TimelineItem[] = [];
   for (const it of items) {
     if (it.sidechain) continue;
     if (it.kind === 'assistant' || (it.kind === 'user' && !INJECTED_USER_TURN.test(it.text))) out.push(it);
     else if (it.kind === 'tool_use' && it.name === 'AskUserQuestion' && it.ask?.length) {
-      asks.add(it.id);
+      calls.set(it.id, it.name);
       out.push(it);
-    } else if (it.kind === 'tool_result' && it.forId !== null && asks.has(it.forId)) {
+    } else if (it.kind === 'tool_use' && it.name === START_TOOL) calls.set(it.id, it.name);
+    else if (it.kind === 'tool_result' && it.forId !== null && calls.get(it.forId) === START_TOOL) {
+      out.push({ kind: 'user', text: `[yoicks] ${it.text.replace(/\s+/g, ' ').trim()}`, sidechain: false, ts: it.ts });
+    } else if (it.kind === 'tool_result' && it.forId !== null && calls.has(it.forId)) {
       const answer = it.truncated ? null : askAnswer(it.text); // cut short, it may name only some: shown as it is
       out.push(answer === null ? it : { kind: 'user', text: answer, sidechain: false, ts: it.ts });
     }

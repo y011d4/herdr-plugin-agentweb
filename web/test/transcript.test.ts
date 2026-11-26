@@ -207,7 +207,7 @@ describe('conversationItems / latestActivity (home chat)', () => {
     const ask: TimelineItem = { kind: 'tool_use', id: 'q1', name: 'AskUserQuestion', summary: '', todos: null,
       ask: [{ question: '好きな果物は？', header: '果物', multiSelect: false, options: [{ label: 'りんご', description: '' }] }], sidechain: false, ts: null };
     const answered = (forId: string, text: string, isError = false): TimelineItem => ({ kind: 'tool_result', forId, text, truncated: false, isError, sidechain: false, ts: 5 });
-    const asks = new Set<string>();
+    const asks = new Map<string, string>();
     assert.deepEqual(conversationItems([u('聞いて'), ask], asks).map((i) => i.kind), ['user', 'tool_use']);
     // the answer arrives in a later append (Claude Code's wording, as on 2.1.322)
     const later = conversationItems([answered('q1', 'Your questions have been answered: "好きな果物は？"="ばなな \\"完熟\\"". You can now continue with these answers in mind.'), result], asks);
@@ -218,6 +218,22 @@ describe('conversationItems / latestActivity (home chat)', () => {
     // a result cut short may name only some answers: it stays as it is, its "truncated" with it
     const cut = { ...answered('q1', 'answered: "A?"="x", "B?"="y'), truncated: true } as TimelineItem;
     assert.equal(conversationItems([cut], asks)[0].kind, 'tool_result');
+  });
+
+  it("shows a worker the headless orchestrator started as a [yoicks] notice of the bridge's answer, across appends", () => {
+    const start: TimelineItem = { kind: 'tool_use', id: 's1', name: 'mcp__yoicks__agent_start', summary: '', todos: null, ask: null, sidechain: false, ts: null };
+    const res = (forId: string, text: string, isError = false): TimelineItem => ({ kind: 'tool_result', forId, text, truncated: false, isError, sidechain: false, ts: 7 });
+    const calls = new Map<string, string>();
+    assert.deepEqual(conversationItems([u('頼んで'), start], calls).map((i) => i.kind), ['user']);
+    // the bridge's answer, as on 11-26's personal session: one line, a dim notice
+    const shown = conversationItems([res('s1', 'started w-a (pane w8H:p1) in /r; delivered to w-a: you are woken when it finishes or stops for an answer'), result], calls);
+    assert.deepEqual(shown, [{ kind: 'user', text: '[yoicks] started w-a (pane w8H:p1) in /r; delivered to w-a: you are woken when it finishes or stops for an answer', sidechain: false, ts: 7 }]);
+    assert.match(renderItem(shown[0]), /class="chat-item chat-notice"/);
+    // not delivered (an error result) says so too, on one line
+    assert.deepEqual(conversationItems([res('s1', 'started w-a (pane p) in /r; not delivered to w-a:\nagent_pane_busy', true)], calls).map((i) => (i as { text: string }).text),
+      ['[yoicks] started w-a (pane p) in /r; not delivered to w-a: agent_pane_busy']);
+    // another tool's result stays hidden
+    assert.deepEqual(conversationItems([tool('mcp__yoicks__agent_prompt', ''), res('mcp__yoicks__agent_prompt', 'delivered')], calls), []);
   });
 
   it('hides only Claude Code\'s injected tags, not user text that starts with "<"', () => {
