@@ -23,8 +23,9 @@ export const isAgentsRoute = (hash: string): boolean => hash === '#/agents' || h
 // From a Home (#/home/<name>), the agents list is #/agents/<name>: just that orchestrator's account's agents.
 export const homeAgentsHash = (hash: string): string => hash.replace(/^#\/home\//, '#/agents/');
 
+/** The orchestrator a pane is: its pane, or a headless one's hl:<name> (stopped too: a late link opens its Home). */
 export function orchestratorOfPane(state: AppState | null, paneId: string | null): OrchestratorView | undefined {
-  return paneId === null ? undefined : orchestrators(state).find((o) => o.paneId === paneId);
+  return paneId === null ? undefined : orchestrators(state).find((o) => o.paneId === paneId || (o.mode === 'headless' && paneId === `hl:${o.name}`));
 }
 
 /** The orchestrator a #/home/<name> or #/agents/<name> route names. */

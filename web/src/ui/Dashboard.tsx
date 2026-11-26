@@ -34,7 +34,7 @@ export function orchestratorLabel(o: OrchestratorView | undefined): string {
   return o?.label || (o?.paneId ? findPane(o.paneId)?.ws.label : '') || o?.name || 'Home';
 }
 
-function relativeTime(ms: number): string {
+export function relativeTime(ms: number): string {
   if (!ms) return '';
   const diff = Date.now() - ms;
   if (diff < 5_000) return 'just now';

@@ -9,6 +9,8 @@
  * composer, Home's status bar and "doing now" line) and hears back through opts.
  * store.view.paneViewMode is its mode (wsSendWatch reads it). One per opened pane:
  * destroy() stops every timer and listener, and its late responses do nothing.
+ * A headless orchestrator (hl:<name>) has no terminal: its view is the chat alone, empty until its
+ * session's transcript has a line, and its question comes from the State (ui/Pane.tsx), not the screen.
  */
 import { ansiToHtml } from './ansi.ts';
 import { apiGet } from './api.ts';
@@ -85,6 +87,7 @@ interface PendingAnswer {
 
 export function createPaneView(container: HTMLElement, paneId: string, opts: PaneViewOpts): PaneView {
   const { view } = store;
+  const headless = paneId.startsWith('hl:');
   const terminalEl = Object.assign(document.createElement('div'), { className: 'terminal-output', id: 'terminal-output' });
   const chatEl = Object.assign(document.createElement('div'), { className: 'chat-log', id: 'chat-log' });
   chatEl.style.display = 'none';
@@ -188,7 +191,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       const data = await apiGet<TranscriptResponse>(`/api/panes/${encodeURIComponent(paneId)}/transcript`);
       if (destroyed || view.paneViewMode !== 'chat') return;
       if (chatSessionId !== reqSession || chatCursor !== reqCursor) return; // superseded in flight
-      if (!data.available) { chatAvailable = false; opts.showToggle(false); switchToTerminal(false); return; }
+      if (!data.available) { noTranscript(); return; }
       chatSessionId = data.sessionId ?? null;
       chatCursor = data.cursor ?? 0;
       renderChatReset(data.items ?? []);
@@ -230,15 +233,29 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     if (atBottom) chatEl.scrollTop = chatEl.scrollHeight;
   }
 
+  // No transcript: a pane falls back to its terminal. A headless orchestrator has none: its chat
+  // shows empty until its session's first line (a start or a Clear writes none before the first message).
+  function noTranscript(): void {
+    if (headless) {
+      if (chatSessionId !== null || !chatEl.hasChildNodes()) {
+        chatSessionId = null;
+        chatCursor = 0;
+        renderChatReset([]);
+      }
+      return;
+    }
+    chatAvailable = false;
+    opts.showToggle(false);
+    if (view.paneViewMode === 'chat') switchToTerminal(false);
+  }
+
   function onTranscriptItems(msg: WsTranscriptItemsMessage): void {
     if (!msg.available) {
-      chatAvailable = false;
-      opts.showToggle(false);
-      if (view.paneViewMode === 'chat') switchToTerminal(false);
+      noTranscript();
       return;
     }
     chatAvailable = true;
-    opts.showToggle(true);
+    opts.showToggle(!headless); // a headless orchestrator has no terminal to toggle to
     if (view.paneViewMode !== 'chat') return; // availability noted; content applies only in chat mode
     if (msg.reset || msg.sessionId !== chatSessionId) {
       // Same session (a reconnect re-watch) → keep scroll; a new session → bottom.
@@ -270,7 +287,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       // BEFORE acting on it — a stale available:false must not force the terminal
       // after a WS push/reset already advanced the chat.
       if (chatSessionId !== reqSession || chatCursor !== reqCursor) return; // superseded in flight
-      if (!data.available) { chatAvailable = false; opts.showToggle(false); switchToTerminal(false); return; }
+      if (!data.available) { noTranscript(); return; }
       if (data.reset || data.sessionId !== chatSessionId) {
         chatSessionId = data.sessionId ?? null;
         chatCursor = data.cursor ?? 0;
@@ -299,7 +316,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
 
   function updatePromptPanel(): void {
     const status = findPane(paneId)?.pane?.agent?.status;
-    const blocked = view.paneViewMode === 'chat' && status === 'blocked';
+    const blocked = !headless && view.paneViewMode === 'chat' && status === 'blocked';
     if (!blocked) {
       // Pane is no longer waiting: the answer (if one was just sent) has landed. The
       // panel goes, and with it the post-send cooldown that was suppressing re-taps.
@@ -411,7 +428,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
         settlePendingAnswer();
       }
       // Refresh the screen (not while hidden — visibilitychange re-reads it on return)
-      if ((msg.to === 'blocked' || msg.to === 'done') && !document.hidden) void term.refresh();
+      if ((msg.to === 'blocked' || msg.to === 'done') && !document.hidden && !headless) void term.refresh();
     }
   });
 
@@ -447,7 +464,12 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   // view is continuously scrollable from the very first swipe; then polling, and
   // the probe for a Claude transcript (it reveals the toggle and switches to chat
   // when that's the preferred view).
-  void (async () => {
+  if (headless) {
+    // no terminal to read first: straight to the chat
+    chatAvailable = true;
+    startPaneRefresh();
+    switchToChat(undefined, false);
+  } else void (async () => {
     await term.refresh();
     // Left while the first read was in flight: no history load against a gone view.
     if (destroyed) return;
@@ -465,7 +487,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       updatePromptPanel(); // agent may have just become (un)blocked
       settlePendingAnswer(); // ...because a tapped answer landed
     },
-    echo: term.echo,
+    echo: headless ? () => {} : term.echo,
     answered(id, chat, post) {
       if (destroyed) return;
       // Tracked before the POST answers: the `working` push can beat its response.

@@ -1129,8 +1129,7 @@ func (s *server) resolvePaneTranscript(paneID string) (sessionID, file string, e
 		if h == nil || h.session() == "" {
 			return "", "", nil
 		}
-		sid, root := h.session(), accountForConfigDir(h.def.Env["CLAUDE_CONFIG_DIR"], "")
-		return sid, resolveTranscriptPath(sid, h.def.Dir, []string{root}), nil
+		return h.session(), h.transcriptFile(), nil
 	}
 	p, err := s.paneInfo(paneID)
 	if err != nil {

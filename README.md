@@ -412,6 +412,15 @@ the orchestrator's directory; as of Claude Code 2.1.322 it lets `tree`, `du`, `f
 allow rule lifts it.) Workers themselves are ordinary agents under your own permission prompts;
 this boundary is about what each orchestrator, and so each account, sees.
 
+**Headless.** `"mode": "headless"` on an entry runs that orchestrator as the bridge's own `claude -p`
+instead of an agent in a herdr pane (your Claude subscription only: the bridge refuses API-key
+billing). Its Home is then the chat alone: messages go out also while it works, ■ on the
+"doing now" line interrupts it, its questions get an answer panel, and the status bar shows its
+usage (`5h · 7d · ctx`) and what went wrong, each with what to do. It has no herdr pane: on the PC,
+open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
+back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
+fresh session); the Home's warnings and Settings show the same steps.
+
 **Older setups.** Without `orchestrators`, nothing changes. The single `"orchestrator_dir": "<dir>"`,
 or else the old default `~/.local/share/herdr-agentweb/dispatcher` if it exists, is still the one
 orchestrator, named `default`. It runs your own `CLAUDE.md` from that directory, which the plugin
