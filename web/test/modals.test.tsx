@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { act } from 'react';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { keptTasks, setAppState } from '../src/store.ts';
-import { confirmModal, Modals, openAgentMenu, openNewAgent } from '../src/ui/Modals.tsx';
+import { confirmModal, Modals, openAgentMenu, openNewAgent, previewImage } from '../src/ui/Modals.tsx';
 import { agentStart, errors, profiles, rename, state } from './contract.gen.ts';
 import { fire, render } from './render.ts';
 
@@ -214,5 +214,85 @@ describe('New agent', () => {
     await act(async () => { await openNewAgent(); });
     assert.ok(!open());
     assert.deepEqual(toastsShown(), ['No launch profiles: Configure launch_profiles in the bridge config.']);
+  });
+});
+
+describe('Image preview', () => {
+  const popped = (): Promise<void> => new Promise((r) => { addEventListener('popstate', () => r(), { once: true }); });
+  /** A hash change as a browser makes it: the new entry has no state, and a popstate fires (happy-dom keeps the state and fires none). */
+  async function hashChange(hash: string): Promise<void> {
+    location.hash = hash;
+    history.replaceState(null, '');
+    await fire(() => dispatchEvent(new PopStateEvent('popstate', { state: null })));
+    await settle();
+  }
+  async function go(delta: number): Promise<void> {
+    const moved = popped();
+    history.go(delta);
+    await moved;
+    await settle();
+  }
+  it('shows the image with focus on ×; a tap on it or around it, ×, Escape or Back closes it and the route stays', async () => {
+    location.hash = '#/home/pilot';
+    const opener = document.body.appendChild(document.createElement('button'));
+    for (const dismiss of [() => $('.image-preview-close').click(), () => $('.image-preview img').click(), () => $('.modal-overlay').click(),
+      () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))]) {
+      opener.focus();
+      await fire(() => previewImage('data:image/png;base64,x', 'Attached image'));
+      assert.equal($<HTMLImageElement>('.image-preview img').alt, 'Attached image');
+      assert.ok(document.activeElement === $('.image-preview-close'));
+      assert.equal(typeof history.state?.imagePreview, 'number');
+      const back = popped();
+      await fire(dismiss);
+      assert.ok(!open());
+      await back; // its history entry taken back off
+      assert.equal(history.state?.imagePreview, undefined);
+      assert.ok(document.activeElement === opener);
+    }
+    await fire(() => previewImage('data:image/png;base64,x', 'image'));
+    const back = popped();
+    history.back(); // the phone's Back
+    await back;
+    assert.ok(!open());
+    await settle();
+    assert.equal(location.hash, '#/home/pilot', 'one step back, not two');
+    let moved = popped();
+    history.forward(); // onto the closed preview's entry: it shows again
+    await moved;
+    await settle();
+    assert.equal($<HTMLImageElement>('.image-preview img').alt, 'image');
+    moved = popped();
+    history.back();
+    await moved;
+    await settle();
+    assert.ok(!open());
+    assert.equal(location.hash, '#/home/pilot');
+    opener.remove();
+  });
+
+  it('a hash change closes it; Back shows it again and Forward still reaches the later route', async () => {
+    location.hash = '#/home/pilot';
+    await fire(() => previewImage('data:image/png;base64,x', 'image'));
+    await hashChange('#/agents'); // e.g. a notification's link
+    assert.ok(!open());
+    assert.equal(location.hash, '#/agents', 'no step back');
+    await go(-1);
+    assert.ok(open());
+    assert.equal(location.hash, '#/home/pilot');
+    await go(1);
+    assert.ok(!open());
+    assert.equal(location.hash, '#/agents');
+  });
+
+  it('shows only the last 5 again: an older entry stays blank', async () => {
+    location.hash = '#/x0';
+    for (let i = 1; i <= 6; i++) {
+      await fire(() => previewImage('data:image/png;base64,x', `image ${i}`));
+      await hashChange(`#/x${i}`);
+    }
+    await go(-11); // x0 [P1] x1 P2 x2 … P6 x6
+    assert.ok(!open());
+    await go(2); // P2
+    assert.equal($<HTMLImageElement>('.image-preview img').alt, 'image 2');
   });
 });
