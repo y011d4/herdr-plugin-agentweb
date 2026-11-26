@@ -88,20 +88,14 @@ describe('notify', () => {
     assert.deepEqual(shown, []);
   });
 
-  it('a sticky toast per push, not for the pane on screen', () => {
-    store.view.activePaneId = 'p3';
-    notifyAgentStatus(done);
-    notifyAgentStatus(working);
+  it('no toast for a status push or an alert, the page visible or not', () => {
+    for (const h of [false, true]) {
+      hidden = h;
+      notifyAgentStatus(working);
+      notifyAgentStatus(done);
+      notifyOrchestratorAlert({ type: 'orchestrator_alert', name: 'pilot', kind: 'silent', message: 'no event' });
+    }
     assert.deepEqual(getToasts(), []);
-    store.view.activePaneId = null;
-    notifyAgentStatus(working);
-    notifyAgentStatus(done);
-    assert.deepEqual(getToasts().map((t) => [t.title, t.body, t.paneId]), [
-      ['Claude Code: idle → working', 'repo-wt-feat / feat', 'p3'],
-      ['Claude Code done', 'repo-wt-feat / feat', 'p3'],
-    ]);
-    getToasts()[1].onclick!();
-    assert.equal(location.hash, '#/pane/p3');
   });
 
   it("opening a pane closes its OS notifications", async () => {

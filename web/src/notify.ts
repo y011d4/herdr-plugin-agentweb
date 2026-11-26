@@ -1,12 +1,12 @@
 /**
- * notify.ts — telling the user an agent changed: the in-app toasts (a store; ui/Toasts.tsx
- * draws it) and the OS notifications. A status push toasts unless its pane is on screen;
- * blocked/done also raise an OS notification while the page is hidden, notifications are on
- * and permitted. Opening a pane clears its toasts and notifications (the shell calls the
- * dismiss functions). A headless orchestrator's warning (orchestrator_alert) is told the same way,
- * as its pane hl:<name>, so opening its Home clears it too.
+ * notify.ts — the toasts (a store; ui/Toasts.tsx draws it): short-lived results of what the user
+ * did ("Send failed", "Renamed", …), and the OS notifications: a blocked/done status push raises
+ * one while the page is hidden, notifications are on and permitted. Opening a pane clears its
+ * notifications (the shell calls dismissNotificationsForPane). A headless orchestrator's warning
+ * (orchestrator_alert) is told the same way, as its pane hl:<name>, so opening its Home clears it too.
+ * Neither push toasts: a worker's progress shows on the Home, a warning on its status bar.
  */
-import { homeHash, paneRoute } from './routes.ts';
+import { paneRoute } from './routes.ts';
 import { store } from './store.ts';
 import type { WsAgentStatusMessage, WsOrchestratorAlertMessage } from './types.ts';
 
@@ -18,20 +18,8 @@ export interface Toast {
   id: number;
   title: string;
   body: string;
-  /** opening this pane dismisses the toast */
-  paneId?: string;
-  /** a tap: runs this, then the toast goes */
-  onclick?: () => void;
   /** on its way out (the toast-out animation) */
   fading: boolean;
-}
-
-export interface ToastOptions {
-  onclick?: () => void;
-  /** sticky toasts stay until the user dismisses them */
-  sticky?: boolean;
-  /** associates the toast with a pane so opening that pane auto-dismisses it */
-  paneId?: string;
 }
 
 export const TOAST_MAX = 10;
@@ -53,11 +41,11 @@ export function subscribeToasts(fn: () => void): () => void {
   return () => { listeners.delete(fn); };
 }
 
-/** A toast; the stack keeps the newest TOAST_MAX (fading ones count). Non-sticky ones go after 4s. */
-export function showToast(title: string, body: string, opts: ToastOptions = {}): void {
+/** A toast, gone after 4s; the stack keeps the newest TOAST_MAX (fading ones count). */
+export function showToast(title: string, body: string): void {
   const id = ++seq;
-  setToasts([...toasts, { id, title, body, paneId: opts.paneId, onclick: opts.onclick, fading: false }].slice(-TOAST_MAX));
-  if (!opts.sticky) setTimeout(() => dismissToast(id), 4_000);
+  setToasts([...toasts, { id, title, body, fading: false }].slice(-TOAST_MAX));
+  setTimeout(() => dismissToast(id), 4_000);
 }
 
 /** Removes a toast at once. */
@@ -65,42 +53,32 @@ export function removeToast(id: number): void {
   if (toasts.some((t) => t.id === id)) setToasts(toasts.filter((t) => t.id !== id));
 }
 
-function fadeOut(match: (t: Toast) => boolean): void {
-  const hit = toasts.filter(match);
-  if (!hit.length) return;
-  setToasts(toasts.map((t) => (match(t) ? { ...t, fading: true } : t)));
-  for (const t of hit) setTimeout(() => removeToast(t.id), FADE_MS);
+/** Fades a toast out, then removes it. */
+export function dismissToast(id: number): void {
+  if (!toasts.some((t) => t.id === id)) return;
+  setToasts(toasts.map((t) => (t.id === id ? { ...t, fading: true } : t)));
+  setTimeout(() => removeToast(id), FADE_MS);
 }
 
-/** Fades a toast out, then removes it. */
-export const dismissToast = (id: number): void => fadeOut((t) => t.id === id);
-
-/** Fades out every toast associated with a pane (called on pane open). */
-export const dismissToastsForPane = (paneId: string): void => fadeOut((t) => t.paneId === paneId);
-
-/** Clear all: every toast, at once. */
+/** Every toast, at once (the tests' reset). */
 export const clearToasts = (): void => setToasts([]);
 
 // ── A status push ─────────────────────────────────────────────────────────────
 
-/** An agent_status push: a toast (not for the pane on screen); blocked/done also an OS
- *  notification while the page is hidden, notifications are on and permitted. */
-export function notifyAgentStatus({ paneId, agent, from, to, workspaceLabel, tabLabel }: WsAgentStatusMessage): void {
-  const jumpToPane = (): void => { location.hash = paneRoute(store.appState, paneId); };
+/** An agent_status push: for blocked/done an OS notification while the page is hidden,
+ *  notifications are on and permitted. */
+export function notifyAgentStatus({ paneId, agent, to, workspaceLabel, tabLabel }: WsAgentStatusMessage): void {
+  if (to !== 'blocked' && to !== 'done') return;
   const body = [workspaceLabel, tabLabel].filter(Boolean).join(' / '); // a headless orchestrator has no tab
-  const alert = to === 'blocked' || to === 'done';
-  const title = alert ? `${agent ?? 'Agent'} ${to}` : `${agent ?? 'Agent'}: ${from} → ${to}`;
-  if (store.view.activePaneId !== paneId) showToast(title, body, { sticky: true, onclick: jumpToPane, paneId });
-  if (alert) osNotify(title, body, paneId);
+  osNotify(`${agent ?? 'Agent'} ${to}`, body, paneId);
 }
 
 /** An orchestrator_alert push: a headless orchestrator's new warning (once per kind and session), or with
- *  no name a failed Claude Code check. A sticky toast and, while hidden, an OS notification; either's tap
- *  opens its Home (the check's: Settings, where it is shown). Its Home shows it as a warning line meanwhile. */
+ *  no name a failed Claude Code check. While hidden, an OS notification whose tap opens its Home (the
+ *  check's: Settings, where it is shown). Its Home shows it as a warning line meanwhile. */
 export function notifyOrchestratorAlert({ name, kind, message }: WsOrchestratorAlertMessage): void {
   const o = store.appState?.orchestrators?.find((x) => x.name === name);
   const title = name ? `${o?.label || name}: ${kind}` : 'Claude Code check failed';
-  showToast(title, message, { sticky: true, paneId: name ? `hl:${name}` : undefined, onclick: () => { location.hash = name ? homeHash(name) : '#/settings'; } });
   osNotify(title, message, name ? `hl:${name}` : '#/settings'); // a tag that is a hash opens there (sw.ts)
 }
 
@@ -126,7 +104,7 @@ function osNotify(title: string, body: string, paneId: string): void {
 //
 // tag === paneId is intentional: successive status pings for one pane coalesce to a
 // single OS entry (latest status wins) instead of stacking stale ones, and it is the
-// key dismissNotificationsForPane() matches on. The in-app toast stack keeps history.
+// key dismissNotificationsForPane() matches on.
 
 function showSystemNotification(title: string, body: string, paneId: string): void {
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
