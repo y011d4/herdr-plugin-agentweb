@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { StrictMode, act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { clearToasts, getToasts } from '../src/notify.ts';
-import { emit, setAppState, setStartingHome, store } from '../src/store.ts';
+import { emit, setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
 import { App, start } from '../src/ui/App.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
@@ -153,44 +153,77 @@ describe('App', () => {
     assert.equal(location.hash, '#/agents');
   });
 
-  it("opens an orchestrator's Home once it runs, after its Start on the list", async () => {
+  it("a stopped orchestrator's Home has Start; its running Home opens once the State shows it", async () => {
     const s = fresh(); // "work" stopped
     await act(async () => push!({ type: 'state', state: s }));
-    setStartingHome('work');
-    await act(async () => push!({ type: 'state', state: s }));
-    assert.equal(location.hash, '#/agents', 'not running yet');
+    await go('#/home/work');
+    assert.ok($('#screen #screen-home-stopped'));
+    assert.equal(store.view.activePaneId, null);
+    assert.ok(!$('#btn-home-clear') && $('#btn-settings'), 'no Clear/Stop to a stopped Home; Settings');
+    await click($('#btn-home-start'));
+    await answer('POST /api/orchestrators/work/start', { ok: true, paneId: 'p6' });
+    assert.equal(($('#btn-home-start') as HTMLButtonElement).disabled, true, 'starting until the State shows it');
     s.orchestrators[1].paneId = 'p6';
     await act(async () => push!({ type: 'state', state: s }));
     await settle();
     assert.equal(location.hash, '#/home/work');
-    assert.equal(store.startingHome, null);
+    assert.equal(store.view.activePaneId, 'p6');
+    assert.ok($('#screen #screen-pane.screen-home'));
   });
 
-  it("holds a Home through its orchestrator's replacement: a new pane re-routes onto it; none in 8s goes to the list", async () => {
+  it("a failed Start says so and frees the stopped Home's button", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/home/work');
+    await click($('#btn-home-start'));
+    await answer('POST /api/orchestrators/work/start', { error: { code: 'already_running', message: 'it runs' } }, 409);
+    assert.deepEqual(toastTitles(), ['Could not start the orchestrator']);
+    assert.equal(($('#btn-home-start') as HTMLButtonElement).disabled, false);
+  });
+
+  it("a Home whose orchestrator goes shows it stopped; a Clear holds for the replacement, up to 8s", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/home/personal');
     const s = fresh();
-    s.orchestrators[0].paneId = null; // cleared: the old pane is gone, the new one not detected yet
+    s.orchestrators[0].paneId = null; // it exited (not a Clear): the stopped Home at once
     await act(async () => push!({ type: 'state', state: s }));
+    await settle();
     assert.equal(location.hash, '#/home/personal');
+    assert.equal(store.view.activePaneId, null);
+    assert.ok($('#screen #screen-home-stopped'));
+    s.orchestrators[0].paneId = 'p4'; // started again (elsewhere): its running Home
+    await act(async () => push!({ type: 'state', state: s }));
+    await settle();
     assert.equal(store.view.activePaneId, 'p4');
+
+    // a Clear: the gap before the replacement holds the Home, the replacement re-routes onto it
+    await click($('#btn-home-clear'));
+    await click($('#modal-root #cf-ok'));
+    s.orchestrators[0].paneId = null;
+    await act(async () => push!({ type: 'state', state: s }));
+    assert.equal(store.view.activePaneId, 'p4', 'held through the gap');
+    await answer('POST /api/agents/p4/clear', { ok: true, paneId: 'p1' });
     s.orchestrators[0].paneId = 'p1';
     await act(async () => push!({ type: 'state', state: s }));
-    assert.equal(location.hash, '#/home/personal');
+    await settle();
     assert.equal(store.view.activePaneId, 'p1', 're-routed onto the replacement');
     assert.ok($('#screen #screen-pane.screen-home'));
 
+    // a Clear whose replacement never shows: the stopped Home after 8s
+    await click($('#btn-home-clear'));
+    await click($('#modal-root #cf-ok'));
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     s.orchestrators[0].paneId = null;
     await act(async () => push!({ type: 'state', state: s }));
     await act(async () => { vi.advanceTimersByTime(7_999); });
-    assert.equal(location.hash, '#/home/personal');
-    assert.deepEqual(toastTitles(), []);
+    assert.equal(store.view.activePaneId, 'p1');
+    assert.deepEqual(toastTitles().filter((t) => t === 'Orchestrator stopped'), []);
     await act(async () => { vi.advanceTimersByTime(1); });
-    assert.deepEqual(toastTitles(), ['Orchestrator stopped']);
-    assert.equal(location.hash, '#/agents');
+    assert.ok(toastTitles().includes('Orchestrator stopped'));
     vi.useRealTimers();
     await settle();
-    assert.ok($('#screen #screen-agents'));
+    assert.equal(location.hash, '#/home/personal');
+    assert.ok($('#screen #screen-home-stopped'));
+    await answer('POST /api/agents/p1/clear', { ok: true, paneId: 'p8' });
   });
 
   it('Stop goes back to the list the pane came from; Clear goes to the new pane, or stays on a Home', async () => {
@@ -220,13 +253,19 @@ describe('App', () => {
     assert.equal(location.hash, '#/home/personal', 'the State routes onto the replacement');
   });
 
-  it("a Home's Stop button closes its orchestrator's pane after the confirm", async () => {
+  it("a Home's Stop button closes its orchestrator's pane after the confirm, and the Home stays, stopped", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/home/personal');
     await click($('#btn-home-stop'));
     await click($('#modal-root #cf-ok'));
     await answer('DELETE /api/panes/p4', { ok: true });
     assert.deepEqual(toastTitles(), ['Stopped']);
+    const s = fresh();
+    s.orchestrators[0].paneId = null;
+    await act(async () => push!({ type: 'state', state: s }));
+    await settle();
+    assert.equal(location.hash, '#/home/personal');
+    assert.ok($('#screen #screen-home-stopped #btn-home-start'));
   });
 
   it("a Home's Settings button opens the settings, whose Back returns to that Home", async () => {
