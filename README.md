@@ -345,6 +345,8 @@ with defaults, is:
   ntfy instance. When unset (default) the bridge performs no outbound requests at
   all. If you want pushes while the app is closed: self-host ntfy, bind it to
   your tailnet, point the ntfy Android app at the same topic.
+- `canary` — `false` turns off `scripts/claude-canary.sh`, the periodic check of Claude Code for
+  headless orchestrators (see [Checking Claude Code](#checking-claude-code-for-headless-mode)).
 
 **Applying changes:** the config is read once at startup, so restart the bridge
 after editing — `herdr plugin action invoke y011d4.yoicks.stop`, then `…start`.
@@ -499,7 +501,8 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   `headless` is `{ status: stopped|idle|working|blocked|done|error, completionSeq, pending: { id, questions } | null,
   usage: { fiveHour, sevenDay: { utilization (0–1), resetsAt (ms) } | null, contextPct | null, at } | null,
   warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }] }`, `null` for a tui one)
-  and `orchestratorPaneId` (the first running tui one's, or `null`). Each agent's `completionSeq` is herdr's
+  and `orchestratorPaneId` (the first running tui one's, or `null`), and `claudeCheck`, the last Claude Code check
+  (`{ at (ms), version, ok, failed: [items] }`, `null` when none has run). Each agent's `completionSeq` is herdr's
   `completion_seq` (which completion its idle/done status is; `null` until fetched), and its
   `stateChangeSeq` is herdr's `state_change_seq` (herdr's order of status changes, which the app
   lists by; `null` until fetched)
@@ -560,7 +563,8 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   `agent.prompt`; `text` must be non-empty)
 - `WS /ws?token=…` — `{"type":"state"}` snapshots and `{"type":"agent_status"}`
   transitions, and `{"type":"orchestrator_alert","name","kind","message"}` for a headless
-  orchestrator's new warning (once per session and kind; also to ntfy when `notify_url` is set). A
+  orchestrator's new warning (once per session and kind; also to ntfy when `notify_url` is set; `name` `""`
+  with `kind` `"canary"`: a failed Claude Code check, once). A
   headless orchestrator's working → done and → blocked come as `agent_status` with `paneId: "hl:<name>"`
   and its label as `workspaceLabel`. `{"type":"watch_transcript","paneId":…}` starts a live tail that
   pushes `{"type":"transcript_items",…}` (`reset` rebuilds, else appends);
@@ -618,6 +622,37 @@ again.
 Logs for the detached daemon go to `<state dir>/bridge.log`
 (`~/.local/state/herdr/plugins/y011d4.yoicks`, or `$HERDR_PLUGIN_STATE_DIR` inside plugin
 commands).
+
+### Checking Claude Code for headless mode
+
+A headless orchestrator relies on parts of Claude Code's `claude -p` stream that aren't
+documented: the init's keys, the interrupt, the permission tool, the transcript, the usage
+events. The live test checks them against the real `claude`, with haiku, a throwaway directory,
+your default account (no `CLAUDE_CONFIG_DIR`) and a fake herdr: one session and one resume, about
+six short turns. It prints a `PASS`/`FAIL` line per item and afterwards removes its own
+`~/.claude/projects/` entry. It is never built into the binary (the `claudelive` tag); CI only vets
+it.
+
+```bash
+go test -tags claudelive -count=1 -run TestClaudeLive -v ./internal/bridge
+```
+
+`scripts/claude-canary.sh` runs it periodically from the linked checkout and writes the result to
+`<state dir>/canary.json`. A bridge with a headless orchestrator reads that file every minute. The
+state carries it as `claudeCheck`, a failed check is a warning on each headless orchestrator, the
+"not verified" version warning tells the last check's result, and each failed check notifies once
+(ntfy, the PC, the app). The script runs the test only when Claude Code's version differs from the last check's
+or that check is 24 hours old (`--force` runs it now). An hourly systemd user timer runs it:
+
+```bash
+sh scripts/claude-canary.sh install   # writes ~/.config/systemd/user/yoicks-claude-canary.{service,timer}
+systemctl --user daemon-reload && systemctl --user enable --now yoicks-claude-canary.timer
+```
+
+The script never enables the timer itself. Each check costs one short haiku session (tens of
+thousands of tokens, mostly cache), about once a day and once per Claude Code update: small, but
+part of your weekly quota. When that quota runs low, stop it with `"canary": false` in
+`config.json` or `systemctl --user disable --now yoicks-claude-canary.timer`.
 
 ### Releasing
 

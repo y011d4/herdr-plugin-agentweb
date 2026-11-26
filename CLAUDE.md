@@ -449,6 +449,25 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   scripts by message text, MCP calls through go-sdk's client as Claude Code makes them) and
   fakeherdr's World, which answers the agent calls (`agent.get/read/prompt/wait`, a worker's script
   via `OnPrompt`, `StallAfter`) and records `notification.show`; never a real Claude.
+- **The real Claude** only in `headless_live_test.go` (`//go:build claudelive`; CI only vets it):
+  `go test -tags claudelive -count=1 -run TestClaudeLive -v ./internal/bridge` runs `claude` itself
+  through the runner (haiku via the test-only `extraArgs`, the personal account, throwaway dirs,
+  fakeherdr), about six turns, and prints `PASS|FAIL <item> <detail>` for plan §8's items plus
+  `mcp_failure` (the bearer revoked mid-session: Claude Code 2.1.322 says `MCP server "yoicks"
+  rejected the Authorization header in its config …`); `CLAUDE_LIVE_OUT` gets `{version, ok,
+  failed}`. It removes only its own `~/.claude/projects/<slug>/`. Run it when Claude Code changes
+  (it uses the weekly quota), then raise `verifiedClaudeVersion`. `scripts/claude-canary.sh` (its
+  test: `scripts/claude_canary_test.go`, fake `claude` and `go`) runs it from the linked checkout
+  for a new version or after 24 h and writes `<state>/canary.json` (`{at, version, ok, failed}`);
+  `install` writes the hourly user timer, which the user enables; config `"canary": false` stops it.
+  With a headless entry the bridge reads the file at its start and each minute (`checkClaude`):
+  state `claudeCheck`, a `canary` warning on the headless ones while it failed, the version warning
+  tells it, and a failed check alerts once (`orchestrator_alert` with no name, ntfy,
+  `notification.show`).
+- The `mcp_call` warning doesn't read Claude Code's error text: the MCP middleware notes the
+  `_meta["claudecode/toolUseId"]` of each `tools/call` (`served`), the stream model reports each yoicks
+  tool's result, and an `is_error` one for an id never served failed before reaching the bridge.
+  fakeclaude names its calls the same way (`mcpfail` fails one without calling).
 - Live verification is expected before claiming completion: healthz, an
   `/api/state` sanity check, and (for input paths) a scratch-tab round trip
   (`herdr tab create` → POST input → read back → close the tab).
