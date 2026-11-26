@@ -360,12 +360,9 @@ class Page {
     return r;
   }
   async tapEl(el: string) { const p = await this.at(el); await this.tap(p.x, p.y); return Date.now(); }
-  /** Waits (10s at most) until a touch at p lands on `el`, clearing the toasts over it: status changes raise
-   *  sticky ones, right where the list's top (the Start buttons) is. With two or more, the stack's own box
-   *  (beside its Clear all) takes the touch too, so any hit in #toast-container clears them all. */
+  /** Waits (10s at most) until a touch at p lands on `el`: a toast over it goes after 4s. */
   uncovered = (el: string, p: { x: number; y: number }) =>
-    this.until(`(() => { const e = ${el}, hit = document.elementFromPoint(${p.x}, ${p.y}); if (e && e.contains(hit)) return true;
-      if (hit?.closest('#toast-container')) document.getElementById('toast-clear-all')?.click(); return false; })()`, 10_000);
+    this.until(`(() => { const e = ${el}; return !!e && e.contains(document.elementFromPoint(${p.x}, ${p.y})); })()`, 10_000);
   /** Stops holding, and sends the held requests on; returns them (Fetch.requestPaused params). */
   async release(): Promise<any[]> {
     this.hold = null;
@@ -1061,44 +1058,10 @@ async function p4t1(c: Ctx) {
     await pg.ev(prev === null ? `localStorage.removeItem('herdr_notifications')` : `localStorage.setItem('herdr_notifications', ${js(prev)})`);
     await pg.cdp.send('Target.activateTarget', { targetId: pg.targetId });
     if (other) await pg.cdp.send('Target.closeTarget', { targetId: other.targetId }).catch(() => {});
-    await reportLess(c, 'idle'); // on the pane: no toast for it
+    await reportLess(c, 'idle');
     await sleep(500);
     await pg.goto('#/agents');
   }
-}
-
-/** P5: from the list, wc-less idle -> working adds a toast for it, whose tap opens the pane; back on the list,
- *  working -> idle adds another, which a 120px right swipe removes without changing the hash. */
-async function p5(c: Ctx) {
-  const { pg } = c;
-  const less = c.rec.names.less;
-  const sel = `.toast[data-pane-id=${js(less)}]`;
-  const count = `document.querySelectorAll(${js(sel)}).length`;
-  const last = `[...document.querySelectorAll(${js(sel)})].pop()`;
-  await pg.goto('#/agents');
-  const n0 = await pg.ev(count);
-  await reportLess(c, 'working');
-  const added = await pg.until(`${count} === ${n0 + 1}`, 5000);
-  await pg.tapEl(last);
-  const nav = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)}`, 2000);
-
-  await pg.goto('#/agents');
-  await pg.until(`${count} === 0`, 2000); // opening the pane dismissed its toasts
-  const n1 = await pg.ev(count);
-  await reportLess(c, 'idle');
-  const added2 = await pg.until(`${count} === ${n1 + 1}`, 5000);
-  const h0 = await pg.hash();
-  const p = await pg.at(last);
-  const x = p.x - 60; // left of center: the swipe stays on screen and off the close button
-  await pg.touch('touchStart', [[x, p.y]]);
-  for (let i = 1; i <= 8; i++) { await sleep(16); await pg.touch('touchMove', [[x + 15 * i, p.y]]); }
-  await pg.touch('touchEnd', []);
-  const gone = await pg.until(`${count} === ${n1}`, 1000);
-  await sleep(500); // a swipe that also tapped would navigate by now
-  const h1 = await pg.hash();
-  result(c, !added.timeout && !nav.timeout && !added2.timeout && !gone.timeout && h1 === h0, 'P5',
-    `toast=${ms(added)},tap=${ms(nav)},toast2=${ms(added2)},swipedOff=${ms(gone)},hash=${h0}->${h1}`,
-    'idle->working adds a wc-less .toast, whose tap opens #/pane/<it> within 2s; a 120px right swipe removes one, the hash unchanged');
 }
 
 /** P15: wc-stop opened from #/agents/wc-o1 and stopped (⋮ → Stop agent… → Stop): back to that list, the pane gone. */
@@ -1356,7 +1319,7 @@ async function h6(c: Ctx) {
   result(c, !r.timeout, 'H6', `warning=${ms(r)}`, "Claude Code 0.0.0-webcheck: a version warning line on wc-h1's Home within 3s, with 'Back to TUI'");
 }
 
-/** H2: a message from the Home: working, then done, its reply in the chat; done told on another screen; seen there, idle. */
+/** H2: a message from the Home: working, then done (finishing on another screen), its reply in the chat; seen there, idle. */
 async function h2(c: Ctx) {
   const { pg } = c;
   await hlHome(c, 'wc-h1');
@@ -1365,15 +1328,14 @@ async function h2(c: Ctx) {
   const working = await waitFn(async () => (await hlStatus(c, 'wc-h1')) === 'working', 3000, 100);
   await pg.goto('#/agents'); // finishing while another screen is shown
   const done = await waitFn(async () => (await hlStatus(c, 'wc-h1')) === 'done', 10_000, 200);
-  const toast = await pg.until(`[...document.querySelectorAll('.toast[data-pane-id="hl:wc-h1"]')].some((t) => /done/.test(t.textContent))`, 3000);
   await pg.goto('#/home/wc-h1');
   const reply = await pg.until(`document.querySelectorAll('#chat-log .chat-assistant').length > ${n0} && ${CHAT}.includes('echo: slow 3')`, 5000);
   const dot = `document.querySelector('.home-switch-btn[data-orch="wc-h1"] i')?.className`;
   const seen = await pg.until(`${dot} === 'home-dot idle'`, 3000);
   const api0 = await hlStatus(c, 'wc-h1');
-  result(c, !working.timeout && !done.timeout && !toast.timeout && !reply.timeout && !seen.timeout && api0 === 'done', 'H2',
-    `working=${ms(working)},done=${ms(done)},toast=${ms(toast)},reply=${ms(reply)},dot=${seen.v ? 'idle' : await pg.ev(dot)},api=${api0}`,
-    "Send 'slow 3' on wc-h1's Home: working within 3s, done within 10s; on #/agents a toast for hl:wc-h1 'done' within 3s; back on its Home the reply, and its switcher dot idle (seen) while /api/state still says done");
+  result(c, !working.timeout && !done.timeout && !reply.timeout && !seen.timeout && api0 === 'done', 'H2',
+    `working=${ms(working)},done=${ms(done)},reply=${ms(reply)},dot=${seen.v ? 'idle' : await pg.ev(dot)},api=${api0}`,
+    "Send 'slow 3' on wc-h1's Home: working within 3s, done within 10s (on #/agents); back on its Home the reply, and its switcher dot idle (seen) while /api/state still says done");
 }
 
 /** H3: its question in the answer panel: a tap answers it (the fake's tool_result has the answer); the old id is 409. */
@@ -1425,22 +1387,20 @@ async function h5(c: Ctx) {
     "two messages sent during 'slow 2': both user items and both replies, in order, within 10s; two user bubbles in that order on the Home");
 }
 
-/** H8: lines it can't read: a stream_broken warning with the way back to the TUI, which opens in place; a toast. */
+/** H8: lines it can't read: a stream_broken warning with the way back to the TUI, which opens in place. */
 async function h8(c: Ctx) {
   const { pg } = c;
   await hlHome(c, 'wc-h1');
-  await pg.ev(`document.getElementById('toast-clear-all')?.click(), 1`).catch(() => {});
   await compose(c, 'garbage 3');
   const row = `document.querySelector('.home-warning[data-kind="stream_broken"]')`;
   const warn = await pg.until(`!!${row}?.querySelector('[data-action="tui"]')`, 5000);
-  const toast = await pg.until(`[...document.querySelectorAll('.toast[data-pane-id="hl:wc-h1"]')].some((t) => /stream_broken/.test(t.textContent))`, 3000);
   let steps = { v: false, timeout: true, ms: 0 };
   if (!warn.timeout) {
     await pg.tapEl(`${row}.querySelector('[data-action="tui"]')`);
     steps = await pg.until(`(document.querySelector('.home-warnings .tui-steps')?.textContent ?? '').includes('"wc-h1"')`, 2000);
   }
-  result(c, !warn.timeout && !toast.timeout && !steps.timeout, 'H8', `warning=${ms(warn)},toast=${ms(toast)},steps=${ms(steps)}`,
-    "'garbage 3': a stream_broken warning line within 5s, a toast within 3s; its 'Back to TUI' shows the steps naming wc-h1");
+  result(c, !warn.timeout && !steps.timeout, 'H8', `warning=${ms(warn)},steps=${ms(steps)}`,
+    "'garbage 3': a stream_broken warning line within 5s; its 'Back to TUI' shows the steps naming wc-h1");
 }
 
 /** H7: the preview restarts: wc-h1 comes back on the same session, its chat still there. */
@@ -1763,7 +1723,7 @@ async function p8t2(c: Ctx) {
   const sw = await pg.until(`document.querySelectorAll('.home-switch-btn').length === ${all} && !!${dim}`, 5000);
   if (!sw.timeout) {
     const at = await pg.at(dim);
-    await pg.uncovered(dim, at); // wc-o1's start raised toasts
+    await pg.uncovered(dim, at);
     await pg.tap(at.x, at.y);
   } else await pg.goto('#/home/wc-o2');
   const stopped = await stoppedHome(c, 'wc-o2', 3000);
@@ -1841,7 +1801,6 @@ const ITEMS: Item[] = [
   { id: 'P18', tier: 1, needs: ['less'], run: p18 },
   { id: 'P3', tier: 1, needs: ['less'], run: p3 },
   { id: 'P4-T1', tier: 1, needs: ['less'], run: p4t1 },
-  { id: 'P5', tier: 1, needs: ['less'], run: p5 },
   { id: 'P15', tier: 1, needs: ['stop'], run: p15 },
   { id: 'P10', tier: 1, needs: ['shell', 'less'], run: p10 },
   { id: 'P14', tier: 1, needs: ['shell', 'less'], run: p14 },
@@ -1927,8 +1886,6 @@ async function check(o: Record<string, any>): Promise<number> {
       for (let attempt = 1; ; attempt++) {
         const mark = c.out.length;
         const fails = c.failures;
-        // sticky toasts from real agents' status changes stack over the screen and take touches meant for it
-        await c.pg.ev(`document.getElementById('toast-clear-all')?.click(), 1`).catch(() => {});
         try { await item.run(c); } catch (e) {
           result(c, false, item.id, `${e instanceof EnvError ? 'ENV:' : 'error:'}${(e as Error).message}`, 'item threw');
         }

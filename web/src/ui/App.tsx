@@ -14,7 +14,7 @@
 import { Fragment, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { apiDelete, apiGet, apiPost, getToken, headlessName, loadToken, onUnauthorized, orchestratorPost, setToken } from '../api.ts';
-import { dismissNotificationsForPane, dismissToastsForPane, notifyAgentStatus, notifyOrchestratorAlert, showToast } from '../notify.ts';
+import { dismissNotificationsForPane, notifyAgentStatus, notifyOrchestratorAlert, showToast } from '../notify.ts';
 import { homeOf, nextPaneBackRoute, nextSettingsBackRoute, paneGoneRoute, paneRoute, resolveRoute } from '../routes.ts';
 import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, store, subscribe, type View } from '../store.ts';
 import type { AppState, ClearResponse, WsMessage } from '../types.ts';
@@ -100,7 +100,7 @@ function handleWsMessage(msg: WsMessage): void {
     setAppState(msg.state);
     onStateUpdate();
   } else if (msg.type === 'agent_status') {
-    notifyAgentStatus(msg); // a toast; for blocked/done also an OS notification while hidden
+    notifyAgentStatus(msg); // for blocked/done an OS notification while hidden
   } else if (msg.type === 'orchestrator_alert') {
     notifyOrchestratorAlert(msg); // a headless orchestrator's new warning (or a failed Claude Code check)
   } else if (msg.type === 'pane_gone') {
@@ -249,7 +249,6 @@ function handleRoute(e?: Event): void {
     view.activePaneId = route.paneId;
     try { localStorage.setItem(STORAGE_HOME, route.name); } catch { /* memory-only */ }
     if (route.paneId) {
-      dismissToastsForPane(route.paneId);
       dismissNotificationsForPane(route.paneId);
       markActivePaneSeen();
       renderPaneDetail(route.paneId, route.name);
@@ -262,8 +261,7 @@ function handleRoute(e?: Event): void {
   } else if (route.kind === 'pane') {
     view.activePaneId = route.paneId;
     view.paneBackRoute = nextPaneBackRoute(e instanceof HashChangeEvent ? new URL(e.oldURL).hash : null, view.paneBackRoute);
-    // opening a pane clears its pending notifications (in-app toasts + OS)
-    dismissToastsForPane(route.paneId);
+    // opening a pane clears its pending OS notifications
     dismissNotificationsForPane(route.paneId);
     markActivePaneSeen();
     renderPaneDetail(route.paneId);

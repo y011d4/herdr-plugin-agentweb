@@ -64,8 +64,9 @@ All in `internal/bridge/` (one package):
   open pane's OS notifications, seen done), `visualViewport` → `--app-height` and the startup (token,
   WS, first `/api/state`, a 401 → the token screen). Under it: `api.ts` (token, REST; a 401 →
   callback), `store.ts` (State, WS link, `view`, seen done, kept tasks; subscribe/emit), `ws.ts`
-  (socket, ping, backoff, state polling, watches) and `notify.ts` (the toast store and the OS
-  notifications). The screens are in `web/src/ui/`: Settings, Token, the agents list `Dashboard.tsx`,
+  (socket, ping, backoff, state polling, watches) and `notify.ts` (the toast store: short-lived
+  results of the user's actions, and the OS notifications; a status push or an alert never
+  toasts). The screens are in `web/src/ui/`: Settings, Token, the agents list `Dashboard.tsx`,
   `Pane.tsx` and `PromptPanel.tsx`; `Toasts.tsx` draws into `#toast-container` and `Modals.tsx`
   (Confirm, agent actions, Rename, New agent) is portalled into `#modal-root`. An opened
   pane's body is `pane-view.ts` (`createPaneView` → setMode/onState/echo/destroy, one per opened
@@ -82,8 +83,8 @@ All in `internal/bridge/` (one package):
   `/api/orchestrators/:name/*`, `watch.ts` watches only its transcript, pane-view has no terminal for
   it (the chat, empty until its session's first line) and `PromptPanel.tsx`'s `HeadlessPrompt` answers
   `headless.pending`; its usage and warnings (■, Clear, the steps back to the TUI) sit on the status
-  bar. `orchestrator_alert` toasts (`notifyOrchestratorAlert`); Settings shows the last Claude Code
-  check and the TUI steps; the `[yoicks] …` lines at either end of a user turn render as dim lines (`splitNotices`), the rest as its bubble; an `agent_start` result shows as such a line. `ansi.ts` — pure ANSI→HTML,
+  bar. `orchestrator_alert` raises an OS notification while hidden (`notifyOrchestratorAlert`);
+  Settings shows the last Claude Code check and the TUI steps; the `[yoicks] …` lines at either end of a user turn render as dim lines (`splitNotices`), the rest as its bubble; an `agent_start` result shows as such a line. `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
   (manifest, icons) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one
