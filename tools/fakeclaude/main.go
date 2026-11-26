@@ -20,8 +20,11 @@
 //	deaf      stop reading stdin (what's written to it backs up)
 //	other     the reply "echo: <text>"
 //
-// A control_request interrupt ends the turn running, or a message sent before it that hasn't
-// started (result error_during_execution, terminal_reason aborted_*), then is answered.
+//	hold      wait 2 s before its turn begins (then the reply)
+//
+// A control_request interrupt ends the turn running, or with none running the one message it
+// overtook, whose turn hasn't begun (result error_during_execution, terminal_reason aborted_*),
+// then is answered; messages queued behind it stay and run next (as S0 measured).
 // Stdin's end while idle exits 0; while working, after the turn. FAKECLAUDE_START=init sends
 // an init at once, before any message; =exit exits 1 at once. FAKECLAUDE_LOG, when set, gets
 // a JSON line for the argv (and env keys) and each stdin line.
@@ -109,18 +112,20 @@ type fake struct {
 	outMu sync.Mutex
 
 	mu      sync.Mutex
-	cancel  context.CancelFunc // the turn in progress
-	epoch   int                // interrupts so far: a message queued before one never starts
+	cancel  context.CancelFunc // the turn running (nil: none)
+	read    int                // messages read
+	begun   int                // messages whose turn has begun (or was skipped)
+	skip    map[int]bool       // messages an interrupt overtook before their turn began
 	answers map[string]chan map[string]any
 }
 
 type queued struct {
-	text  string
-	epoch int
+	text string
+	n    int // its place among the messages read
 }
 
 func session(args []string) {
-	f := &fake{id: firstNonEmpty(argAfter(args, "--session-id"), argAfter(args, "--resume")), answers: map[string]chan map[string]any{}}
+	f := &fake{id: firstNonEmpty(argAfter(args, "--session-id"), argAfter(args, "--resume")), answers: map[string]chan map[string]any{}, skip: map[int]bool{}}
 	if t := argAfter(args, "--tools"); t != "" {
 		f.tools = strings.Split(t, ",")
 	}
@@ -162,18 +167,20 @@ func session(args []string) {
 					time.Sleep(time.Hour) // stop reading stdin: the bridge's writes back up
 				}
 				f.mu.Lock()
-				epoch := f.epoch
+				f.read++
+				n := f.read
 				f.mu.Unlock()
-				msgs <- queued{text, epoch}
+				msgs <- queued{text, n}
 			case "control_request":
 				req, _ := m["request"].(map[string]any)
 				if req["subtype"] == "interrupt" {
-					// registered before the answer: the turn running, or one queued but not
-					// started yet, ends without its reply
+					// registered before the answer: the turn running ends, or with none running
+					// the next message, which it overtook, never begins
 					f.mu.Lock()
-					f.epoch++
 					if f.cancel != nil {
 						f.cancel()
+					} else if f.begun < f.read {
+						f.skip[f.begun+1] = true
 					}
 					f.mu.Unlock()
 					f.emit(map[string]any{"type": "control_response", "response": map[string]any{
@@ -234,13 +241,25 @@ func (f *fake) record(v map[string]any) {
 
 func (f *fake) turn(q queued) {
 	text := q.text
+	if text == "hold" {
+		time.Sleep(2 * time.Second)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	f.mu.Lock()
-	interrupted := q.epoch != f.epoch
-	f.cancel = cancel
+	f.begun = q.n
+	skipped := f.skip[q.n]
+	delete(f.skip, q.n)
+	if !skipped {
+		f.cancel = cancel
+	}
 	f.mu.Unlock()
-	if interrupted { // an interrupt came after it was sent, before it started
+	defer func() {
+		f.mu.Lock()
+		f.cancel = nil
+		f.mu.Unlock()
+	}()
+	if skipped { // an interrupt came after it was sent, before its turn began
 		f.aborted("aborted_streaming")
 		return
 	}
