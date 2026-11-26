@@ -149,3 +149,38 @@ func TestWorldPromptWithoutWaitOutlivesItsPane(t *testing.T) {
 		w.Add(Pane{ID: "w1", Tab: "t9", Workspace: "w1", Agent: "claude", Status: "idle", Name: "w1"})
 	}
 }
+
+// The deadline takes its place among the changes by time, however late the wait looks: a
+// working before the stall time counts, one after it doesn't.
+func TestWorldWaitSettlesChangesAgainstTheDeadline(t *testing.T) {
+	w := NewWorld()
+	w.Add(Pane{ID: "w1", Tab: "t9", Workspace: "w1", Agent: "claude", Status: "idle", Name: "w1"})
+	w.StallAfter(50 * time.Millisecond)
+	prompt := json.RawMessage(`{"target":"w1","text":"x","wait":{"until":["done","idle","blocked"]}}`)
+	answer := func(rep Reply) (code, status string) {
+		rep = rep.Wait(make(chan struct{}))
+		if rep.Code != "" {
+			return rep.Code, ""
+		}
+		a, _ := rep.Result.(map[string]any)["agent"].(map[string]any)
+		s, _ := a["agent_status"].(string)
+		return "", s
+	}
+
+	rep := w.agentCall("agent.prompt", prompt)
+	w.Set("w1", "working") // before the stall time
+	w.Set("w1", "done")
+	time.Sleep(100 * time.Millisecond) // the wait looks only after the deadline
+	if code, st := answer(rep); code != "" || st != "done" {
+		t.Errorf("a working in time: %q %q", code, st)
+	}
+
+	w.Set("w1", "idle")
+	rep = w.agentCall("agent.prompt", prompt)
+	time.Sleep(100 * time.Millisecond)
+	w.Set("w1", "working") // after it
+	w.Set("w1", "done")
+	if code, _ := answer(rep); code != "agent_prompt_stalled" {
+		t.Errorf("a working too late: %q", code)
+	}
+}

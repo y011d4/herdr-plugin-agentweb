@@ -71,7 +71,7 @@ func (w *World) Set(paneID, status string) string {
 			if status == "done" {
 				p.completionSeq++
 			}
-			w.tell(change{p.ID, status, agentInfo(p)})
+			w.tell(change{pane: p.ID, to: status, agent: agentInfo(p)})
 		}
 		return from
 	}
@@ -153,10 +153,12 @@ func agentInfo(p *Pane) map[string]any {
 		"interactive_ready": !p.NotReady, "state_change_seq": p.stateChangeSeq, "completion_seq": p.completionSeq}
 }
 
-// change is one status change of a pane, with its agent then; to "" is the pane leaving.
+// change is one status change of a pane, with its agent then and when it came; to "" is the
+// pane leaving.
 type change struct {
 	pane, to string
 	agent    map[string]any
+	at       time.Time
 }
 
 // watcher is a held wait: it gets every change from its registration on, in order (w.mu).
@@ -165,8 +167,9 @@ type watcher struct {
 	signal  chan struct{} // cap 1: new changes are there
 }
 
-// tell gives every held wait the change; w.mu held.
+// tell gives every held wait the change, stamped now; w.mu held.
 func (w *World) tell(c change) {
+	c.at = time.Now()
 	for x := range w.watchers {
 		x.changes = append(x.changes, c)
 		select {
@@ -178,8 +181,10 @@ func (w *World) tell(c change) {
 
 // await holds a wait on pane, registered now (w.mu held: no change can come between the
 // caller's look at the pane and it): step judges each of its changes in order until it gives
-// the answer. The pane leaving answers not_found, the client leaving ends it; deadline (zero:
-// none) asks onDeadline, which may answer or let it go on without one.
+// the answer. The pane leaving answers not_found, the client leaving ends it. deadline (zero:
+// none) takes its place among the changes by time, whenever the wait gets to look: changes
+// before it are judged first, then onDeadline (which may answer, or let it go on without
+// one), then the changes after it.
 func (w *World) await(pane string, deadline time.Time, onDeadline func() (Reply, bool), step func(c change) (Reply, bool)) Reply {
 	x := &watcher{signal: make(chan struct{}, 1)}
 	if w.watchers == nil {
@@ -192,20 +197,31 @@ func (w *World) await(pane string, deadline time.Time, onDeadline func() (Reply,
 			delete(w.watchers, x)
 			w.mu.Unlock()
 		}()
+		timing := !deadline.IsZero()
 		var timer <-chan time.Time
-		if !deadline.IsZero() {
+		if timing {
 			t := time.NewTimer(time.Until(deadline))
 			defer t.Stop()
 			timer = t.C
 		}
+		due := func() (Reply, bool) { // the deadline's turn: once
+			timing = false
+			return onDeadline()
+		}
 		for {
-			w.mu.Lock()
+			w.mu.Lock() // what came so far, and whether the deadline is past, as of one moment
 			cs := x.changes
 			x.changes = nil
+			past := timing && !time.Now().Before(deadline)
 			w.mu.Unlock()
 			for _, c := range cs {
 				if c.pane != pane {
 					continue
+				}
+				if timing && c.at.After(deadline) {
+					if rep, done := due(); done {
+						return rep
+					}
 				}
 				if c.to == "" {
 					return Reply{Code: "not_found", Message: "no agent " + pane}
@@ -214,14 +230,16 @@ func (w *World) await(pane string, deadline time.Time, onDeadline func() (Reply,
 					return rep
 				}
 			}
+			if past && timing {
+				if rep, done := due(); done {
+					return rep
+				}
+			}
 			select {
 			case <-x.signal:
 			case <-gone:
 				return Reply{Close: true}
-			case <-timer:
-				if rep, done := onDeadline(); done {
-					return rep
-				}
+			case <-timer: // the next look settles it
 				timer = nil
 			}
 		}
