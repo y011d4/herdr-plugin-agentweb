@@ -140,13 +140,15 @@ func TestHeadlessAskAndAnswer(t *testing.T) {
 		t.Errorf("answered twice: %d", status)
 	}
 
-	// a message while a question waits refuses it, with the message
+	// a message while a question waits is its answer, in the user's own words (no refusal: the
+	// model would read that as an error)
 	b.send(t, "ask")
 	b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
-	b.send(t, "no fruit, thanks")
+	b.send(t, "banana, please")
 	b.waitFor(t, "the turn's end", func(v OrchestratorView) bool { return v.Headless.Status == "done" && v.Headless.Pending == nil })
 	_, tr, _ = b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
-	if !strings.Contains(tr, `\"behavior\":\"deny\",\"message\":\"no fruit, thanks\"`) {
+	if !strings.Contains(tr, `\"behavior\":\"allow\"`) || !strings.Contains(tr, `\"answers\":{\"Which fruit?\":\"banana, please\"}`) ||
+		strings.Count(tr, `\"behavior\":\"deny\"`) != 0 {
 		t.Errorf("the tool_result: %s", tr)
 	}
 
