@@ -119,6 +119,19 @@ func ensureOrchestratorDir(def OrchestratorDef, rules string) error {
 // Always plain claude, whatever config does to the `claude` launch profile.
 var orchestratorProfile = map[string]LaunchProfile{"claude": {Argv: []string{"claude"}, Label: "Claude Code"}}
 
+// expectedAccount is the Claude account an orchestrator runs under: the one its env sets,
+// else what its dir sets (direnv; up to 15 s), else the default. startOrchestrator checks
+// the started agent against it; a stopped orchestrator's Home lists that account's agents.
+func expectedAccount(def OrchestratorDef) string {
+	if cfg := def.Env["CLAUDE_CONFIG_DIR"]; cfg != "" {
+		return accountForConfigDir(cfg, "")
+	}
+	if a := dirAccount(def.Dir); a != "" {
+		return a
+	}
+	return accountForConfigDir("", "")
+}
+
 // startOrchestrator starts an orchestrator in a new workspace at its dir, with its
 // env, and returns its pane and agent name. Refused when one already runs there. A
 // managed dir is (re)written first; a legacy one must exist. The started agent must
@@ -148,13 +161,7 @@ func startOrchestrator(rpc Rpc, def OrchestratorDef, rules string) (paneID, name
 	} else if _, err := os.Stat(def.Dir); err != nil {
 		return "", "", &LifecycleError{Status: 404, Code: "not_found", Message: def.Dir + " does not exist"}
 	}
-	// the account its env sets; else what its dir sets (a legacy dir's own .envrc), else the default
-	expected := ""
-	if cfg := def.Env["CLAUDE_CONFIG_DIR"]; cfg != "" {
-		expected = accountForConfigDir(cfg, "")
-	} else if expected = dirAccount(def.Dir); expected == "" {
-		expected = accountForConfigDir("", "")
-	}
+	expected := expectedAccount(def)
 	agent := agentName("orch-" + def.Name)
 	if agent == "" {
 		agent = "orch"
