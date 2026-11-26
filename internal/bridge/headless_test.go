@@ -734,3 +734,42 @@ func TestNoHeadlessWithoutAHeadlessEntry(t *testing.T) {
 		t.Errorf("send to a tui orchestrator: %d", status)
 	}
 }
+
+// A message queued behind an interrupted turn runs next; with no turn running, an interrupt
+// ends only the message it overtook (as Claude Code does, S0 row 2).
+func TestHeadlessInterruptKeepsQueuedMessages(t *testing.T) {
+	transcript := func(b *hlBridge) string {
+		_, body, _ := b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
+		return body
+	}
+	t.Run("the message an interrupt overtook ends; the one after it runs", func(t *testing.T) {
+		b := startHeadless(t, t.TempDir(), nil, nil)
+		b.start(t)
+		b.waitStatus(t, "idle")
+		b.send(t, "hold") // its turn begins only 2 s later
+		if status, body := b.post(t, "interrupt", ""); status != 200 {
+			t.Fatalf("interrupt: %d %s", status, body)
+		}
+		b.send(t, "after")
+		b.waitFor(t, "after answered", func(v OrchestratorView) bool { return v.Headless.CompletionSeq == 1 && v.Headless.Status == "done" })
+		if tr := transcript(b); !strings.Contains(tr, "echo: after") || strings.Contains(tr, "echo: hold") {
+			t.Errorf("transcript %s", tr)
+		}
+	})
+	t.Run("a message queued behind a turn survives its interrupt", func(t *testing.T) {
+		b := startHeadless(t, t.TempDir(), nil, nil)
+		b.start(t)
+		b.waitStatus(t, "idle")
+		b.send(t, "slow 30")
+		waitUntil(t, 5*time.Second, "the turn begins", func() bool { return strings.Contains(transcript(b), `"text":"slow 30"`) })
+		b.send(t, "queued")
+		b.waitStdin(t, "queued")
+		if status, body := b.post(t, "interrupt", ""); status != 200 {
+			t.Fatalf("interrupt: %d %s", status, body)
+		}
+		b.waitFor(t, "queued answered", func(v OrchestratorView) bool { return v.Headless.CompletionSeq == 1 && v.Headless.Status == "done" })
+		if tr := transcript(b); !strings.Contains(tr, "echo: queued") || strings.Contains(tr, "echo: slow 30") {
+			t.Errorf("transcript %s", tr)
+		}
+	})
+}
