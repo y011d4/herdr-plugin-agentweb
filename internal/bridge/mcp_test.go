@@ -877,3 +877,28 @@ func needsAccounts(t *testing.T) {
 		t.Skip("a worker's Claude account is read from /proc: Linux only")
 	}
 }
+
+// A yoicks tool's error result whose call never reached the bridge (it failed in Claude Code:
+// its MCP session, the bearer, the transport) warns mcp_call; a call the bridge served and
+// answered with an error doesn't.
+func TestHeadlessMCPCallFailure(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	b.send(t, `call agent_get {"name":"nobody"}`)
+	b.waitStatus(t, "done")
+	if _, tr, _ := b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil); !strings.Contains(tr, `"isError":true`) {
+		t.Fatalf("not an error result: %s", tr)
+	}
+	if v := b.view(t); hasWarning(v, "mcp_call") {
+		t.Fatalf("a served call warned: %+v", v.Headless.Warnings)
+	}
+	b.send(t, "mcpfail")
+	v := b.waitFor(t, "the warning", func(v OrchestratorView) bool { return hasWarning(v, "mcp_call") })
+	for _, w := range v.Headless.Warnings {
+		if w.Kind == "mcp_call" && (w.Message != "overview failed before reaching the bridge (Error calling tool (overview): fake transport failure); Clear to reconnect" ||
+			!slices.Equal(w.Actions, []string{"clear"})) {
+			t.Errorf("%+v", w)
+		}
+	}
+}

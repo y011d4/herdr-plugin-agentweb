@@ -175,4 +175,19 @@ func TestHeadlessStream(t *testing.T) {
 			t.Errorf("%+v", st)
 		}
 	})
+
+	t.Run("a yoicks tool's result is reported with its tool_use, an error's first line with it", func(t *testing.T) {
+		m := hlModel{}
+		use := `{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"toolu_y1","name":"mcp__yoicks__overview","input":{}},` +
+			`{"type":"tool_use","id":"toolu_y2","name":"mcp__yoicks__agent_get","input":{}},{"type":"tool_use","id":"toolu_b1","name":"Bash","input":{}}]}}`
+		results := `{"type":"user","message":{"role":"user","content":[` +
+			`{"type":"tool_result","tool_use_id":"toolu_y1","is_error":true,"content":"<tool_use_error>Error calling tool (overview): HTTP 401\nmore</tool_use_error>"},` +
+			`{"type":"tool_result","tool_use_id":"toolu_y2","content":[{"type":"text","text":"{}"}]},` +
+			`{"type":"tool_result","tool_use_id":"toolu_b1","is_error":true,"content":"no"}]}}`
+		steps := applyAll(&m, lineInit, use, results, results)
+		want := []hlToolResult{{"toolu_y1", "overview", "Error calling tool (overview): HTTP 401"}, {"toolu_y2", "agent_get", ""}}
+		if !slices.Equal(steps[2].Results, want) || len(steps[3].Results) != 0 || len(m.yoicksUses) != 0 {
+			t.Errorf("results %+v, then %+v; left %v", steps[2].Results, steps[3].Results, m.yoicksUses)
+		}
+	})
 }
