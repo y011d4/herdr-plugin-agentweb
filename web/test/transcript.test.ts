@@ -188,6 +188,7 @@ describe('renderItem — assistant + user turns use the markdown renderer', () =
     // only the ends: one in the middle, or not at a line's start, stays the user's
     assert.deepEqual(shown(user('a\n[yoicks] x\nb')), ['chat-user: a[yoicks] xb']);
     assert.deepEqual(shown(user('see [yoicks] x')), ['chat-user: see [yoicks] x']);
+    assert.doesNotMatch(user('- this:\n  [yoicks] w-a: done'), /chat-notice/); // indented: a list item's line
   });
 });
 
