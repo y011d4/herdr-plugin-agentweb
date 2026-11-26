@@ -524,6 +524,37 @@ func TestHeadlessRefusesBilling(t *testing.T) {
 	})
 }
 
+// The child is the running one before its first line or its exit: an init at once is
+// checked, an exit at once is a crash.
+func TestHeadlessChildAtOnce(t *testing.T) {
+	// spawn goes on late: its first line, or its end, comes before that
+	late := func(h *headlessRunner) { h.startedHook = func() { time.Sleep(300 * time.Millisecond) } }
+	t.Run("an init at once is checked", func(t *testing.T) {
+		fakeClaudeEnv(t)
+		t.Setenv("FAKECLAUDE_START", "init")
+		t.Setenv("FAKECLAUDE_APIKEYSOURCE", "ANTHROPIC_API_KEY")
+		b := startHeadless(t, t.TempDir(), nil, late)
+		b.start(t)
+		v := b.waitFor(t, "the init refused", func(v OrchestratorView) bool { return v.Headless.Status == "error" && v.PaneID == nil })
+		if !hasWarning(v, "init") {
+			t.Errorf("%+v", v.Headless)
+		}
+	})
+	t.Run("an exit at once is a crash, restarted to the limit", func(t *testing.T) {
+		fakeClaudeEnv(t)
+		t.Setenv("FAKECLAUDE_START", "exit")
+		b := startHeadless(t, t.TempDir(), nil, late)
+		b.start(t)
+		v := b.waitFor(t, "the restart limit", func(v OrchestratorView) bool { return v.Headless.Status == "error" })
+		if !hasWarning(v, "restart_limit") || v.PaneID != nil {
+			t.Errorf("%+v %v", v.Headless, v.PaneID)
+		}
+		if runs, _ := b.runs(t); len(runs) != 4 {
+			t.Errorf("%d runs", len(runs))
+		}
+	})
+}
+
 func TestHeadlessOrphanScan(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("the orphan scan reads /proc: Linux only")
