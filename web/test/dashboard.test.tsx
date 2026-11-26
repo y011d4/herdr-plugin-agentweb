@@ -10,8 +10,8 @@ import { state as recorded } from './contract.gen.ts';
 import { fire, render } from './render.ts';
 
 const fresh = (): AppState => structuredClone(recorded);
-/** Lets the timers and React settle. */
-const settle = (): Promise<void> => act(async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0)); });
+/** Runs the (fake) timers due and lets React settle. */
+const settle = (): Promise<void> => act(async () => { vi.runAllTimers(); });
 
 let unmounts: Array<() => Promise<void>>;
 async function show(hash: string, state: AppState | null): Promise<HTMLElement> {
@@ -30,6 +30,7 @@ beforeEach(() => {
   localStorage.clear();
 });
 afterEach(async () => {
+  vi.useRealTimers();
   for (const u of unmounts) await u();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -103,6 +104,9 @@ describe('Dashboard under state pushes', () => {
     const c = await show('#/agents', fresh());
     const scroller = c.querySelector('#screen-agents')!;
     const name = () => c.querySelector('.agent-card[data-pane-id="p1"] .agent-name')!.textContent;
+    // Fake, so lift's setTimeout runs only in settle(): `await fire()` (React's act) itself waits a
+    // macrotask (setImmediate), which a real setTimeout(0) can beat under load.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     await touch(scroller, 'touchstart', 1);
     await fire(() => setAppState(renamed('pushed')));
     assert.equal(name(), 'one #1');
