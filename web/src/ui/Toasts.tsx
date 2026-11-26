@@ -1,25 +1,19 @@
 /**
- * ui/Toasts.tsx — the toast stack (notify.ts's store), drawn into #toast-container: "Clear
- * all" (shown by CSS once two are stacked), then the toasts, oldest first. A toast goes on
- * its ✕, a right swipe past 72px, or a tap (when it has one).
+ * ui/Toasts.tsx — the toast stack (notify.ts's store), drawn into #toast-container, oldest
+ * first. A toast goes after 4s, on its ✕, or a right swipe past 72px.
  */
 import { useRef, useSyncExternalStore } from 'react';
-import { clearToasts, dismissToast, getToasts, removeToast, subscribeToasts, type Toast } from '../notify.ts';
+import { dismissToast, getToasts, removeToast, subscribeToasts, type Toast } from '../notify.ts';
 
 export function Toasts() {
   const toasts = useSyncExternalStore(subscribeToasts, getToasts);
-  return (
-    <>
-      <button type="button" id="toast-clear-all" onClick={clearToasts}>Clear all</button>
-      {toasts.map((t) => <ToastItem key={t.id} toast={t} />)}
-    </>
-  );
+  return <>{toasts.map((t) => <ToastItem key={t.id} toast={t} />)}</>;
 }
 
 function ToastItem({ toast: t }: { toast: Toast }) {
   const el = useRef<HTMLDivElement>(null);
   // the swipe follows the finger by styling the element directly, not by re-rendering
-  const swipe = useRef({ startX: 0, dx: 0, didSwipe: false });
+  const swipe = useRef({ startX: 0, dx: 0 });
   const s = swipe.current;
   const style = (): CSSStyleDeclaration => el.current!.style;
 
@@ -27,8 +21,6 @@ function ToastItem({ toast: t }: { toast: Toast }) {
     <div
       ref={el}
       className={t.fading ? 'toast fading' : 'toast'}
-      data-pane-id={t.paneId}
-      style={t.onclick ? { cursor: 'pointer' } : undefined}
       onTouchStart={(e) => {
         s.startX = e.touches[0].clientX;
         s.dx = 0;
@@ -44,29 +36,21 @@ function ToastItem({ toast: t }: { toast: Toast }) {
       onTouchEnd={() => {
         style().transition = 'transform 0.15s ease-out, opacity 0.15s ease-out';
         if (s.dx > 72) {
-          s.didSwipe = true;
           style().transform = 'translateX(120%)';
           style().opacity = '0';
           setTimeout(() => removeToast(t.id), 150);
         } else {
-          if (Math.abs(s.dx) > 10) s.didSwipe = true;
           style().transform = '';
           style().opacity = '';
         }
         s.dx = 0;
       }}
-      onClick={t.onclick && (() => {
-        // a swipe gesture must not double as a tap
-        if (s.didSwipe) { s.didSwipe = false; return; }
-        t.onclick!();
-        removeToast(t.id);
-      })}
     >
       <div className="toast-main">
         <div className="toast-header">{t.title}</div>
         <div className="toast-body">{t.body}</div>
       </div>
-      <button className="toast-close" aria-label="Dismiss" onClick={(e) => { e.stopPropagation(); dismissToast(t.id); }}>&#10005;</button>
+      <button className="toast-close" aria-label="Dismiss" onClick={() => dismissToast(t.id)}>&#10005;</button>
     </div>
   );
 }
