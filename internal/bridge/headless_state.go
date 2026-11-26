@@ -69,9 +69,13 @@ type hlStep struct {
 	Results  []hlToolResult // the yoicks tools' results it carries
 }
 
-// hlToolResult is a yoicks tool's result in the stream: its tool_use id, the tool, and for
-// an is_error one the first line of its text.
-type hlToolResult struct{ ID, Tool, Error string }
+// hlToolResult is a yoicks tool's result in the stream: its tool_use id, the tool, whether it
+// is an error, and then the first line of its text.
+type hlToolResult struct {
+	ID, Tool string
+	IsError  bool
+	Error    string
+}
 
 // hlCanUse is a permission request over stdio (can_use_tool), which the supervisor answers.
 type hlCanUse struct {
@@ -150,11 +154,11 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 				continue
 			}
 			delete(m.yoicksUses, id)
-			res := hlToolResult{ID: id, Tool: tool}
-			if b["is_error"] == true {
+			res := hlToolResult{ID: id, Tool: tool, IsError: b["is_error"] == true}
+			if res.IsError {
 				text := strings.NewReplacer("<tool_use_error>", "", "</tool_use_error>", "").Replace(toolResultText(b["content"]))
 				first, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
-				res.Error, _ = truncateUnits(first, 200)
+				res.Error, _ = truncateUnits(firstNonEmpty(strings.TrimSpace(first), "no error text"), 200)
 			}
 			st.Results = append(st.Results, res)
 		}
