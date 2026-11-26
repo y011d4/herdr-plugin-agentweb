@@ -25,15 +25,20 @@ import (
 )
 
 func TestHeadlessArgv(t *testing.T) {
-	got := headlessArgv("s-1", false, "/st/headless/h.mcp.json")
+	got := headlessArgv("s-1", false, "/st/headless/h.mcp.json", true)
 	want := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
 		"--session-id", "s-1", "--mcp-config", "/st/headless/h.mcp.json", "--strict-mcp-config",
-		"--permission-mode", "manual", "--tools", "AskUserQuestion"}
+		"--permission-prompt-tool", "mcp__yoicks__approve", "--permission-mode", "manual", "--tools", "AskUserQuestion",
+		"--allowedTools", "mcp__yoicks__overview,mcp__yoicks__agent_get,mcp__yoicks__agent_read,mcp__yoicks__agent_prompt,mcp__yoicks__agent_start,mcp__yoicks__worktree_remove"}
 	if !slices.Equal(got, want) {
 		t.Errorf("new: %v", got)
 	}
-	if got := headlessArgv("s-1", true, "/m"); got[6] != "--resume" || got[7] != "s-1" {
+	if got := headlessArgv("s-1", true, "/m", true); got[6] != "--resume" || got[7] != "s-1" {
 		t.Errorf("resume: %v", got)
+	}
+	// no tools (YOICKS_HEADLESS_NO_TOOLS): approve only
+	if got := headlessArgv("s-1", false, "/st/headless/h.mcp.json", false); !slices.Equal(got, want[:len(want)-2]) || !slices.Equal(headlessTools(false), []string{"AskUserQuestion"}) {
+		t.Errorf("no tools: %v", got)
 	}
 	for _, a := range got {
 		if a == "--bare" || a == "--dangerously-skip-permissions" {
@@ -105,6 +110,7 @@ type hlBridge struct {
 	*testBridge
 	log  string // FAKECLAUDE_LOG
 	home string
+	name string // its orchestrator
 }
 
 // fakeClaudeEnv builds tools/fakeclaude as `claude` (the orphan scan looks for that name)
@@ -131,7 +137,7 @@ func fakeClaudeEnv(t *testing.T) (log, home string) {
 	return log, home
 }
 
-// startHeadless runs a bridge with one headless orchestrator, h1, on fakeclaude.
+// startHeadless runs a bridge with one headless orchestrator, h1 (or the name hlName says), on fakeclaude.
 func startHeadless(t *testing.T, stateDir string, env map[string]string, tweak func(*headlessRunner)) *hlBridge {
 	t.Helper()
 	log, home := os.Getenv("FAKECLAUDE_LOG"), os.Getenv("HOME")
@@ -147,21 +153,22 @@ func startHeadless(t *testing.T, stateDir string, env map[string]string, tweak f
 			env[k] = v
 		}
 	}
-	def := OrchestratorDef{Name: "h1", Label: "H1", Dir: filepath.Join(home, "orchestrators", "h1"), Env: env, Managed: true, Mode: "headless"}
+	name := firstNonEmpty(os.Getenv("HLNAME"), "h1")
+	def := OrchestratorDef{Name: name, Label: "H1", Dir: filepath.Join(home, "orchestrators", name), Env: env, Managed: true, Mode: "headless"}
 	b := startBridge(t, Config{StateDir: stateDir, Orchestrators: []OrchestratorDef{def}}, nil, func(s *server) {
-		h := s.headless["h1"]
+		h := s.headless[name]
 		h.restartDelays = []time.Duration{50 * time.Millisecond, 50 * time.Millisecond, 50 * time.Millisecond}
 		if tweak != nil {
 			tweak(h)
 		}
 	})
 	t.Cleanup(b.srv.shutdownHeadless) // before the bridge's own cleanup (LIFO)
-	return &hlBridge{b, log, home}
+	return &hlBridge{b, log, home, name}
 }
 
 func (b *hlBridge) post(t *testing.T, action, body string) (int, string) {
 	t.Helper()
-	status, out, _ := b.do(t, "POST", "/api/orchestrators/h1/"+action, b.token, []byte(body))
+	status, out, _ := b.do(t, "POST", "/api/orchestrators/"+b.name+"/"+action, b.token, []byte(body))
 	return status, out
 }
 
@@ -189,7 +196,7 @@ func (b *hlBridge) waitStatus(t *testing.T, status string) OrchestratorView {
 
 func (b *hlBridge) start(t *testing.T) {
 	t.Helper()
-	if status, body := b.post(t, "start", ""); status != 200 || body != `{"ok":true,"paneId":"hl:h1","name":"h1"}` {
+	if status, body := b.post(t, "start", ""); status != 200 || body != `{"ok":true,"paneId":"hl:`+b.name+`","name":"`+b.name+`"}` {
 		t.Fatalf("start: %d %s", status, body)
 	}
 }
@@ -409,8 +416,12 @@ func TestHeadlessDetectors(t *testing.T) {
 	defer c.CloseNow()
 	b.start(t)
 	b.waitStatus(t, "idle")
-	for _, script := range []string{"unknown", "garbage", "ask"} {
+	for _, script := range []string{"unknown", "garbage", "askstdio"} {
 		b.send(t, script)
+		if script == "askstdio" { // over stdio too, the question is the Home's to answer
+			v := b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
+			b.post(t, "answer", `{"id":"`+v.Headless.Pending.ID+`","deny":"not now"}`)
+		}
 		b.waitFor(t, script+" answered", func(v OrchestratorView) bool { return v.Headless.Status == "done" })
 	}
 	b.send(t, "hang 2")
@@ -429,7 +440,7 @@ func TestHeadlessDetectors(t *testing.T) {
 	if hasWarning(v, "silent") {
 		t.Error("the silence warning stayed after an event")
 	}
-	b.waitStdin(t, `"behavior":"deny"`) // the stdio permission request was answered
+	b.waitStdin(t, `"message":"not now"`) // the stdio permission request was answered
 
 	// each kind was alerted once over WS
 	alerts := map[string]int{}
@@ -638,7 +649,7 @@ func TestHeadlessOrphanScan(t *testing.T) {
 	user.Wait()
 
 	// an earlier bridge's child (with the marker): stopped, then the start goes on
-	orphan := run(headlessArgv(sid, true, mcp)...)
+	orphan := run(headlessArgv(sid, true, mcp, true)...)
 	waitUntil(t, 5*time.Second, "it runs", func() bool { return len(claudeProcsWith(sid)) > 0 })
 	if pid := markedHeadlessChild(state, "h1"); pid != orphan.Process.Pid {
 		t.Errorf("markedHeadlessChild %d, want %d", pid, orphan.Process.Pid)
@@ -755,7 +766,7 @@ func TestHeadlessReapsOrphansBeforeARefusal(t *testing.T) {
 	sid := newUUID()
 	os.WriteFile(headlessPath(state, "h1", ".json"), []byte(`{"sessionId":"`+sid+`","wanted":true}`), 0o600)
 	orphan := func() chan struct{} {
-		cmd := otherClaude(t, headlessArgv(sid, true, headlessPath(state, "h1", ".mcp.json"))...)
+		cmd := otherClaude(t, headlessArgv(sid, true, headlessPath(state, "h1", ".mcp.json"), true)...)
 		waitUntil(t, 5*time.Second, "it runs", func() bool { return markedHeadlessChild(state, "h1") == cmd.Process.Pid })
 		gone := make(chan struct{})
 		go func() { cmd.Wait(); close(gone) }()

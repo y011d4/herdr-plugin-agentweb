@@ -18,9 +18,6 @@ import (
 // one runs, with a warning.
 const verifiedClaudeVersion = "2.1.322"
 
-// headlessTools is the exact tool set a headless child must report at init.
-var headlessTools = []string{"AskUserQuestion"}
-
 // knownEvents is the stream's event types (Claude Code 2.1.322 and the Agent SDK's list),
 // each with its known subtypes; nil = any subtype.
 var knownEvents = map[string][]string{
@@ -36,7 +33,7 @@ var knownEvents = map[string][]string{
 var warningActions = map[string][]string{
 	"silent": {"interrupt", "clear"}, "permission_route": {"interrupt"}, "stream_broken": {"clear", "tui"},
 	"restart_limit": {"clear", "tui"}, "panic": {"clear", "tui"}, "init": {"tui"}, "billing": {"tui"}, "env": {"tui"},
-	"auth": {"tui"}, "version": {"tui"}, "start": {"tui"},
+	"auth": {"tui"}, "version": {"tui"}, "start": {"tui"}, "question_route": {"interrupt"}, "rules": {"clear"},
 }
 
 // hlModel is what a headless child's stream has said so far.
@@ -44,6 +41,8 @@ type hlModel struct {
 	Status        string
 	CompletionSeq int64
 	Usage         *HeadlessUsage
+	expectTools   []string        // the exact tools its init must report (nil: AskUserQuestion)
+	expectMCP     bool            // and the yoicks MCP server connected
 	inited        bool            // this child's first init was checked
 	model         string          // the model of the last assistant message
 	ctxTokens     float64         // its context: input + cache tokens
@@ -61,6 +60,16 @@ type hlStep struct {
 	Reply    any    // a control_response to write back
 	Acked    string // the request_id a control_response answered
 	Log      string // a line for bridge.log (keys and kinds only, never content)
+	Ask      string // the tool_use id of an AskUserQuestion it asked
+	CanUse   *hlCanUse
+}
+
+// hlCanUse is a permission request over stdio (can_use_tool), which the supervisor answers.
+type hlCanUse struct {
+	RequestID any
+	Tool      string
+	ToolUseID string
+	Input     map[string]any
 }
 
 // apply reads one stdout line. now is ms.
@@ -106,6 +115,12 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 		if u, ok := msg["usage"].(map[string]any); ok {
 			m.ctxTokens = num(u["input_tokens"]) + num(u["cache_creation_input_tokens"]) + num(u["cache_read_input_tokens"])
 		}
+		content, _ := msg["content"].([]any)
+		for _, b := range content {
+			if b, _ := b.(map[string]any); b["type"] == "tool_use" && b["name"] == "AskUserQuestion" {
+				st.Ask, _ = b["id"].(string)
+			}
+		}
 	case "result":
 		if reason, _ := ev["terminal_reason"].(string); strings.HasPrefix(reason, "aborted") {
 			m.Status = "idle" // interrupted: no completion to report
@@ -138,12 +153,14 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 		id := ev["request_id"]
 		req := ev["request"].(map[string]any)
 		if req["subtype"] == "can_use_tool" {
-			// the permission tool is the documented route; this one is answered so the turn goes on
-			tool, _ := req["tool_name"].(string)
-			st.Warnings = []hlWarning{{"permission_route", "a permission request (" + tool + ") came over stdio instead of the permission tool; it was denied"}}
-			st.Log = "can_use_tool " + tool + ": denied"
-			st.Reply = controlResponse(id, map[string]any{"subtype": "success", "response": map[string]any{
-				"behavior": "deny", "message": "yoicks: permission requests go through the permission tool; denied"}})
+			// the permission tool is the documented route; this one is answered as it would be
+			cu := &hlCanUse{RequestID: id}
+			cu.Tool, _ = req["tool_name"].(string)
+			cu.ToolUseID, _ = req["tool_use_id"].(string)
+			cu.Input, _ = req["input"].(map[string]any)
+			st.CanUse = cu
+			st.Warnings = []hlWarning{{"permission_route", "a permission request (" + cu.Tool + ") came over stdio instead of the permission tool"}}
+			st.Log = "can_use_tool " + cu.Tool
 		} else {
 			st.Log = fmt.Sprintf("control_request %v: answered with an error", req["subtype"])
 			st.Reply = controlResponse(id, map[string]any{"subtype": "error", "error": fmt.Sprintf("yoicks: unsupported control request %v", req["subtype"])})
@@ -164,12 +181,25 @@ func (m *hlModel) checkInit(ev map[string]any) (st hlStep) {
 		tools = append(tools, s)
 	}
 	version, _ := ev["claude_code_version"].(string)
-	st.Init = fmt.Sprintf("init session=%v version=%s apiKeySource=%s tools=%v", ev["session_id"], version, source, tools)
+	want := m.expectTools
+	if want == nil {
+		want = []string{"AskUserQuestion"}
+	}
+	connected := false
+	servers, _ := ev["mcp_servers"].([]any)
+	for _, s := range servers {
+		if s, _ := s.(map[string]any); s["name"] == "yoicks" && s["status"] == "connected" {
+			connected = true
+		}
+	}
+	st.Init = fmt.Sprintf("init session=%v version=%s apiKeySource=%s tools=%v mcp=%v", ev["session_id"], version, source, tools, connected)
 	switch {
 	case source != "none":
 		st.Fatal = "init: apiKeySource is " + source + ", not none (it would bill an API key); stopped"
-	case !slices.Equal(slices.Sorted(slices.Values(tools)), headlessTools):
-		st.Fatal = fmt.Sprintf("init: tools %v, not %v; stopped", tools, headlessTools)
+	case !slices.Equal(slices.Sorted(slices.Values(tools)), slices.Sorted(slices.Values(want))):
+		st.Fatal = fmt.Sprintf("init: tools %v, not %v; stopped", tools, want)
+	case m.expectMCP && !connected:
+		st.Fatal = "init: the yoicks MCP server isn't connected; stopped"
 	}
 	if version != verifiedClaudeVersion {
 		st.Warnings = []hlWarning{{"version", "Claude Code " + version + " is not verified (verified: " + verifiedClaudeVersion + "); it keeps running"}}

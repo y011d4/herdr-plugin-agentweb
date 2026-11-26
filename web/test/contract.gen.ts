@@ -619,9 +619,28 @@ export const messages: WsMessage[] = [
      ],
      "mode": "headless",
      "headless": {
-      "status": "working",
+      "status": "blocked",
       "completionSeq": 3,
-      "pending": null,
+      "pending": {
+       "id": "1a2b3c4d",
+       "questions": [
+        {
+         "question": "Which fruit?",
+         "header": "Fruit",
+         "multiSelect": false,
+         "options": [
+          {
+           "label": "apple",
+           "description": "red"
+          },
+          {
+           "label": "cherry",
+           "description": ""
+          }
+         ]
+        }
+       ]
+      },
       "usage": {
        "fiveHour": {
         "utilization": 0.35,
