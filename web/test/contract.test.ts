@@ -18,8 +18,9 @@ describe('the Go bridge contract fixtures', () => {
     assert.match(html, /fix the bug/);
     assert.match(html, /<strong>fixed<\/strong>/);
     assert.match(html, /cherry/); // the AskUserQuestion option
+    assert.ok(html.includes('<img class="chat-image" src="data:image/png;base64,iVBORw0KGgo="'), "a user turn's image");
     // the assistant turn is a sidechain; the question (AskUserQuestion) stays, its answer isn't among them
-    assert.deepEqual(conversationItems(items).map((i) => i.kind), ['user', 'tool_use']);
+    assert.deepEqual(conversationItems(items).map((i) => i.kind), ['user', 'user', 'tool_use']);
   });
 
   it('give the dashboard a card per agent, orchestrators and shells left out', () => {

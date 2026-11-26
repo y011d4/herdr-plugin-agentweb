@@ -324,7 +324,12 @@ func decodePathSegment(seg string) (string, bool) {
 // readBody reads a JSON object body of at most 64 KB. On failure it has answered
 // (413 too large, else 400) and returns nil.
 func readBody(w http.ResponseWriter, r *http.Request) map[string]any {
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, bodyLimit))
+	return readBodyMax(w, r, bodyLimit)
+}
+
+// readBodyMax is readBody with its own size limit.
+func readBodyMax(w http.ResponseWriter, r *http.Request, limit int64) map[string]any {
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
@@ -567,16 +572,21 @@ func (s *server) headlessRoute(w http.ResponseWriter, r *http.Request, h *headle
 	case "clear":
 		err = h.Clear()
 	case "send":
-		body := readBody(w, r)
+		body := readBodyMax(w, r, bodyLimit+2*maxImageBytes) // base64 is 4/3 of the images
 		if body == nil {
 			return
 		}
 		text, _ := body["text"].(string)
-		if jsTrim(text) == "" {
-			jsonError(w, http.StatusBadRequest, "invalid_params", "text must be a non-empty string")
+		images, ierr := imageBlocks(body["images"])
+		if ierr != nil {
+			sendError(w, ierr)
 			return
 		}
-		err = h.Send(text)
+		if jsTrim(text) == "" && len(images) == 0 {
+			jsonError(w, http.StatusBadRequest, "invalid_params", "text must be a non-empty string, or images given")
+			return
+		}
+		err = h.Send(text, images)
 	case "answer":
 		// {id, answers: {question: label(s)}} answers the pending question; {id, deny: message} refuses it
 		body := readBody(w, r)

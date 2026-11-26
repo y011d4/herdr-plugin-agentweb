@@ -97,6 +97,7 @@ func contractItems() []TimelineItem {
 	forID := "toolu_01"
 	return []TimelineItem{
 		{Kind: "user", Text: "fix the bug", TS: &ts},
+		{Kind: "user", Text: "what is it?", Images: []string{"data:image/png;base64,iVBORw0KGgo="}},
 		{Kind: "assistant", Text: "Done: **fixed** <it> & more.", Sidechain: true},
 		{Kind: "thinking", Text: "let me look", Truncated: true, TS: &ts},
 		{Kind: "tool_use", ID: "toolu_01", Name: "Bash", Summary: "npm test", TS: &ts},

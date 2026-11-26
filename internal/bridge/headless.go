@@ -14,12 +14,18 @@ package bridge
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif" // imageBlocks decodes them
+	_ "image/jpeg"
+	_ "image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1046,12 +1052,16 @@ func (r *headlessRunner) running() (*hlChild, error) {
 // words (AskUserQuestion's free-text answer, which the model takes as said: S0 row 12), the same
 // text for each of its questions; else it is written, also mid-turn (Claude Code takes it in at
 // the next tool boundary). A refusal would reach the model as an error with the text as its
-// reason, which it reads as nonsense.
-func (r *headlessRunner) Send(text string) error {
+// reason, which it reads as nonsense. Images (imageBlocks') go first, then the text, if any; an
+// answer can't carry them, so with a question pending they are refused.
+func (r *headlessRunner) Send(text string, images []any) error {
 	r.mu.Lock()
 	p := r.pending
 	r.mu.Unlock()
 	if p != nil {
+		if len(images) > 0 {
+			return &LifecycleError{Status: 409, Code: "question_pending", Message: "answer the question first: images can't answer it"}
+		}
 		answers := map[string]any{}
 		for _, q := range p.questions {
 			answers[q.Question] = text
@@ -1060,28 +1070,90 @@ func (r *headlessRunner) Send(text string) error {
 			return nil
 		}
 	}
-	return r.write(text)
+	if len(images) == 0 {
+		return r.write(text)
+	}
+	if jsTrim(text) != "" { // the API refuses an empty text block
+		images = append(images, map[string]any{"type": "text", "text": text})
+	}
+	return r.write(images)
 }
 
-// write writes a user message (the user's, or yoicks's own).
-func (r *headlessRunner) write(text string) error {
+// The images a message may carry: JPEG, PNG or GIF that decode whole (a broken one in the
+// session would fail every later turn), at most 2000 px a side (the API's limit once a request
+// holds over 20 images) and 1 MiB in all, so the transcript line stays within a chat read
+// (tailMaxBytes). The web UI scales and recompresses to fit.
+const (
+	maxImages     = 4
+	maxImageBytes = 1 << 20
+	maxImageSide  = 2000
+)
+
+var imageFormats = map[string]string{"image/jpeg": "jpeg", "image/png": "png", "image/gif": "gif"}
+
+// imageBlocks checks a send's images ([{mediaType, data: base64}]) and returns them as image
+// content blocks (nil for none).
+func imageBlocks(v any) ([]any, error) {
+	if v == nil {
+		return nil, nil
+	}
+	bad := func(msg string) error { return &LifecycleError{Status: 400, Code: "invalid_params", Message: msg} }
+	list, ok := v.([]any)
+	if !ok || len(list) > maxImages {
+		return nil, bad(fmt.Sprintf("images must be a list of at most %d {mediaType, data}", maxImages))
+	}
+	var out []any
+	total := 0
+	for _, it := range list {
+		m, _ := it.(map[string]any)
+		mt, _ := m["mediaType"].(string)
+		data, _ := m["data"].(string)
+		format, ok := imageFormats[mt]
+		if !ok {
+			return nil, bad("an image must be image/jpeg, image/png or image/gif")
+		}
+		raw, err := base64.StdEncoding.DecodeString(data)
+		if err != nil {
+			return nil, bad("an image's data isn't base64")
+		}
+		if total += len(raw); total > maxImageBytes {
+			return nil, bad("the images are over 1 MiB in all")
+		}
+		cfg, got, err := image.DecodeConfig(bytes.NewReader(raw))
+		if err == nil && max(cfg.Width, cfg.Height) > maxImageSide {
+			return nil, bad(fmt.Sprintf("an image is over %d px a side", maxImageSide))
+		}
+		if err == nil && got == format { // whole: DecodeConfig reads only the header
+			_, _, err = image.Decode(bytes.NewReader(raw))
+		}
+		if err != nil || got != format {
+			return nil, bad("an image isn't a whole " + mt)
+		}
+		out = append(out, map[string]any{"type": "image", "source": map[string]any{
+			"type": "base64", "media_type": mt, "data": base64.StdEncoding.EncodeToString(raw)}})
+	}
+	return out, nil
+}
+
+// write writes a user message (the user's, or yoicks's own): its content, a string or blocks.
+func (r *headlessRunner) write(content any) error {
 	r.mu.Lock()
 	c, err := r.running()
 	r.mu.Unlock()
 	if err != nil {
 		return err
 	}
-	return r.writeTo(c, text)
+	return r.writeTo(c, content)
 }
 
 // writeTo writes a user message to child c (never to a later one); it works on it from then.
-func (r *headlessRunner) writeTo(c *hlChild, text string) error {
+func (r *headlessRunner) writeTo(c *hlChild, content any) error {
 	r.mu.Lock()
 	if r.child == c && r.model.Status != "working" && r.model.Status != "blocked" {
 		r.model.Status, r.lastEvent = "working", time.Now()
 	}
 	r.mu.Unlock()
-	if err := c.write(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}}); err != nil {
+	if err := c.write(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": content}}); err != nil {
 		return &LifecycleError{Status: 502, Code: "write_failed", Message: "could not write to claude: " + err.Error()}
 	}
 	r.onChange()

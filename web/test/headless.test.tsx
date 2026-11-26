@@ -21,6 +21,8 @@ vi.mock('../src/ws.ts', () => ({
   onWsMessage: (_fn: (msg: WsMessage) => void) => () => {},
   wsSendWatch: () => {},
 }));
+// happy-dom has no canvas: a picked file becomes an attachment named after it
+vi.mock('../src/image.ts', async (orig) => ({ ...(await orig<typeof import('../src/image.ts')>()), toAttachment: async (f: File) => ({ mediaType: 'image/jpeg', data: f.name }) }));
 
 // The recorded headless orchestrator "pilot" (Pilot): blocked on "Which fruit?" (id 1a2b3c4d), completionSeq 3,
 // 5h 35% read long ago, ctx 12.5%, warnings silent (interrupt, clear) and unknown_event.
@@ -129,6 +131,30 @@ describe("a headless orchestrator's Home", () => {
     assert.deepEqual(posts('send'), [{ text: 'hi' }]);
     await answer('POST /api/orchestrators/pilot/send', { ok: true });
     assert.equal(ta.value, '');
+  });
+
+  it('attaches picked images (thumbnails, removable), sends them with the text and clears them once sent', async () => {
+    await home(withPilot(idle));
+    const pick = async (...names: string[]) => {
+      const picker = $<HTMLInputElement>('#input-image-picker');
+      Object.defineProperty(picker, 'files', { configurable: true, value: names.map((n) => new File(['x'], n, { type: n.endsWith('.txt') ? 'text/plain' : 'image/png' })) });
+      await fire(() => picker.dispatchEvent(new Event('change', { bubbles: true })));
+    };
+    await pick('a.png', 'notes.txt', 'b.png');
+    const thumbs = () => [...container.querySelectorAll<HTMLImageElement>('#input-images img')].map((i) => i.src);
+    assert.deepEqual(thumbs(), ['data:image/jpeg;base64,a.png', 'data:image/jpeg;base64,b.png']);
+    await fire(() => container.querySelector<HTMLButtonElement>('#input-images button')!.click());
+    assert.deepEqual(thumbs(), ['data:image/jpeg;base64,b.png']);
+    await fire(() => $('#btn-send-enter').click()); // an image alone is a message
+    await fire(() => $('#btn-send-enter').click()); // once
+    assert.deepEqual(posts('send'), [{ text: '', images: [{ mediaType: 'image/jpeg', data: 'b.png' }] }]);
+    await answer('POST /api/orchestrators/pilot/send', { ok: true });
+    assert.ok(container.querySelector('#input-images') === null, 'thumbnails cleared');
+    await pick('c.png');
+    await fire(() => $('#btn-send-enter').click());
+    await answer('POST /api/orchestrators/pilot/send', { error: { code: 'invalid_params', message: 'the images are over 1 MiB in all' } }, 400);
+    assert.deepEqual(thumbs(), ['data:image/jpeg;base64,c.png']); // kept on a failure
+    assert.deepEqual(getToasts().map((t) => t.body), ['the images are over 1 MiB in all']);
   });
 
   it("answers its question with one POST per tap; a stale one says so and frees the options", async () => {
