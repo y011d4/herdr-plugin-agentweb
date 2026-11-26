@@ -112,16 +112,15 @@ func settingsBilling(content []byte) string {
 	return ""
 }
 
-// heldSession sorts the processes holding sessionID in their argv: ours (with the bridge's
-// marker, an orphan of an earlier bridge) and anyone else's (a user's `claude --resume`).
+// heldSession sorts the claudes that matter to a start: ours (with the bridge's marker: an
+// earlier bridge's child, whatever its session) and anyone else's holding sessionID (a
+// user's `claude --resume`).
 func heldSession(procs []procArgs, sessionID, mcpConfig string) (ours, others []procArgs) {
 	for _, p := range procs {
-		if !slices.Contains(p.argv, sessionID) {
-			continue
-		}
-		if hasMarker(p.argv, mcpConfig) {
+		switch {
+		case hasMarker(p.argv, mcpConfig):
 			ours = append(ours, p)
-		} else {
+		case sessionID != "" && slices.Contains(p.argv, sessionID):
 			others = append(others, p)
 		}
 	}
@@ -431,6 +430,7 @@ func (r *headlessRunner) resetLocked() {
 
 // start runs the checks, then the child; r.op held.
 func (r *headlessRunner) start(resume bool) error {
+	others := r.reapOrphans() // first: whatever refuses this start, an earlier bridge's child stops
 	if kind, msg := r.refusedEnv(); msg != "" {
 		return r.fail(kind, &LifecycleError{Status: 409, Code: kind + "_refused", Message: msg})
 	}
@@ -443,15 +443,9 @@ func (r *headlessRunner) start(resume bool) error {
 		}
 	}
 	mcpConfig := headlessPath(r.stateDir, r.def.Name, ".mcp.json")
-	if sid := r.session(); resume && runtime.GOOS == "linux" {
-		ours, others := heldSession(claudeProcs(), sid, mcpConfig)
-		if len(others) > 0 {
-			return &LifecycleError{Status: 409, Code: "session_in_use", Message: fmt.Sprintf(
-				"another claude (pid %d) runs its session %s: end it first (yoicks never stops it; only Linux, with /proc, can see it)", others[0].pid, sid)}
-		}
-		for _, p := range ours {
-			r.killOrphan(p.pid)
-		}
+	if resume && len(others) > 0 {
+		return &LifecycleError{Status: 409, Code: "session_in_use", Message: fmt.Sprintf(
+			"another claude (pid %d) runs its session %s: end it first (yoicks never stops it; only Linux, with /proc, can see it)", others[0].pid, r.session())}
 	}
 	if err := ensureOrchestratorDir(r.def, r.rules); err != nil {
 		return r.fail("start", &LifecycleError{Status: 500, Code: "error", Message: "could not write " + r.def.Dir + ": " + err.Error()})
@@ -505,6 +499,33 @@ func (r *headlessRunner) start(resume bool) error {
 		r.Send(restartedNotice)
 	}
 	return nil
+}
+
+// reapOrphans kills the children an earlier bridge left (they carry its marker) and returns
+// the other claudes on its session, which it never kills; none outside Linux (no /proc).
+// r.op held, with no child of its own.
+func (r *headlessRunner) reapOrphans() []procArgs {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	ours, others := heldSession(claudeProcs(), r.session(), headlessPath(r.stateDir, r.def.Name, ".mcp.json"))
+	for _, p := range ours {
+		r.killOrphan(p.pid)
+	}
+	return others
+}
+
+// reap is the bridge's start for one it doesn't start: only the orphans go.
+func (r *headlessRunner) reap() {
+	defer r.recoverAt("the orphan scan")
+	r.op.Lock()
+	defer r.op.Unlock()
+	r.mu.Lock()
+	running := r.child != nil
+	r.mu.Unlock()
+	if !running {
+		r.reapOrphans()
+	}
 }
 
 // check runs claude with args under the child's env, in its dir (≤15 s).

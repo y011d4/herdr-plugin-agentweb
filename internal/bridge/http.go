@@ -581,16 +581,19 @@ func (s *server) broadcastAlert(name, kind, message string) {
 	}
 }
 
-// startHeadless starts the headless orchestrators that ran when the bridge last stopped.
+// startHeadless starts the headless orchestrators that ran when the bridge last stopped; for
+// the rest it only stops the children an earlier bridge left.
 func (s *server) startHeadless() {
 	for _, h := range s.headless {
-		if h.wantsToRun() {
-			go func() {
-				if err := h.Start(); err != nil {
-					h.failed(err)
-				}
-			}()
+		if !h.wantsToRun() {
+			go h.reap()
+			continue
 		}
+		go func() {
+			if err := h.Start(); err != nil {
+				h.failed(err)
+			}
+		}()
 	}
 }
 

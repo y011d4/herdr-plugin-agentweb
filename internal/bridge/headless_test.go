@@ -84,8 +84,12 @@ func TestHeadlessOrphans(t *testing.T) {
 		{3, []string{"claude", "-p", "--resume", "other", "--mcp-config", marker}},
 	}
 	ours, others := heldSession(procs, "sid", marker)
-	if len(ours) != 1 || ours[0].pid != 1 || len(others) != 1 || others[0].pid != 2 {
+	// a child with the marker is ours whatever its session; another claude only when on it
+	if len(ours) != 2 || ours[0].pid != 1 || ours[1].pid != 3 || len(others) != 1 || others[0].pid != 2 {
 		t.Errorf("ours %v, others %v", ours, others)
+	}
+	if ours, others := heldSession(procs, "", marker); len(ours) != 2 || len(others) != 0 {
+		t.Errorf("no session: ours %v, others %v", ours, others)
 	}
 	if orphanTarget(10, 10) != -10 || orphanTarget(10, 4) != 10 {
 		t.Error("the group is killed only when the orphan leads it")
@@ -619,17 +623,7 @@ func TestHeadlessOrphanScan(t *testing.T) {
 	b.post(t, "stop", "")
 	runs, _ := b.runs(t)
 	sid, mcp := runs[0].argv[7], headlessPath(state, "h1", ".mcp.json")
-	run := func(args ...string) *exec.Cmd { // a claude the bridge didn't start
-		cmd := exec.Command(os.Getenv("YOICKS_CLAUDE_BIN"), args...)
-		cmd.Dir = t.TempDir()
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		stdin, _ := cmd.StdinPipe()
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { stdin.Close(); cmd.Process.Kill(); cmd.Wait() })
-		return cmd
-	}
+	run := func(args ...string) *exec.Cmd { return otherClaude(t, args...) }
 
 	// the user's own claude on that session: never stopped, the start refused
 	user := run("-p", "--resume", sid)
@@ -733,6 +727,57 @@ func TestNoHeadlessWithoutAHeadlessEntry(t *testing.T) {
 	if status, _, _ := b.do(t, "POST", "/api/orchestrators/t1/send", b.token, []byte(`{"text":"x"}`)); status != 404 {
 		t.Errorf("send to a tui orchestrator: %d", status)
 	}
+}
+
+// otherClaude runs a fakeclaude the bridge didn't start, in its own group.
+func otherClaude(t *testing.T, args ...string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command(os.Getenv("YOICKS_CLAUDE_BIN"), args...)
+	cmd.Dir = t.TempDir()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stdin, _ := cmd.StdinPipe()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stdin.Close(); cmd.Process.Kill(); cmd.Wait() })
+	return cmd
+}
+
+// An earlier bridge's child goes even when this start is refused (an env of its own), at the
+// bridge's start and at a Start.
+func TestHeadlessReapsOrphansBeforeARefusal(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the orphan scan reads /proc: Linux only")
+	}
+	fakeClaudeEnv(t)
+	state := t.TempDir()
+	os.MkdirAll(filepath.Join(state, "headless"), 0o700)
+	sid := newUUID()
+	os.WriteFile(headlessPath(state, "h1", ".json"), []byte(`{"sessionId":"`+sid+`","wanted":true}`), 0o600)
+	orphan := func() chan struct{} {
+		cmd := otherClaude(t, headlessArgv(sid, true, headlessPath(state, "h1", ".mcp.json"))...)
+		waitUntil(t, 5*time.Second, "it runs", func() bool { return markedHeadlessChild(state, "h1") == cmd.Process.Pid })
+		gone := make(chan struct{})
+		go func() { cmd.Wait(); close(gone) }()
+		return gone
+	}
+	wait := func(gone chan struct{}, when string) {
+		select {
+		case <-gone:
+		case <-time.After(5 * time.Second):
+			t.Errorf("%s: the orphan still runs", when)
+		}
+	}
+	gone := orphan()
+	b := startHeadless(t, state, map[string]string{"HOME": "/elsewhere"}, nil)
+	b.srv.startHeadless()
+	wait(gone, "the bridge's start")
+
+	gone = orphan()
+	if status, body := b.post(t, "start", ""); status != 409 || !strings.Contains(body, "env_refused") {
+		t.Errorf("start: %d %s", status, body)
+	}
+	wait(gone, "a start")
 }
 
 // A message queued behind an interrupted turn runs next; with no turn running, an interrupt
