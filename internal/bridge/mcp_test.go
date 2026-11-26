@@ -343,6 +343,25 @@ func TestHeadlessWakeUps(t *testing.T) {
 			blockedAtStart(t, ready)
 		})
 	}
+	t.Run("blocked in a task of its own: once answered it is followed, its next question wakes too", func(t *testing.T) {
+		b := startHeadless(t, t.TempDir(), nil, nil)
+		w := worker(t, b, "blocked", nil)
+		b.start(t)
+		b.waitStatus(t, "idle")
+		b.send(t, `call agent_prompt {"name":"w1","text":"do the thing"}`)
+		b.waitStatus(t, "done")
+		w.Set("w1p", "working") // the user answered its permission question: it works on
+		time.Sleep(300 * time.Millisecond)
+		w.Set("w1p", "blocked") // and asks another
+		b.waitWakes(t, "[yoicks] w1: working → blocked")
+		w.Set("w1p", "working")
+		time.Sleep(300 * time.Millisecond)
+		w.Set("w1p", "done")
+		b.waitWakes(t, "[yoicks] w1: working → blocked", "[yoicks] w1: working → done")
+		if n := len(w.Prompts()); n != 0 {
+			t.Errorf("%d prompts", n)
+		}
+	})
 	t.Run("a stalled prompt goes on with the level wait", func(t *testing.T) {
 		b := startHeadless(t, t.TempDir(), nil, nil)
 		w := worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
