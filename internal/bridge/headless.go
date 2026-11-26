@@ -427,6 +427,28 @@ func (r *headlessRunner) warn(kind, message string) func() {
 	return func() { r.onAlert(kind, message) }
 }
 
+// setClaudeCheck takes the last claude check (the bridge's minute tick): its version warning
+// tells it, and while it is a failed one a canary warning stands (alerted by the bridge, once
+// for all orchestrators).
+func (r *headlessRunner) setClaudeCheck(c *ClaudeCheck) {
+	r.mu.Lock()
+	r.model.check = c
+	i := slices.IndexFunc(r.warnings, func(w HeadlessWarning) bool { return w.Kind == "canary" })
+	changed := false
+	if c != nil && !c.OK {
+		msg := "the last Claude Code check " + c.describe() + ": headless may not work; back to the TUI until a check passes"
+		if changed = i < 0 || r.warnings[i].Message != msg; changed {
+			r.warn("canary", msg)
+		}
+	} else if changed = i >= 0; changed {
+		r.warnings = slices.Delete(r.warnings, i, i+1)
+	}
+	r.mu.Unlock()
+	if changed {
+		r.onChange()
+	}
+}
+
 // fail makes it an error with a warning, and returns err.
 func (r *headlessRunner) fail(kind string, err *LifecycleError) error {
 	r.mu.Lock()
@@ -520,7 +542,7 @@ func (r *headlessRunner) start(resume bool) error {
 	}
 	if version, _, _ := strings.Cut(strings.TrimSpace(string(out)), " "); version != verifiedClaudeVersion {
 		r.mu.Lock()
-		alert := r.warn("version", "Claude Code "+version+" is not verified (verified: "+verifiedClaudeVersion+"); it keeps running")
+		alert := r.warn("version", versionWarning(version, r.model.check))
 		r.mu.Unlock()
 		alert()
 	}

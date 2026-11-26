@@ -202,7 +202,8 @@ export const state: AppState = {
    "headless": null
   }
  ],
- "orchestratorPaneId": "p4"
+ "orchestratorPaneId": "p4",
+ "claudeCheck": null
 };
 
 export const messages: WsMessage[] = [
@@ -406,7 +407,8 @@ export const messages: WsMessage[] = [
      "headless": null
     }
    ],
-   "orchestratorPaneId": "p4"
+   "orchestratorPaneId": "p4",
+   "claudeCheck": null
   }
  },
  {
@@ -670,7 +672,16 @@ export const messages: WsMessage[] = [
      }
     }
    ],
-   "orchestratorPaneId": "p4"
+   "orchestratorPaneId": "p4",
+   "claudeCheck": {
+    "at": 1795478400000,
+    "version": "2.1.330",
+    "ok": false,
+    "failed": [
+     "interrupt",
+     "resume"
+    ]
+   }
   }
  },
  {
@@ -696,6 +707,12 @@ export const messages: WsMessage[] = [
   "name": "pilot",
   "kind": "silent",
   "message": "no event for 3m0s while working"
+ },
+ {
+  "type": "orchestrator_alert",
+  "name": "",
+  "kind": "canary",
+  "message": "the Claude Code check failed on 2026-11-26 09:00 (2.1.330: resume)"
  },
  {
   "type": "pong"

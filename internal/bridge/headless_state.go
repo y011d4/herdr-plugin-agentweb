@@ -12,6 +12,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 )
 
 // verifiedClaudeVersion is the Claude Code version headless mode was checked against. Another
@@ -34,7 +35,7 @@ var warningActions = map[string][]string{
 	"silent": {"interrupt", "clear"}, "permission_route": {"interrupt"}, "stream_broken": {"clear", "tui"},
 	"restart_limit": {"clear", "tui"}, "panic": {"clear", "tui"}, "init": {"tui"}, "billing": {"tui"}, "env": {"tui"},
 	"auth": {"tui"}, "version": {"tui"}, "start": {"tui"}, "question_route": {"interrupt"}, "rules": {"clear"},
-	"mcp_call": {"clear"},
+	"mcp_call": {"clear"}, "canary": {"tui"},
 }
 
 // hlModel is what a headless child's stream has said so far.
@@ -50,6 +51,7 @@ type hlModel struct {
 	unreadableRun int               // lines in a row that couldn't be read
 	unknown       map[string]bool   // event kinds already warned about this session
 	yoicksUses    map[string]string // the yoicks tool_use ids awaiting their result → the tool
+	check         *ClaudeCheck      // the last claude check (the version warning tells it)
 }
 
 type hlWarning struct{ Kind, Message string }
@@ -237,7 +239,7 @@ func (m *hlModel) checkInit(ev map[string]any) (st hlStep) {
 		st.Fatal = "init: the yoicks MCP server isn't connected; stopped"
 	}
 	if version != verifiedClaudeVersion {
-		st.Warnings = []hlWarning{{"version", "Claude Code " + version + " is not verified (verified: " + verifiedClaudeVersion + "); it keeps running"}}
+		st.Warnings = []hlWarning{{"version", versionWarning(version, m.check)}}
 	}
 	return st
 }
@@ -301,4 +303,23 @@ func num(v any) float64 { f, _ := v.(float64); return f }
 func controlResponse(id any, response map[string]any) map[string]any {
 	response["request_id"] = id
 	return map[string]any{"type": "control_response", "response": response}
+}
+
+// versionWarning is the warning for a Claude Code version headless wasn't verified on, with
+// the last check's result (check nil: none has run).
+func versionWarning(version string, check *ClaudeCheck) string {
+	last := "no check has run (scripts/claude-canary.sh)"
+	if check != nil {
+		last = "the last check " + check.describe()
+	}
+	return "Claude Code " + version + " is not verified (verified: " + verifiedClaudeVersion + "); it keeps running; " + last
+}
+
+// describe is how the check went, when, and on which version.
+func (c *ClaudeCheck) describe() string {
+	when := time.UnixMilli(c.At).Format("2006-01-02 15:04")
+	if c.OK {
+		return "passed on " + when + " (" + c.Version + ")"
+	}
+	return "failed on " + when + " (" + c.Version + ": " + strings.Join(c.Failed, ", ") + ")"
 }
