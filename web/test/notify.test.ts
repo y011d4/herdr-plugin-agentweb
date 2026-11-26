@@ -55,6 +55,21 @@ describe('notify', () => {
     assert.deepEqual(shown.map((n) => `${n.title}|${n.tag}`), ['pilot: silent|hl:pilot', 'Claude Code check failed|#/settings']);
   });
 
+  it("without a SW registration, a failed check's page notification opens Settings when clicked", async () => {
+    const made: Array<{ onclick: () => void }> = [];
+    vi.stubGlobal('Notification', Object.assign(function (this: { onclick: () => void; addEventListener: () => void }) {
+      this.addEventListener = () => {};
+      made.push(this);
+    }, { permission: 'granted' }));
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { getRegistration: async () => undefined } });
+    vi.stubGlobal('focus', () => {});
+    location.hash = '#/agents';
+    notifyOrchestratorAlert({ type: 'orchestrator_alert', name: '', kind: 'canary', message: 'interrupt failed' });
+    await settle();
+    made[0].onclick();
+    assert.equal(location.hash, '#/settings');
+  });
+
   it('none while visible, turned off, not permitted, or for another status', async () => {
     const cases: Array<() => void> = [
       () => { hidden = false; },
