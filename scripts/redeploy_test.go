@@ -5,6 +5,8 @@ package scripts
 // bin/yoicks as "built <commit>", or fails in a commit with a BROKEN file.
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -165,18 +167,38 @@ func TestRedeploy(t *testing.T) {
 		}
 	})
 	t.Run("warns, then deploys, when a headless orchestrator is mid-turn", func(t *testing.T) {
-		w := setup(t)
-		head := push(t, w, "README", "x")
-		write(t, filepath.Join(w.fake, "state", "herdr", "plugins", "t.yoicks", "token"), "0123abcd")
-		// /api/state beside the file:// /healthz
-		write(t, filepath.Join(w.fake, "api", "state"), `{"orchestrators":[{"name":"personal","headless":null},`+
-			`{"name":"pilot","headless":{"status":"working"}},{"name":"quiet","headless":{"status":"idle"}}]}`)
-		out, err := redeploy(t, w, "main")
-		if err != nil || !strings.Contains(out, "warning: headless orchestrator pilot (working): the restart interrupts it") || strings.Contains(out, "quiet") {
-			t.Fatalf("err %v:\n%s", err, out)
-		}
-		if got := read(filepath.Join(w.prod, "bin/yoicks")); got != "built "+head {
-			t.Errorf("bin/yoicks = %q, want built %s", got, head)
+		for token, warns := range map[string]bool{"0123abcd": true, "wrong": false} {
+			w := setup(t)
+			head := push(t, w, "README", "x")
+			write(t, filepath.Join(w.fake, "state", "herdr", "plugins", "t.yoicks", "token"), token)
+			// the bridge: /healthz as the fake herdr's file says, /api/state only for the token
+			bridge := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/healthz":
+					if b, err := os.ReadFile(filepath.Join(w.fake, "healthz")); err == nil {
+						rw.Write(b)
+						return
+					}
+				case "/api/state":
+					if r.Header.Get("Authorization") == "Bearer 0123abcd" {
+						rw.Write([]byte(`{"orchestrators":[{"name":"personal","headless":null},` +
+							`{"name":"pilot","headless":{"status":"working"}},{"name":"quiet","headless":{"status":"idle"}}]}`))
+						return
+					}
+					rw.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+				rw.WriteHeader(http.StatusNotFound)
+			}))
+			defer bridge.Close()
+			out, err := redeploy(t, w, "main", "REDEPLOY_HEALTHZ="+bridge.URL+"/healthz")
+			warned := strings.Contains(out, "warning: headless orchestrator pilot (working): the restart interrupts it")
+			if err != nil || warned != warns || strings.Contains(out, "quiet") {
+				t.Fatalf("token %s: err %v, warned %v:\n%s", token, err, warned, out)
+			}
+			if got := read(filepath.Join(w.prod, "bin/yoicks")); got != "built "+head {
+				t.Errorf("bin/yoicks = %q, want built %s", got, head)
+			}
 		}
 	})
 	t.Run("refuses another checkout", func(t *testing.T) {
