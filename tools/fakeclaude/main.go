@@ -17,11 +17,14 @@
 //	garbage   a line that isn't JSON, then the reply
 //	unknown   an event of a type Claude Code doesn't have, then the reply
 //	ask       an AskUserQuestion tool_use and a can_use_tool control_request, then wait for its answer
+//	deaf      stop reading stdin (what's written to it backs up)
 //	other     the reply "echo: <text>"
 //
-// A control_request interrupt is answered and ends the turn (result error_during_execution,
-// terminal_reason aborted_*). Stdin's end while idle exits 0; while working, after the turn.
-// FAKECLAUDE_LOG, when set, gets a JSON line for the argv (and env keys) and each stdin line.
+// A control_request interrupt ends the turn running, or a message sent before it that hasn't
+// started (result error_during_execution, terminal_reason aborted_*), then is answered.
+// Stdin's end while idle exits 0; while working, after the turn. FAKECLAUDE_START=init sends
+// an init at once, before any message; =exit exits 1 at once. FAKECLAUDE_LOG, when set, gets
+// a JSON line for the argv (and env keys) and each stdin line.
 package main
 
 import (
@@ -107,7 +110,13 @@ type fake struct {
 
 	mu      sync.Mutex
 	cancel  context.CancelFunc // the turn in progress
+	epoch   int                // interrupts so far: a message queued before one never starts
 	answers map[string]chan map[string]any
+}
+
+type queued struct {
+	text  string
+	epoch int
 }
 
 func session(args []string) {
@@ -128,7 +137,14 @@ func session(args []string) {
 	}, f.cwd)
 	f.transcript = filepath.Join(root, "projects", slug, f.id+".jsonl")
 
-	msgs := make(chan string, 64)
+	switch os.Getenv("FAKECLAUDE_START") {
+	case "init": // an init before any message (Claude Code sends it at a turn's start)
+		f.emit(f.init())
+	case "exit":
+		fmt.Fprintln(os.Stderr, "fakeclaude: exiting at once as asked")
+		os.Exit(1)
+	}
+	msgs := make(chan queued, 64)
 	go func() {
 		sc := bufio.NewScanner(os.Stdin)
 		sc.Buffer(make([]byte, 1<<20), 16<<20)
@@ -142,11 +158,20 @@ func session(args []string) {
 			case "user":
 				msg, _ := m["message"].(map[string]any)
 				text, _ := msg["content"].(string)
-				msgs <- text
+				if text == "deaf" {
+					time.Sleep(time.Hour) // stop reading stdin: the bridge's writes back up
+				}
+				f.mu.Lock()
+				epoch := f.epoch
+				f.mu.Unlock()
+				msgs <- queued{text, epoch}
 			case "control_request":
 				req, _ := m["request"].(map[string]any)
 				if req["subtype"] == "interrupt" {
+					// registered before the answer: the turn running, or one queued but not
+					// started yet, ends without its reply
 					f.mu.Lock()
+					f.epoch++
 					if f.cancel != nil {
 						f.cancel()
 					}
@@ -166,9 +191,15 @@ func session(args []string) {
 		}
 		close(msgs)
 	}()
-	for text := range msgs {
-		f.turn(text)
+	for q := range msgs {
+		f.turn(q)
 	}
+}
+
+func (f *fake) init() map[string]any {
+	return map[string]any{"type": "system", "subtype": "init", "session_id": f.id, "cwd": f.cwd, "tools": f.tools,
+		"mcp_servers": []any{}, "model": "fake", "permissionMode": "default",
+		"apiKeySource": env("FAKECLAUDE_APIKEYSOURCE", "none"), "claude_code_version": env("FAKECLAUDE_VERSION", "2.1.322")}
 }
 
 func firstNonEmpty(a, b string) string {
@@ -201,15 +232,19 @@ func (f *fake) record(v map[string]any) {
 	}
 }
 
-func (f *fake) turn(text string) {
+func (f *fake) turn(q queued) {
+	text := q.text
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	f.mu.Lock()
+	interrupted := q.epoch != f.epoch
 	f.cancel = cancel
 	f.mu.Unlock()
-	f.emit(map[string]any{"type": "system", "subtype": "init", "session_id": f.id, "cwd": f.cwd, "tools": f.tools,
-		"mcp_servers": []any{}, "model": "fake", "permissionMode": "default",
-		"apiKeySource": env("FAKECLAUDE_APIKEYSOURCE", "none"), "claude_code_version": env("FAKECLAUDE_VERSION", "2.1.322")})
+	if interrupted { // an interrupt came after it was sent, before it started
+		f.aborted("aborted_streaming")
+		return
+	}
+	f.emit(f.init())
 	f.record(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}})
 	word, arg, _ := strings.Cut(text, " ")
 	seconds, _ := strconv.Atoi(arg)
