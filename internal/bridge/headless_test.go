@@ -909,19 +909,24 @@ func TestHeadlessClaudeCheck(t *testing.T) {
 		t.Errorf("canary warning %q", w)
 	}
 	waitUntil(t, 5*time.Second, "the alert", func() bool { return nAlerts() == 1 })
-	b.start(t)
-	v := b.waitStatus(t, "idle")
-	if w := warning(v, "version"); !strings.Contains(w, "Claude Code 2.1.330 is not verified") || !strings.Contains(w, "the last check "+failedFirst) {
-		t.Errorf("version warning %q", w)
+	// a start and a Clear keep the check: its warnings stand at once, no tick needed
+	for _, action := range []string{"start", "clear"} {
+		if code, body := b.post(t, action, ""); code != 200 {
+			t.Fatalf("%s: %d %s", action, code, body)
+		}
+		v := b.waitStatus(t, "idle")
+		if w := warning(v, "canary"); !strings.Contains(w, failedFirst) {
+			t.Errorf("after %s: canary %q", action, w)
+		}
+		if w := warning(v, "version"); !strings.Contains(w, "Claude Code 2.1.330 is not verified") || !strings.Contains(w, "the last check "+failedFirst) {
+			t.Errorf("after %s: version %q", action, w)
+		}
 	}
-	b.srv.checkClaude() // the minute tick: the same check again, its warning back after the start's reset
-	if w := warning(b.view(t), "canary"); !strings.Contains(w, failedFirst) {
-		t.Errorf("after the tick: %q", w)
-	}
+	// a passing check ends the canary warning, and the version warning says so
 	write(first.Add(time.Hour), true, "")
 	b.srv.checkClaude()
-	if v := b.view(t); warning(v, "canary") != "" {
-		t.Errorf("a passing check left the warning: %+v", v.Headless.Warnings)
+	if v := b.view(t); warning(v, "canary") != "" || !strings.Contains(warning(v, "version"), "the last check passed on "+first.Add(time.Hour).Format("2006-01-02 15:04")) {
+		t.Errorf("after a passing check: %+v", v.Headless.Warnings)
 	}
 	write(first.Add(2*time.Hour), false, `"interrupt"`)
 	b.srv.checkClaude()
