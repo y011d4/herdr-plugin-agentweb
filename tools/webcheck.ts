@@ -1439,15 +1439,20 @@ async function ht2(c: Ctx) {
   let ok = true;
   const step = (name: string, pass: boolean, v: string) => { out.push(`${name}=${v}`); ok &&= pass; };
 
+  // a resumed session may have said OK before: one more
+  const oks = `[...document.querySelectorAll('#chat-log .chat-assistant')].filter((e) => e.textContent.trim() === 'OK').length`;
+  const ok0 = await pg.ev(oks);
   await compose(c, OK_PROMPT);
-  const okDone = await status(['done', 'idle'], 60_000);
-  const okReply = await pg.until(`[...document.querySelectorAll('#chat-log .chat-assistant')].some((e) => e.textContent.trim() === 'OK')`, 5000);
-  step('ok', !okDone.timeout && !okReply.timeout, `${ms(okDone)}/${ms(okReply)}`);
+  const okReply = await pg.until(`${oks} > ${ok0}`, 60_000, 300);
+  const okDone = await status(['done', 'idle'], 30_000);
+  step('ok', !okDone.timeout && !okReply.timeout, `${ms(okReply)}/${ms(okDone)}`);
   // only haiku from here on (the weekly quota): the session's file says which model answered
   const sid = (await hlTranscript(c, 'wc-h2')).sessionId;
   const root = path.join(pinnedAccount() || path.join(os.homedir(), '.claude'), 'projects');
   const file = fs.readdirSync(root).map((d) => path.join(root, d, `${sid}.jsonl`)).find((f) => fs.existsSync(f));
-  const model = file && fs.readFileSync(file, 'utf8').match(/"model":"(claude-[^"]+)"/)?.[1];
+  // its assistant lines' model (other lines name the account's default model too)
+  const model = file && fs.readFileSync(file, 'utf8').split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .find((l) => l?.type === 'assistant')?.message?.model;
   if (!model?.includes('haiku')) throw env(`wc-h2 answered on ${model ?? 'an unknown model'}, not haiku: stopped here`);
 
   await compose(c, ASK_PROMPT);
