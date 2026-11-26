@@ -108,6 +108,25 @@ func TestTranscriptNormalize(t *testing.T) {
 			}
 		})
 
+		t.Run("maps a queued command without an origin (claude -p) to a user item", func(t *testing.T) {
+			l := `{"type":"attachment","attachment":{"type":"queued_command","prompt":"and then this","commandMode":"prompt"}}`
+			if items := normalizeLine(l); len(items) != 1 || items[0].Kind != "user" || items[0].Text != "and then this" {
+				t.Fatalf("got %s", itemsJSON(t, items))
+			}
+		})
+
+		t.Run("hides the synthetic filler of a resume after a kill, not other synthetic lines", func(t *testing.T) {
+			synthetic := func(text string) string {
+				return jsonLine(obj{"type": "assistant", "message": obj{"model": "<synthetic>", "role": "assistant", "content": []any{obj{"type": "text", "text": text}}}})
+			}
+			if items := normalizeLine(synthetic("No response requested.")); len(items) != 0 {
+				t.Errorf("filler: got %s", itemsJSON(t, items))
+			}
+			if items := normalizeLine(synthetic("API Error: Connection lost")); len(items) != 1 {
+				t.Errorf("an API error: got %s", itemsJSON(t, items))
+			}
+		})
+
 		t.Run("keeps queued commands that are not the user's words, and other attachments, hidden", func(t *testing.T) {
 			for _, l := range []string{
 				queued("<task-notification>done</task-notification>", "task-notification", nil),
