@@ -243,15 +243,41 @@ describe('Image preview', () => {
     assert.ok(!open());
     await settle();
     assert.equal(location.hash, '#/home/pilot', 'one step back, not two');
-    const forwardAndBack = new Promise<void>((r) => {
-      let n = 0;
-      const f = (): void => { if (++n === 2) { removeEventListener('popstate', f); r(); } };
-      addEventListener('popstate', f);
-    });
-    history.forward(); // onto the closed preview's entry, which is skipped
-    await forwardAndBack;
-    assert.equal(history.state?.imagePreview, undefined);
+    let moved = popped();
+    history.forward(); // onto the closed preview's entry: it shows again
+    await moved;
+    await settle();
+    assert.equal($<HTMLImageElement>('.image-preview img').alt, 'image');
+    moved = popped();
+    history.back();
+    await moved;
+    await settle();
     assert.ok(!open());
+    assert.equal(location.hash, '#/home/pilot');
     opener.remove();
+  });
+
+  it('a hash change closes it; Back shows it again and Forward still reaches the later route', async () => {
+    location.hash = '#/home/pilot';
+    await fire(() => previewImage('data:image/png;base64,x', 'image'));
+    location.hash = '#/agents'; // e.g. a notification's link
+    // as a browser does: the new entry has no state, and a popstate fires (happy-dom keeps the state and fires none)
+    history.replaceState(null, '');
+    await fire(() => dispatchEvent(new PopStateEvent('popstate', { state: null })));
+    await settle();
+    assert.ok(!open());
+    assert.equal(location.hash, '#/agents', 'no step back');
+    let moved = popped();
+    history.back();
+    await moved;
+    await settle();
+    assert.ok(open());
+    assert.equal(location.hash, '#/home/pilot');
+    moved = popped();
+    history.forward();
+    await moved;
+    await settle();
+    assert.ok(!open());
+    assert.equal(location.hash, '#/agents');
   });
 });

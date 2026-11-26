@@ -54,13 +54,22 @@ function Overlay({ close, className, children }: { close: () => void; className:
   );
 }
 
+// Each preview's image by its history entry, so Back or Forward onto the entry shows it again.
+// ponytail: kept for the page's life (a scaled image is ~150 KB); drop old ones if that ever matters.
+const previewed = new Map<number, { src: string; alt: string }>();
+
 /** An image, fit to the screen. A tap on it or around it, ×, Escape or the phone's Back closes it: it
  *  opens on a history entry of its own at the same URL (no hashchange, so no route), which a close by
  *  any other means takes back off. Focus goes to × and back to the opener. */
 export function previewImage(src: string, alt: string): void {
-  const opener = document.activeElement as HTMLElement | null;
   const mark = Math.random(); // this preview's entry, not a stale one a reload or a hash change left behind
+  previewed.set(mark, { src, alt });
   history.pushState({ imagePreview: mark }, '');
+  showPreview(src, alt, mark);
+}
+
+function showPreview(src: string, alt: string, mark: number): void {
+  const opener = document.activeElement as HTMLElement | null;
   const close = showModal((close) => (
     <>
       <img src={src} alt={alt} onClick={close} />
@@ -73,10 +82,14 @@ export function previewImage(src: string, alt: string): void {
   }, 'image-preview');
   addEventListener('popstate', close);
 }
-// Arriving on a closed preview's entry (Forward, or Back onto one a hash change left behind) skips it:
-// it shows nothing, and at the same URL the next Back would seem to do nothing. An open preview's entry
-// is always the newest, so no popstate lands on it.
-addEventListener('popstate', () => { if (history.state?.imagePreview) history.back(); });
+// Forward onto a closed preview's entry, or Back onto one a hash change left behind, shows it again:
+// else the entry shows nothing and, at the same URL, the next Back seems to do nothing. (After a
+// reload the map is empty and such an entry stays blank.)
+addEventListener('popstate', () => {
+  const mark: unknown = history.state?.imagePreview;
+  const p = typeof mark === 'number' ? previewed.get(mark) : undefined;
+  if (p) showPreview(p.src, p.alt, mark as number);
+});
 
 const textInput = { type: 'text', autoCapitalize: 'off', autoCorrect: 'off', spellCheck: false } as const;
 
