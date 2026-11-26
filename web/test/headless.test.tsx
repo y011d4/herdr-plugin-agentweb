@@ -21,8 +21,10 @@ vi.mock('../src/ws.ts', () => ({
   onWsMessage: (_fn: (msg: WsMessage) => void) => () => {},
   wsSendWatch: () => {},
 }));
-// happy-dom has no canvas: a picked file becomes an attachment named after it
-vi.mock('../src/image.ts', async (orig) => ({ ...(await orig<typeof import('../src/image.ts')>()), toAttachment: async (f: File) => ({ mediaType: 'image/jpeg', data: f.name }) }));
+// happy-dom has no canvas: a picked file becomes an attachment named after it, once `scaled` resolves
+let scaled: Promise<void> = Promise.resolve();
+vi.mock('../src/image.ts', async (orig) => ({ ...(await orig<typeof import('../src/image.ts')>()),
+  toAttachment: async (f: File) => { await scaled; return { mediaType: 'image/jpeg', data: f.name }; } }));
 
 // The recorded headless orchestrator "pilot" (Pilot): blocked on "Which fruit?" (id 1a2b3c4d), completionSeq 3,
 // 5h 35% read long ago, ctx 12.5%, warnings silent (interrupt, clear) and unknown_event.
@@ -155,6 +157,24 @@ describe("a headless orchestrator's Home", () => {
     await answer('POST /api/orchestrators/pilot/send', { error: { code: 'invalid_params', message: 'the images are over 1 MiB in all' } }, 400);
     assert.deepEqual(thumbs(), ['data:image/jpeg;base64,c.png']); // kept on a failure
     assert.deepEqual(getToasts().map((t) => t.body), ['the images are over 1 MiB in all']);
+  });
+
+  it('sends nothing while an image is still being scaled', async () => {
+    await home(withPilot(idle));
+    let release = () => {};
+    scaled = new Promise((r) => { release = r; });
+    const picker = $<HTMLInputElement>('#input-image-picker');
+    Object.defineProperty(picker, 'files', { configurable: true, value: [new File(['x'], 'a.png', { type: 'image/png' })] });
+    await fire(() => picker.dispatchEvent(new Event('change', { bubbles: true })));
+    await fire(() => { $<HTMLTextAreaElement>('#pane-input').value = 'see this'; });
+    assert.equal($<HTMLButtonElement>('#btn-send-enter').disabled, true);
+    await fire(() => $('#btn-send-enter').click());
+    assert.deepEqual(posts('send'), []);
+    await act(async () => { release(); await flush(); });
+    scaled = Promise.resolve();
+    assert.equal($<HTMLButtonElement>('#btn-send-enter').disabled, false);
+    await fire(() => $('#btn-send-enter').click());
+    assert.deepEqual(posts('send'), [{ text: 'see this', images: [{ mediaType: 'image/jpeg', data: 'a.png' }] }]);
   });
 
   it("answers its question with one POST per tap; a stale one says so and frees the options", async () => {

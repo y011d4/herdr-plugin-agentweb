@@ -577,6 +577,10 @@ func (s *server) headlessRoute(w http.ResponseWriter, r *http.Request, h *headle
 			return
 		}
 		text, _ := body["text"].(string)
+		if len(text) > bodyLimit { // text keeps its own limit: the line must fit a chat read
+			jsonError(w, http.StatusRequestEntityTooLarge, "bad_request", "text too large")
+			return
+		}
 		images, ierr := imageBlocks(body["images"])
 		if ierr != nil {
 			sendError(w, ierr)

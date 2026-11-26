@@ -1094,6 +1094,9 @@ func TestHeadlessSendsImages(t *testing.T) {
 			t.Errorf("%s: %d %s", body, status, out)
 		}
 	}
+	if status, out := send(strings.Repeat("x", bodyLimit+1)); status != 413 { // text keeps its own limit
+		t.Errorf("long text: %d %s", status, out)
+	}
 	b.send(t, "ask")
 	b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
 	if status, out := send("banana"); status != 409 || !strings.Contains(out, "question_pending") {
