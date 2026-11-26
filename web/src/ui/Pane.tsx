@@ -14,6 +14,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
+import { draftKey, getDraft, pruneDrafts, setDraft } from '../drafts.ts';
 import { homeSummary, shownStatus } from '../dashboard-group.ts';
 import { fitImages, MAX_IMAGES, toAttachment, type ImageAttachment } from '../image.ts';
 import { showToast } from '../notify.ts';
@@ -37,6 +38,10 @@ const setToggle = (t: Partial<typeof toggle>): void => { toggle = { ...toggle, .
 const useToggle = () => useSyncExternalStore(subscribe, () => toggle);
 const useAppState = (): AppState | null => useSyncExternalStore(subscribe, () => store.appState);
 let shownInput: HTMLTextAreaElement | null = null; // the composer on screen
+let shownKey = ''; // and its draft's key (drafts.ts)
+// The text of each draft key's send in flight (the latest): a composer reopened meanwhile doesn't show
+// it, so it isn't sent twice. Storage keeps it until the send succeeds: a reload mid-send can't lose it.
+const sendingDrafts = new Map<string, string>();
 
 /** A new State: the answer panel follows the open pane's status. */
 export function paneViewOnState(): void {
@@ -129,7 +134,7 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
         </div>
       )}
       <div className="input-bar">
-        <Composer paneId={paneId} home={home} />
+        <Composer paneId={paneId} home={home} name={name} />
         {/* Home hides the terminal keys while chatting; they come back with the terminal */}
         <div className="quickkey-row" id="quickkey-row" style={home && mode !== 'terminal' ? { display: 'none' } : undefined}>
           {KEYS.map(([label, payload]) => (
@@ -253,11 +258,13 @@ const autoGrow = (t: HTMLTextAreaElement): void => {
 
 // The one composer: an agent's pane and an orchestrator's Home alike. On a touch device Enter
 // inserts a newline and only the Send button sends, so the phone keyboard can't fire off half-typed
-// commands; on a PC Enter sends and Shift+Enter inserts a newline (composer-keys.ts). A headless
-// orchestrator's also takes images (+, or pasted), shown above it until sent.
-function Composer({ paneId, home }: { paneId: string; home: boolean }) {
+// commands; on a PC Enter sends and Shift+Enter inserts a newline (composer-keys.ts). What is typed is
+// kept as the Home's (`name`) or the pane's draft (drafts.ts) until it is sent. A headless
+// orchestrator's also takes images (+, or pasted), shown above it until sent (not kept as a draft).
+function Composer({ paneId, home, name }: { paneId: string; home: boolean; name: string }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
+  const key = draftKey(paneId, home ? name : undefined);
   const [placeholder] = useState(() => (home ? `Message ${orchestratorLabel(orchestratorOfPane(store.appState, paneId))}…` : 'Send text…'));
   const hl = headlessName(paneId); // no pane to type into: its message goes to the bridge's child
   const [images, setImages] = useState<ImageAttachment[]>([]);
@@ -288,14 +295,16 @@ function Composer({ paneId, home }: { paneId: string; home: boolean }) {
   useLayoutEffect(() => {
     const t = input.current!;
     shownInput = t;
-    const draft = keptTasks.draft(paneId);
-    if (draft !== null) {
+    shownKey = key;
+    const stored = getDraft(key);
+    const draft = keptTasks.draft(paneId) ?? (sendingDrafts.get(key) === stored ? '' : stored);
+    if (draft) {
       t.value = draft;
       autoGrow(t);
     }
     t.disabled = keptTasks.sending(paneId);
     return () => { if (shownInput === t) shownInput = null; };
-  }, [paneId]);
+  }, [paneId, key]);
 
   const send = async (): Promise<void> => {
     const t = input.current!;
@@ -305,6 +314,7 @@ function Composer({ paneId, home }: { paneId: string; home: boolean }) {
     sendingImages.current = sent.length > 0; // an upload takes a while: a second tap mustn't send them twice
     const kept = keptTasks.beginSend(paneId, text); // false unless the pane has a kept task
     if (kept) t.disabled = true;
+    if (text) sendingDrafts.set(key, text);
     let restored: string | null = null;
     try {
       // clear:true wipes the pane's composer first so this message submits on its own — never
@@ -319,13 +329,26 @@ function Composer({ paneId, home }: { paneId: string; home: boolean }) {
         t.value = '';
         autoGrow(t);
       }
+      if (text && getDraft(key) === text) setDraft(key, '');
       if (sent.length) setImages((cur) => cur.filter((i) => !sent.includes(i))); // and images added mid-send
       paneView?.echo();
     } catch (err) {
       if (kept) restored = keptTasks.finishSend(paneId, false);
+      // the draft again, unless a newer one is stored (a later send's success left none); a composer
+      // empty under its key (reopened, a Home's after a Clear's new pane too) shows it
+      if (text && !getDraft(key)) {
+        setDraft(key, text);
+        if (store.appState) pruneDrafts(store.appState); // not for a pane closed meanwhile: herdr reuses its id
+      }
+      const live = shownKey === key ? shownInput : null;
+      if (text && live && !live.value && getDraft(key) === text) {
+        live.value = text;
+        autoGrow(live);
+      }
       showToast('Send failed', (err as Error).message);
     } finally {
       sendingImages.current = false;
+      if (sendingDrafts.get(key) === text) sendingDrafts.delete(key);
       if (kept) {
         // Unlock the pane's composer as displayed now — this one, or one reopened during the send
         // (this textarea is then detached) — and on failure show the task in it again.
@@ -378,7 +401,7 @@ function Composer({ paneId, home }: { paneId: string; home: boolean }) {
           </>
         )}
         <textarea id="pane-input" ref={input} rows={1} placeholder={placeholder} autoCorrect="off" autoCapitalize="off" spellCheck={false}
-          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); keptTasks.edit(paneId, e.currentTarget.value); }}></textarea>
+          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); keptTasks.edit(paneId, e.currentTarget.value); setDraft(key, e.currentTarget.value); }}></textarea>
         <button className="input-send-btn" id="btn-send-enter" disabled={preparing > 0} onClick={() => { void send(); }}>Send</button>
       </div>
     </>
