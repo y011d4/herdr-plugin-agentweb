@@ -555,6 +555,18 @@ func TestHeadlessChildAtOnce(t *testing.T) {
 	})
 }
 
+func TestHeadlessStateDirUnwritable(t *testing.T) {
+	state := t.TempDir()
+	os.WriteFile(filepath.Join(state, "headless"), nil, 0o600) // a file where its dir goes
+	b := startHeadless(t, state, nil, nil)
+	if status, body := b.post(t, "start", ""); status != 500 || !strings.Contains(body, "could not write") {
+		t.Errorf("start: %d %s", status, body)
+	}
+	if runs, _ := b.runs(t); len(runs) != 0 {
+		t.Errorf("runs %v", runs)
+	}
+}
+
 func TestHeadlessOrphanScan(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("the orphan scan reads /proc: Linux only")
