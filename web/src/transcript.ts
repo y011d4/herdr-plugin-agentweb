@@ -326,14 +326,39 @@ export function renderItems(items: TimelineItem[]): string {
 // own paste, so it stays.)
 const INJECTED_USER_TURN = /^\s*<(task-notification|system-reminder|local-command-[\w-]+|command-(name|message|args)|bash-(input|stdout|stderr))>/;
 
+// Claude Code's AskUserQuestion result: `… "<question>"="<answer>", "<question>"="<answer>". …`
+const ASK_ANSWER = /"((?:[^"\\]|\\.)*)"="((?:[^"\\]|\\.)*)"/g;
+const unquote = (s: string): string => s.replace(/\\(.)/g, '$1');
+
+/** What an AskUserQuestion result says was answered: the answer, or `question: answer` per line
+ *  for several; null when it names none (refused, interrupted). */
+export function askAnswer(text: string): string | null {
+  const pairs = [...text.matchAll(ASK_ANSWER)].map((m) => [unquote(m[1]), unquote(m[2])]);
+  if (!pairs.length) return null;
+  return pairs.length === 1 ? pairs[0][1] : pairs.map(([q, a]) => `${q}: ${a}`).join('\n');
+}
+
 /**
  * The home (orchestrator) chat shows only the dialogue: the user's and the
- * assistant's own words. Tool calls/results, thinking, subagent traffic and
- * injected user turns are hidden.
+ * assistant's own words, and its questions (AskUserQuestion) with what the user
+ * answered as their own bubble. Other tool calls/results, thinking, subagent
+ * traffic and injected user turns are hidden. `asks` (kept across appends: a
+ * question and its answer arrive apart) holds the questions' tool_use ids.
  */
-export function conversationItems(items: TimelineItem[]): TimelineItem[] {
-  return items.filter((it) => !it.sidechain &&
-    (it.kind === 'assistant' || (it.kind === 'user' && !INJECTED_USER_TURN.test(it.text))));
+export function conversationItems(items: TimelineItem[], asks = new Set<string>()): TimelineItem[] {
+  const out: TimelineItem[] = [];
+  for (const it of items) {
+    if (it.sidechain) continue;
+    if (it.kind === 'assistant' || (it.kind === 'user' && !INJECTED_USER_TURN.test(it.text))) out.push(it);
+    else if (it.kind === 'tool_use' && it.name === 'AskUserQuestion' && it.ask?.length) {
+      asks.add(it.id);
+      out.push(it);
+    } else if (it.kind === 'tool_result' && it.forId !== null && asks.has(it.forId)) {
+      const answer = it.truncated ? null : askAnswer(it.text); // cut short, it may name only some: shown as it is
+      out.push(answer === null ? it : { kind: 'user', text: answer, sidechain: false, ts: it.ts });
+    }
+  }
+  return out;
 }
 
 /**

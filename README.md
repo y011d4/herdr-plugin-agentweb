@@ -547,7 +547,7 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   headless orchestrator: send a message (also while it works) and interrupt its turn, both 409 when it
   isn't running; clear starts it in a fresh session (returning `{"paneId", "name"}` like start), running
   or not; stop ends it, and succeeds when it is already stopped. A message sent while a question is
-  pending refuses that question, with the message as the reason. A headless orchestrator has no herdr pane: `/api/panes/hl:<name>/…` and
+  pending answers it, in the user's own words (the same text for each of its questions). A headless orchestrator has no herdr pane: `/api/panes/hl:<name>/…` and
   `/api/agents/hl:<name>/…` answer 404, except `GET /api/panes/hl:<name>/transcript`.
 - `POST /api/orchestrators/:name/answer` `{"id": "…", "answers": {"<question>": "<label>"}}` or
   `{"id": "…", "deny": "<message>"}` — answer (or refuse) the headless orchestrator's pending question

@@ -116,6 +116,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   let chatCursor = 0; // byte offset into the transcript for incremental fetches
   let chatProbing = false; // an availability probe is in flight — prevents overlap
   let activity: string | null = null; // Home: latest tool call since the orchestrator last spoke
+  let asks = new Set<string>(); // Home: its questions' tool_use ids, so their answers show (conversationItems)
 
   // Pending-prompt panel: when a claude pane is blocked (waiting for input), the
   // chat surfaces an answer UI — tappable options for a pending AskUserQuestion,
@@ -208,7 +209,8 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     if (view.homeMode) {
       activity = latestActivity(items, null);
       opts.activity(activity);
-      items = conversationItems(items);
+      asks = new Set();
+      items = conversationItems(items, asks);
     }
     if (items.length) chatEl.innerHTML = renderItems(items);
     else chatEl.replaceChildren(Object.assign(document.createElement('div'), { className: 'chat-empty', textContent: 'No messages yet.' }));
@@ -222,7 +224,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     if (view.homeMode) {
       activity = latestActivity(items, activity);
       opts.activity(activity);
-      items = conversationItems(items);
+      items = conversationItems(items, asks);
       if (items.length === 0) return;
     }
     // follow the bottom only if the user is already there — don't yank them out of

@@ -1,6 +1,6 @@
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
-import { renderMarkdown, renderItem, conversationItems, latestActivity, type TimelineItem } from '../src/transcript.ts';
+import { askAnswer, renderMarkdown, renderItem, conversationItems, latestActivity, type TimelineItem } from '../src/transcript.ts';
 
 // renderMarkdown is the chat prose renderer used for user + assistant turns.
 // It must be XSS-safe (all text escaped before formatting) and dependency-free.
@@ -185,6 +185,23 @@ describe('conversationItems / latestActivity (home chat)', () => {
   it('keeps only the user/assistant words, dropping tools, injected turns and subagents', () => {
     const items = [u('fix it'), tool('Bash', 'herdr agent list'), result, u('<task-notification> done'), a('sub', true), a('done!')];
     assert.deepEqual(conversationItems(items).map((i) => (i as { text: string }).text), ['fix it', 'done!']);
+  });
+
+  it("keeps a question (AskUserQuestion) and shows its answer as the user's, across appends", () => {
+    const ask: TimelineItem = { kind: 'tool_use', id: 'q1', name: 'AskUserQuestion', summary: '', todos: null,
+      ask: [{ question: '好きな果物は？', header: '果物', multiSelect: false, options: [{ label: 'りんご', description: '' }] }], sidechain: false, ts: null };
+    const answered = (forId: string, text: string, isError = false): TimelineItem => ({ kind: 'tool_result', forId, text, truncated: false, isError, sidechain: false, ts: 5 });
+    const asks = new Set<string>();
+    assert.deepEqual(conversationItems([u('聞いて'), ask], asks).map((i) => i.kind), ['user', 'tool_use']);
+    // the answer arrives in a later append (Claude Code's wording, as on 2.1.322)
+    const later = conversationItems([answered('q1', 'Your questions have been answered: "好きな果物は？"="ばなな \\"完熟\\"". You can now continue with these answers in mind.'), result], asks);
+    assert.deepEqual(later, [{ kind: 'user', text: 'ばなな "完熟"', sidechain: false, ts: 5 }]);
+    // several questions: one line each; no answer named (refused, interrupted): the result as it is
+    assert.equal(askAnswer('answered: "A?"="x", "B?"="y, z". Go on.'), 'A?: x\nB?: y, z');
+    assert.equal(conversationItems([answered('q1', 'ほげ', true)], asks)[0].kind, 'tool_result');
+    // a result cut short may name only some answers: it stays as it is, its "truncated" with it
+    const cut = { ...answered('q1', 'answered: "A?"="x", "B?"="y'), truncated: true } as TimelineItem;
+    assert.equal(conversationItems([cut], asks)[0].kind, 'tool_result');
   });
 
   it('hides only Claude Code\'s injected tags, not user text that starts with "<"', () => {

@@ -120,7 +120,7 @@ export function PromptPanel({ paneId, prompt, view }: { paneId: string; prompt: 
  * Next/Send, then every answer in one POST …/answer with the question's id. A stale id answers 409
  * (stale_question: answered, declined or interrupted meanwhile). The parent keys it on that id, so a
  * new question gets a fresh panel; the sent one stays disabled until the State takes it away. The
- * composer stays: a message sent meanwhile declines the question with its text (the bridge's /send).
+ * composer stays: a message sent meanwhile is the answer in the user's own words (the bridge's /send).
  */
 export function HeadlessPrompt({ name, pending }: { name: string; pending: { id: string; questions: AskQuestion[] } }) {
   const [step, setStep] = useState(0);
@@ -183,7 +183,7 @@ export function HeadlessPrompt({ name, pending }: { name: string; pending: { id:
           {last ? 'Send' : 'Next'}
         </button>
       )}
-      <div className="chat-prompt-hint">Or type a reply below: it declines the question with your words.</div>
+      <div className="chat-prompt-hint">Or type your own answer below and send it.</div>
     </div>
   );
 }
