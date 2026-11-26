@@ -473,7 +473,8 @@ func (r *headlessRunner) start(resume bool) error {
 	if found := r.scanSettings(); found != "" {
 		return r.fail("billing", &LifecycleError{Status: 409, Code: "billing_refused", Message: found + ": a headless orchestrator never runs with an API key"})
 	}
-	if err := os.MkdirAll(filepath.Join(r.stateDir, "headless"), 0o700); err == nil {
+	err = os.MkdirAll(filepath.Join(r.stateDir, "headless"), 0o700)
+	if err == nil {
 		err = writeFile0600(mcpConfig, []byte(`{"mcpServers":{}}`))
 	}
 	if err != nil {
