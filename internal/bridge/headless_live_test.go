@@ -161,7 +161,9 @@ func TestClaudeLive(t *testing.T) {
 	// the version first: a start that fails still names the claude it checked (the canary's gate)
 	vctx, vcancel := context.WithTimeout(context.Background(), 15*time.Second) // as the bridge's own check: a hung claude can't eat the deadline
 	defer vcancel()
-	if out, err := exec.CommandContext(vctx, claudeBin(), "--version").Output(); err == nil {
+	vcmd := exec.CommandContext(vctx, claudeBin(), "--version")
+	vcmd.WaitDelay = time.Second // a descendant holding the pipe can't keep Output waiting past the cancel
+	if out, err := vcmd.Output(); err == nil {
 		version, _, _ = strings.Cut(strings.TrimSpace(string(out)), " ")
 	}
 	if code, body := b.post(t, "start", ""); code != 200 || !poll(60*time.Second, func() bool { return status() == "idle" }) {
