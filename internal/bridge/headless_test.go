@@ -817,6 +817,23 @@ func TestHeadlessInterruptKeepsQueuedMessages(t *testing.T) {
 			t.Errorf("transcript %s", tr)
 		}
 	})
+	t.Run("an interrupt between a reply and its result ends that turn; the queued one still runs", func(t *testing.T) {
+		b := startHeadless(t, t.TempDir(), nil, nil)
+		b.start(t)
+		b.waitStatus(t, "idle")
+		b.send(t, "replyhold") // replies, then waits 2 s before its result
+		waitUntil(t, 5*time.Second, "the reply is out", func() bool { return strings.Contains(transcript(b), "echo: replyhold") })
+		b.send(t, "queued")
+		b.waitStdin(t, "queued")
+		if status, body := b.post(t, "interrupt", ""); status != 200 {
+			t.Fatalf("interrupt: %d %s", status, body)
+		}
+		// the interrupted turn ends aborted (no completion); the queued message is the one that completes
+		b.waitFor(t, "queued answered", func(v OrchestratorView) bool { return v.Headless.CompletionSeq == 1 && v.Headless.Status == "done" })
+		if tr := transcript(b); !strings.Contains(tr, "echo: queued") {
+			t.Errorf("the queued message never ran: %s", tr)
+		}
+	})
 }
 
 // A stop overlapping a write that finishes at once still interrupts the turn first.
