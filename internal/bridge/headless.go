@@ -298,6 +298,7 @@ type hlChild struct {
 	done     chan struct{} // closed once it has exited and its stdout is read
 	expected bool          // its exit was asked for (r.mu)
 	failed   bool          // it is being killed for an error: what it still says is ignored (r.mu)
+	epoch    int           // the runner's epoch it began in: what it asks carries this, not a later Stop/Clear's
 }
 
 // headlessState is the persisted part (<state>/headless/<name>.json).
@@ -680,7 +681,7 @@ func (r *headlessRunner) spawn(argv, env []string) error {
 		// it is the running child before its first line is read or its exit seen: neither may
 		// find another child (the init check would be skipped, a dead child left as running)
 		r.mu.Lock()
-		r.child, r.lastEvent = c, time.Now()
+		r.child, r.lastEvent, c.epoch = c, time.Now(), r.epoch
 		r.model.inited, r.model.unreadableRun = false, 0
 		r.model.expectTools, r.model.expectMCP = headlessTools(r.tools), true
 		r.model.Status = "idle"
@@ -758,7 +759,7 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 		r.mu.Unlock()
 		return
 	}
-	epoch := r.epoch
+	epoch := c.epoch // its own: a Stop or Clear may already have begun the next epoch while it still talks
 	r.lastEvent = time.Now()
 	r.warnings = slices.DeleteFunc(r.warnings, func(w HeadlessWarning) bool { return w.Kind == "silent" })
 	from := r.model.Status
