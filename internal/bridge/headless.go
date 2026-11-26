@@ -279,6 +279,7 @@ type headlessRunner struct {
 	lastEvent    time.Time
 	pending      *hlPending          // the question waiting for the user
 	asks         map[string]bool     // AskUserQuestion tool_use ids: did each reach approve?
+	served       map[string]bool     // the tool_use ids of the tool calls that reached the bridge, until their result
 	watches      map[string]*hlWatch // by pane
 	saved        []hlWatch           // the watches saved by an earlier bridge, re-armed at the first start
 	wakes        []string
@@ -320,7 +321,8 @@ func newHeadlessRunner(def OrchestratorDef, stateDir, rules string) *headlessRun
 		tools:         os.Getenv("YOICKS_HEADLESS_NO_TOOLS") != "1",
 		restartDelays: []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second},
 		crashWindow:   10 * time.Minute, interruptWait: 2 * time.Second, silence: 3 * time.Minute,
-		alerted: map[string]bool{}, interrupts: map[string]chan struct{}{}, asks: map[string]bool{}, watches: map[string]*hlWatch{}}
+		alerted: map[string]bool{}, interrupts: map[string]chan struct{}{}, asks: map[string]bool{}, served: map[string]bool{},
+		watches: map[string]*hlWatch{}}
 	r.model.Status = "stopped"
 	var saved headlessState
 	if b, err := os.ReadFile(headlessPath(stateDir, def.Name, ".json")); err == nil && json.Unmarshal(b, &saved) == nil && (saved.SessionID == "" || sessionIDRe.MatchString(saved.SessionID)) {
@@ -682,7 +684,7 @@ func (r *headlessRunner) spawn(argv, env []string) error {
 		// find another child (the init check would be skipped, a dead child left as running)
 		r.mu.Lock()
 		r.child, r.lastEvent, c.epoch = c, time.Now(), r.epoch
-		r.model.inited, r.model.unreadableRun = false, 0
+		r.model.inited, r.model.unreadableRun, r.model.yoicksUses, r.served = false, 0, nil, map[string]bool{}
 		r.model.expectTools, r.model.expectMCP = headlessTools(r.tools), true
 		r.model.Status = "idle"
 		r.mu.Unlock()
@@ -771,6 +773,14 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 	if ch := r.interrupts[step.Acked]; ch != nil {
 		close(ch)
 		delete(r.interrupts, step.Acked)
+	}
+	for _, res := range step.Results {
+		// an error for a call the bridge never served failed on the way (the MCP session, its
+		// bearer, the transport), whatever Claude Code's words for it
+		if res.Error != "" && !r.served[res.ID] {
+			alerts = append(alerts, r.warn("mcp_call", res.Tool+" failed before reaching the bridge ("+res.Error+"); Clear to reconnect"))
+		}
+		delete(r.served, res.ID)
 	}
 	if step.Fatal != "" {
 		c.expected, c.failed = true, true

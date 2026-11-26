@@ -179,6 +179,15 @@ func (r *headlessRunner) boundCalls(next mcp.MethodHandler) mcp.MethodHandler {
 		if method != "tools/call" {
 			return next(ctx, method, req)
 		}
+		// Claude Code names the tool_use each call is for (S0's mcp.log): the stream's result for
+		// one never named here failed before reaching the bridge (onLine's mcp_call)
+		if p, ok := req.GetParams().(*mcp.CallToolParamsRaw); ok && p.Name != "approve" {
+			if id, _ := p.Meta["claudecode/toolUseId"].(string); id != "" {
+				r.mu.Lock()
+				r.served[id] = true
+				r.mu.Unlock()
+			}
+		}
 		epoch, ok := 0, false
 		if extra := req.GetExtra(); extra != nil {
 			epoch, ok = r.caller(extra.Header)

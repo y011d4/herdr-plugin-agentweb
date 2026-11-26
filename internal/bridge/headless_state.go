@@ -34,6 +34,7 @@ var warningActions = map[string][]string{
 	"silent": {"interrupt", "clear"}, "permission_route": {"interrupt"}, "stream_broken": {"clear", "tui"},
 	"restart_limit": {"clear", "tui"}, "panic": {"clear", "tui"}, "init": {"tui"}, "billing": {"tui"}, "env": {"tui"},
 	"auth": {"tui"}, "version": {"tui"}, "start": {"tui"}, "question_route": {"interrupt"}, "rules": {"clear"},
+	"mcp_call": {"clear"},
 }
 
 // hlModel is what a headless child's stream has said so far.
@@ -41,13 +42,14 @@ type hlModel struct {
 	Status        string
 	CompletionSeq int64
 	Usage         *HeadlessUsage
-	expectTools   []string        // the exact tools its init must report (nil: AskUserQuestion)
-	expectMCP     bool            // and the yoicks MCP server connected
-	inited        bool            // this child's first init was checked
-	model         string          // the model of the last assistant message
-	ctxTokens     float64         // its context: input + cache tokens
-	unreadableRun int             // lines in a row that couldn't be read
-	unknown       map[string]bool // event kinds already warned about this session
+	expectTools   []string          // the exact tools its init must report (nil: AskUserQuestion)
+	expectMCP     bool              // and the yoicks MCP server connected
+	inited        bool              // this child's first init was checked
+	model         string            // the model of the last assistant message
+	ctxTokens     float64           // its context: input + cache tokens
+	unreadableRun int               // lines in a row that couldn't be read
+	unknown       map[string]bool   // event kinds already warned about this session
+	yoicksUses    map[string]string // the yoicks tool_use ids awaiting their result → the tool
 }
 
 type hlWarning struct{ Kind, Message string }
@@ -62,7 +64,12 @@ type hlStep struct {
 	Log      string // a line for bridge.log (keys and kinds only, never content)
 	Ask      string // the tool_use id of an AskUserQuestion it asked
 	CanUse   *hlCanUse
+	Results  []hlToolResult // the yoicks tools' results it carries
 }
+
+// hlToolResult is a yoicks tool's result in the stream: its tool_use id, the tool, and for
+// an is_error one the first line of its text.
+type hlToolResult struct{ ID, Tool, Error string }
 
 // hlCanUse is a permission request over stdio (can_use_tool), which the supervisor answers.
 type hlCanUse struct {
@@ -117,9 +124,37 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 		}
 		content, _ := msg["content"].([]any)
 		for _, b := range content {
-			if b, _ := b.(map[string]any); b["type"] == "tool_use" && b["name"] == "AskUserQuestion" {
-				st.Ask, _ = b["id"].(string)
+			b, _ := b.(map[string]any)
+			name, _ := b["name"].(string)
+			id, _ := b["id"].(string)
+			switch {
+			case b["type"] != "tool_use":
+			case name == "AskUserQuestion":
+				st.Ask = id
+			case strings.HasPrefix(name, "mcp__yoicks__") && id != "":
+				if m.yoicksUses == nil {
+					m.yoicksUses = map[string]string{}
+				}
+				m.yoicksUses[id] = strings.TrimPrefix(name, "mcp__yoicks__")
 			}
+		}
+	case "user":
+		content, _ := ev["message"].(map[string]any)["content"].([]any)
+		for _, b := range content {
+			b, _ := b.(map[string]any)
+			id, _ := b["tool_use_id"].(string)
+			tool, ours := m.yoicksUses[id]
+			if b["type"] != "tool_result" || !ours {
+				continue
+			}
+			delete(m.yoicksUses, id)
+			res := hlToolResult{ID: id, Tool: tool}
+			if b["is_error"] == true {
+				text := strings.NewReplacer("<tool_use_error>", "", "</tool_use_error>", "").Replace(toolResultText(b["content"]))
+				first, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
+				res.Error, _ = truncateUnits(first, 200)
+			}
+			st.Results = append(st.Results, res)
 		}
 	case "result":
 		if reason, _ := ev["terminal_reason"].(string); strings.HasPrefix(reason, "aborted") {
