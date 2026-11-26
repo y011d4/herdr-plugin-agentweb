@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { act } from 'react';
+import { draftKey, setDraft } from '../src/drafts.ts';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { keptTasks, setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
@@ -20,8 +21,8 @@ vi.mock('../src/ws.ts', () => ({
 interface Req { method: string; url: string; body: any; answered: boolean; answer: (status: number, body: unknown) => void }
 let reqs: Req[];
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
-async function answer(match: string, body: unknown, status = 200): Promise<void> {
-  const r = reqs.find((q) => !q.answered && `${q.method} ${q.url}`.includes(match));
+async function answer(match: string, body: unknown, status = 200, nth = 0): Promise<void> {
+  const r = reqs.filter((q) => !q.answered && `${q.method} ${q.url}`.includes(match))[nth]; // nth: the nth still open
   assert.ok(r, `no open request ${match} (open: ${reqs.filter((q) => !q.answered).map((q) => `${q.method} ${q.url}`).join(', ')})`);
   r.answered = true;
   await act(async () => { r.answer(status, body); await flush(); });
@@ -34,11 +35,11 @@ let unmount: () => Promise<void>;
 let container: HTMLElement;
 
 /** The pane screen as mounted: its topbar's slots, then the screen. */
-async function show(paneId: string, home = false, back = '#/agents'): Promise<void> {
+async function show(paneId: string, home = false, back = '#/agents', name = home ? orchestratorOfPane(store.appState, paneId)?.name : undefined): Promise<void> {
   store.view.activePaneId = paneId;
   store.view.homeMode = home;
   const t = paneTopbar(paneId, home, back, () => {});
-  ({ container, unmount } = await render(<><div id="tb">{t.left}{t.title}{t.right}</div><Pane paneId={paneId} home={home} name={home ? orchestratorOfPane(store.appState, paneId)?.name : undefined} /></>));
+  ({ container, unmount } = await render(<><div id="tb">{t.left}{t.title}{t.right}</div><Pane paneId={paneId} home={home} name={name} /></>));
 }
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => container.querySelector<T>(sel)!;
 const ta = () => $<HTMLTextAreaElement>('#pane-input');
@@ -146,6 +147,90 @@ describe('composer', () => {
     await answer('POST /api/panes/p2/input', { ok: true });
     assert.equal(ta().value, '');
     assert.equal(keptTasks.draft('p2'), null);
+  });
+
+  it('keeps an unsent draft per pane and per Home across leaving and reopening (stored: a reload too) until it is sent', async () => {
+    const reopen = async (paneId: string, home = false, name?: string) => { await unmount(); await show(paneId, home, '#/agents', name); };
+    await show('p2');
+    await type('p2 draft');
+    await reopen('p1');
+    assert.equal(ta().value, '', "another pane's composer");
+    await type('p1 draft');
+    location.hash = '#/home/personal';
+    await reopen('p4', true);
+    assert.equal(ta().value, '', "the Home's composer");
+    await type('home draft');
+    await reopen('p2');
+    assert.equal(ta().value, 'p2 draft');
+    await key({});
+    await answer('POST /api/panes/p2/input', { error: { code: 'x', message: 'boom' } }, 500);
+    await reopen('p2');
+    assert.equal(ta().value, 'p2 draft', 'a failed send keeps it');
+    await key({});
+    await reopen('p2');
+    assert.equal(ta().value, '', 'reopened while it is sent: not shown, so not sent twice');
+    assert.equal(JSON.parse(localStorage.getItem('herdr_drafts')!)['pane:p2'], 'p2 draft', 'but stored: a reload mid-send keeps it');
+    await answer('POST /api/panes/p2/input', { ok: true });
+    assert.equal(ta().value, '');
+    await reopen('p2');
+    assert.equal(ta().value, '', 'sent: forgotten');
+    await type('a');
+    await key({});
+    await type('ab');
+    await type('a'); // edited mid-send, back to what went out
+    await answer('POST /api/panes/p2/input', { ok: true });
+    await reopen('p2');
+    assert.equal(ta().value, '', 'sent: forgotten too');
+    await type('one');
+    await key({});
+    await type('two');
+    await key({});
+    await answer('POST /api/panes/p2/input', { error: { code: 'x', message: 'boom' } }, 500);
+    await answer('POST /api/panes/p2/input', { error: { code: 'x', message: 'boom' } }, 500);
+    await reopen('p2');
+    assert.equal(ta().value, 'two', 'two failed sends: the last one stays');
+    await key({});
+    await type('three');
+    await key({});
+    await answer('POST /api/panes/p2/input', { error: { code: 'x', message: 'boom' } }, 500);
+    assert.equal(ta().value, 'three', 'a newer draft stays');
+    await answer('POST /api/panes/p2/input', { ok: true });
+    assert.equal(ta().value, '');
+    await reopen('p2');
+    await type('four');
+    await key({});
+    await type('five');
+    await key({});
+    await answer('POST /api/panes/p2/input', { ok: true }, 200, 1); // five went
+    await answer('POST /api/panes/p2/input', { error: { code: 'x', message: 'boom' } }, 500); // four didn't
+    assert.equal(ta().value, 'four', 'failed, and nothing newer unsent: the draft again');
+    await reopen('p2');
+    assert.equal(ta().value, 'four');
+    await reopen('p1');
+    assert.equal(ta().value, 'p1 draft');
+    await reopen('p4', true);
+    assert.equal(ta().value, 'home draft');
+    assert.deepEqual(JSON.parse(localStorage.getItem('herdr_drafts')!), { 'pane:p1': 'p1 draft', 'pane:p2': 'four', 'home:personal': 'home draft' });
+    await key({});
+    await reopen('p9', true, 'personal'); // a Clear gave the Home a new pane while it was sent
+    assert.equal(ta().value, '');
+    await answer('POST /api/panes/p4/input', { error: { code: 'x', message: 'boom' } }, 500);
+    assert.equal(ta().value, 'home draft', 'a failed send shows it in the Home again');
+  });
+
+  it("drops the drafts of panes and orchestrators the State no longer has, but not while herdr is out of reach", async () => {
+    for (const k of [draftKey('p2'), draftKey('p99'), draftKey('p4', 'personal'), draftKey('', 'gone')]) setDraft(k, k);
+    setAppState({ ...fresh(), connected: false, workspaces: [], orchestrators: [] });
+    assert.deepEqual(Object.keys(JSON.parse(localStorage.getItem('herdr_drafts')!)), ['pane:p2', 'pane:p99', 'home:personal', 'home:gone']);
+    setAppState(fresh());
+    assert.deepEqual(JSON.parse(localStorage.getItem('herdr_drafts')!), { 'pane:p2': 'pane:p2', 'home:personal': 'home:personal' });
+    await show('p2');
+    await key({});
+    const gone = fresh(); // p2 closed while its send is in flight
+    for (const ws of gone.workspaces) for (const t of ws.tabs) t.panes = t.panes.filter((p) => p.paneId !== 'p2');
+    setAppState(gone);
+    await answer('POST /api/panes/p2/input', { error: { code: 'x', message: 'boom' } }, 500);
+    assert.deepEqual(JSON.parse(localStorage.getItem('herdr_drafts')!), { 'home:personal': 'home:personal' }, 'its failure stores nothing for a reused id');
   });
 
   it('keeps the same textarea and what is typed in it across state pushes', async () => {
