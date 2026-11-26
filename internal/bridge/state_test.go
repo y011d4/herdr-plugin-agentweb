@@ -404,9 +404,14 @@ func TestFindOrchestrators(t *testing.T) {
 				{Name: "off", Label: "", Dir: "/off"},
 			}, nil)
 			checkEq(t, jsonOf(t, views), `[`+
-				`{"name":"home","label":"Home","paneId":"w0:p2","agents":null},`+
-				`{"name":"work","label":"Work","paneId":"w0:p1","agents":null},`+
-				`{"name":"off","label":"","paneId":null,"agents":null}]`)
+				`{"name":"home","label":"Home","paneId":"w0:p2","agents":null,"mode":"tui","headless":null},`+
+				`{"name":"work","label":"Work","paneId":"w0:p1","agents":null,"mode":"tui","headless":null},`+
+				`{"name":"off","label":"","paneId":null,"agents":null,"mode":"tui","headless":null}]`)
+			// a headless one never owns a pane: one in its dir goes to the dir above
+			views = findOrchestrators(state, []OrchestratorDef{{Name: "home", Dir: "/o"}, {Name: "work", Dir: "/o/work", Mode: "headless"}}, nil)
+			if *views[0].PaneID != "w0:p1" || views[1].PaneID != nil || views[1].Mode != "headless" {
+				t.Errorf("headless: %s", jsonOf(t, views))
+			}
 		})
 
 		t.Run("lists the agents of each orchestrator's account; none when its account isn't known", func(t *testing.T) {

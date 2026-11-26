@@ -10,6 +10,7 @@ package bridge
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"math"
@@ -58,10 +59,10 @@ var mimeTypes = map[string]string{
 
 // pane routes: the id segment is any non-slash text (pane ids contain ':')
 var (
-	paneRoute      = regexp.MustCompile(`^/api/panes/([^/]+)/(\w+)$`)
-	paneIDRoute    = regexp.MustCompile(`^/api/panes/([^/]+)$`) // DELETE = stop the agent
-	agentRoute     = regexp.MustCompile(`^/api/agents/([^/]+)/(\w+)$`)
-	orchStartRoute = regexp.MustCompile(`^/api/orchestrators/([^/]+)/start$`)
+	paneRoute   = regexp.MustCompile(`^/api/panes/([^/]+)/(\w+)$`)
+	paneIDRoute = regexp.MustCompile(`^/api/panes/([^/]+)$`) // DELETE = stop the agent
+	agentRoute  = regexp.MustCompile(`^/api/agents/([^/]+)/(\w+)$`)
+	orchRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/(start|send|interrupt|clear|stop)$`)
 )
 
 // server is the HTTP + WS server over one herdr client.
@@ -76,6 +77,8 @@ type server struct {
 	// each configured orchestrator's expectedAccount ("": not found yet), found in the
 	// background (direnv can take seconds); nil until the first is found
 	expected atomic.Pointer[[]string]
+	// the headless orchestrators' runners, by name (none without a headless entry)
+	headless map[string]*headlessRunner
 	stop     chan struct{}
 	stopOnce sync.Once
 	// how often a transcript watch re-resolves the session (a field so tests can shorten it)
@@ -98,6 +101,13 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 		stop:              make(chan struct{}),
 		transcriptResolve: transcriptResolveInterval,
 		clients:           map[*wsClient]struct{}{},
+		headless:          map[string]*headlessRunner{},
+	}
+	for _, d := range cfg.Orchestrators {
+		if d.Mode == "headless" {
+			s.headless[d.Name] = newHeadlessRunner(d, cfg.StateDir, rules, s.rpc, s.broadcastState,
+				func(kind, message string) { s.broadcastAlert(d.Name, kind, message) })
+		}
 	}
 	// Each agent pane's Claude account, so an orchestrator's agents list shows just
 	// its own account's agents; looked at on each push and each minute even when
@@ -164,17 +174,27 @@ func (s *server) close() { s.stopOnce.Do(func() { close(s.stop) }) }
 func (s *server) clientState(st *State) ClientState {
 	accounts := s.accounts.Accounts()
 	views := findOrchestrators(st, s.cfg.Orchestrators, accounts)
-	// a stopped orchestrator's Home lists the agents of the account it would run under
+	for i := range views {
+		if r := s.headless[views[i].Name]; r != nil {
+			v, running := r.view()
+			views[i].Headless = &v
+			if running {
+				views[i].PaneID = new("hl:" + views[i].Name)
+			}
+		}
+	}
+	// a stopped orchestrator's Home lists the agents of the account it would run under, a
+	// headless one's those of the account it runs under
 	if expected := s.expected.Load(); expected != nil {
 		for i := range views {
-			if views[i].PaneID == nil && (*expected)[i] != "" {
+			if (views[i].PaneID == nil || views[i].Headless != nil) && (*expected)[i] != "" {
 				views[i].Agents = agentsOfAccount(st, accounts, (*expected)[i])
 			}
 		}
 	}
-	var first *string
+	var first *string // a pane, for clients that only know panes
 	for _, v := range views {
-		if v.PaneID != nil {
+		if v.PaneID != nil && v.Headless == nil {
 			first = v.PaneID
 			break
 		}
@@ -357,8 +377,9 @@ func (s *server) route(w http.ResponseWriter, r *http.Request, pathname string) 
 	}
 
 	// Start a configured orchestrator by name (its dir and env come from config, never
-	// from the request), in a new workspace; the client follows it via state.
-	if m := orchStartRoute.FindStringSubmatch(pathname); m != nil && method == "POST" {
+	// from the request), in a new workspace; the client follows it via state. A headless
+	// one is the bridge's child instead, which also takes send, interrupt, clear and stop.
+	if m := orchRoute.FindStringSubmatch(pathname); m != nil && method == "POST" {
 		name, ok := decodePathSegment(m[1])
 		i := -1
 		if ok {
@@ -368,6 +389,18 @@ func (s *server) route(w http.ResponseWriter, r *http.Request, pathname string) 
 		}
 		if i == -1 {
 			jsonError(w, http.StatusNotFound, "not_found", "no orchestrator named "+name)
+			return
+		}
+		if h := s.headless[name]; h != nil {
+			s.headlessRoute(w, r, h, m[2])
+			return
+		}
+		if m[2] != "start" {
+			jsonError(w, http.StatusNotFound, "not_found", "orchestrator "+name+" isn't headless")
+			return
+		}
+		if pid := markedHeadlessChild(s.cfg.StateDir, name); pid != 0 {
+			jsonError(w, http.StatusConflict, "already_running", fmt.Sprintf("orchestrator %s runs headless (pid %d): stop it first", name, pid))
 			return
 		}
 		paneID, agent, err := startOrchestrator(s.rpc, s.cfg.Orchestrators[i], s.rules)
@@ -443,6 +476,9 @@ func (s *server) route(w http.ResponseWriter, r *http.Request, pathname string) 
 			jsonError(w, http.StatusBadRequest, "invalid_params", "malformed pane id")
 			return
 		}
+		if noHeadlessPane(w, paneID) {
+			return
+		}
 		out, err := stopAgent(s.rpc, paneID)
 		if err != nil {
 			sendError(w, err)
@@ -459,6 +495,9 @@ func (s *server) route(w http.ResponseWriter, r *http.Request, pathname string) 
 			jsonError(w, http.StatusBadRequest, "invalid_params", "malformed pane id")
 			return
 		}
+		if m[2] != "transcript" && noHeadlessPane(w, paneID) {
+			return
+		}
 		s.paneRoute(w, r, paneID, m[2])
 		return
 	}
@@ -469,11 +508,99 @@ func (s *server) route(w http.ResponseWriter, r *http.Request, pathname string) 
 			jsonError(w, http.StatusBadRequest, "invalid_params", "malformed agent id")
 			return
 		}
+		if noHeadlessPane(w, target) {
+			return
+		}
 		s.agentRoute(w, r, target, m[2])
 		return
 	}
 
 	jsonError(w, http.StatusNotFound, "not_found", "not found")
+}
+
+// noHeadlessPane answers 404 for a headless orchestrator's id (hl:<name>): it has no herdr
+// pane, only a transcript; true when it answered.
+func noHeadlessPane(w http.ResponseWriter, id string) bool {
+	if !strings.HasPrefix(id, "hl:") {
+		return false
+	}
+	jsonError(w, http.StatusNotFound, "not_found", id+" is a headless orchestrator: use /api/orchestrators/<name>/…")
+	return true
+}
+
+// headlessRoute is POST /api/orchestrators/:name/<action> for a headless orchestrator.
+func (s *server) headlessRoute(w http.ResponseWriter, r *http.Request, h *headlessRunner, action string) {
+	var err error
+	switch action {
+	case "start":
+		err = h.Start()
+	case "clear":
+		err = h.Clear()
+	case "send":
+		body := readBody(w, r)
+		if body == nil {
+			return
+		}
+		text, _ := body["text"].(string)
+		if jsTrim(text) == "" {
+			jsonError(w, http.StatusBadRequest, "invalid_params", "text must be a non-empty string")
+			return
+		}
+		err = h.Send(text)
+	case "interrupt":
+		err = h.Interrupt()
+	case "stop":
+		err = h.Stop()
+	}
+	if err != nil {
+		sendError(w, err)
+		return
+	}
+	if action == "start" || action == "clear" { // like a TUI start: the pane to follow
+		jsonOK(w, struct {
+			OK     bool   `json:"ok"`
+			PaneID string `json:"paneId"`
+			Name   string `json:"name"`
+		}{true, "hl:" + h.def.Name, h.def.Name})
+		return
+	}
+	jsonOK(w, okWith(struct{}{}))
+}
+
+// broadcastAlert sends a headless orchestrator's new warning to every client, and to ntfy.
+func (s *server) broadcastAlert(name, kind, message string) {
+	if msg, err := marshalRaw(WsOrchestratorAlertMessage{Type: "orchestrator_alert", Name: name, Kind: kind, Message: message}); err == nil {
+		s.bmu.Lock()
+		for c := range s.clients {
+			c.queueMsg(msg)
+		}
+		s.bmu.Unlock()
+	}
+	if s.cfg.NotifyURL != nil && *s.cfg.NotifyURL != "" {
+		go postNtfy(*s.cfg.NotifyURL, "yoicks "+name+": "+kind, message)
+	}
+}
+
+// startHeadless starts the headless orchestrators that ran when the bridge last stopped.
+func (s *server) startHeadless() {
+	for _, h := range s.headless {
+		if h.wantsToRun() {
+			go func() {
+				if err := h.Start(); err != nil {
+					h.failed(err)
+				}
+			}()
+		}
+	}
+}
+
+// shutdownHeadless ends every headless child, in parallel (yoicks stop waits 5 s in all).
+func (s *server) shutdownHeadless() {
+	var wg sync.WaitGroup
+	for _, h := range s.headless {
+		wg.Go(h.Shutdown)
+	}
+	wg.Wait()
 }
 
 // icuASCIIOrder is printable ASCII in the order of ICU's root collation, which the
@@ -885,6 +1012,15 @@ const transcriptInitialItems = 300 // last-N items sent on an initial chat load
 // herdr RPC failure is an error instead, so callers retry and keep their view rather
 // than mistake a flaky pane.get for "no transcript".
 func (s *server) resolvePaneTranscript(paneID string) (sessionID, file string, err error) {
+	// a headless orchestrator's: its session, in its account's projects, from its dir
+	if name, ok := strings.CutPrefix(paneID, "hl:"); ok {
+		h := s.headless[name]
+		if h == nil || h.session() == "" {
+			return "", "", nil
+		}
+		sid, root := h.session(), accountForConfigDir(h.def.Env["CLAUDE_CONFIG_DIR"], "")
+		return sid, resolveTranscriptPath(sid, h.def.Dir, []string{root}), nil
+	}
 	p, err := s.paneInfo(paneID)
 	if err != nil {
 		return "", "", err

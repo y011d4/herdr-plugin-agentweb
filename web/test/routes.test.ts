@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { agentsScope, nextPaneBackRoute, nextSettingsBackRoute, paneGoneRoute, paneRoute, resolveRoute } from '../src/routes.ts';
 import type { AppState, OrchestratorView } from '../src/types.ts';
 
-const orch = (name: string, paneId: string | null): OrchestratorView => ({ name, label: '', paneId, agents: null });
+const orch = (name: string, paneId: string | null): OrchestratorView => ({ name, label: '', paneId, agents: null, mode: 'tui', headless: null });
 const state = (...orchestrators: OrchestratorView[]): AppState => ({
   connected: true, herdr: { version: null, protocol: null }, focused: { workspaceId: null, tabId: null, paneId: null },
   workspaces: [], orchestrators, orchestratorPaneId: null,

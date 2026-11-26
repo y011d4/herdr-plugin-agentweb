@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -243,6 +244,10 @@ func (c *wsClient) stopPaneWatch() {
 func (c *wsClient) watchPane(paneID string) {
 	c.mu.Lock()
 	c.stopPaneWatch()
+	if strings.HasPrefix(paneID, "hl:") { // a headless orchestrator has no screen to read
+		c.mu.Unlock()
+		return
+	}
 	gen := c.paneGen
 	ctx, stop := context.WithCancel(c.ctx)
 	c.paneStop = stop
