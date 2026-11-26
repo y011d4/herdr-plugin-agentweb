@@ -677,3 +677,17 @@ func TestStoppedOrchestratorAgents(t *testing.T) {
 		return v.PaneID == nil && v.Agents != nil
 	})
 }
+
+// A lookup that couldn't read the account keeps the one read before; a read one replaces it.
+func TestWithExpected(t *testing.T) {
+	cur := withExpected(nil, 2, 1, "/work/projects", true)
+	checkEq(t, jsonOf(t, cur), `["","/work/projects"]`)
+	cur = withExpected(&cur, 2, 1, "/default/projects", false) // direnv failed: kept
+	checkEq(t, jsonOf(t, cur), `["","/work/projects"]`)
+	cur = withExpected(&cur, 2, 0, "/default/projects", false) // unknown before: the default stands in
+	checkEq(t, jsonOf(t, cur), `["/default/projects","/work/projects"]`)
+	prev := cur
+	cur = withExpected(&prev, 2, 1, "/other/projects", true) // read: replaced, in a fresh copy
+	checkEq(t, jsonOf(t, cur), `["/default/projects","/other/projects"]`)
+	checkEq(t, prev[1], "/work/projects")
+}
