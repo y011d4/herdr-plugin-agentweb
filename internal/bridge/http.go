@@ -114,13 +114,7 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 			for {
 				a, read := expectedAccountRead(d)
 				emu.Lock()
-				next := make([]string, len(cfg.Orchestrators))
-				if cur := s.expected.Load(); cur != nil {
-					copy(next, *cur)
-				}
-				if read || next[i] == "" {
-					next[i] = a
-				}
+				next := withExpected(s.expected.Load(), len(cfg.Orchestrators), i, a, read)
 				s.expected.Store(&next)
 				emu.Unlock()
 				s.broadcastState() // deduped when nothing changed
@@ -145,6 +139,20 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 		}
 	}()
 	return s
+}
+
+// withExpected is cur (nil: none yet) with orchestrator i's account a: a fresh copy, so a
+// published slice never changes. An account not read (direnv couldn't tell) replaces only
+// an unknown one, so a refresh that fails keeps the account read before.
+func withExpected(cur *[]string, n, i int, a string, read bool) []string {
+	next := make([]string, n)
+	if cur != nil {
+		copy(next, *cur)
+	}
+	if read || next[i] == "" {
+		next[i] = a
+	}
+	return next
 }
 
 func (s *server) close() { s.stopOnce.Do(func() { close(s.stop) }) }
