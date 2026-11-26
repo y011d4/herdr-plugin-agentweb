@@ -1,10 +1,13 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -239,5 +242,65 @@ func TestHerdrClientIgnoresAnAgentListFromBeforeADrop(t *testing.T) {
 	time.Sleep(2500 * time.Millisecond) // the reconnect (1 s), then the stale answer (1.5 s)
 	if s := c.State(); s == nil || s.Pane("p1").Agent.CompletionSeq == nil || *s.Pane("p1").Agent.CompletionSeq != 2 {
 		t.Errorf("p1's completion seq: want 2 from after the reconnect, got %+v", s.Pane("p1").Agent)
+	}
+}
+
+// A no-deadline call (herdr's waits) is given up by its context: one cancelled already sends
+// nothing (not even a connection), one cancelled while herdr says nothing returns at once.
+func TestHerdrCallCancellation(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "fh")
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "h.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	var mu sync.Mutex
+	conns, got := 0, 0
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns++
+			mu.Unlock()
+			go func() { // reads, never answers
+				b := make([]byte, 4096)
+				for {
+					n, err := c.Read(b)
+					mu.Lock()
+					got += n
+					mu.Unlock()
+					if err != nil {
+						return
+					}
+				}
+			}()
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := herdrCall(ctx, sock, "agent.wait", map[string]any{"target": "p1"}, 0); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled before: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	if conns != 0 || got != 0 {
+		t.Errorf("cancelled before: %d connections, %d bytes", conns, got)
+	}
+	mu.Unlock()
+
+	ctx, cancel = context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	began := time.Now()
+	if _, err := herdrCall(ctx, sock, "agent.wait", map[string]any{"target": "p1"}, 0); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled while waiting: %v", err)
+	}
+	if d := time.Since(began); d > time.Second {
+		t.Errorf("returned %s after the cancel", d)
 	}
 }

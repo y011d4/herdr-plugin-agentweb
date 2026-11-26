@@ -67,8 +67,13 @@ func herdrCall(ctx context.Context, socketPath, method string, params map[string
 		params = map[string]any{}
 	}
 	id := fmt.Sprintf("yoicks:%d:%d", time.Now().UnixMilli(), rpcSeq.Add(1))
-	conn, err := net.DialTimeout("unix", socketPath, requestTimeout)
+	dialCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	conn, err := (&net.Dialer{}).DialContext(dialCtx, "unix", socketPath)
+	cancel()
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		logf("[herdr-client] rpc %s error: %s %s", method, err, safeParamsForLog(params))
 		return nil, err
 	}
@@ -81,7 +86,13 @@ func herdrCall(ctx context.Context, socketPath, method string, params map[string
 	if err != nil {
 		return nil, err
 	}
+	if ctx.Err() != nil { // given up before a byte went out: nothing reaches herdr
+		return nil, ctx.Err()
+	}
 	if _, err := conn.Write(append(line, '\n')); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		logf("[herdr-client] rpc %s error: %s %s", method, err, safeParamsForLog(params))
 		return nil, err
 	}
