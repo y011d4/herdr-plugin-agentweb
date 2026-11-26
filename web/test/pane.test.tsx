@@ -21,8 +21,8 @@ vi.mock('../src/ws.ts', () => ({
 interface Req { method: string; url: string; body: any; answered: boolean; answer: (status: number, body: unknown) => void }
 let reqs: Req[];
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
-async function answer(match: string, body: unknown, status = 200): Promise<void> {
-  const r = reqs.find((q) => !q.answered && `${q.method} ${q.url}`.includes(match));
+async function answer(match: string, body: unknown, status = 200, nth = 0): Promise<void> {
+  const r = reqs.filter((q) => !q.answered && `${q.method} ${q.url}`.includes(match))[nth]; // nth: the nth still open
   assert.ok(r, `no open request ${match} (open: ${reqs.filter((q) => !q.answered).map((q) => `${q.method} ${q.url}`).join(', ')})`);
   r.answered = true;
   await act(async () => { r.answer(status, body); await flush(); });
@@ -189,11 +189,28 @@ describe('composer', () => {
     await answer('POST /api/panes/p2/input', { error: { code: 'x', message: 'boom' } }, 500);
     await reopen('p2');
     assert.equal(ta().value, 'two', 'two failed sends: the last one stays');
+    await key({});
+    await type('three');
+    await key({});
+    await answer('POST /api/panes/p2/input', { error: { code: 'x', message: 'boom' } }, 500);
+    assert.equal(ta().value, 'three', 'a newer draft stays');
+    await answer('POST /api/panes/p2/input', { ok: true });
+    assert.equal(ta().value, '');
+    await reopen('p2');
+    await type('four');
+    await key({});
+    await type('five');
+    await key({});
+    await answer('POST /api/panes/p2/input', { ok: true }, 200, 1); // five went
+    await answer('POST /api/panes/p2/input', { error: { code: 'x', message: 'boom' } }, 500); // four didn't
+    assert.equal(ta().value, 'four', 'failed, and nothing newer unsent: the draft again');
+    await reopen('p2');
+    assert.equal(ta().value, 'four');
     await reopen('p1');
     assert.equal(ta().value, 'p1 draft');
     await reopen('p4', true);
     assert.equal(ta().value, 'home draft');
-    assert.deepEqual(JSON.parse(localStorage.getItem('herdr_drafts')!), { 'pane:p1': 'p1 draft', 'pane:p2': 'two', 'home:personal': 'home draft' });
+    assert.deepEqual(JSON.parse(localStorage.getItem('herdr_drafts')!), { 'pane:p1': 'p1 draft', 'pane:p2': 'four', 'home:personal': 'home draft' });
     await key({});
     await reopen('p9', true, 'personal'); // a Clear gave the Home a new pane while it was sent
     assert.equal(ta().value, '');
