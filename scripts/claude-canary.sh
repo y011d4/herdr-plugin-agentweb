@@ -23,16 +23,30 @@ if [ "${1:-}" = install ]; then
 	units=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
 	gobin=$(command -v go) || { echo "go isn't on PATH" >&2; exit 1; }
 	claudebin=$(command -v claude) || { echo "claude isn't on PATH" >&2; exit 1; }
+	# systemd: % starts a specifier everywhere; a double-quoted word escapes \ and "; ExecStart
+	# also expands $ (WorkingDirectory takes the path as it is, unquoted)
+	word() { printf '"%s"' "$(printf '%s' "$1" | sed 's/[\\"]/\\&/g; s/%/%%/g')"; }
+	env="Environment=$(word "PATH=$(dirname "$gobin"):$(dirname "$claudebin"):/usr/local/bin:/usr/bin:/bin")"
+	if [ -n "${HERDR_PLUGIN_STATE_DIR:-}" ]; then
+		env="$env
+Environment=$(word "HERDR_PLUGIN_STATE_DIR=$HERDR_PLUGIN_STATE_DIR")"
+	fi
+	if [ -n "${HERDR_PLUGIN_CONFIG_DIR:-}" ]; then
+		env="$env
+Environment=$(word "HERDR_PLUGIN_CONFIG_DIR=$HERDR_PLUGIN_CONFIG_DIR")"
+	fi
+	workdir=$(printf '%s' "$root" | sed 's/%/%%/g')
+	script=$(word "$(printf '%s' "$root" | sed 's/\$/$$/g')/scripts/claude-canary.sh")
 	mkdir -p "$units"
 	cat >"$units/yoicks-claude-canary.service" <<EOF
 [Unit]
-Description=yoicks: check Claude Code's headless mode ($root/scripts/claude-canary.sh)
+Description=yoicks: check Claude Code's headless mode (scripts/claude-canary.sh)
 
 [Service]
 Type=oneshot
-WorkingDirectory=$root
-Environment=PATH=$(dirname "$gobin"):$(dirname "$claudebin"):/usr/local/bin:/usr/bin:/bin
-ExecStart=/bin/sh $root/scripts/claude-canary.sh
+WorkingDirectory=$workdir
+$env
+ExecStart=/bin/sh $script
 EOF
 	cat >"$units/yoicks-claude-canary.timer" <<EOF
 [Unit]
@@ -66,15 +80,21 @@ if [ "${1:-}" != --force ] && [ "$version" = "$last_version" ] && [ -n "$last_at
 fi
 
 out=$(mktemp)
-trap 'rm -f "$out"' EXIT
+tmp=
+trap 'rm -f "$out" ${tmp:+"$tmp"}' EXIT
 if CLAUDE_LIVE_OUT=$out go test -tags claudelive -count=1 -timeout 15m -run TestClaudeLive ./internal/bridge; then ran=0; else ran=$?; fi
 result=$(cat "$out" 2>/dev/null || true)
 case $ran:$result in
 0:'{'* | *:'{'*'"ok":false'*) ;; # the test's own verdict
 *) result="{\"version\":\"$version\",\"ok\":false,\"failed\":[\"run (go test exit $ran)\"]}" ;;
 esac
+# a verdict without a version (claude never started) is this claude's: the next hourly run then
+# waits for a new version or 24 h like any other
+result=$(printf '%s' "$result" | sed "s/\"version\":\"\"/\"version\":\"$version\"/")
 umask 077
 mkdir -p "$state"
-printf '{"at":%s,%s\n' "$now" "${result#"{"}" >"$state/canary.json.tmp"
-mv "$state/canary.json.tmp" "$state/canary.json"
+tmp=$(mktemp "$state/canary.json.XXXXXX") # its own: another run (a --force beside the timer's) has another
+printf '{"at":%s,%s\n' "$now" "${result#"{"}" >"$tmp"
+mv "$tmp" "$state/canary.json"
+tmp=
 echo "claude check: $(cat "$state/canary.json")"
