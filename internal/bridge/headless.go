@@ -454,7 +454,9 @@ func (r *headlessRunner) syncCheckLocked() bool {
 		r.warnings = slices.Delete(r.warnings, i, i+1)
 	}
 	if i := slices.IndexFunc(r.warnings, func(w HeadlessWarning) bool { return w.Kind == "version" }); i >= 0 {
-		if msg := versionWarning(r.model.version, c); r.warnings[i].Message != msg {
+		if r.model.version == verifiedClaudeVersion { // the verified one now: the warning is stale
+			r.warnings, changed = slices.Delete(r.warnings, i, i+1), true
+		} else if msg := versionWarning(r.model.version, c); r.warnings[i].Message != msg {
 			r.warnings[i].Message, changed = msg, true
 		}
 	}
@@ -559,6 +561,8 @@ func (r *headlessRunner) start(resume bool) error {
 	versionAlert := func() {}
 	if version != verifiedClaudeVersion {
 		versionAlert = r.warn("version", versionWarning(version, r.model.check))
+	} else { // back on the verified version (an update between restarts): no warning left over
+		r.warnings = slices.DeleteFunc(r.warnings, func(w HeadlessWarning) bool { return w.Kind == "version" })
 	}
 	r.mu.Unlock()
 	versionAlert()
