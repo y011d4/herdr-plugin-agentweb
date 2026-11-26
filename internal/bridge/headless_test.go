@@ -567,6 +567,33 @@ func TestHeadlessStateDirUnwritable(t *testing.T) {
 	}
 }
 
+// A child that stopped reading stdin, with a send stuck on it, still stops within the budget.
+func TestHeadlessShutdownPastAStuckWrite(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	b.send(t, "deaf")
+	big, _ := json.Marshal(map[string]string{"text": strings.Repeat("x", 60000)})
+	sent := make(chan struct{})
+	go func() {
+		defer close(sent)
+		for range 4 { // more than the pipe holds
+			b.do(t, "POST", "/api/orchestrators/h1/send", b.token, big)
+		}
+	}()
+	time.Sleep(1500 * time.Millisecond) // a send is stuck by now
+	runs, _ := b.runs(t)
+	began := time.Now()
+	b.srv.shutdownHeadless()
+	if d := time.Since(began); d > 2500*time.Millisecond {
+		t.Errorf("shutdown took %s", d)
+	}
+	if alive(runs[0].pid) {
+		t.Error("the child outlived the shutdown")
+	}
+	<-sent
+}
+
 func TestHeadlessOrphanScan(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("the orphan scan reads /proc: Linux only")
