@@ -39,6 +39,7 @@ type World struct {
 	stallAfter    time.Duration
 	prompts       []Prompt
 	notifications []map[string]any
+	watchers      map[*watcher]struct{} // the held waits
 }
 
 // NewWorld starts with three panes in one workspace: p1 (claude, idle), p2
@@ -70,6 +71,7 @@ func (w *World) Set(paneID, status string) string {
 			if status == "done" {
 				p.completionSeq++
 			}
+			w.tell(change{p.ID, status, agentInfo(p)})
 		}
 		return from
 	}
@@ -90,6 +92,7 @@ func (w *World) Remove(paneID string) {
 	for i, p := range w.panes {
 		if p.ID == paneID {
 			w.panes = append(w.panes[:i], w.panes[i+1:]...)
+			w.tell(change{pane: paneID})
 			return
 		}
 	}
@@ -150,28 +153,85 @@ func agentInfo(p *Pane) map[string]any {
 		"interactive_ready": !p.NotReady, "state_change_seq": p.stateChangeSeq, "completion_seq": p.completionSeq}
 }
 
-// waitFor polls until ok (with w.mu held) says the pane's state answers, or the pane goes
-// (not_found); after two minutes it hangs up (a fake's wait whose client left).
-func (w *World) waitFor(target string, ok func(p *Pane) (Reply, bool)) Reply {
-	for end := time.Now().Add(2 * time.Minute); time.Now().Before(end); {
-		w.mu.Lock()
-		p := w.find(target)
-		if p == nil {
-			w.mu.Unlock()
-			return Reply{Code: "not_found", Message: "no agent " + target}
+// change is one status change of a pane, with its agent then; to "" is the pane leaving.
+type change struct {
+	pane, to string
+	agent    map[string]any
+}
+
+// watcher is a held wait: it gets every change from its registration on, in order (w.mu).
+type watcher struct {
+	changes []change
+	signal  chan struct{} // cap 1: new changes are there
+}
+
+// tell gives every held wait the change; w.mu held.
+func (w *World) tell(c change) {
+	for x := range w.watchers {
+		x.changes = append(x.changes, c)
+		select {
+		case x.signal <- struct{}{}:
+		default:
 		}
-		rep, done := ok(p)
-		w.mu.Unlock()
-		if done {
-			return rep
-		}
-		time.Sleep(20 * time.Millisecond)
 	}
-	return Reply{Close: true}
+}
+
+// await holds a wait on pane, registered now (w.mu held: no change can come between the
+// caller's look at the pane and it): step judges each of its changes in order until it gives
+// the answer. The pane leaving answers not_found, the client leaving ends it; deadline (zero:
+// none) asks onDeadline, which may answer or let it go on without one.
+func (w *World) await(pane string, deadline time.Time, onDeadline func() (Reply, bool), step func(c change) (Reply, bool)) Reply {
+	x := &watcher{signal: make(chan struct{}, 1)}
+	if w.watchers == nil {
+		w.watchers = map[*watcher]struct{}{}
+	}
+	w.watchers[x] = struct{}{}
+	return Reply{Wait: func(gone <-chan struct{}) Reply {
+		defer func() {
+			w.mu.Lock()
+			delete(w.watchers, x)
+			w.mu.Unlock()
+		}()
+		var timer <-chan time.Time
+		if !deadline.IsZero() {
+			t := time.NewTimer(time.Until(deadline))
+			defer t.Stop()
+			timer = t.C
+		}
+		for {
+			w.mu.Lock()
+			cs := x.changes
+			x.changes = nil
+			w.mu.Unlock()
+			for _, c := range cs {
+				if c.pane != pane {
+					continue
+				}
+				if c.to == "" {
+					return Reply{Code: "not_found", Message: "no agent " + pane}
+				}
+				if rep, done := step(c); done {
+					return rep
+				}
+			}
+			select {
+			case <-x.signal:
+			case <-gone:
+				return Reply{Close: true}
+			case <-timer:
+				if rep, done := onDeadline(); done {
+					return rep
+				}
+				timer = nil
+			}
+		}
+	}}
 }
 
 // agentCall answers the agent calls: agent.get, agent.read, agent.prompt (its wait is edge:
-// the change the prompt brings), agent.wait (level: the state as it is, matched exactly).
+// it needs a working or blocked after the delivery, within stallAfter, else
+// agent_prompt_stalled, then ends on an until status) and agent.wait (level: the state as it
+// is, matched exactly; timeout_ms). Waits see every change, held until they match.
 func (w *World) agentCall(method string, raw json.RawMessage) Reply {
 	var params struct {
 		Target    string   `json:"target"`
@@ -192,58 +252,57 @@ func (w *World) agentCall(method string, raw json.RawMessage) Reply {
 		return false
 	}
 	w.mu.Lock()
+	defer w.mu.Unlock()
 	p := w.find(params.Target)
 	if p == nil {
-		w.mu.Unlock()
 		return Reply{Code: "not_found", Message: "no agent " + params.Target}
+	}
+	info := func(kind string, agent map[string]any) Reply {
+		return Reply{Result: map[string]any{"type": kind, "agent": agent}}
 	}
 	switch method {
 	case "agent.get":
-		defer w.mu.Unlock()
-		return Reply{Result: map[string]any{"type": "agent_info", "agent": agentInfo(p)}}
+		return info("agent_info", agentInfo(p))
 	case "agent.read":
-		defer w.mu.Unlock()
 		return Reply{Result: map[string]any{"type": "pane_read", "read": map[string]any{"text": "the screen of " + p.ID}}}
 	case "agent.wait":
-		w.mu.Unlock()
-		deadline := time.Now().Add(time.Duration(params.TimeoutMs) * time.Millisecond)
-		return w.waitFor(params.Target, func(p *Pane) (Reply, bool) {
-			if params.TimeoutMs > 0 && time.Now().After(deadline) && !has(params.Until, p.Status) {
-				return Reply{Code: "timeout", Message: "agent.wait timed out"}, true
-			}
-			return Reply{Result: map[string]any{"type": "agent_info", "agent": agentInfo(p)}}, has(params.Until, p.Status)
-		})
+		if has(params.Until, p.Status) {
+			return info("agent_info", agentInfo(p))
+		}
+		var deadline time.Time
+		if params.TimeoutMs > 0 {
+			deadline = time.Now().Add(time.Duration(params.TimeoutMs) * time.Millisecond)
+		}
+		return w.await(p.ID, deadline, func() (Reply, bool) { return Reply{Code: "timeout", Message: "agent.wait timed out"}, true },
+			func(c change) (Reply, bool) { return info("agent_info", c.agent), has(params.Until, c.to) })
 	}
 	// agent.prompt
 	if p.NotReady {
-		w.mu.Unlock()
 		return Reply{Code: "agent_not_ready", Message: "agent is not ready"}
 	}
-	id, seq := p.ID, p.stateChangeSeq
-	w.prompts = append(w.prompts, Prompt{id, params.Text})
-	hook, stall := w.onPrompt, w.stallAfter
-	w.mu.Unlock()
-	if hook != nil {
-		go hook(id, params.Text)
+	w.prompts = append(w.prompts, Prompt{p.ID, params.Text})
+	if hook := w.onPrompt; hook != nil {
+		id := p.ID
+		defer func() { go hook(id, params.Text) }() // after the wait is registered
 	}
 	if params.Wait == nil {
-		w.mu.Lock()
-		defer w.mu.Unlock()
-		return Reply{Result: map[string]any{"type": "agent_prompted", "agent": agentInfo(w.find(id))}}
+		return info("agent_prompted", agentInfo(p))
 	}
+	stall := w.stallAfter
 	if stall == 0 {
 		stall = 5 * time.Second
 	}
-	deadline := time.Now().Add(stall)
-	return w.waitFor(id, func(p *Pane) (Reply, bool) {
-		if p.stateChangeSeq == seq {
-			if time.Now().After(deadline) {
-				return Reply{Code: "agent_prompt_stalled", Message: "the agent didn't start working"}, true
+	seen := p.Status == "working" || p.Status == "blocked" // the prompt was taken up
+	return w.await(p.ID, time.Now().Add(stall),
+		func() (Reply, bool) {
+			return Reply{Code: "agent_prompt_stalled", Message: "no working or blocked state within the stall time"}, !seen
+		},
+		func(c change) (Reply, bool) {
+			if c.to == "working" || c.to == "blocked" {
+				seen = true
 			}
-			return Reply{}, false
-		}
-		return Reply{Result: map[string]any{"type": "agent_prompted", "agent": agentInfo(p)}}, has(params.Wait.Until, p.Status)
-	})
+			return info("agent_prompted", c.agent), seen && has(params.Wait.Until, c.to)
+		})
 }
 
 // SetSnapshotDelay delays every session.snapshot answer by d. With late, the
