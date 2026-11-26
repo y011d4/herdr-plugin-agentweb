@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -524,6 +525,9 @@ func TestHeadlessRefusesBilling(t *testing.T) {
 }
 
 func TestHeadlessOrphanScan(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the orphan scan reads /proc: Linux only")
+	}
 	state := t.TempDir()
 	b := startHeadless(t, state, nil, nil)
 	b.start(t)
