@@ -128,9 +128,9 @@ func expectedAccount(def OrchestratorDef) string {
 }
 
 // expectedAccountRead is expectedAccount, and whether it was read (false: direnv couldn't
-// tell, so the default stands in).
+// tell, so the default stands in). A headless one runs with its env only, never direnv's.
 func expectedAccountRead(def OrchestratorDef) (string, bool) {
-	if cfg := def.Env["CLAUDE_CONFIG_DIR"]; cfg != "" {
+	if cfg := def.Env["CLAUDE_CONFIG_DIR"]; cfg != "" || def.Mode == "headless" {
 		return accountForConfigDir(cfg, ""), true
 	}
 	if a := dirAccount(def.Dir); a != "" {
@@ -144,22 +144,11 @@ func expectedAccountRead(def OrchestratorDef) (string, bool) {
 // managed dir is (re)written first; a legacy one must exist. The started agent must
 // come up under the account its env sets, else it is stopped again.
 func startOrchestrator(rpc Rpc, def OrchestratorDef, rules string) (paneID, name string, err error) {
-	raw, err := rpc("agent.list", nil)
-	if err != nil {
+	if pane, err := agentInDir(rpc, def.Dir); err != nil {
 		return "", "", err
-	}
-	var list struct {
-		Agents []struct {
-			PaneID string `json:"pane_id"`
-			Cwd    string `json:"cwd"`
-		} `json:"agents"`
-	}
-	json.Unmarshal(raw, &list)
-	for _, a := range list.Agents {
-		if a.Cwd == def.Dir || strings.HasPrefix(a.Cwd, def.Dir+"/") {
-			return "", "", &LifecycleError{Status: 409, Code: "already_running",
-				Message: fmt.Sprintf("orchestrator %s already runs (pane %s)", def.Name, a.PaneID)}
-		}
+	} else if pane != "" {
+		return "", "", &LifecycleError{Status: 409, Code: "already_running",
+			Message: fmt.Sprintf("orchestrator %s already runs (pane %s)", def.Name, pane)}
 	}
 	if def.Managed {
 		if err := ensureOrchestratorDir(def, rules); err != nil {
@@ -194,4 +183,25 @@ func startOrchestrator(rpc Rpc, def OrchestratorDef, rules string) (paneID, name
 		return "", "", err
 	}
 	return out.PaneID, out.Name, nil
+}
+
+// agentInDir is the pane of a herdr agent running in dir or below ("" = none).
+func agentInDir(rpc Rpc, dir string) (string, error) {
+	raw, err := rpc("agent.list", nil)
+	if err != nil {
+		return "", err
+	}
+	var list struct {
+		Agents []struct {
+			PaneID string `json:"pane_id"`
+			Cwd    string `json:"cwd"`
+		} `json:"agents"`
+	}
+	json.Unmarshal(raw, &list)
+	for _, a := range list.Agents {
+		if a.Cwd == dir || strings.HasPrefix(a.Cwd, dir+"/") {
+			return a.PaneID, nil
+		}
+	}
+	return "", nil
 }

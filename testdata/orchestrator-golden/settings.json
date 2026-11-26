@@ -1,0 +1,24 @@
+{
+  "disableAgentView": true,
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "Bash(/home/u/herdr-yoicks/bin/yoicks overview)",
+      "Bash(/home/u/herdr-yoicks/bin/yoicks agent *)",
+      "Bash(/home/u/herdr-yoicks/bin/yoicks worktree remove *)"
+    ],
+    "deny": [
+      "Edit",
+      "Write",
+      "NotebookEdit",
+      "Bash(herdr *)",
+      "Bash(tree *)",
+      "Bash(du *)",
+      "Bash(fd *)",
+      "Bash(fdfind *)",
+      "Bash(lsof *)",
+      "Read(~/.config/claude/**)",
+      "Read(~/.claude/projects/**)"
+    ]
+  }
+}

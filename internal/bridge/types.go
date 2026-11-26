@@ -136,6 +136,9 @@ type OrchestratorDef struct {
 	Env map[string]string
 	// the plugin writes its dir; false for a legacy orchestrator_dir (the user's own)
 	Managed bool
+	// "tui" (an agent in a herdr pane; "" too) or "headless" (the bridge's own claude -p
+	// child; managed entries only)
+	Mode string
 }
 
 // OrchestratorView is an orchestrator as sent to clients.
@@ -145,6 +148,42 @@ type OrchestratorView struct {
 	PaneID *string `json:"paneId"`
 	// the agent panes of its Claude account (itself included); null when unknown
 	Agents []string `json:"agents"`
+	// "tui" or "headless" (then paneId is "hl:<name>" while its child runs)
+	Mode string `json:"mode"`
+	// a headless orchestrator's state; null for tui
+	Headless *HeadlessView `json:"headless"`
+}
+
+// HeadlessView is a headless orchestrator's state (headless.go, headless_state.go).
+type HeadlessView struct {
+	Status        string `json:"status"` // stopped | idle | working | blocked | done | error
+	CompletionSeq int64  `json:"completionSeq"`
+	// a question waiting for the user: always null until the permission tool exists
+	Pending  *struct{}         `json:"pending"`
+	Usage    *HeadlessUsage    `json:"usage"`
+	Warnings []HeadlessWarning `json:"warnings"`
+}
+
+// HeadlessUsage is what Claude Code last said of the account's rate limits and the
+// session's context.
+type HeadlessUsage struct {
+	FiveHour   *UsageWindow `json:"fiveHour"`
+	SevenDay   *UsageWindow `json:"sevenDay"`
+	ContextPct *float64     `json:"contextPct"` // percent of the context window; null until a turn ends
+	At         int64        `json:"at"`         // when the rate limits were read (ms); 0 = not yet
+}
+
+type UsageWindow struct {
+	Utilization float64 `json:"utilization"` // 0–1
+	ResetsAt    int64   `json:"resetsAt"`    // ms
+}
+
+// HeadlessWarning is something that went wrong, shown on the Home until the next start.
+type HeadlessWarning struct {
+	Kind    string   `json:"kind"`
+	Message string   `json:"message"`
+	Since   int64    `json:"since"`   // ms
+	Actions []string `json:"actions"` // what the Home offers: interrupt | clear | tui
 }
 
 // LaunchProfile is a named, fixed way to start an agent.
@@ -301,6 +340,15 @@ type WsAgentStatusMessage struct {
 	To             string  `json:"to"`
 	WorkspaceLabel *string `json:"workspaceLabel"`
 	TabLabel       *string `json:"tabLabel"`
+}
+
+// WsOrchestratorAlertMessage is a headless orchestrator's new warning, sent once per kind
+// and session.
+type WsOrchestratorAlertMessage struct {
+	Type    string `json:"type"` // "orchestrator_alert"
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
 }
 
 type WsPongMessage struct {
