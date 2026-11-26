@@ -617,7 +617,7 @@ a {
   transform: translateX(20px);
 }
 
-/* ── Toast notifications ── */
+/* ── Toasts ── */
 #toast-container {
   /* top-right, below the topbar — must never cover the input bar */
   position: fixed;
@@ -642,28 +642,6 @@ a {
      container's right edge (~12px from the screen edge — visually negligible). */
   overflow-x: hidden;
   scrollbar-width: thin;
-}
-
-/* "Clear all" dismisses the whole stack. It shows once two or more toasts are
-   stacked (one has its own ✕) and sticks to the top while the stack scrolls. */
-#toast-clear-all {
-  display: none;
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  flex: none;
-  background: var(--color-toast-bg);
-  color: var(--color-toast-text);
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  padding: 6px 14px;
-  min-height: 32px;
-  font-size: 13px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-  cursor: pointer;
-}
-#toast-container:has(.toast ~ .toast) #toast-clear-all {
-  display: block;
 }
 
 .toast {
