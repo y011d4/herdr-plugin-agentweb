@@ -231,6 +231,7 @@ type headlessRunner struct {
 	interruptWait time.Duration
 	silence       time.Duration
 	lineHook      func([]byte) // tests: runs on each stdout line, in the reader
+	startedHook   func()       // tests: runs once the child has started, before spawn goes on
 
 	op sync.Mutex // start, stop, clear: one at a time
 
@@ -562,12 +563,20 @@ func (r *headlessRunner) spawn(argv, env []string) error {
 		err := cmd.Start()
 		inR.Close()
 		outW.Close()
-		started <- err
 		if err != nil {
 			outR.Close()
 			inW.Close()
+			started <- err
 			return
 		}
+		// it is the running child before its first line is read or its exit seen: neither may
+		// find another child (the init check would be skipped, a dead child left as running)
+		r.mu.Lock()
+		r.child, r.lastEvent = c, time.Now()
+		r.model.inited, r.model.unreadableRun = false, 0
+		r.model.Status = "idle"
+		r.mu.Unlock()
+		started <- nil
 		read := make(chan struct{})
 		go r.readStdout(c, outR, read)
 		werr := cmd.Wait()
@@ -583,10 +592,10 @@ func (r *headlessRunner) spawn(argv, env []string) error {
 	if err := <-started; err != nil {
 		return err
 	}
+	if r.startedHook != nil {
+		r.startedHook()
+	}
 	r.mu.Lock()
-	r.child, r.lastEvent = c, time.Now()
-	r.model.inited, r.model.unreadableRun = false, 0
-	r.model.Status = "idle"
 	closed := r.closed
 	r.mu.Unlock()
 	r.log("started pid %d, session %s (%s)", cmd.Process.Pid, r.session(), argv[6])
