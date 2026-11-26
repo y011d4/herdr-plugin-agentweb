@@ -1,6 +1,6 @@
 /**
  * ui/Modals.tsx — the modal dialogs, one at a time, drawn into #modal-root: Confirm, the
- * agent-actions menu, Rename and New agent. A modal closes on a backdrop tap, Escape or its
+ * agent-actions menu, Rename, New agent and the image preview. A modal closes on a backdrop tap, Escape or its
  * buttons; its close() is idempotent and fires the opener's onClose exactly once (so a
  * confirm resolves on dismiss). Opening one closes the one before.
  */
@@ -11,7 +11,7 @@ import { showToast } from '../notify.ts';
 import { keptTasks, store } from '../store.ts';
 import type { AgentStartResponse, ProfilesResponse, RenameResponse } from '../types.ts';
 
-interface Open { id: number; render: (close: () => void) => ReactNode; close: () => void }
+interface Open { id: number; render: (close: () => void) => ReactNode; close: () => void; className: string }
 
 let current: Open | null = null;
 let seq = 0;
@@ -20,7 +20,7 @@ const changed = (): void => { for (const fn of listeners) fn(); };
 const subscribe = (fn: () => void): (() => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
 
 /** Shows a modal (closing the one on show); returns its close(). */
-function showModal(render: (close: () => void) => ReactNode, onClose?: () => void): () => void {
+function showModal(render: (close: () => void) => ReactNode, onClose?: () => void, className = 'modal'): () => void {
   current?.close();
   const id = ++seq;
   let closed = false;
@@ -30,18 +30,18 @@ function showModal(render: (close: () => void) => ReactNode, onClose?: () => voi
     if (current?.id === id) { current = null; changed(); }
     onClose?.();
   };
-  current = { id, render, close };
+  current = { id, render, close, className };
   changed();
   return close;
 }
 
 export function Modals() {
   const open = useSyncExternalStore(subscribe, () => current);
-  return open && <Overlay key={open.id} close={open.close}>{open.render(open.close)}</Overlay>;
+  return open && <Overlay key={open.id} close={open.close} className={open.className}>{open.render(open.close)}</Overlay>;
 }
 
 // Above everything (toasts are z 1000, modals sit higher: style.css).
-function Overlay({ close, children }: { close: () => void; children: ReactNode }) {
+function Overlay({ close, className, children }: { close: () => void; className: string; children: ReactNode }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') close(); };
     document.addEventListener('keydown', onKey);
@@ -49,10 +49,50 @@ function Overlay({ close, children }: { close: () => void; children: ReactNode }
   }, [close]);
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
-      <div className="modal" role="dialog" aria-modal="true">{children}</div>
+      <div className={className} role="dialog" aria-modal="true">{children}</div>
     </div>
   );
 }
+
+// The last few previews' images by their history entries, so Back or Forward onto one shows it again
+// (an older entry stays blank, as after a reload). Opening a preview drops the forward entries, so
+// only Forward after a close, or the ones hash changes left behind, can still be reached.
+const PREVIEWS_KEPT = 5;
+const previewed = new Map<number, { src: string; alt: string }>();
+
+/** An image, fit to the screen. A tap on it or around it, ×, Escape or the phone's Back closes it: it
+ *  opens on a history entry of its own at the same URL (no hashchange, so no route), which a close by
+ *  any other means takes back off. Focus goes to × and back to the opener. */
+export function previewImage(src: string, alt: string): void {
+  const mark = Math.random(); // this preview's entry, not a stale one a reload or a hash change left behind
+  previewed.set(mark, { src, alt });
+  if (previewed.size > PREVIEWS_KEPT) previewed.delete(previewed.keys().next().value!);
+  history.pushState({ imagePreview: mark }, '');
+  showPreview(src, alt, mark);
+}
+
+function showPreview(src: string, alt: string, mark: number): void {
+  const opener = document.activeElement as HTMLElement | null;
+  const close = showModal((close) => (
+    <>
+      <img src={src} alt={alt} onClick={close} />
+      <button className="image-preview-close" aria-label="Close" autoFocus onClick={close}>&times;</button>
+    </>
+  ), () => {
+    removeEventListener('popstate', close);
+    if (history.state?.imagePreview === mark) history.back();
+    opener?.focus();
+  }, 'image-preview');
+  addEventListener('popstate', close);
+}
+// Forward onto a closed preview's entry, or Back onto one a hash change left behind, shows it again:
+// else the entry shows nothing and, at the same URL, the next Back seems to do nothing. (After a
+// reload the map is empty and such an entry stays blank.)
+addEventListener('popstate', () => {
+  const mark: unknown = history.state?.imagePreview;
+  const p = typeof mark === 'number' ? previewed.get(mark) : undefined;
+  if (p) showPreview(p.src, p.alt, mark as number);
+});
 
 const textInput = { type: 'text', autoCapitalize: 'off', autoCorrect: 'off', spellCheck: false } as const;
 

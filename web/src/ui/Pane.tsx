@@ -24,6 +24,7 @@ import { emit, findPane, keptTasks, store, subscribe } from '../store.ts';
 import type { AppState, HeadlessUsage, OrchestratorView } from '../types.ts';
 import { agentCards, cardTitle, orchestratorLabel, relativeTime } from './Dashboard.tsx';
 import type { Topbar } from './App.tsx';
+import { previewImage } from './Modals.tsx';
 import { HeadlessPrompt, PromptPanel } from './PromptPanel.tsx';
 import { TuiSteps } from './Settings.tsx';
 
@@ -123,7 +124,11 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
   return (
     <div id="screen-pane" className={home ? 'screen-home' : undefined} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       {home && <HomeStatus name={name} state={state} actions={actions} />}
-      <div id="pane-view" ref={body} style={{ display: 'contents' }}></div>
+      {/* a sent image in the chat opens full screen */}
+      <div id="pane-view" ref={body} style={{ display: 'contents' }} onClick={(e) => {
+        const img = (e.target as Element).closest('.chat-image-open')?.querySelector('img');
+        if (img) previewImage(img.src, img.alt);
+      }}></div>
       {prompt && paneView && <PromptPanel paneId={paneId} prompt={prompt} view={paneView} />}
       {hl && pending && <HeadlessPrompt key={pending.id} name={hl} pending={pending} />}
       {home && (
@@ -384,12 +389,15 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
     <>
       {images.length > 0 && (
         <div className="input-images" id="input-images">
-          {images.map((a, i) => (
-            <span key={i} className="input-image">
-              <img src={`data:${a.mediaType};base64,${a.data}`} alt="" />
-              <button aria-label="Remove image" onClick={() => setImages((cur) => cur.filter((x) => x !== a))}>&times;</button>
-            </span>
-          ))}
+          {images.map((a, i) => {
+            const src = `data:${a.mediaType};base64,${a.data}`;
+            return (
+              <span key={i} className="input-image">
+                <button aria-label="View image" onClick={() => previewImage(src, 'Attached image')}><img src={src} alt="" /></button>
+                <button className="input-image-remove" aria-label="Remove image" onClick={() => setImages((cur) => cur.filter((x) => x !== a))}>&times;</button>
+              </span>
+            );
+          })}
         </div>
       )}
       <div className="input-row">
