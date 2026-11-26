@@ -113,7 +113,7 @@ func TestRedeploy(t *testing.T) {
 		os.Remove(filepath.Join(w.fake, "calls"))
 		return sh(t, w.prod, append([]string{"FAKE=" + w.fake, "ROOT=" + w.prod,
 			"REDEPLOY_HERDR=" + filepath.Join(w.fake, "herdr"), "REDEPLOY_HEALTHZ=file://" + filepath.Join(w.fake, "healthz"),
-			"REDEPLOY_HEALTHZ_WAIT=2"}, extra...), "sh", "scripts/redeploy.sh", ref)
+			"REDEPLOY_HEALTHZ_WAIT=2", "XDG_STATE_HOME=" + filepath.Join(w.fake, "state")}, extra...), "sh", "scripts/redeploy.sh", ref)
 	}
 	// refused checks a run that stops nothing: an error saying want, no action invoked
 	refused := func(t *testing.T, w world, out string, err error, want string) {
@@ -162,6 +162,21 @@ func TestRedeploy(t *testing.T) {
 		}
 		if calls := read(filepath.Join(w.fake, "calls")); !strings.Contains(calls, "t.yoicks.stop") || !strings.Contains(calls, "start built "+head) {
 			t.Errorf("calls:\n%s", calls)
+		}
+	})
+	t.Run("warns, then deploys, when a headless orchestrator is mid-turn", func(t *testing.T) {
+		w := setup(t)
+		head := push(t, w, "README", "x")
+		write(t, filepath.Join(w.fake, "state", "herdr", "plugins", "t.yoicks", "token"), "0123abcd")
+		// /api/state beside the file:// /healthz
+		write(t, filepath.Join(w.fake, "api", "state"), `{"orchestrators":[{"name":"personal","headless":null},`+
+			`{"name":"pilot","headless":{"status":"working"}},{"name":"quiet","headless":{"status":"idle"}}]}`)
+		out, err := redeploy(t, w, "main")
+		if err != nil || !strings.Contains(out, "warning: headless orchestrator pilot (working): the restart interrupts it") || strings.Contains(out, "quiet") {
+			t.Fatalf("err %v:\n%s", err, out)
+		}
+		if got := read(filepath.Join(w.prod, "bin/yoicks")); got != "built "+head {
+			t.Errorf("bin/yoicks = %q, want built %s", got, head)
 		}
 	})
 	t.Run("refuses another checkout", func(t *testing.T) {
