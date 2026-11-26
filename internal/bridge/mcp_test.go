@@ -6,12 +6,14 @@ package bridge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -604,5 +606,57 @@ func TestHeadlessClearForgetsWorkers(t *testing.T) {
 	runs, _ := b.runs(t)
 	if last := runs[len(runs)-1].argv; last[6] != "--session-id" || last[7] == runs[0].argv[7] {
 		t.Errorf("not a fresh session: %v", last)
+	}
+}
+
+// agent_start with a blank task starts the worker and sends it nothing.
+func TestHeadlessStartWithABlankTask(t *testing.T) {
+	var calls []string
+	var mu sync.Mutex
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	standIn := exec.Command("sleep", "600")
+	standIn.Env = []string{"HOME=" + b.home, "PATH=" + os.Getenv("PATH")}
+	if err := standIn.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { standIn.Process.Kill(); standIn.Wait() })
+	h := b.srv.headless["h1"]
+	h.slowRPC = func(method string, params map[string]any) (json.RawMessage, error) { // herdr for the start
+		mu.Lock()
+		calls = append(calls, method)
+		mu.Unlock()
+		switch method {
+		case "session.snapshot":
+			return json.RawMessage(`{"snapshot":{"workspaces":[],"panes":[]}}`), nil
+		case "workspace.create":
+			return json.RawMessage(`{"root_pane":{"pane_id":"n1"}}`), nil
+		case "agent.start", "agent.get":
+			return json.RawMessage(`{"agent":{"pane_id":"n1","agent":"claude"}}`), nil
+		case "pane.process_info":
+			return json.RawMessage(fmt.Sprintf(`{"process_info":{"shell_pid":1,"foreground_process_group_id":%d}}`, standIn.Process.Pid)), nil
+		}
+		return json.RawMessage(`{}`), nil
+	}
+	b.start(t)
+	b.waitStatus(t, "idle")
+	cs, err := mcpClient(t, h.mcpURL, h.mcpBearer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "agent_start", Arguments: map[string]any{"name": "w-x", "cwd": t.TempDir(), "task": "  \n"}})
+	if err != nil || res.IsError || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "started w-x") || strings.Contains(res.Content[0].(*mcp.TextContent).Text, "deliver") {
+		t.Fatalf("%v %+v", err, res)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if slices.Contains(calls, "agent.prompt") || !slices.Contains(calls, "agent.start") || slices.ContainsFunc(b.fake.Requests(), func(r fakeherdr.Request) bool { return r.Method == "agent.prompt" }) {
+		t.Errorf("calls %v", calls)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.watches) != 0 {
+		t.Errorf("%d watches", len(h.watches))
 	}
 }
