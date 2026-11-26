@@ -416,7 +416,7 @@ this boundary is about what each orchestrator, and so each account, sees.
 instead of an agent in a herdr pane (your Claude subscription only: the bridge refuses API-key
 billing). Its Home is then the chat alone: messages go out also while it works, ■ on the
 "doing now" line interrupts it, its questions get an answer panel, and the status bar shows its
-usage (`5h · 7d · ctx`) and what went wrong, each with what to do. It has no herdr pane: on the PC,
+usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable) and what went wrong, each with what to do. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
 fresh session); the Home's warnings and Settings show the same steps.
@@ -508,7 +508,7 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   `mode` is `"tui"`, or `"headless"` for one the bridge runs itself as `claude -p` (config
   `"mode": "headless"`, managed entries only), whose `paneId` is `"hl:<name>"` while it runs and whose
   `headless` is `{ status: stopped|idle|working|blocked|done|error, completionSeq, pending: { id, questions } | null,
-  usage: { fiveHour, sevenDay: { utilization (0–1), resetsAt (ms) } | null, contextPct | null, at } | null,
+  usage: { fiveHour, sevenDay, fable: { utilization (0–1), resetsAt (ms) } | null, contextPct | null, at } | null,
   warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }] }`, `null` for a tui one)
   and `orchestratorPaneId` (the first running tui one's, or `null`), and `claudeCheck`, the last Claude Code check
   (`{ at (ms), version, ok, failed: [items] }`, `null` when none has run). Each agent's `completionSeq` is herdr's
