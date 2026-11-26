@@ -1368,11 +1368,14 @@ async function h2(c: Ctx) {
 async function h3(c: Ctx) {
   const { pg } = c;
   await hlHome(c, 'wc-h1');
+  // a resumed session may hold an earlier answer: one more
+  const cherries = async () => ((await hlTranscript(c, 'wc-h1')).items ?? []).filter((i: any) => i.kind === 'tool_result' && i.text.includes('"Which fruit?":"cherry"')).length;
+  const n0 = await cherries();
   await compose(c, 'ask');
   const panel = await pg.until(`[...document.querySelectorAll('#headless-prompt .ask-opt')].map((b) => b.textContent).join('|') === '1applered|2cherry'`, 5000);
   const id = (await hlView(c, 'wc-h1'))?.headless?.pending?.id;
   await pg.tapEl(`document.querySelectorAll('#headless-prompt .ask-opt')[1]`);
-  const answered = await waitFn(async () => (await hlTranscript(c, 'wc-h1')).items?.some((i: any) => i.kind === 'tool_result' && i.text.includes('"Which fruit?":"cherry"')), 5000, 200);
+  const answered = await waitFn(async () => (await cherries()) > n0, 5000, 200);
   const gone = await pg.until(`!document.getElementById('headless-prompt')`, 3000);
   let stale = 0;
   await api(c, 'POST', '/api/orchestrators/wc-h1/answer', { id: id ?? 'none', answers: { 'Which fruit?': 'apple' } }).catch((e) => { stale = /: 409 /.test(e.message) ? 409 : -1; });
