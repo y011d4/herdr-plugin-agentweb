@@ -449,9 +449,10 @@ type hlWatch struct {
 	Pane    string `json:"pane"`
 	Name    string `json:"name"`
 	Cwd     string `json:"cwd"`
-	Status  string `json:"status"`  // the last one told (or seen at the send)
-	Seq     int64  `json:"seq"`     // its state_change_seq then
-	Startup bool   `json:"startup"` // blocked at its start, its task not sent: wake when it's ready
+	Status  string `json:"status"`           // the last one told (or seen at the send)
+	Seq     int64  `json:"seq"`              // its state_change_seq then
+	Startup bool   `json:"startup"`          // blocked at its start, its task not sent: wake when it's ready
+	Unsent  bool   `json:"unsent,omitempty"` // followed on after that question with the task still unsent: its end says so
 	cancel  context.CancelFunc
 	seen    bool // its pane was in a state (a new worker's may not be yet)
 }
@@ -605,7 +606,7 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 			// answered, it works on (a question in the middle of a task of its own): followed from
 			// here as any watch, so its next question or its end wakes the orchestrator too
 			r.mu.Lock()
-			w.Startup = false
+			w.Startup, w.Unsent = false, true
 			r.mu.Unlock()
 			until = untilMoved
 			if !r.settle(w, raw, &until) {
@@ -650,7 +651,11 @@ func (r *headlessRunner) settle(w *hlWatch, raw json.RawMessage, until *[]string
 		*until = untilMoved
 	}
 	// w.Status is only ever changed here, in its own goroutine
-	return r.tell(w, fmt.Sprintf("%s: %s → %s", w.Name, w.Status, status), status, seq, end) && !end
+	line := fmt.Sprintf("%s: %s → %s", w.Name, w.Status, status)
+	if end && w.Unsent { // the end of a task of its own, not of the orchestrator's
+		line += ", ready, task not sent"
+	}
+	return r.tell(w, line, status, seq, end) && !end
 }
 
 // tell is a watch's change, in one save: line (when not "") queued as a wake-up, its status

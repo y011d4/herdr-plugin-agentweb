@@ -357,7 +357,8 @@ func TestHeadlessWakeUps(t *testing.T) {
 		w.Set("w1p", "working")
 		time.Sleep(300 * time.Millisecond)
 		w.Set("w1p", "done")
-		b.waitWakes(t, "[yoicks] w1: working → blocked", "[yoicks] w1: working → done")
+		// its own task's end: the orchestrator's task still waits to be sent
+		b.waitWakes(t, "[yoicks] w1: working → blocked", "[yoicks] w1: working → done, ready, task not sent")
 		if n := len(w.Prompts()); n != 0 {
 			t.Errorf("%d prompts", n)
 		}
