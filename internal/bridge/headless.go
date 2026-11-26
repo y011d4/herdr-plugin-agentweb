@@ -387,6 +387,16 @@ func (r *headlessRunner) session() string {
 	return r.sessionID
 }
 
+// transcriptFile is its session's transcript in its account's projects ("" when there is none
+// yet: Claude Code writes it at the session's first message).
+func (r *headlessRunner) transcriptFile() string {
+	sid := r.session()
+	if sid == "" {
+		return ""
+	}
+	return resolveTranscriptPath(sid, r.def.Dir, []string{accountForConfigDir(r.def.Env["CLAUDE_CONFIG_DIR"], "")})
+}
+
 func (r *headlessRunner) wantsToRun() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -547,6 +557,9 @@ func (r *headlessRunner) start(resume bool) error {
 		}
 	}
 	mcpConfig := headlessPath(r.stateDir, r.def.Name, ".mcp.json")
+	// a session that has had no message has no transcript, and Claude Code can't resume it ("No
+	// conversation found"): it begins again under the same id (nothing of it is lost)
+	begin := resume && r.transcriptFile() == ""
 	if resume && len(others) > 0 {
 		return &LifecycleError{Status: 409, Code: "session_in_use", Message: fmt.Sprintf(
 			"another claude (pid %d) runs its session %s: end it first (yoicks never stops it; only Linux, with /proc, can see it)", others[0].pid, r.session())}
@@ -602,7 +615,7 @@ func (r *headlessRunner) start(resume bool) error {
 		r.sessionID = newUUID()
 	}
 	alert := func() {}
-	if !resume || r.rulesHash == "" {
+	if !resume || begin || r.rulesHash == "" {
 		r.rulesHash = hex.EncodeToString(hash[:])
 	} else if r.rulesHash != hex.EncodeToString(hash[:]) { // its system prompt keeps the rules it began with
 		alert = r.warn("rules", "the orchestrator rules changed since this session began: Clear to apply them")
@@ -614,7 +627,7 @@ func (r *headlessRunner) start(resume bool) error {
 	r.persist()
 	r.mu.Unlock()
 	alert()
-	if err := r.spawn(append(headlessArgv(r.session(), resume, mcpConfig, r.tools), r.extraArgs...), env); err != nil {
+	if err := r.spawn(append(headlessArgv(r.session(), resume && !begin, mcpConfig, r.tools), r.extraArgs...), env); err != nil {
 		return r.fail("start", &LifecycleError{Status: 500, Code: "claude_failed", Message: "could not start claude: " + err.Error()})
 	}
 	r.rearm()
