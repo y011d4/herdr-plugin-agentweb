@@ -39,12 +39,30 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-// Only http(s)/mailto links become anchors; anything else (javascript:, data:,
+// Only http(s) links become anchors; anything else (javascript:, data:, mailto:,
 // relative paths) is left as literal text so a transcript can't smuggle a
 // script-URL into an href. `url` arrives already HTML-escaped.
 function safeUrl(url: string): string | null {
-  const probe = url.replace(/&amp;/g, '&').trim().toLowerCase();
-  return /^(https?:\/\/|mailto:)/.test(probe) ? url : null;
+  return /^https?:\/\//i.test(url) ? url : null;
+}
+
+// A bare http(s) URL in escaped text: printable ASCII except `&` (only as `&amp;`) and `\`,
+// so it ends at whitespace, `&lt;`/`&gt;`/`&quot;`, a stash placeholder, and at any
+// non-ASCII character: Japanese around it (「詳細はhttps://a.b/cを見て。」) stays text.
+// ponytail: a raw non-ASCII path (https://ja.wikipedia.org/wiki/東京) links only up to its
+// first non-ASCII character; percent-encoded paths link whole.
+const BARE_URL_RE = /https?:\/\/(?:&amp;|[\x21-\x25\x27-\x5b\x5d-\x7e])+/gi;
+
+// GFM's autolink tail: trailing punctuation, a trailing `&`, and a `)`/`]` the URL
+// doesn't open itself aren't part of it ("(see https://a.b/c).", "**https://a.b**").
+function trimUrlTail(url: string): string {
+  for (;;) {
+    const t = url.replace(/(?:[.,:;!?*_~']|&amp;)+$/, '');
+    const close = t.slice(-1);
+    const open = close === ')' ? '(' : close === ']' ? '[' : '';
+    if (!open || t.split(close).length <= t.split(open).length) return t;
+    url = t.slice(0, -1);
+  }
 }
 
 // Emphasis on already-escaped text: ~~del~~, **bold**, __bold__, *em*, _em_.
@@ -59,18 +77,22 @@ function emphasis(s: string): string {
     .replace(/(^|[^\w])_(?!\s)([^_\n]+?)(?<!\s)_(?![\w])/g, '$1<em>$2</em>');
 }
 
-// Inline markdown on raw text: escape, then `code` and [links] (protected from
-// emphasis via placeholders), then emphasis. Returns HTML with no line handling.
+// Inline markdown on raw text: escape, then `code`, [links] and bare URLs (protected
+// from emphasis via placeholders), then emphasis. Returns HTML with no line handling.
 function renderInline(raw: string): string {
   const stash: string[] = [];
   const put = (html: string): string => `\\u0000${stash.push(html) - 1}\\u0000`;
+  const link = (href: string, html: string): string =>
+    put(`<a class="chat-link" href="${href}" target="_blank" rel="noopener noreferrer">${html}</a>`);
   const s = escapeHtml(raw.replace(/\\u0000/g, '')) // strip the placeholder sentinel from input
     .replace(/`([^`\n]+)`/g, (_m, c) => put(`<code>${c}</code>`))
     .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (m, text, url) => {
       const href = safeUrl(url);
-      return href
-        ? put(`<a class="chat-link" href="${href}" target="_blank" rel="noopener noreferrer">${emphasis(text)}</a>`)
-        : m;
+      return href ? link(href, emphasis(text)) : m;
+    })
+    .replace(BARE_URL_RE, (m) => {
+      const url = trimUrlTail(m);
+      return /\/\/./.test(url) ? link(url, url) + m.slice(url.length) : m;
     });
   // Restore looped, not single-pass: a stashed link/code span can itself contain
   // a lower-indexed placeholder (e.g. `code` inside link text). Each pass resolves
@@ -216,7 +238,7 @@ function renderBlocks(text: string): string {
 
 // Full-ish markdown for chat prose: fenced code blocks are kept verbatim in
 // <pre>; every other region is block-parsed. Dependency-free and XSS-safe (all
-// text is escaped before formatting; only http(s)/mailto links become anchors).
+// text is escaped before formatting; only http(s) links become anchors).
 export function renderMarkdown(src: string): string {
   const parts = src.replace(/\\u0000/g, '').split('```');
   let html = '';

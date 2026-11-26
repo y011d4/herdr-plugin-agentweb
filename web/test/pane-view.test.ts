@@ -91,6 +91,31 @@ describe('pane view: chat', () => {
     assert.match(chatLog().textContent!, /and more/);
   });
 
+  it('a tap on a link while chat text is selected only ends the selection', async () => {
+    open('p1');
+    await answer('/read?source=visible', read[1]);
+    await answer('/transcript', transcript[0]);
+    const items: TimelineItem[] = [{ kind: 'assistant', text: 'PR: https://example.com/pull/1', sidechain: false }];
+    push({ type: 'transcript_items', paneId: 'p1', available: true, sessionId: transcript[0].sessionId!, items, cursor: 300, reset: false });
+    const a = chatLog().querySelector<HTMLAnchorElement>('a.chat-link')!;
+    assert.equal(a.getAttribute('href'), 'https://example.com/pull/1');
+    // what the chat log let through; the test itself never follows a link
+    const opened: boolean[] = [];
+    const record = (e: Event) => { opened.push(!e.defaultPrevented); e.preventDefault(); };
+    document.addEventListener('click', record);
+    try {
+      const sel = getSelection()!;
+      sel.selectAllChildren(chatLog().lastElementChild!);
+      a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      assert.deepEqual(opened, [false], 'the tap that dismisses a selection opens nothing');
+      assert.equal(sel.isCollapsed, true, 'and it does dismiss it');
+      a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      assert.deepEqual(opened, [false, true], 'without a selection the link opens');
+    } finally {
+      document.removeEventListener('click', record);
+    }
+  });
+
   it('runs at most one availability probe at a time', async () => {
     vi.useFakeTimers();
     localStorage.setItem('herdr_pane_view', 'terminal');
