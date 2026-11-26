@@ -347,10 +347,11 @@ func normalizeLine(rawLine string) []TimelineItem {
 	// A message the user sent while the agent was working, taken in mid-turn (at a tool
 	// boundary): Claude Code records it only as this attachment, never as a `user` line.
 	// Other queued commands (task notifications, messages from peer agents) aren't the
-	// user's words and stay hidden.
+	// user's words and stay hidden. Under claude -p (a headless orchestrator) the user's has
+	// no origin at all; the others always have one.
 	if typ == "attachment" {
 		a := jsGet(o, "attachment")
-		if jsGet(a, "type") != "queued_command" || jsGet(jsGet(a, "origin"), "kind") != "human" {
+		if origin := jsGet(a, "origin"); jsGet(a, "type") != "queued_command" || origin != nil && jsGet(origin, "kind") != "human" {
 			return nil
 		}
 		return userItems(jsGet(a, "prompt"), sidechain, ts)
@@ -362,6 +363,11 @@ func normalizeLine(rawLine string) []TimelineItem {
 		return userItems(jsGet(message, "content"), sidechain, ts)
 	case "assistant":
 		content, _ := jsGet(message, "content").([]any)
+		// the filler a --resume after a kill adds (Claude Code's other synthetic lines, API
+		// errors and limits, are for the user to read)
+		if jsGet(message, "model") == "<synthetic>" && len(content) == 1 && jsGet(content[0], "text") == "No response requested." {
+			return nil
+		}
 		var out []TimelineItem
 		for _, b := range content {
 			switch jsGet(b, "type") {
