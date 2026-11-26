@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os/exec"
 	"os/signal"
 	"strconv"
 	"syscall"
@@ -87,7 +88,14 @@ func Serve(web fs.FS, rules string) error {
 	base := fmt.Sprintf("http://%s:%d", cfg.Host, cfg.Port)
 	fmt.Printf("yoicks %s listening on %s\n", Version, base)
 	fmt.Printf("connect: %s?token=%s\n", base, token)
+	// direnv picks the accounts of dirs (dirAccount): without it, a dir's account is unknown
+	if p, err := exec.LookPath("direnv"); err == nil {
+		fmt.Println("[yoicks] direnv: " + p)
+	} else {
+		fmt.Println("[yoicks] direnv: not found (dirs' Claude accounts can't be read)")
+	}
 	client.Start()
+	srv.startHeadless()
 
 	hs := &http.Server{
 		Handler: srv,
@@ -103,14 +111,18 @@ func Serve(web fs.FS, rules string) error {
 	go func() { served <- hs.Serve(ln) }()
 	select {
 	case err := <-served:
+		srv.shutdownHeadless()
 		client.Destroy()
 		return err
 	case <-ctx.Done():
 	}
 	fmt.Println("[yoicks] shutting down")
+	// all within yoicks stop's 5 s: the headless children (≤2 s, in parallel), then the rest
+	began := time.Now()
+	srv.shutdownHeadless()
 	client.Destroy()
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), max(500*time.Millisecond, 3*time.Second-time.Since(began)))
 	defer cancel()
-	_ = hs.Shutdown(shutdownCtx) // whatever is still open after 3 s is cut off
+	_ = hs.Shutdown(shutdownCtx) // whatever is still open then is cut off
 	return nil
 }

@@ -86,6 +86,47 @@ export interface OrchestratorView {
   paneId: string | null;
   /** the agent panes of its Claude account (itself included); null when that isn't known */
   agents: string[] | null;
+  /** 'tui': an agent in a herdr pane; 'headless': the bridge's own claude -p child, whose
+   *  paneId is 'hl:<name>' while it runs (it has no herdr pane, only a transcript) */
+  mode: 'tui' | 'headless';
+  /** a headless orchestrator's state; null for 'tui' */
+  headless: HeadlessView | null;
+}
+
+export interface HeadlessView {
+  status: 'stopped' | 'idle' | 'working' | 'blocked' | 'done' | 'error';
+  /** counts its completed turns (an interrupted one isn't) */
+  completionSeq: number;
+  /** a question waiting for the user: always null for now */
+  pending: null;
+  usage: HeadlessUsage | null;
+  /** what went wrong, kept until the next start or clear */
+  warnings: HeadlessWarning[];
+}
+
+export interface UsageWindow {
+  /** 0–1 */
+  utilization: number;
+  /** ms */
+  resetsAt: number;
+}
+
+export interface HeadlessUsage {
+  fiveHour: UsageWindow | null;
+  sevenDay: UsageWindow | null;
+  /** percent of the context window; null until a turn has ended */
+  contextPct: number | null;
+  /** when the rate limits were read (ms); 0 = not yet */
+  at: number;
+}
+
+export interface HeadlessWarning {
+  kind: string;
+  message: string;
+  /** ms */
+  since: number;
+  /** what the Home offers for it */
+  actions: Array<'interrupt' | 'clear' | 'tui'>;
 }
 
 // ── REST responses (the wire recordings in contract.gen.ts check them) ──
@@ -166,6 +207,14 @@ export interface WsAgentStatusMessage {
   tabLabel: string | null;
 }
 
+/** a headless orchestrator's new warning (once per kind and session) */
+export interface WsOrchestratorAlertMessage {
+  type: 'orchestrator_alert';
+  name: string;
+  kind: string;
+  message: string;
+}
+
 export interface WsPongMessage {
   type: 'pong';
 }
@@ -200,6 +249,7 @@ export interface WsTranscriptItemsMessage {
 export type WsMessage =
   | WsStateMessage
   | WsAgentStatusMessage
+  | WsOrchestratorAlertMessage
   | WsPongMessage
   | WsPaneOutputMessage
   | WsPaneGoneMessage

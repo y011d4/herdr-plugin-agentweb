@@ -50,6 +50,15 @@ func TestConfig(t *testing.T) {
 				[]OrchestratorDef{{Name: "w", Label: "w", Dir: data + "/orchestrators/w", Env: map[string]string{"OK": "y"}, Managed: true}})
 		})
 
+		t.Run(`"mode": "headless" makes a managed entry headless; an unmanaged one stays tui`, func(t *testing.T) {
+			eq(t, parseOrchestrators(fromJSON(t, `[{"name": "h", "mode": "headless"}, {"name": "u", "dir": "/u", "mode": "headless"}, {"name": "t", "mode": "Headless"}]`), nil, home, data, none),
+				[]OrchestratorDef{
+					{Name: "h", Label: "h", Dir: data + "/orchestrators/h", Env: map[string]string{}, Managed: true, Mode: "headless"},
+					{Name: "u", Label: "u", Dir: "/u", Env: map[string]string{}},
+					{Name: "t", Label: "t", Dir: data + "/orchestrators/t", Env: map[string]string{}, Managed: true},
+				})
+		})
+
 		t.Run("drops malformed entries and repeated names", func(t *testing.T) {
 			out := parseOrchestrators(fromJSON(t, `[null, "x", {"label": "no name"}, {"name": "../up"}, {"name": "a b"}, {"name": "ok"}, {"name": "ok", "label": "again"}]`),
 				nil, home, data, none)

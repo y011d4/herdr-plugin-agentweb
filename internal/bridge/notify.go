@@ -91,9 +91,14 @@ func sendNtfyNotification(change StatusChange, state *State, notifyURL *string) 
 		}
 		body = label + " · " + body
 	}
+	postNtfy(*notifyURL, title, body)
+}
 
+// postNtfy posts one notification (title: printable ASCII). Failures are logged once
+// (until a success); it waits for the POST, so run it in a goroutine.
+func postNtfy(notifyURL, title, body string) {
 	err := func() error {
-		req, err := http.NewRequest("POST", *notifyURL, strings.NewReader(body))
+		req, err := http.NewRequest("POST", notifyURL, strings.NewReader(body))
 		if err != nil {
 			return err
 		}

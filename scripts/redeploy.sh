@@ -151,6 +151,17 @@ healthy() {
 	return 1
 }
 
+# A headless orchestrator mid-turn loses that turn to the restart (it resumes, and is told
+# so): say so first. The bridge's token comes from its state dir and goes to curl on stdin,
+# never on a command line (printf is a builtin).
+token_file=${XDG_STATE_HOME:-$HOME/.local/state}/herdr/plugins/$id/token
+if [ -r "$token_file" ]; then
+	busy=$(printf 'Authorization: Bearer %s\n' "$(cat "$token_file")" |
+		curl -fsS --max-time 2 -H @- "${healthz%/healthz}/api/state" 2>/dev/null |
+		jq -r '[.orchestrators[]? | select(.headless.status == "working" or .headless.status == "blocked") | "\(.name) (\(.headless.status))"] | join(", ")') || busy=
+	[ -z "$busy" ] || say "warning: headless orchestrator $busy: the restart interrupts it (it resumes and is told so)"
+fi
+
 backup=$(mktemp bin/.yoicks.old.XXXXXX)
 cp -p bin/yoicks "$backup"
 stopped=1

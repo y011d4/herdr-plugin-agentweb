@@ -386,7 +386,7 @@ func eqSeq(a, b *int64) bool {
 // shell's cwd, not the mutable foreground cwd) is the identity; with nested dirs the
 // deepest wins. Given each agent pane's account (nil value: unknown), each also lists
 // the agent panes of its own account (itself included), or null when its account
-// isn't known.
+// isn't known. A headless one has no pane (clientState fills in its child).
 func findOrchestrators(s *State, defs []OrchestratorDef, accounts map[string]*string) []OrchestratorView {
 	paneIDs := make([]*string, len(defs))
 	for _, ws := range s.Workspaces {
@@ -398,6 +398,9 @@ func findOrchestrators(s *State, defs []OrchestratorDef, accounts map[string]*st
 				cwd := *pane.LaunchCwd
 				best := -1
 				for i, d := range defs {
+					if d.Mode == "headless" { // runs as the bridge's child, never in a pane
+						continue
+					}
 					if (cwd == d.Dir || strings.HasPrefix(cwd, d.Dir+"/")) && (best == -1 || len(d.Dir) > len(defs[best].Dir)) {
 						best = i
 					}
@@ -419,7 +422,7 @@ func findOrchestrators(s *State, defs []OrchestratorDef, accounts map[string]*st
 		if account != nil && *account != "" {
 			agents = agentsOfAccount(s, accounts, *account)
 		}
-		views[i] = OrchestratorView{Name: d.Name, Label: d.Label, PaneID: paneIDs[i], Agents: agents}
+		views[i] = OrchestratorView{Name: d.Name, Label: d.Label, PaneID: paneIDs[i], Agents: agents, Mode: firstNonEmpty(d.Mode, "tui")}
 	}
 	return views
 }

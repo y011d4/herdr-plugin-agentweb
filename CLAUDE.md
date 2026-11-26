@@ -122,6 +122,23 @@ All in `internal/bridge/` (one package):
   `pane.agent_detected` (fires on detect *and* release) is rebuild-triggering, so agent presence and
   `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `yoicks agent …`, waking on background
   `agent prompt --wait`) lives in that dir's `CLAUDE.md`, not in this repo.
+- **Headless orchestrators** (being built: plan in `.omc/plans/headless-orchestrator/`): a managed entry
+  with `"mode": "headless"` (an unmanaged one stays tui, logged) runs as the bridge's own child,
+  `claude -p` over stream-json, instead of an agent in a pane. `headless.go`: one `headlessRunner` per
+  such entry (start with the billing checks and the orphan scan; send, also mid-turn; interrupt as a
+  `control_request`, no answer in 2 s → kill + `--resume`; stop = interrupt, close stdin, 1.5 s, SIGTERM
+  the group, 0.5 s, SIGKILL; clear = a fresh session; a crash restarts with `--resume` after 2/10/30 s,
+  more than 3 in 10 min = `error`; the bridge's shutdown stops them in parallel within `yoicks stop`'s
+  5 s, Pdeathsig as the backstop). `headless_state.go` is pure: a stdout line → status, completionSeq,
+  usage, warnings (unknown events, unreadable lines, the init check). Its state's `paneId` is
+  `hl:<name>` while the child runs; the pane/agent routes and `watch_pane` refuse `hl:` (404 /
+  nothing read), only the transcript route serves it (`resolvePaneTranscript`'s head). Saved in
+  `<state>/headless/<name>.json` (`{sessionId, wanted}`); `<state>/headless/<name>.mcp.json` (only the
+  bridge writes it, `--mcp-config` in the argv) is the marker that tells its own orphan from a user's
+  `claude --resume`. Warnings also go out once per session and kind as WS `orchestrator_alert` and
+  ntfy. `tools/fakeclaude` (built as `claude`; `YOICKS_CLAUDE_BIN` points the bridge at it) stands in
+  for Claude Code in tests and checks. Without a headless entry none of it runs: no child, no
+  `[headless` log line.
 - `herdr-plugin.toml` — actions/panes call `./bin/yoicks`. `[[build]]` (`scripts/plugin-build.sh release`) runs on
   `herdr plugin install`/`update` only — never for a linked plugin (not on link, relink, update,
   enable or a herdr restart; checked on 0.9.5): it downloads the GitHub release binary of the
@@ -371,6 +388,18 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
 - Bind stays loopback-only by default; remote access is Tailscale's job
   (`tailscale serve`). No outbound requests unless `notify_url` is set.
 - Static file serving keeps the resolve+prefix path-traversal guard.
+- A headless orchestrator stays on the Claude subscription (fail closed): its child's env is an
+  allowlist (HOME PATH USER LOGNAME SHELL LANG LC_* TZ TMPDIR, TERM=dumb, then the entry's env; never
+  `HERDR_*`, which would make herdr's hooks report it as a pane, nor a billing variable), and its argv
+  never has `--bare` or `--dangerously-skip-permissions`. An entry env with `ANTHROPIC_*`,
+  `CLAUDE_CODE_USE_*` or `AWS_BEARER_TOKEN_BEDROCK` is refused, and so is one with `HOME` or
+  `XDG_CONFIG_HOME` (the checks, the account and the chat read the bridge's home); before each start `claude auth status
+  --json` must say `authMethod: claude.ai` with a subscription (only those two fields are read or
+  logged: the output has the account's email), and no settings file it reads (the account's, the
+  dir's `settings.json`/`settings.local.json`, the managed one) may set such an env or `apiKeyHelper`
+  (auth status misses those); the child's first init must say `apiKeySource: none` and exactly its
+  tools, else it is stopped. The orphan scan kills only a claude carrying the bridge's marker (its
+  group only when it leads one); any other claude on that session is left alone (409).
 - Starting agents is gated to the `launch_profiles` allowlist: `POST /api/agents` takes a profile
   *name* → fixed argv, never a caller-supplied command/argv. (`cwd` is passed through and is not a
   new privilege — the bearer token already grants full pane input ≈ a shell — but choosing the
@@ -457,3 +486,6 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   through a real orchestrator; `blocked` on the folder-trust prompt. Never run against a real
   herdr: linux/arm64 and macOS. Supporting macOS's account features needs `sysctl`
   (`kern.procargs2`, via `golang.org/x/sys/unix`) in place of `/proc`.
+- **Headless on macOS**: no `/proc`, so no orphan scan (a child an earlier bridge left isn't found),
+  no refusal of a TUI start (phone or `yoicks orchestrator start`) beside a running headless child,
+  and no Pdeathsig (only the shutdown ends a child). The same `sysctl` would fix the first two.

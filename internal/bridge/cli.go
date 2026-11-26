@@ -1011,6 +1011,15 @@ func (c cli) orchestrator() int {
 		fmt.Fprintf(os.Stderr, "no orchestrator named %s in config.json\n", name)
 		return 1
 	}
+	// the bridge runs a headless one itself; macOS has no /proc to see one running
+	if defs[i].Mode == "headless" {
+		fmt.Fprintf(os.Stderr, "orchestrator %s is headless: the bridge runs it, so start it from its Home\n", name)
+		return 1
+	}
+	if pid := markedHeadlessChild(stateDir(), name); pid != 0 {
+		fmt.Fprintf(os.Stderr, "orchestrator %s runs headless (pid %d): stop it from its Home first\n", name, pid)
+		return 1
+	}
 	paneID, _, err := startOrchestrator(rpcWithin(60*time.Second), defs[i], c.rules)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "start failed: "+err.Error())
