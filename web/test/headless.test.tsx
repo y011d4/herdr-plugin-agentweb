@@ -11,10 +11,11 @@ import { orchestratorOfPane, resolveRoute } from '../src/routes.ts';
 import { findPane, markPaneSeen, setAppState, store } from '../src/store.ts';
 import { renderItem } from '../src/transcript.ts';
 import type { AppState, OrchestratorView, WsMessage, WsStateMessage } from '../src/types.ts';
+import { Modals } from '../src/ui/Modals.tsx';
 import { Pane, paneTopbar, usageParts } from '../src/ui/Pane.tsx';
 import { claudeCheckText } from '../src/ui/Settings.tsx';
 import { watchMessages } from '../src/watch.ts';
-import { messages, state as recorded } from './contract.gen.ts';
+import { messages, state as recorded, transcript } from './contract.gen.ts';
 import { fire, render } from './render.ts';
 
 vi.mock('../src/ws.ts', () => ({
@@ -58,7 +59,7 @@ async function home(s: AppState, actions?: { clear: () => void; stop: () => void
   store.view.activePaneId = 'hl:pilot';
   store.view.homeMode = true;
   const t = paneTopbar('hl:pilot', true, '#/agents', () => {});
-  ({ container, unmount } = await render(<><div id="tb">{t.title}{t.right}</div><Pane paneId="hl:pilot" home={true} actions={actions} name="pilot" /></>));
+  ({ container, unmount } = await render(<><div id="tb">{t.title}{t.right}</div><Pane paneId="hl:pilot" home={true} actions={actions} name="pilot" /><Modals /></>));
 }
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => container.querySelector<T>(sel)!;
 const opts = () => [...container.querySelectorAll<HTMLButtonElement>('#headless-prompt .ask-opt')];
@@ -145,7 +146,7 @@ describe("a headless orchestrator's Home", () => {
     await pick('a.png', 'notes.txt', 'b.png');
     const thumbs = () => [...container.querySelectorAll<HTMLImageElement>('#input-images img')].map((i) => i.src);
     assert.deepEqual(thumbs(), ['data:image/jpeg;base64,a.png', 'data:image/jpeg;base64,b.png']);
-    await fire(() => container.querySelector<HTMLButtonElement>('#input-images button')!.click());
+    await fire(() => $('#input-images [aria-label="Remove image"]').click());
     assert.deepEqual(thumbs(), ['data:image/jpeg;base64,b.png']);
     await fire(() => $('#btn-send-enter').click()); // an image alone is a message
     await fire(() => $('#btn-send-enter').click()); // once
@@ -157,6 +158,26 @@ describe("a headless orchestrator's Home", () => {
     await answer('POST /api/orchestrators/pilot/send', { error: { code: 'invalid_params', message: 'the images are over 1 MiB in all' } }, 400);
     assert.deepEqual(thumbs(), ['data:image/jpeg;base64,c.png']); // kept on a failure
     assert.deepEqual(getToasts().map((t) => t.body), ['the images are over 1 MiB in all']);
+  });
+
+  it('opens an attached image and a sent one full screen; × still removes an attached one', async () => {
+    await home(withPilot(idle));
+    const png = 'data:image/png;base64,iVBORw0KGgo=';
+    await answer('/transcript', { ...transcript[0], items: [{ kind: 'user', text: '', images: [png], sidechain: false, ts: null }] });
+    const picker = $<HTMLInputElement>('#input-image-picker');
+    Object.defineProperty(picker, 'files', { configurable: true, value: [new File(['x'], 'a.png', { type: 'image/png' })] });
+    await fire(() => picker.dispatchEvent(new Event('change', { bubbles: true })));
+    const shown = () => [...container.querySelectorAll<HTMLImageElement>('.image-preview img')].map((i) => `${i.src} ${i.alt}`);
+    await fire(() => $('#input-images [aria-label="View image"]').click());
+    assert.deepEqual(shown(), ['data:image/jpeg;base64,a.png Attached image']);
+    await fire(() => $('.image-preview-close').click());
+    assert.deepEqual(shown(), []);
+    await fire(() => $('#chat-log .chat-image').click()); // the tap lands on the image inside its button
+    assert.deepEqual(shown(), [`${png} image`]);
+    await fire(() => $('.image-preview img').click());
+    assert.deepEqual(shown(), []);
+    await fire(() => $('#input-images [aria-label="Remove image"]').click());
+    assert.ok(container.querySelector('#input-images') === null);
   });
 
   it('sends nothing while an image is still being scaled', async () => {
