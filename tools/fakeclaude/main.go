@@ -254,11 +254,14 @@ func (f *fake) turn(q queued) {
 		f.cancel = cancel
 	}
 	f.mu.Unlock()
-	defer func() {
+	// The turn stops being the running one before its result goes out: an interrupt that
+	// arrives after the result then overtakes the next queued message, as it should.
+	ended := func() {
 		f.mu.Lock()
 		f.cancel = nil
 		f.mu.Unlock()
-	}()
+	}
+	defer ended()
 	if skipped { // an interrupt came after it was sent, before its turn began
 		f.aborted("aborted_streaming")
 		return
@@ -283,6 +286,7 @@ func (f *fake) turn(q queued) {
 		for i := 1; i <= seconds; i++ {
 			select {
 			case <-ctx.Done():
+				ended()
 				f.aborted("aborted_tools")
 				return
 			case <-time.After(time.Second):
@@ -294,9 +298,11 @@ func (f *fake) turn(q queued) {
 		f.emit(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "toolu_slow", "content": "finished"}}}})
 	}
 	if ctx.Err() != nil {
+		ended()
 		f.aborted("aborted_streaming")
 		return
 	}
+	ended()
 	f.reply("echo: " + text)
 }
 
