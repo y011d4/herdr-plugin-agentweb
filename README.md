@@ -547,7 +547,11 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   headless orchestrator: send a message (also while it works) and interrupt its turn, both 409 when it
   isn't running; clear starts it in a fresh session (returning `{"paneId", "name"}` like start), running
   or not; stop ends it, and succeeds when it is already stopped. A message sent while a question is
-  pending answers it, in the user's own words (the same text for each of its questions). A headless orchestrator has no herdr pane: `/api/panes/hl:<name>/…` and
+  pending answers it, in the user's own words (the same text for each of its questions). A send may
+  carry `"images": [{"mediaType": "image/jpeg", "data": "<base64>"}]` (JPEG, PNG or GIF that decode
+  whole, at most 4, 2000 px a side and 1 MiB in all; `text` may then be empty), written as image
+  blocks before the text; 400 otherwise, 409 while a question is pending. The web UI's + and paste
+  attach them, scaled and recompressed to JPEG. A headless orchestrator has no herdr pane: `/api/panes/hl:<name>/…` and
   `/api/agents/hl:<name>/…` answer 404, except `GET /api/panes/hl:<name>/transcript`.
 - `POST /api/orchestrators/:name/answer` `{"id": "…", "answers": {"<question>": "<label>"}}` or
   `{"id": "…", "deny": "<message>"}` — answer (or refuse) the headless orchestrator's pending question
@@ -564,7 +568,7 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   the old pane; the pane id changes, so the client re-follows the new pane
 - `GET /api/panes/:paneId/transcript` — Claude Code chat view: the pane's JSONL
   session transcript as normalized `items` (`user`/`assistant`/`thinking`/
-  `tool_use`/`tool_result`) plus `sessionId` and a byte `cursor`. Returns
+  `tool_use`/`tool_result`; a `user` item with images has `images`, as data: URLs) plus `sessionId` and a byte `cursor`. Returns
   `{"available": false}` when the pane isn't a claude session or its transcript
   isn't on this host. Add `?session=<id>&after=<cursor>` to fetch only items past
   the cursor for that session (incremental polling).

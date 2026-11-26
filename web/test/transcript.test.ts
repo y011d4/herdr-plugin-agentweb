@@ -250,3 +250,17 @@ describe('conversationItems / latestActivity (home chat)', () => {
     assert.equal(latestActivity([a('started w-x')], first), null); // it spoke: thinking/writing again
   });
 });
+
+describe('renderItem — images', () => {
+  const png = 'data:image/png;base64,iVBORw0KGgo=';
+  it("shows a user turn's images under its words, or alone", () => {
+    const h = renderItem({ kind: 'user', text: 'what is it?', images: [png, png], sidechain: false, ts: null });
+    assert.match(h, /^<div class="chat-item chat-user"><div class="chat-bubble chat-md"><p class="chat-p">what is it\?<\/p><\/div><\/div><div class="chat-item chat-user chat-images">/);
+    assert.equal(h.split(`<img class="chat-image" src="${png}" alt="image">`).length, 3);
+    assert.equal(renderItem({ kind: 'user', text: '', images: [png], sidechain: false, ts: null }),
+      `<div class="chat-item chat-user chat-images"><img class="chat-image" src="${png}" alt="image"></div>`);
+  });
+  it('escapes a src', () => {
+    assert.doesNotMatch(renderItem({ kind: 'user', text: '', images: ['x" onerror="y'], sidechain: false, ts: null }), /" onerror/);
+  });
+});

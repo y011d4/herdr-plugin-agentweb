@@ -11,10 +11,11 @@
  * State pushes re-render it constantly. The composer's textarea is uncontrolled (React never sets its
  * value), so a push never resets what is being typed, an IME composition included.
  */
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
 import { homeSummary, shownStatus } from '../dashboard-group.ts';
+import { fitImages, MAX_IMAGES, toAttachment, type ImageAttachment } from '../image.ts';
 import { showToast } from '../notify.ts';
 import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
 import { homeAgentsHash, homeHash, orchestratorOfPane, paneRoute } from '../routes.ts';
@@ -251,10 +252,31 @@ const autoGrow = (t: HTMLTextAreaElement): void => {
 
 // The one composer: an agent's pane and an orchestrator's Home alike. On a touch device Enter
 // inserts a newline and only the Send button sends, so the phone keyboard can't fire off half-typed
-// commands; on a PC Enter sends and Shift+Enter inserts a newline (composer-keys.ts).
+// commands; on a PC Enter sends and Shift+Enter inserts a newline (composer-keys.ts). A headless
+// orchestrator's also takes images (+, or pasted), shown above it until sent.
 function Composer({ paneId, home }: { paneId: string; home: boolean }) {
   const input = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
   const [placeholder] = useState(() => (home ? `Message ${orchestratorLabel(orchestratorOfPane(store.appState, paneId))}…` : 'Send text…'));
+  const hl = headlessName(paneId); // no pane to type into: its message goes to the bridge's child
+  const [images, setImages] = useState<ImageAttachment[]>([]);
+  const shown = useRef(images);
+  shown.current = images;
+  const sendingImages = useRef(false);
+  const attach = async (files: File[]): Promise<void> => {
+    const picked = files.filter((f) => f.type.startsWith('image/'));
+    if (!picked.length) return;
+    let added: ImageAttachment[];
+    try {
+      added = await Promise.all(picked.map(toAttachment));
+    } catch {
+      showToast('Image not added', 'This browser could not read it');
+      return;
+    }
+    const next = fitImages(shown.current, added);
+    if (next.length < shown.current.length + added.length) showToast('Not every image was added', `At most ${MAX_IMAGES}, 1 MB in all, per message`);
+    setImages(next);
+  };
   // A new agent's first task the bridge couldn't deliver lands here, ready to send, and stays (with
   // the user's edits) until sent, so leaving the pane doesn't lose it. While its send is in flight the
   // composer is locked, here and in a view reopened meanwhile.
@@ -273,7 +295,9 @@ function Composer({ paneId, home }: { paneId: string; home: boolean }) {
   const send = async (): Promise<void> => {
     const t = input.current!;
     const text = t.value;
-    if (!text || keptTasks.sending(paneId)) return;
+    const sent = shown.current;
+    if ((!text && !sent.length) || keptTasks.sending(paneId) || sendingImages.current) return;
+    sendingImages.current = sent.length > 0; // an upload takes a while: a second tap mustn't send them twice
     const kept = keptTasks.beginSend(paneId, text); // false unless the pane has a kept task
     if (kept) t.disabled = true;
     let restored: string | null = null;
@@ -284,18 +308,19 @@ function Composer({ paneId, home }: { paneId: string; home: boolean }) {
       // raw control byte a full-screen / non-readline TUI could act on. Other panes just get
       // text+enter. enter:true then submits in the same request.
       const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
-      const hl = headlessName(paneId); // no pane to type into: its message goes to the bridge's child
-      await (hl ? orchestratorPost(hl, 'send', { text }) : apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) }));
+      await (hl ? orchestratorPost(hl, 'send', sent.length ? { text, images: sent } : { text }) : apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) }));
       if (kept) keptTasks.finishSend(paneId, true);
       if (t.value === text) { // clear on success, but keep text typed mid-send
         t.value = '';
         autoGrow(t);
       }
+      if (sent.length) setImages((cur) => cur.filter((i) => !sent.includes(i))); // and images added mid-send
       paneView?.echo();
     } catch (err) {
       if (kept) restored = keptTasks.finishSend(paneId, false);
       showToast('Send failed', (err as Error).message);
     } finally {
+      sendingImages.current = false;
       if (kept) {
         // Unlock the pane's composer as displayed now — this one, or one reopened during the send
         // (this textarea is then detached) — and on failure show the task in it again.
@@ -319,12 +344,39 @@ function Composer({ paneId, home }: { paneId: string; home: boolean }) {
     if (!key.repeat) void send(); // a held Enter sends once, not once per auto-repeat
   };
 
+  // a pasted image (a screenshot) is attached; its file name, if the clipboard has one, isn't typed
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>): void => {
+    const files = [...e.clipboardData.files];
+    if (!hl || !files.some((f) => f.type.startsWith('image/'))) return;
+    e.preventDefault();
+    void attach(files);
+  };
+
   return (
-    <div className="input-row">
-      <textarea id="pane-input" ref={input} rows={1} placeholder={placeholder} autoCorrect="off" autoCapitalize="off" spellCheck={false}
-        onKeyDown={onKeyDown} onInput={(e) => { autoGrow(e.currentTarget); keptTasks.edit(paneId, e.currentTarget.value); }}></textarea>
-      <button className="input-send-btn" id="btn-send-enter" onClick={() => { void send(); }}>Send</button>
-    </div>
+    <>
+      {images.length > 0 && (
+        <div className="input-images" id="input-images">
+          {images.map((a, i) => (
+            <span key={i} className="input-image">
+              <img src={`data:${a.mediaType};base64,${a.data}`} alt="" />
+              <button aria-label="Remove image" onClick={() => setImages((cur) => cur.filter((x) => x !== a))}>&times;</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="input-row">
+        {hl && (
+          <>
+            <button className="input-attach-btn" id="btn-attach" aria-label="Attach images" onClick={() => picker.current!.click()}>+</button>
+            <input ref={picker} id="input-image-picker" type="file" accept="image/*" multiple hidden
+              onChange={(e) => { void attach([...(e.currentTarget.files ?? [])]); e.currentTarget.value = ''; }} />
+          </>
+        )}
+        <textarea id="pane-input" ref={input} rows={1} placeholder={placeholder} autoCorrect="off" autoCapitalize="off" spellCheck={false}
+          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); keptTasks.edit(paneId, e.currentTarget.value); }}></textarea>
+        <button className="input-send-btn" id="btn-send-enter" onClick={() => { void send(); }}>Send</button>
+      </div>
+    </>
   );
 }
 

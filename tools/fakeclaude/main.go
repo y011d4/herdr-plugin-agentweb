@@ -139,8 +139,9 @@ type fake struct {
 }
 
 type queued struct {
-	text string
-	n    int // its place among the messages read
+	text    string // its words (a content array: its text blocks)
+	content any    // as sent, recorded so
+	n       int    // its place among the messages read
 }
 
 func session(args []string) {
@@ -194,6 +195,14 @@ func session(args []string) {
 			case "user":
 				msg, _ := m["message"].(map[string]any)
 				text, _ := msg["content"].(string)
+				if blocks, ok := msg["content"].([]any); ok {
+					for _, b := range blocks {
+						block, _ := b.(map[string]any)
+						if t, ok := block["text"].(string); ok {
+							text += t
+						}
+					}
+				}
 				if text == "deaf" {
 					time.Sleep(time.Hour) // stop reading stdin: the bridge's writes back up
 				}
@@ -201,7 +210,7 @@ func session(args []string) {
 				f.read++
 				n := f.read
 				f.mu.Unlock()
-				msgs <- queued{text, n}
+				msgs <- queued{text, msg["content"], n}
 			case "control_request":
 				req, _ := m["request"].(map[string]any)
 				if req["subtype"] == "interrupt" {
@@ -290,7 +299,7 @@ func (f *fake) turn(q queued) {
 		return
 	}
 	f.emit(f.init())
-	f.record(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}})
+	f.record(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": q.content}})
 	word, arg, _ := strings.Cut(text, " ")
 	seconds, _ := strconv.Atoi(arg)
 	switch word {

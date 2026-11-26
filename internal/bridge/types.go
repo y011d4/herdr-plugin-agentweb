@@ -402,6 +402,7 @@ type WsTranscriptItemsMessage struct {
 type TimelineItem struct {
 	Kind      string
 	Text      string
+	Images    []string      // user: the images sent with it, as data: URLs (omitted when none)
 	Truncated bool          // thinking, tool_result
 	ID        string        // tool_use
 	Name      string        // tool_use
@@ -464,11 +465,12 @@ func (t TimelineItem) MarshalJSON() ([]byte, error) {
 		}{t.Kind, t.ForID, t.Text, t.Truncated, t.IsError, t.Sidechain, t.TS})
 	default: // user, assistant
 		return marshalRaw(struct {
-			Kind      string `json:"kind"`
-			Text      string `json:"text"`
-			Sidechain bool   `json:"sidechain"`
-			TS        *int64 `json:"ts"`
-		}{t.Kind, t.Text, t.Sidechain, t.TS})
+			Kind      string   `json:"kind"`
+			Text      string   `json:"text"`
+			Images    []string `json:"images,omitempty"`
+			Sidechain bool     `json:"sidechain"`
+			TS        *int64   `json:"ts"`
+		}{t.Kind, t.Text, t.Images, t.Sidechain, t.TS})
 	}
 }
 

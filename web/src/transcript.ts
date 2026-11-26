@@ -25,7 +25,8 @@ export interface AskQuestion {
 }
 
 export type TimelineItem =
-  | { kind: 'user'; text: string; sidechain: boolean; ts: number | null }
+  // images: the ones sent with it, as data: URLs (absent when none)
+  | { kind: 'user'; text: string; images?: string[]; sidechain: boolean; ts: number | null }
   | { kind: 'assistant'; text: string; sidechain: boolean; ts: number | null }
   | { kind: 'thinking'; text: string; truncated: boolean; sidechain: boolean; ts: number | null }
   | { kind: 'tool_use'; id: string; name: string; summary: string; todos: TodoEntry[] | null; ask: AskQuestion[] | null; sidechain: boolean; ts: number | null }
@@ -303,6 +304,12 @@ export function splitNotices(text: string): { before: string[]; body: string; af
 
 /** Render a single TimelineItem to a self-contained HTML block (safe to append). */
 export function renderItem(item: TimelineItem): string {
+  // the images sent with a user turn: under its words, or alone (the bridge sends only data: URLs)
+  if (item.kind === 'user' && item.images?.length) {
+    const { images, ...words } = item;
+    const imgs = images.map((src) => `<img class="chat-image" src="${escapeHtml(src)}" alt="image">`).join('');
+    return (words.text.trim() ? renderItem(words) : '') + `<div class="chat-item chat-user chat-images${item.sidechain ? ' chat-sidechain' : ''}">${imgs}</div>`;
+  }
   const sub = item.sidechain ? ' chat-sidechain' : '';
   const subTag = item.sidechain ? '<span class="chat-sub-tag">subagent</span>' : '';
   switch (item.kind) {
