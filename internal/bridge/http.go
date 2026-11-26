@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -72,6 +73,9 @@ type server struct {
 	rules    string // the bundled orchestrator/rules.md
 	profiles *PaneProfileStore
 	accounts *PaneAccountCache
+	// each configured orchestrator's expectedAccount ("": unknown), found once in the
+	// background (direnv can take seconds); nil until then
+	expected atomic.Pointer[[]string]
 	stop     chan struct{}
 	stopOnce sync.Once
 	// how often a transcript watch re-resolves the session (a field so tests can shorten it)
@@ -100,6 +104,15 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 	// nothing changes (an unchanged push is deduped), and a changed answer re-pushes.
 	s.accounts = newPaneAccountCache(func(id string) (string, error) { return paneAccount(s.rpc, id) },
 		s.broadcastState, accountRefreshInterval, time.Now)
+	// ponytail: found once per bridge start; an .envrc edited later shows after a restart
+	go func() {
+		expected := make([]string, len(cfg.Orchestrators))
+		for i, d := range cfg.Orchestrators {
+			expected[i] = expectedAccount(d)
+		}
+		s.expected.Store(&expected)
+		s.broadcastState()
+	}()
 	go func() {
 		t := time.NewTicker(accountRefreshInterval)
 		defer t.Stop()
@@ -122,7 +135,16 @@ func (s *server) close() { s.stopOnce.Do(func() { close(s.stop) }) }
 // orchestratorPaneId (the first running one) stays for clients of the
 // single-orchestrator contract.
 func (s *server) clientState(st *State) ClientState {
-	views := findOrchestrators(st, s.cfg.Orchestrators, s.accounts.Accounts())
+	accounts := s.accounts.Accounts()
+	views := findOrchestrators(st, s.cfg.Orchestrators, accounts)
+	// a stopped orchestrator's Home lists the agents of the account it would run under
+	if expected := s.expected.Load(); expected != nil {
+		for i := range views {
+			if views[i].PaneID == nil && (*expected)[i] != "" {
+				views[i].Agents = agentsOfAccount(st, accounts, (*expected)[i])
+			}
+		}
+	}
 	var first *string
 	for _, v := range views {
 		if v.PaneID != nil {
