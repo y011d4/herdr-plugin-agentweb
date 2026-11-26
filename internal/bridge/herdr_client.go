@@ -78,21 +78,32 @@ func herdrCall(ctx context.Context, socketPath, method string, params map[string
 		return nil, err
 	}
 	defer conn.Close()
-	defer context.AfterFunc(ctx, func() { conn.Close() })()
+	// the request goes out only while ctx stands: the check and the write against the
+	// cancellation's close, one at a time, so once ctx has ended no byte more is written
+	var sending sync.Mutex
+	defer context.AfterFunc(ctx, func() {
+		sending.Lock()
+		conn.Close()
+		sending.Unlock()
+	})()
 	if timeout > 0 {
 		_ = conn.SetDeadline(time.Now().Add(timeout))
+	} else {
+		_ = conn.SetWriteDeadline(time.Now().Add(requestTimeout)) // a wait's request still goes out promptly
 	}
 	line, err := json.Marshal(map[string]any{"type": "request", "id": id, "method": method, "params": params})
 	if err != nil {
 		return nil, err
 	}
-	if ctx.Err() != nil { // given up before a byte went out: nothing reaches herdr
+	sending.Lock()
+	if ctx.Err() == nil {
+		_, err = conn.Write(append(line, '\n'))
+	}
+	sending.Unlock()
+	if ctx.Err() != nil { // given up: nothing more goes to herdr
 		return nil, ctx.Err()
 	}
-	if _, err := conn.Write(append(line, '\n')); err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
+	if err != nil {
 		logf("[herdr-client] rpc %s error: %s %s", method, err, safeParamsForLog(params))
 		return nil, err
 	}
