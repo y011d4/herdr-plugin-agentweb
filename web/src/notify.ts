@@ -3,11 +3,12 @@
  * draws it) and the OS notifications. A status push toasts unless its pane is on screen;
  * blocked/done also raise an OS notification while the page is hidden, notifications are on
  * and permitted. Opening a pane clears its toasts and notifications (the shell calls the
- * dismiss functions).
+ * dismiss functions). A headless orchestrator's warning (orchestrator_alert) is told the same way,
+ * as its pane hl:<name>, so opening its Home clears it too.
  */
-import { paneRoute } from './routes.ts';
+import { homeHash, paneRoute } from './routes.ts';
 import { store } from './store.ts';
-import type { WsAgentStatusMessage } from './types.ts';
+import type { WsAgentStatusMessage, WsOrchestratorAlertMessage } from './types.ts';
 
 export const STORAGE_NOTIF = 'herdr_notifications'; // 'true': OS notifications on (Settings)
 
@@ -86,12 +87,27 @@ export const clearToasts = (): void => setToasts([]);
  *  notification while the page is hidden, notifications are on and permitted. */
 export function notifyAgentStatus({ paneId, agent, from, to, workspaceLabel, tabLabel }: WsAgentStatusMessage): void {
   const jumpToPane = (): void => { location.hash = paneRoute(store.appState, paneId); };
-  const body = `${workspaceLabel ?? ''} / ${tabLabel ?? ''}`;
+  const body = [workspaceLabel, tabLabel].filter(Boolean).join(' / '); // a headless orchestrator has no tab
   const alert = to === 'blocked' || to === 'done';
   const title = alert ? `${agent ?? 'Agent'} ${to}` : `${agent ?? 'Agent'}: ${from} → ${to}`;
   if (store.view.activePaneId !== paneId) showToast(title, body, { sticky: true, onclick: jumpToPane, paneId });
+  if (alert) osNotify(title, body, paneId);
+}
+
+/** An orchestrator_alert push: a headless orchestrator's new warning (once per kind and session), or with
+ *  no name a failed Claude Code check. A sticky toast (a tap opens its Home; the check's: Settings, where it
+ *  is shown) and, while hidden, an OS notification. Its Home shows it as a warning line meanwhile. */
+export function notifyOrchestratorAlert({ name, kind, message }: WsOrchestratorAlertMessage): void {
+  const o = store.appState?.orchestrators?.find((x) => x.name === name);
+  const title = name ? `${o?.label || name}: ${kind}` : 'Claude Code check failed';
+  const paneId = name ? `hl:${name}` : '';
+  showToast(title, message, { sticky: true, paneId: paneId || undefined, onclick: () => { location.hash = name ? homeHash(name) : '#/settings'; } });
+  osNotify(title, message, paneId);
+}
+
+// An OS notification while the page is hidden, notifications are on and permitted.
+function osNotify(title: string, body: string, paneId: string): void {
   if (
-    alert &&
     document.hidden &&
     localStorage.getItem(STORAGE_NOTIF) === 'true' &&
     typeof Notification !== 'undefined' &&

@@ -10,6 +10,8 @@ export type WatchMessage =
 
 export function watchMessages(paneId: string | null, mode: 'terminal' | 'chat', hidden: boolean): WatchMessage[] {
   if (!paneId) return [{ type: 'unwatch_pane' }, { type: 'unwatch_transcript' }];
+  // a headless orchestrator (hl:<name>) has no pane to watch, only its transcript
+  if (paneId.startsWith('hl:')) return [{ type: 'unwatch_pane' }, { type: 'watch_transcript', paneId }];
   // The transcript watch stays on while hidden: it only sends new items, and
   // restarting it resends the whole tail.
   if (mode === 'chat') return [{ type: 'unwatch_pane' }, { type: 'watch_transcript', paneId }];

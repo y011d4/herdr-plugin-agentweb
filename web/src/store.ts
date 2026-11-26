@@ -7,7 +7,7 @@
 import { markSeen } from './dashboard-group.ts';
 import type { SeenDone } from './dashboard-group.ts';
 import { KeptTasks } from './kept-tasks.ts';
-import type { AppState } from './types.ts';
+import type { AgentStatus, AppState, PaneNode, WorkspaceNode } from './types.ts';
 
 const STORAGE_SEEN = 'herdr_seen_done'; // done panes already opened on this phone (SeenDone)
 export const STORAGE_HOME = 'herdr_home'; // the orchestrator whose Home was opened last
@@ -61,10 +61,27 @@ export function lastHome(): string | null {
   try { return localStorage.getItem(STORAGE_HOME); } catch { return null; }
 }
 
-/** A pane of the State, with its workspace and tab. */
+/** A running headless orchestrator (its paneId is hl:<name>) as a pane, the only place one is made:
+ *  it has no herdr pane, but the views of a pane (findPane, markPaneSeen) take it like one. Never in
+ *  appState.workspaces: New agent's directories and the list's "No workspaces found" go by those. */
+function headlessWorkspaces(state: AppState): WorkspaceNode[] {
+  return (state.orchestrators ?? []).flatMap((o) => {
+    const h = o.headless;
+    if (!h || !o.paneId) return [];
+    const status: AgentStatus = h.status === 'stopped' || h.status === 'error' ? 'unknown' : h.status;
+    const label = o.label || o.name;
+    const pane: PaneNode = { paneId: o.paneId, focused: false, cwd: null, launchCwd: null, title: null, agent: { name: 'claude', displayName: label,
+      status, customStatus: null, message: null, sinceUnixMs: 0, completionSeq: h.completionSeq, stateChangeSeq: null } };
+    return [{ workspaceId: o.paneId, label, cwd: null, worktree: null, tabs: [{ tabId: o.paneId, label: '', panes: [pane] }] }];
+  });
+}
+
+const paneWorkspaces = (state: AppState): WorkspaceNode[] => [...(state.workspaces ?? []), ...headlessWorkspaces(state)];
+
+/** A pane of the State (a running headless orchestrator's too), with its workspace and tab. */
 export function findPane(paneId: string) {
   if (!store.appState) return null;
-  for (const ws of store.appState.workspaces ?? []) {
+  for (const ws of paneWorkspaces(store.appState)) {
     for (const tab of ws.tabs ?? []) {
       for (const pane of tab.panes ?? []) {
         if (pane.paneId === paneId) return { pane, ws, tab };
@@ -76,7 +93,7 @@ export function findPane(paneId: string) {
 
 /** Records a done pane as seen on this phone (see SeenDone). */
 export function markPaneSeen(paneId: string): void {
-  store.seenDone = markSeen(store.seenDone, store.appState?.workspaces ?? [], paneId);
+  store.seenDone = markSeen(store.seenDone, store.appState ? paneWorkspaces(store.appState) : [], paneId);
   // best-effort: a storage failure must not stop the pane view from rendering
   try { localStorage.setItem(STORAGE_SEEN, JSON.stringify(store.seenDone)); } catch { /* memory-only */ }
 }
