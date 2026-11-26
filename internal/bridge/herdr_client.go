@@ -78,14 +78,10 @@ func herdrCall(ctx context.Context, socketPath, method string, params map[string
 		return nil, err
 	}
 	defer conn.Close()
-	// the request goes out only while ctx stands: the check and the write against the
-	// cancellation's close, one at a time, so once ctx has ended no byte more is written
-	var sending sync.Mutex
-	defer context.AfterFunc(ctx, func() {
-		sending.Lock()
-		conn.Close()
-		sending.Unlock()
-	})()
+	// the request goes out only while ctx stands: the cancellation closes the connection at
+	// once, a write in progress or not (a blocked write then fails; half a line is no request
+	// to herdr), and a write after the close sends nothing
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
 	if timeout > 0 {
 		_ = conn.SetDeadline(time.Now().Add(timeout))
 	} else {
@@ -95,11 +91,9 @@ func herdrCall(ctx context.Context, socketPath, method string, params map[string
 	if err != nil {
 		return nil, err
 	}
-	sending.Lock()
 	if ctx.Err() == nil {
 		_, err = conn.Write(append(line, '\n'))
 	}
-	sending.Unlock()
 	if ctx.Err() != nil { // given up: nothing more goes to herdr
 		return nil, ctx.Err()
 	}

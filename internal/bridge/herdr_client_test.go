@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -302,5 +304,55 @@ func TestHerdrCallCancellation(t *testing.T) {
 	}
 	if d := time.Since(began); d > time.Second {
 		t.Errorf("returned %s after the cancel", d)
+	}
+}
+
+// A cancel during a write blocked on a herdr that stopped reading closes the connection at
+// once: the call returns, and herdr never gets a whole request line.
+func TestHerdrCallCancelDuringABlockedWrite(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "fh")
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "h.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		if c, err := ln.Accept(); err == nil {
+			accepted <- c // and doesn't read, for now
+		}
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { // a request far bigger than the socket's buffers
+		_, err := herdrCall(ctx, sock, "agent.prompt", map[string]any{"target": "p1", "text": strings.Repeat("x", 8<<20)}, 0)
+		done <- err
+	}()
+	peer := <-accepted
+	defer peer.Close()
+	first := make([]byte, 1) // the write has begun
+	if _, err := io.ReadFull(peer, first); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // and fills the buffers: blocked
+	began := time.Now()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the call didn't return after the cancel")
+	}
+	if d := time.Since(began); d > time.Second {
+		t.Errorf("returned %s after the cancel", d)
+	}
+	rest, _ := io.ReadAll(peer) // what reached herdr, now that it reads again
+	got := append(first, rest...)
+	if bytes.IndexByte(got, '\n') >= 0 {
+		t.Errorf("herdr got a whole request line (%d bytes)", len(got))
 	}
 }
