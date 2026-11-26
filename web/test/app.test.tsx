@@ -229,11 +229,14 @@ describe('App', () => {
     assert.deepEqual(toastTitles(), ['Stopped']);
   });
 
-  it("a Home's Settings button opens the settings", async () => {
+  it("a Home's Settings button opens the settings, whose Back returns to that Home", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/home/personal');
     await click($('#btn-settings'));
     assert.equal(location.hash, '#/settings');
+    await settle();
+    await click($('.topbar-back'));
+    assert.equal(location.hash, '#/home/personal');
   });
 
   it("routes the SW's navigate message; an orchestrator's pane lands on its Home, drawn afresh", async () => {

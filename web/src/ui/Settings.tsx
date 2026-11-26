@@ -10,10 +10,11 @@ const APP_VERSION = '0.1.0';
 // panel, so a stale cached bundle is immediately visible. 'dev' unbuilt.
 export const BUILD = import.meta.url.match(/-([\w-]{8})\.js$/)?.[1] ?? 'dev';
 
-export const settingsTopbar = {
+/** Back goes to `back`: the Home or list that opened Settings. */
+export const settingsTopbar = (back: string) => ({
   title: 'Settings',
-  left: <button className="topbar-back" aria-label="Back" onClick={() => { location.hash = '#/agents'; }}>&#8592;</button>,
-};
+  left: <button className="topbar-back" aria-label="Back" onClick={() => { location.hash = back; }}>&#8592;</button>,
+});
 
 export function Settings({ toast, onSignedOut }: { toast: (title: string, body: string) => void; onSignedOut: () => void }) {
   const state = useSyncExternalStore(subscribe, () => store.appState);

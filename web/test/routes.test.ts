@@ -1,6 +1,6 @@
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
-import { agentsScope, nextPaneBackRoute, paneGoneRoute, paneRoute, resolveRoute } from '../src/routes.ts';
+import { agentsScope, nextPaneBackRoute, nextSettingsBackRoute, paneGoneRoute, paneRoute, resolveRoute } from '../src/routes.ts';
 import type { AppState, OrchestratorView } from '../src/types.ts';
 
 const orch = (name: string, paneId: string | null): OrchestratorView => ({ name, label: '', paneId, agents: null });
@@ -101,6 +101,14 @@ describe('route helpers', () => {
     assert.equal(nextPaneBackRoute('#/agents/a', '#/agents'), '#/agents/a');
     assert.equal(nextPaneBackRoute('#/pane/p9', '#/agents/a'), '#/agents/a');
     for (const from of ['#/agents', '#/settings', '', null]) assert.equal(nextPaneBackRoute(from, '#/home/a'), '#/agents', String(from));
+  });
+
+  it('nextSettingsBackRoute: the Home or list that opened Settings, else the list; no hash change keeps it', () => {
+    assert.equal(nextSettingsBackRoute('#/home/a', '#/agents'), '#/home/a');
+    assert.equal(nextSettingsBackRoute('#/agents/a', '#/agents'), '#/agents/a');
+    assert.equal(nextSettingsBackRoute('#/agents', '#/home/a'), '#/agents');
+    assert.equal(nextSettingsBackRoute('', '#/home/a'), '#/agents');
+    assert.equal(nextSettingsBackRoute(null, '#/home/a'), '#/home/a');
   });
 
   it("paneGoneRoute: back to the account's list a pane came from, else the list", () => {
