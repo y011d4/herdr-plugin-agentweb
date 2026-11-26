@@ -263,15 +263,19 @@ function Composer({ paneId, home }: { paneId: string; home: boolean }) {
   const shown = useRef(images);
   shown.current = images;
   const sendingImages = useRef(false);
+  const [preparing, setPreparing] = useState(0); // images being scaled: no send until they are there
   const attach = async (files: File[]): Promise<void> => {
     const picked = files.filter((f) => f.type.startsWith('image/'));
     if (!picked.length) return;
     let added: ImageAttachment[];
+    setPreparing((n) => n + 1);
     try {
       added = await Promise.all(picked.map(toAttachment));
     } catch {
       showToast('Image not added', 'This browser could not read it');
       return;
+    } finally {
+      setPreparing((n) => n - 1);
     }
     const next = fitImages(shown.current, added);
     if (next.length < shown.current.length + added.length) showToast('Not every image was added', `At most ${MAX_IMAGES}, 1 MB in all, per message`);
@@ -296,7 +300,7 @@ function Composer({ paneId, home }: { paneId: string; home: boolean }) {
     const t = input.current!;
     const text = t.value;
     const sent = shown.current;
-    if ((!text && !sent.length) || keptTasks.sending(paneId) || sendingImages.current) return;
+    if ((!text && !sent.length) || keptTasks.sending(paneId) || sendingImages.current || preparing) return;
     sendingImages.current = sent.length > 0; // an upload takes a while: a second tap mustn't send them twice
     const kept = keptTasks.beginSend(paneId, text); // false unless the pane has a kept task
     if (kept) t.disabled = true;
@@ -374,7 +378,7 @@ function Composer({ paneId, home }: { paneId: string; home: boolean }) {
         )}
         <textarea id="pane-input" ref={input} rows={1} placeholder={placeholder} autoCorrect="off" autoCapitalize="off" spellCheck={false}
           onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); keptTasks.edit(paneId, e.currentTarget.value); }}></textarea>
-        <button className="input-send-btn" id="btn-send-enter" onClick={() => { void send(); }}>Send</button>
+        <button className="input-send-btn" id="btn-send-enter" disabled={preparing > 0} onClick={() => { void send(); }}>Send</button>
       </div>
     </>
   );
