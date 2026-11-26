@@ -54,8 +54,10 @@ function Overlay({ close, className, children }: { close: () => void; className:
   );
 }
 
-// Each preview's image by its history entry, so Back or Forward onto the entry shows it again.
-// ponytail: kept for the page's life (a scaled image is ~150 KB); drop old ones if that ever matters.
+// The last few previews' images by their history entries, so Back or Forward onto one shows it again
+// (an older entry stays blank, as after a reload). Opening a preview drops the forward entries, so
+// only Forward after a close, or the ones hash changes left behind, can still be reached.
+const PREVIEWS_KEPT = 5;
 const previewed = new Map<number, { src: string; alt: string }>();
 
 /** An image, fit to the screen. A tap on it or around it, ×, Escape or the phone's Back closes it: it
@@ -64,6 +66,7 @@ const previewed = new Map<number, { src: string; alt: string }>();
 export function previewImage(src: string, alt: string): void {
   const mark = Math.random(); // this preview's entry, not a stale one a reload or a hash change left behind
   previewed.set(mark, { src, alt });
+  if (previewed.size > PREVIEWS_KEPT) previewed.delete(previewed.keys().next().value!);
   history.pushState({ imagePreview: mark }, '');
   showPreview(src, alt, mark);
 }

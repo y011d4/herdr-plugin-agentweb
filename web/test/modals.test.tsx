@@ -219,6 +219,19 @@ describe('New agent', () => {
 
 describe('Image preview', () => {
   const popped = (): Promise<void> => new Promise((r) => { addEventListener('popstate', () => r(), { once: true }); });
+  /** A hash change as a browser makes it: the new entry has no state, and a popstate fires (happy-dom keeps the state and fires none). */
+  async function hashChange(hash: string): Promise<void> {
+    location.hash = hash;
+    history.replaceState(null, '');
+    await fire(() => dispatchEvent(new PopStateEvent('popstate', { state: null })));
+    await settle();
+  }
+  async function go(delta: number): Promise<void> {
+    const moved = popped();
+    history.go(delta);
+    await moved;
+    await settle();
+  }
   it('shows the image with focus on ×; a tap on it or around it, ×, Escape or Back closes it and the route stays', async () => {
     location.hash = '#/home/pilot';
     const opener = document.body.appendChild(document.createElement('button'));
@@ -260,24 +273,26 @@ describe('Image preview', () => {
   it('a hash change closes it; Back shows it again and Forward still reaches the later route', async () => {
     location.hash = '#/home/pilot';
     await fire(() => previewImage('data:image/png;base64,x', 'image'));
-    location.hash = '#/agents'; // e.g. a notification's link
-    // as a browser does: the new entry has no state, and a popstate fires (happy-dom keeps the state and fires none)
-    history.replaceState(null, '');
-    await fire(() => dispatchEvent(new PopStateEvent('popstate', { state: null })));
-    await settle();
+    await hashChange('#/agents'); // e.g. a notification's link
     assert.ok(!open());
     assert.equal(location.hash, '#/agents', 'no step back');
-    let moved = popped();
-    history.back();
-    await moved;
-    await settle();
+    await go(-1);
     assert.ok(open());
     assert.equal(location.hash, '#/home/pilot');
-    moved = popped();
-    history.forward();
-    await moved;
-    await settle();
+    await go(1);
     assert.ok(!open());
     assert.equal(location.hash, '#/agents');
+  });
+
+  it('shows only the last 5 again: an older entry stays blank', async () => {
+    location.hash = '#/x0';
+    for (let i = 1; i <= 6; i++) {
+      await fire(() => previewImage('data:image/png;base64,x', `image ${i}`));
+      await hashChange(`#/x${i}`);
+    }
+    await go(-11); // x0 [P1] x1 P2 x2 … P6 x6
+    assert.ok(!open());
+    await go(2); // P2
+    assert.equal($<HTMLImageElement>('.image-preview img').alt, 'image 2');
   });
 });
