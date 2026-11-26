@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -285,6 +286,7 @@ func (b *hlBridge) waitWakes(t *testing.T, want ...string) {
 }
 
 func TestHeadlessWakeUps(t *testing.T) {
+	needsAccounts(t)
 	t.Run("a worker that finishes after 10 s: one wake-up, one task", func(t *testing.T) {
 		b := startHeadless(t, t.TempDir(), nil, nil)
 		w := worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
@@ -484,6 +486,7 @@ func TestHeadlessPromptNeedsText(t *testing.T) {
 // A wake-up the child can't take (down, or the bridge restarting, before the coalesced
 // write) waits, saved, for its next start.
 func TestHeadlessWakeWaitsForTheChild(t *testing.T) {
+	needsAccounts(t)
 	script := func(w *fakeherdr.World, pane string) {
 		w.Set(pane, "working")
 		time.Sleep(300 * time.Millisecond)
@@ -578,6 +581,7 @@ func TestHeadlessSavedWatchesOutliveARefusedStart(t *testing.T) {
 // fresh one (its timer finds a new generation), and the cleared state is saved before the
 // start, so a refused start (and a bridge restart then) can't bring the old watches back.
 func TestHeadlessClearForgetsWorkers(t *testing.T) {
+	needsAccounts(t)
 	state := t.TempDir()
 	b := startHeadless(t, state, nil, nil)
 	worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
@@ -622,6 +626,7 @@ func TestHeadlessClearForgetsWorkers(t *testing.T) {
 
 // agent_start with a blank task starts the worker and sends it nothing.
 func TestHeadlessStartWithABlankTask(t *testing.T) {
+	needsAccounts(t)
 	var calls []string
 	var mu sync.Mutex
 	b := startHeadless(t, t.TempDir(), nil, nil)
@@ -675,6 +680,7 @@ func TestHeadlessStartWithABlankTask(t *testing.T) {
 // A tool call is bound to the child it came from: one in flight across a Clear makes no
 // watch (its worker gets nothing), and that child's bearer reaches nothing after.
 func TestHeadlessCallAcrossAClear(t *testing.T) {
+	needsAccounts(t)
 	b := startHeadless(t, t.TempDir(), nil, nil)
 	h := b.srv.headless["h1"]
 	var prompted atomic.Bool
@@ -766,6 +772,7 @@ func (b *hlBridge) restarted(t *testing.T) {
 // held in its agent lookup across the restart, makes no watch and sends the worker nothing,
 // while the watch from before the crash lives on.
 func TestHeadlessCallAcrossARestart(t *testing.T) {
+	needsAccounts(t)
 	b := startHeadless(t, t.TempDir(), nil, func(h *headlessRunner) { h.restartDelays = []time.Duration{100 * time.Millisecond} })
 	h := b.srv.headless["h1"]
 	var prompts atomic.Int32
@@ -843,4 +850,13 @@ func TestHeadlessQuestionFromAReplacedChild(t *testing.T) {
 		t.Fatalf("answer: %d %s", status, body)
 	}
 	b.waitFor(t, "the turn's end", func(v OrchestratorView) bool { return v.Headless.Status == "done" && v.Headless.Pending == nil })
+}
+
+// needsAccounts skips a test whose worker must pass the account check: a pane's Claude account
+// is read from /proc (Linux only; macOS's needs sysctl, a CLAUDE.md follow-up).
+func needsAccounts(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("a worker's Claude account is read from /proc: Linux only")
+	}
 }
