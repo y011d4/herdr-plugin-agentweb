@@ -75,10 +75,11 @@ var (
 	envNameRE          = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
-// parseOrchestrators reads config `orchestrators: [{ name, label?, env? }]`, in
+// parseOrchestrators reads config `orchestrators: [{ name, label?, env?, mode? }]`, in
 // order. Each is managed by the plugin in <data>/orchestrators/<name> and started
 // with its env (string values; a leading ~ is expanded, so
-// "CLAUDE_CONFIG_DIR": "~/.config/claude/work" works). An entry that still has the
+// "CLAUDE_CONFIG_DIR": "~/.config/claude/work" works); `"mode": "headless"` runs it as
+// the bridge's own child process (headless.go) instead of a herdr pane. An entry that still has the
 // earlier format's dir is that dir, unmanaged. Malformed entries and repeated names
 // are dropped. With none left, the older setup stays as it was: the single
 // orchestrator_dir, else the old default dir (<data>/dispatcher) when it exists,
@@ -104,11 +105,16 @@ func parseOrchestrators(raw, legacyDir any, home, data string, exists func(strin
 		if l, ok := nonEmpty(entry["label"]); ok {
 			label = jsTrim(l)
 		}
+		headless := entry["mode"] == "headless"
 		// an entry with its own dir (the earlier format) stays that unmanaged dir
 		if dir, ok := nonEmpty(entry["dir"]); ok {
+			if headless {
+				logf("[config] orchestrator %s: mode headless needs a managed entry (one without dir); it runs as tui", name)
+			}
 			out = append(out, OrchestratorDef{Name: name, Label: label, Dir: expandDir(dir, home), Env: vars})
 		} else {
-			out = append(out, OrchestratorDef{Name: name, Label: label, Dir: filepath.Join(data, "orchestrators", name), Env: vars, Managed: true})
+			mode := map[bool]string{true: "headless"}[headless]
+			out = append(out, OrchestratorDef{Name: name, Label: label, Dir: filepath.Join(data, "orchestrators", name), Env: vars, Managed: true, Mode: mode})
 		}
 	}
 	if len(out) > 0 {

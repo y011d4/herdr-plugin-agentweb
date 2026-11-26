@@ -15,6 +15,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -73,6 +74,21 @@ func contractState() ClientState {
 	return ClientState{State: s, Orchestrators: views, OrchestratorPaneID: views[0].PaneID}
 }
 
+// withHeadless is state plus a running headless orchestrator, as clientState fills one in
+// from its runner (a state message of its own, so the web tests' state stays as it is).
+func withHeadless(state ClientState) ClientState {
+	const now = 1795478400000
+	def := OrchestratorDef{Name: "pilot", Label: "Pilot", Dir: "/home/u/.local/share/herdr-yoicks/orchestrators/pilot", Managed: true, Mode: "headless"}
+	v := findOrchestrators(state.State, []OrchestratorDef{def}, nil)[0]
+	v.PaneID, v.Agents = new("hl:pilot"), []string{"p1", "p3", "p4"}
+	v.Headless = &HeadlessView{Status: "working", CompletionSeq: 3, Usage: &HeadlessUsage{
+		FiveHour: &UsageWindow{Utilization: 0.35, ResetsAt: 1795665000000}, SevenDay: nil, ContextPct: new(12.5), At: now},
+		Warnings: []HeadlessWarning{{Kind: "silent", Message: "no event for 3m0s while working", Since: now, Actions: []string{"interrupt", "clear"}},
+			{Kind: "unknown_event", Message: "Claude Code sent an event yoicks doesn't know (mystery)", Since: now, Actions: []string{}}}}
+	state.Orchestrators = append(slices.Clone(state.Orchestrators), v)
+	return state
+}
+
 func contractItems() []TimelineItem {
 	ts := int64(1795478400000)
 	forID := "toolu_01"
@@ -95,9 +111,11 @@ func contractMessages(state ClientState, items []TimelineItem) []any {
 	session := "0b9f3c1e-2d4a-4e8b-9c7d-5f6a7b8c9d0e"
 	return []any{
 		WsStateMessage{Type: "state", State: state},
+		WsStateMessage{Type: "state", State: withHeadless(state)},
 		WsAgentStatusMessage{Type: "agent_status", PaneID: "p3", Agent: strp("Claude Code"), From: "working", To: "done",
 			WorkspaceLabel: strp("repo-wt-feat"), TabLabel: strp("feat")},
 		WsAgentStatusMessage{Type: "agent_status", PaneID: "p9", From: "unknown", To: "blocked"},
+		WsOrchestratorAlertMessage{Type: "orchestrator_alert", Name: "pilot", Kind: "silent", Message: "no event for 3m0s while working"},
 		WsPongMessage{Type: "pong"},
 		WsPaneOutputMessage{Type: "pane_output", PaneID: "p1", Ansi: "\u001b[1m❯\u001b[0m hi <b>&", AppScroll: true},
 		WsPaneGoneMessage{Type: "pane_gone", PaneID: "p2"},

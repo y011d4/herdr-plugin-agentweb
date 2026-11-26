@@ -1,0 +1,648 @@
+package bridge
+
+// Headless orchestrators: the pure parts (argv, env, the billing checks, the orphan rule),
+// then the runner through the bridge, against tools/fakeclaude (never a real Claude) and
+// a fake herdr.
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+)
+
+func TestHeadlessArgv(t *testing.T) {
+	got := headlessArgv("s-1", false, "/st/headless/h.mcp.json")
+	want := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+		"--session-id", "s-1", "--mcp-config", "/st/headless/h.mcp.json", "--strict-mcp-config",
+		"--permission-mode", "manual", "--tools", "AskUserQuestion"}
+	if !slices.Equal(got, want) {
+		t.Errorf("new: %v", got)
+	}
+	if got := headlessArgv("s-1", true, "/m"); got[6] != "--resume" || got[7] != "s-1" {
+		t.Errorf("resume: %v", got)
+	}
+	for _, a := range got {
+		if a == "--bare" || a == "--dangerously-skip-permissions" {
+			t.Errorf("argv has %s", a)
+		}
+	}
+	if !hasMarker(got, "/st/headless/h.mcp.json") || hasMarker(got, "/st/headless/other.mcp.json") {
+		t.Error("the marker")
+	}
+}
+
+func TestHeadlessEnv(t *testing.T) {
+	parent := []string{"HOME=/home/u", "PATH=/bin", "USER=u", "LC_ALL=C", "LANG=ja_JP.UTF-8", "TERM=xterm",
+		"HERDR_SOCKET_PATH=/s", "HERDR_PANE_ID=p1", "ANTHROPIC_API_KEY=sk", "CLAUDE_CODE_USE_BEDROCK=1", "SECRET=x", "CLAUDE_CONFIG_DIR=/bridge's"}
+	got := headlessEnv(parent, map[string]string{"CLAUDE_CONFIG_DIR": "/home/u/.config/claude/work", "HERDR_X": "1", "ANTHROPIC_BASE_URL": "u"})
+	want := []string{"HOME=/home/u", "PATH=/bin", "USER=u", "LC_ALL=C", "LANG=ja_JP.UTF-8", "TERM=dumb", "CLAUDE_CONFIG_DIR=/home/u/.config/claude/work"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestHeadlessBillingChecks(t *testing.T) {
+	for k, want := range map[string]bool{"ANTHROPIC_API_KEY": true, "ANTHROPIC_AUTH_TOKEN": true, "CLAUDE_CODE_USE_VERTEX": true,
+		"CLAUDE_CODE_USE_FOUNDRY": true, "AWS_BEARER_TOKEN_BEDROCK": true, "CLAUDE_CONFIG_DIR": false, "AWS_REGION": false} {
+		if isBillingVar(k) != want {
+			t.Errorf("isBillingVar(%s) != %v", k, want)
+		}
+	}
+	for content, want := range map[string]string{
+		`{"env":{"FOO":"1","ANTHROPIC_API_KEY":"sk"}}`: "env.ANTHROPIC_API_KEY",
+		`{"env":{"CLAUDE_CODE_USE_BEDROCK":"1"}}`:      "env.CLAUDE_CODE_USE_BEDROCK",
+		`{"apiKeyHelper":"/bin/key"}`:                  "apiKeyHelper",
+		`{"apiKeyHelper":"","env":{"FOO":"1"}}`:        "",
+		`{"permissions":{"defaultMode":"dontAsk"}}`:    "",
+		`{"env":`: "unreadable JSON",
+	} {
+		if got := settingsBilling([]byte(content)); got != want {
+			t.Errorf("%s: %q, want %q", content, got, want)
+		}
+	}
+}
+
+func TestHeadlessOrphans(t *testing.T) {
+	marker := "/st/headless/h.mcp.json"
+	procs := []procArgs{
+		{1, []string{"claude", "-p", "--resume", "sid", "--mcp-config", marker}}, // ours, orphaned
+		{2, []string{"claude", "--resume", "sid"}},                               // the user's own
+		{3, []string{"claude", "-p", "--resume", "other", "--mcp-config", marker}},
+	}
+	ours, others := heldSession(procs, "sid", marker)
+	if len(ours) != 1 || ours[0].pid != 1 || len(others) != 1 || others[0].pid != 2 {
+		t.Errorf("ours %v, others %v", ours, others)
+	}
+	if orphanTarget(10, 10) != -10 || orphanTarget(10, 4) != 10 {
+		t.Error("the group is killed only when the orphan leads it")
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(newUUID()) {
+		t.Error("newUUID")
+	}
+}
+
+// ── the runner through the bridge ────────────────────────────────────────────
+
+type hlBridge struct {
+	*testBridge
+	log  string // FAKECLAUDE_LOG
+	home string
+}
+
+// fakeClaudeEnv builds tools/fakeclaude as `claude` (the orphan scan looks for that name)
+// and points the bridge at it, with a fresh HOME.
+func fakeClaudeEnv(t *testing.T) (log, home string) {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "claude")
+	build := exec.Command("go", "build", "-o", bin, "./tools/fakeclaude")
+	build.Dir = filepath.Join("..", "..")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("building fakeclaude: %v\n%s", err, out)
+	}
+	home = filepath.Join(dir, "home")
+	os.MkdirAll(home, 0o700)
+	log = filepath.Join(dir, "fakeclaude.log")
+	t.Setenv("YOICKS_CLAUDE_BIN", bin)
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("FAKECLAUDE_LOG", log)
+	old := managedSettingsPath
+	managedSettingsPath = filepath.Join(dir, "managed-settings.json")
+	t.Cleanup(func() { managedSettingsPath = old })
+	return log, home
+}
+
+// startHeadless runs a bridge with one headless orchestrator, h1, on fakeclaude.
+func startHeadless(t *testing.T, stateDir string, env map[string]string, tweak func(*headlessRunner)) *hlBridge {
+	t.Helper()
+	log, home := os.Getenv("FAKECLAUDE_LOG"), os.Getenv("HOME")
+	if !strings.HasSuffix(log, "fakeclaude.log") {
+		log, home = fakeClaudeEnv(t)
+	}
+	if env == nil {
+		env = map[string]string{}
+	}
+	// fakeclaude's settings reach it as the entry's env does (the bridge's own env is allowlisted)
+	for _, kv := range os.Environ() {
+		if k, v, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "FAKECLAUDE_") {
+			env[k] = v
+		}
+	}
+	def := OrchestratorDef{Name: "h1", Label: "H1", Dir: filepath.Join(home, "orchestrators", "h1"), Env: env, Managed: true, Mode: "headless"}
+	b := startBridge(t, Config{StateDir: stateDir, Orchestrators: []OrchestratorDef{def}}, nil, func(s *server) {
+		h := s.headless["h1"]
+		h.restartDelays = []time.Duration{50 * time.Millisecond, 50 * time.Millisecond, 50 * time.Millisecond}
+		if tweak != nil {
+			tweak(h)
+		}
+	})
+	t.Cleanup(b.srv.shutdownHeadless) // before the bridge's own cleanup (LIFO)
+	return &hlBridge{b, log, home}
+}
+
+func (b *hlBridge) post(t *testing.T, action, body string) (int, string) {
+	t.Helper()
+	status, out, _ := b.do(t, "POST", "/api/orchestrators/h1/"+action, b.token, []byte(body))
+	return status, out
+}
+
+func (b *hlBridge) view(t *testing.T) OrchestratorView {
+	t.Helper()
+	_, body, _ := b.do(t, "GET", "/api/state", b.token, nil)
+	var st struct{ Orchestrators []OrchestratorView }
+	if err := json.Unmarshal([]byte(body), &st); err != nil || len(st.Orchestrators) != 1 {
+		t.Fatalf("state %s: %v", body, err)
+	}
+	return st.Orchestrators[0]
+}
+
+func (b *hlBridge) waitFor(t *testing.T, what string, ok func(v OrchestratorView) bool) OrchestratorView {
+	t.Helper()
+	var v OrchestratorView
+	waitUntil(t, 10*time.Second, what, func() bool { v = b.view(t); return ok(v) })
+	return v
+}
+
+func (b *hlBridge) waitStatus(t *testing.T, status string) OrchestratorView {
+	t.Helper()
+	return b.waitFor(t, "status "+status, func(v OrchestratorView) bool { return v.Headless != nil && v.Headless.Status == status })
+}
+
+func (b *hlBridge) start(t *testing.T) {
+	t.Helper()
+	if status, body := b.post(t, "start", ""); status != 200 || body != `{"ok":true,"paneId":"hl:h1","name":"h1"}` {
+		t.Fatalf("start: %d %s", status, body)
+	}
+}
+
+func (b *hlBridge) send(t *testing.T, text string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"text": text})
+	if status, out := b.post(t, "send", string(body)); status != 200 {
+		t.Fatalf("send %q: %d %s", text, status, out)
+	}
+}
+
+// runs is fakeclaude's -p runs (pid, argv), in order; stdin its stdin lines.
+func (b *hlBridge) runs(t *testing.T) (runs []procArgs, stdin []string) {
+	t.Helper()
+	f, err := os.Open(b.log)
+	if err != nil {
+		return nil, nil
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(nil, 1<<20)
+	for sc.Scan() {
+		var l struct {
+			Pid   int
+			Argv  []string
+			Stdin *string
+		}
+		json.Unmarshal(sc.Bytes(), &l)
+		if l.Stdin != nil {
+			stdin = append(stdin, *l.Stdin)
+		} else if slices.Contains(l.Argv, "-p") {
+			runs = append(runs, procArgs{l.Pid, l.Argv})
+		}
+	}
+	return runs, stdin
+}
+
+func (b *hlBridge) waitStdin(t *testing.T, substr string) {
+	t.Helper()
+	waitUntil(t, 10*time.Second, "stdin gets "+substr, func() bool {
+		_, in := b.runs(t)
+		return slices.ContainsFunc(in, func(l string) bool { return strings.Contains(l, substr) })
+	})
+}
+
+func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
+
+func hasWarning(v OrchestratorView, kind string) bool {
+	return v.Headless != nil && slices.ContainsFunc(v.Headless.Warnings, func(w HeadlessWarning) bool { return w.Kind == kind })
+}
+
+func TestHeadlessTurn(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	// its agents: its account's, as a stopped TUI one's
+	if v := b.waitFor(t, "its agents", func(v OrchestratorView) bool { return v.Agents != nil }); v.Mode != "headless" || v.PaneID != nil || v.Headless.Status != "stopped" {
+		t.Fatalf("before the start: %+v", v)
+	}
+	b.start(t)
+	v := b.waitStatus(t, "idle")
+	if v.PaneID == nil || *v.PaneID != "hl:h1" || v.Headless.CompletionSeq != 0 || v.Headless.Pending != nil {
+		t.Fatalf("started: %+v", v)
+	}
+	b.send(t, "slow 1")
+	if v := b.view(t); v.Headless.Status != "working" {
+		t.Errorf("after the send: %s", v.Headless.Status)
+	}
+	v = b.waitStatus(t, "done")
+	if v.Headless.CompletionSeq != 1 || v.Headless.Usage == nil || v.Headless.Usage.FiveHour.Utilization != 0.25 ||
+		v.Headless.Usage.ContextPct == nil || *v.Headless.Usage.ContextPct != 1 || len(v.Headless.Warnings) != 0 {
+		t.Fatalf("done: %+v %+v", v.Headless, v.Headless.Usage)
+	}
+
+	// the chat: the transcript fakeclaude wrote, through the pane transcript route
+	waitUntil(t, 5*time.Second, "the transcript", func() bool {
+		_, body, _ := b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
+		return strings.Contains(body, `"available":true`) && strings.Contains(body, `"text":"echo: slow 1"`)
+	})
+
+	// a message sent mid-turn is written at once, and answered
+	b.send(t, "slow 2")
+	b.waitStatus(t, "working")
+	b.send(t, "while working")
+	b.waitStdin(t, "while working")
+	v = b.waitFor(t, "both turns", func(v OrchestratorView) bool { return v.Headless.CompletionSeq == 3 })
+	if v.Headless.Status != "done" {
+		t.Errorf("status %s", v.Headless.Status)
+	}
+	runs, _ := b.runs(t)
+	if len(runs) != 1 || !slices.Contains(runs[0].argv, "--session-id") {
+		t.Fatalf("runs %v", runs)
+	}
+	// the env allowlist reached it: no herdr variable, no billing one
+	f, _ := os.ReadFile(b.log)
+	if strings.Contains(string(f), `"HERDR_`) || strings.Contains(string(f), `"ANTHROPIC_`) {
+		t.Errorf("env: %s", f)
+	}
+}
+
+func TestHeadlessInterruptAndStop(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	b.send(t, "slow 30")
+	b.waitStatus(t, "working")
+	began := time.Now()
+	if status, body := b.post(t, "interrupt", ""); status != 200 || time.Since(began) > time.Second {
+		t.Fatalf("interrupt: %d %s after %s", status, body, time.Since(began))
+	}
+	if v := b.waitStatus(t, "idle"); v.Headless.CompletionSeq != 0 {
+		t.Errorf("an interrupted turn counted: %+v", v.Headless)
+	}
+
+	// Stop while working: within the budget, and nothing left running
+	b.send(t, "slow 30")
+	b.waitStatus(t, "working")
+	began = time.Now()
+	if status, body := b.post(t, "stop", ""); status != 200 {
+		t.Fatalf("stop: %d %s", status, body)
+	}
+	if d := time.Since(began); d > 2500*time.Millisecond {
+		t.Errorf("stop took %s", d)
+	}
+	runs, _ := b.runs(t)
+	for _, r := range runs {
+		if alive(r.pid) {
+			t.Errorf("pid %d still runs", r.pid)
+		}
+	}
+	if v := b.view(t); v.PaneID != nil || v.Headless.Status != "stopped" {
+		t.Errorf("stopped: %+v", v)
+	}
+	if status, _ := b.post(t, "send", `{"text":"x"}`); status != 409 {
+		t.Errorf("send while stopped: %d", status)
+	}
+}
+
+func TestHeadlessCrashes(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	for i := 1; i <= 4; i++ {
+		b.send(t, "crash")
+		if i < 4 { // restarted, and its notice answered
+			b.waitFor(t, "a restart", func(v OrchestratorView) bool {
+				runs, _ := b.runs(t)
+				return len(runs) == i+1 && v.Headless.Status == "done"
+			})
+		}
+	}
+	v := b.waitStatus(t, "error")
+	if !hasWarning(v, "restart_limit") || !strings.Contains(v.Headless.Warnings[len(v.Headless.Warnings)-1].Message, "crashing as asked") {
+		t.Fatalf("warnings %+v", v.Headless.Warnings)
+	}
+	runs, stdin := b.runs(t)
+	if len(runs) != 4 {
+		t.Fatalf("runs %d", len(runs))
+	}
+	for _, r := range runs[1:] {
+		if r.argv[6] != "--resume" || r.argv[7] != runs[0].argv[7] {
+			t.Errorf("a restart without --resume of the session: %v", r.argv)
+		}
+	}
+	// each restart after a crash mid-turn tells it so
+	if n := len(slices.DeleteFunc(stdin, func(l string) bool { return !strings.Contains(l, "restarted while you were working") })); n != 3 {
+		t.Errorf("%d notices", n)
+	}
+}
+
+func TestHeadlessResumesAcrossBridgeRestarts(t *testing.T) {
+	state := t.TempDir()
+	b := startHeadless(t, state, nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	b.send(t, "slow 30")
+	b.waitStatus(t, "working")
+	began := time.Now()
+	b.srv.shutdownHeadless() // the bridge's shutdown
+	if d := time.Since(began); d > 2500*time.Millisecond {
+		t.Errorf("shutdown took %s", d)
+	}
+	runs, _ := b.runs(t)
+	if alive(runs[0].pid) {
+		t.Fatal("the child outlived the shutdown")
+	}
+
+	b2 := startHeadless(t, state, nil, nil)
+	b2.srv.startHeadless()
+	b2.waitStatus(t, "done") // the notice was answered
+	runs, _ = b2.runs(t)
+	if len(runs) != 2 || runs[1].argv[6] != "--resume" || runs[1].argv[7] != runs[0].argv[7] {
+		t.Fatalf("runs %v", runs)
+	}
+	b2.waitStdin(t, "restarted while you were working")
+
+	// Clear: a fresh session
+	if status, body := b2.post(t, "clear", ""); status != 200 {
+		t.Fatalf("clear: %d %s", status, body)
+	}
+	waitUntil(t, 5*time.Second, "the fresh run", func() bool { runs, _ = b2.runs(t); return len(runs) == 3 })
+	if len(runs) != 3 || runs[2].argv[6] != "--session-id" || runs[2].argv[7] == runs[0].argv[7] {
+		t.Fatalf("after clear %v", runs)
+	}
+}
+
+func TestHeadlessDetectors(t *testing.T) {
+	var mu sync.Mutex
+	var logged []string
+	b := startHeadless(t, t.TempDir(), nil, func(h *headlessRunner) {
+		h.silence = 600 * time.Millisecond
+		h.log = func(f string, a ...any) { mu.Lock(); logged = append(logged, f); mu.Unlock() }
+	})
+	c, _, err := b.dial(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	b.start(t)
+	b.waitStatus(t, "idle")
+	for _, script := range []string{"unknown", "garbage", "ask"} {
+		b.send(t, script)
+		b.waitFor(t, script+" answered", func(v OrchestratorView) bool { return v.Headless.Status == "done" })
+	}
+	b.send(t, "hang 2")
+	v := b.waitFor(t, "the silence warning", func(v OrchestratorView) bool { return hasWarning(v, "silent") })
+	for _, w := range v.Headless.Warnings {
+		if w.Kind == "silent" && !slices.Equal(w.Actions, []string{"interrupt", "clear"}) {
+			t.Errorf("actions %v", w.Actions)
+		}
+	}
+	v = b.waitStatus(t, "done")
+	for _, kind := range []string{"unknown_event", "unreadable", "permission_route"} {
+		if !hasWarning(v, kind) {
+			t.Errorf("no %s warning: %+v", kind, v.Headless.Warnings)
+		}
+	}
+	if hasWarning(v, "silent") {
+		t.Error("the silence warning stayed after an event")
+	}
+	b.waitStdin(t, `"behavior":"deny"`) // the stdio permission request was answered
+
+	// each kind was alerted once over WS
+	alerts := map[string]int{}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	for {
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			break
+		}
+		var m WsOrchestratorAlertMessage
+		if json.Unmarshal(data, &m) == nil && m.Type == "orchestrator_alert" && m.Name == "h1" {
+			alerts[m.Kind]++
+		}
+	}
+	for _, kind := range []string{"unknown_event", "unreadable", "permission_route", "silent"} {
+		if alerts[kind] != 1 {
+			t.Errorf("alerts %v", alerts)
+			break
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.ContainsFunc(logged, func(l string) bool { return strings.HasPrefix(l, "auth status") }) {
+		t.Errorf("logged %v", logged)
+	}
+}
+
+func TestHeadlessRefusesBilling(t *testing.T) {
+	t.Run("an env billing variable: error before any start", func(t *testing.T) {
+		b := startHeadless(t, t.TempDir(), map[string]string{"ANTHROPIC_API_KEY": "sk"}, nil)
+		if v := b.view(t); v.Headless.Status != "error" || !hasWarning(v, "billing") {
+			t.Fatalf("%+v", v.Headless)
+		}
+		if status, body := b.post(t, "start", ""); status != 409 || !strings.Contains(body, "billing_refused") {
+			t.Errorf("start: %d %s", status, body)
+		}
+		b.srv.startHeadless()
+		time.Sleep(200 * time.Millisecond)
+		if runs, _ := b.runs(t); len(runs) != 0 {
+			t.Errorf("runs %v", runs)
+		}
+	})
+	t.Run("not a claude.ai subscription", func(t *testing.T) {
+		var mu sync.Mutex
+		var logged []string
+		fakeClaudeEnv(t)
+		t.Setenv("FAKECLAUDE_AUTH", "api_key")
+		b := startHeadless(t, t.TempDir(), nil, func(h *headlessRunner) {
+			h.log = func(f string, a ...any) { mu.Lock(); logged = append(logged, fmt.Sprintf(f, a...)); mu.Unlock() }
+		})
+		if status, body := b.post(t, "start", ""); status != 409 || !strings.Contains(body, "auth_refused") {
+			t.Errorf("start: %d %s", status, body)
+		}
+		if v := b.view(t); v.Headless.Status != "error" || !hasWarning(v, "auth") {
+			t.Errorf("%+v", v.Headless)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		// auth status prints the account's email: only authMethod and subscriptionType are logged
+		if all := strings.Join(logged, "\n"); !strings.Contains(all, "authMethod=api_key") || strings.Contains(all, "@") {
+			t.Errorf("logged %s", all)
+		}
+	})
+	t.Run("a settings file's env or apiKeyHelper", func(t *testing.T) {
+		_, home := fakeClaudeEnv(t)
+		for _, c := range []struct{ path, content string }{
+			{filepath.Join(home, ".claude", "settings.json"), `{"apiKeyHelper":"/bin/key"}`},
+			{filepath.Join(home, "orchestrators", "h1", ".claude", "settings.local.json"), `{"env":{"ANTHROPIC_API_KEY":"sk"}}`},
+			{managedSettingsPath, `{"env":{"CLAUDE_CODE_USE_BEDROCK":"1"}}`},
+		} {
+			os.MkdirAll(filepath.Dir(c.path), 0o700)
+			os.WriteFile(c.path, []byte(c.content), 0o600)
+			b := startHeadless(t, t.TempDir(), nil, nil)
+			if status, body := b.post(t, "start", ""); status != 409 || !strings.Contains(body, c.path) {
+				t.Errorf("%s: %d %s", c.path, status, body)
+			}
+			os.Remove(c.path)
+		}
+	})
+	t.Run("an init that would bill an API key stops it", func(t *testing.T) {
+		fakeClaudeEnv(t)
+		t.Setenv("FAKECLAUDE_APIKEYSOURCE", "ANTHROPIC_API_KEY")
+		b := startHeadless(t, t.TempDir(), nil, nil)
+		b.start(t)
+		b.waitStatus(t, "idle")
+		b.send(t, "hello")
+		v := b.waitStatus(t, "error")
+		if !hasWarning(v, "init") {
+			t.Errorf("%+v", v.Headless)
+		}
+		time.Sleep(300 * time.Millisecond) // no restart
+		if runs, _ := b.runs(t); len(runs) != 1 || alive(runs[0].pid) {
+			t.Errorf("runs %v", runs)
+		}
+	})
+}
+
+func TestHeadlessOrphanScan(t *testing.T) {
+	state := t.TempDir()
+	b := startHeadless(t, state, nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	b.post(t, "stop", "")
+	runs, _ := b.runs(t)
+	sid, mcp := runs[0].argv[7], headlessPath(state, "h1", ".mcp.json")
+	run := func(args ...string) *exec.Cmd { // a claude the bridge didn't start
+		cmd := exec.Command(os.Getenv("YOICKS_CLAUDE_BIN"), args...)
+		cmd.Dir = t.TempDir()
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		stdin, _ := cmd.StdinPipe()
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { stdin.Close(); cmd.Process.Kill(); cmd.Wait() })
+		return cmd
+	}
+
+	// the user's own claude on that session: never stopped, the start refused
+	user := run("-p", "--resume", sid)
+	waitUntil(t, 5*time.Second, "it runs", func() bool { return len(claudeProcsWith(sid)) > 0 })
+	if status, body := b.post(t, "start", ""); status != 409 || !strings.Contains(body, "session_in_use") {
+		t.Errorf("start: %d %s", status, body)
+	}
+	if !alive(user.Process.Pid) {
+		t.Error("the user's claude was stopped")
+	}
+	user.Process.Kill()
+	user.Wait()
+
+	// an earlier bridge's child (with the marker): stopped, then the start goes on
+	orphan := run(headlessArgv(sid, true, mcp)...)
+	waitUntil(t, 5*time.Second, "it runs", func() bool { return len(claudeProcsWith(sid)) > 0 })
+	if pid := markedHeadlessChild(state, "h1"); pid != orphan.Process.Pid {
+		t.Errorf("markedHeadlessChild %d, want %d", pid, orphan.Process.Pid)
+	}
+	b.start(t)
+	orphan.Wait()
+	if v := b.waitStatus(t, "idle"); v.PaneID == nil {
+		t.Errorf("%+v", v)
+	}
+	if status, body := b.post(t, "start", ""); status != 409 {
+		t.Errorf("a second start: %d %s", status, body)
+	}
+}
+
+func claudeProcsWith(sid string) []procArgs {
+	return slices.DeleteFunc(claudeProcs(), func(p procArgs) bool { return !slices.Contains(p.argv, sid) })
+}
+
+func TestHeadlessPanicStopsOnlyThatOrchestrator(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, func(h *headlessRunner) {
+		h.lineHook = func(line []byte) {
+			if strings.Contains(string(line), "echo: boom") {
+				panic("boom")
+			}
+		}
+	})
+	b.start(t)
+	b.waitStatus(t, "idle")
+	b.send(t, "boom")
+	v := b.waitFor(t, "an error, the child gone", func(v OrchestratorView) bool { return v.Headless.Status == "error" && v.PaneID == nil })
+	if !hasWarning(v, "panic") || v.PaneID != nil {
+		t.Errorf("%+v", v)
+	}
+	if status, _, _ := b.do(t, "GET", "/api/state", b.token, nil); status != 200 {
+		t.Errorf("the bridge stopped serving: %d", status)
+	}
+	runs, _ := b.runs(t)
+	waitUntil(t, 3*time.Second, "the child ends", func() bool { return !alive(runs[0].pid) })
+}
+
+func TestHeadlessHasNoPane(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	n := len(b.fake.Requests())
+	for _, r := range []struct{ method, path string }{
+		{"POST", "/api/panes/hl:h1/input"}, {"GET", "/api/panes/hl:h1/read"}, {"POST", "/api/panes/hl%3Ah1/focus"},
+		{"DELETE", "/api/panes/hl:h1"}, {"POST", "/api/agents/hl:h1/send"}, {"POST", "/api/agents/hl:h1/clear"},
+	} {
+		if status, body, _ := b.do(t, r.method, r.path, b.token, []byte(`{"text":"x"}`)); status != 404 {
+			t.Errorf("%s %s: %d %s", r.method, r.path, status, body)
+		}
+	}
+	c, _, err := b.dial(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	if err := c.Write(context.Background(), websocket.MessageText, []byte(`{"type":"watch_pane","paneId":"hl:h1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1500 * time.Millisecond)
+	if got := b.sent(n); len(got) != 0 {
+		t.Errorf("herdr got %v for hl:h1", got)
+	}
+}
+
+// No headless entry, no headless anything: no runner, no child, no log line.
+func TestNoHeadlessWithoutAHeadlessEntry(t *testing.T) {
+	log, home := fakeClaudeEnv(t)
+	def := OrchestratorDef{Name: "t1", Dir: filepath.Join(home, "orchestrators", "t1"), Env: map[string]string{}, Managed: true}
+	b := startBridge(t, Config{Orchestrators: []OrchestratorDef{def}}, nil, nil)
+	b.srv.startHeadless()
+	b.srv.shutdownHeadless()
+	if len(b.srv.headless) != 0 {
+		t.Errorf("runners %v", b.srv.headless)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, err := os.Stat(log); err == nil {
+		t.Error("fakeclaude ran")
+	}
+	_, body, _ := b.do(t, "GET", "/api/state", b.token, nil)
+	if !strings.Contains(body, `"mode":"tui","headless":null`) {
+		t.Errorf("state %s", body)
+	}
+	if status, _, _ := b.do(t, "POST", "/api/orchestrators/t1/send", b.token, []byte(`{"text":"x"}`)); status != 404 {
+		t.Errorf("send to a tui orchestrator: %d", status)
+	}
+}
