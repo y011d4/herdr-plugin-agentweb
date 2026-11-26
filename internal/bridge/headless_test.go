@@ -372,6 +372,8 @@ func TestHeadlessResumesAcrossBridgeRestarts(t *testing.T) {
 	b := startHeadless(t, state, nil, nil)
 	b.start(t)
 	b.waitStatus(t, "idle")
+	b.send(t, "hello")
+	b.waitStatus(t, "done")
 	b.send(t, "slow 30")
 	b.waitStatus(t, "working")
 	began := time.Now()
@@ -386,7 +388,11 @@ func TestHeadlessResumesAcrossBridgeRestarts(t *testing.T) {
 
 	b2 := startHeadless(t, state, nil, nil)
 	b2.srv.startHeadless()
-	b2.waitStatus(t, "done") // the notice was answered
+	// the notice was answered: the count goes on from the first bridge's (a phone's seen-done
+	// record is keyed on it)
+	if v := b2.waitStatus(t, "done"); v.Headless.CompletionSeq != 2 {
+		t.Errorf("completionSeq after the restart: %d, want 2", v.Headless.CompletionSeq)
+	}
 	runs, _ = b2.runs(t)
 	if len(runs) != 2 || runs[1].argv[6] != "--resume" || runs[1].argv[7] != runs[0].argv[7] {
 		t.Fatalf("runs %v", runs)
