@@ -14,7 +14,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
-import { draftKey, getDraft, setDraft } from '../drafts.ts';
+import { draftKey, getDraft, pruneDrafts, setDraft } from '../drafts.ts';
 import { homeSummary, shownStatus } from '../dashboard-group.ts';
 import { fitImages, MAX_IMAGES, toAttachment, type ImageAttachment } from '../image.ts';
 import { showToast } from '../notify.ts';
@@ -336,7 +336,10 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
       if (kept) restored = keptTasks.finishSend(paneId, false);
       // the draft again, unless a newer one is stored (a later send's success left none); a composer
       // empty under its key (reopened, a Home's after a Clear's new pane too) shows it
-      if (text && !getDraft(key)) setDraft(key, text);
+      if (text && !getDraft(key)) {
+        setDraft(key, text);
+        if (store.appState) pruneDrafts(store.appState); // not for a pane closed meanwhile: herdr reuses its id
+      }
       const live = shownKey === key ? shownInput : null;
       if (text && live && !live.value && getDraft(key) === text) {
         live.value = text;

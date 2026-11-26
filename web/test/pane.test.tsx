@@ -224,6 +224,13 @@ describe('composer', () => {
     assert.deepEqual(Object.keys(JSON.parse(localStorage.getItem('herdr_drafts')!)), ['pane:p2', 'pane:p99', 'home:personal', 'home:gone']);
     setAppState(fresh());
     assert.deepEqual(JSON.parse(localStorage.getItem('herdr_drafts')!), { 'pane:p2': 'pane:p2', 'home:personal': 'home:personal' });
+    await show('p2');
+    await key({});
+    const gone = fresh(); // p2 closed while its send is in flight
+    for (const ws of gone.workspaces) for (const t of ws.tabs) t.panes = t.panes.filter((p) => p.paneId !== 'p2');
+    setAppState(gone);
+    await answer('POST /api/panes/p2/input', { error: { code: 'x', message: 'boom' } }, 500);
+    assert.deepEqual(JSON.parse(localStorage.getItem('herdr_drafts')!), { 'home:personal': 'home:personal' }, 'its failure stores nothing for a reused id');
   });
 
   it('keeps the same textarea and what is typed in it across state pushes', async () => {
