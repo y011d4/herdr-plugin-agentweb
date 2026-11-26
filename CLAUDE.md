@@ -83,7 +83,7 @@ All in `internal/bridge/` (one package):
   it (the chat, empty until its session's first line) and `PromptPanel.tsx`'s `HeadlessPrompt` answers
   `headless.pending`; its usage and warnings (■, Clear, the steps back to the TUI) sit on the status
   bar. `orchestrator_alert` toasts (`notifyOrchestratorAlert`); Settings shows the last Claude Code
-  check and the TUI steps; a `[yoicks] …` user turn renders as a dim line. `ansi.ts` — pure ANSI→HTML,
+  check and the TUI steps; the `[yoicks] …` lines at either end of a user turn render as dim lines (`splitNotices`), the rest as its bubble; an `agent_start` result shows as such a line. `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
   (manifest, icons) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one
@@ -118,7 +118,7 @@ All in `internal/bridge/` (one package):
   `homeMode` (Stop leaves the Home stopped; a Clear holds it ≤8s for the replacement) — a switcher
   between the configured orchestrators (2+; stopped ones dimmed), a
   status bar of its account's agents (blocked chips + counts, `homeSummary`; no orchestrators), dialogue-only chat
-  (`conversationItems` hides tools/injected turns), a "doing now" line (`latestActivity`) and a
+  (`conversationItems` hides tools/injected turns, but for questions and worker starts), a "doing now" line (`latestActivity`) and a
   composer (the terminal + quick keys stay one `>_` tap away — the only way to send Esc/Ctrl+C, and
   the fallback when there's no transcript). Orchestrators get no card in any agents list (`agentCards`
   in `ui/Dashboard.tsx` feeds both the list and `homeSummary`); the full list's ← Home opens `defaultHome()`.
