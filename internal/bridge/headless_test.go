@@ -996,18 +996,22 @@ func TestHeadlessClaudeCheck(t *testing.T) {
 	}
 }
 
-// Whether a session can be resumed is where Claude Code looks: a project dir linked elsewhere counts.
+// Whether a session can be resumed is where Claude Code looks: under the slug of its cwd as the
+// child sees it (a linked orchestrator dir resolved), and a project dir linked elsewhere counts.
 func TestHeadlessHasTranscript(t *testing.T) {
-	cfg, outside, dir := t.TempDir(), t.TempDir(), "/srv/orch"
+	cfg, outside, real := t.TempDir(), t.TempDir(), t.TempDir()
+	real, _ = filepath.EvalSymlinks(real)
+	dir := filepath.Join(t.TempDir(), "orch") // a link to real, as a linked XDG_DATA_HOME makes it
+	os.Symlink(real, dir)
 	r := newHeadlessRunner(OrchestratorDef{Name: "h1", Dir: dir, Env: map[string]string{"CLAUDE_CONFIG_DIR": cfg}, Managed: true, Mode: "headless"}, t.TempDir(), "")
 	r.sessionID = newUUID()
 	if r.hasTranscript() {
 		t.Fatal("a transcript before any")
 	}
 	os.MkdirAll(filepath.Join(cfg, "projects"), 0o700)
-	os.Symlink(outside, filepath.Join(cfg, "projects", slugForCwd(dir)))
+	os.Symlink(outside, filepath.Join(cfg, "projects", slugForCwd(real)))
 	os.WriteFile(filepath.Join(outside, r.sessionID+".jsonl"), []byte("{}\n"), 0o600)
 	if !r.hasTranscript() {
-		t.Error("the transcript in a linked project dir")
+		t.Error("the transcript under the resolved dir's slug, in a linked project dir")
 	}
 }
