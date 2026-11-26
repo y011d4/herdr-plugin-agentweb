@@ -409,6 +409,34 @@ func TestHeadlessResumesAcrossBridgeRestarts(t *testing.T) {
 	}
 }
 
+// A session that never got a message has no transcript, and Claude Code (as the fake) can't resume
+// it: a Stop and Start, or a restart, begins it again under the same id instead of crash-looping.
+func TestHeadlessRestartsASessionWithNoMessage(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	if status, body := b.post(t, "stop", ""); status != 200 {
+		t.Fatalf("stop: %d %s", status, body)
+	}
+	b.start(t)
+	b.waitStatus(t, "idle")
+	var runs []procArgs
+	waitUntil(t, 5*time.Second, "the second run", func() bool { runs, _ = b.runs(t); return len(runs) == 2 })
+	if runs[1].argv[6] != "--session-id" || runs[1].argv[7] != runs[0].argv[7] {
+		t.Fatalf("runs %v", runs)
+	}
+	b.send(t, "hello")
+	b.waitStatus(t, "done")
+	if status, body := b.post(t, "stop", ""); status != 200 {
+		t.Fatalf("stop: %d %s", status, body)
+	}
+	b.start(t) // now it has a transcript: resumed
+	waitUntil(t, 5*time.Second, "the third run", func() bool { runs, _ = b.runs(t); return len(runs) == 3 })
+	if runs[2].argv[6] != "--resume" || runs[2].argv[7] != runs[0].argv[7] {
+		t.Fatalf("runs %v", runs)
+	}
+}
+
 func TestHeadlessDetectors(t *testing.T) {
 	var mu sync.Mutex
 	var logged []string
@@ -643,8 +671,9 @@ func TestHeadlessOrphanScan(t *testing.T) {
 	sid, mcp := runs[0].argv[7], headlessPath(state, "h1", ".mcp.json")
 	run := func(args ...string) *exec.Cmd { return otherClaude(t, args...) }
 
-	// the user's own claude on that session: never stopped, the start refused
-	user := run("-p", "--resume", sid)
+	// the user's own claude on that session (it has had no message: no --resume of it): never
+	// stopped, the start refused
+	user := run("-p", "--session-id", sid)
 	waitUntil(t, 5*time.Second, "it runs", func() bool { return len(claudeProcsWith(sid)) > 0 })
 	if status, body := b.post(t, "start", ""); status != 409 || !strings.Contains(body, "session_in_use") {
 		t.Errorf("start: %d %s", status, body)
@@ -656,7 +685,7 @@ func TestHeadlessOrphanScan(t *testing.T) {
 	user.Wait()
 
 	// an earlier bridge's child (with the marker): stopped, then the start goes on
-	orphan := run(headlessArgv(sid, true, mcp, true)...)
+	orphan := run(headlessArgv(sid, false, mcp, true)...)
 	waitUntil(t, 5*time.Second, "it runs", func() bool { return len(claudeProcsWith(sid)) > 0 })
 	if pid := markedHeadlessChild(state, "h1"); pid != orphan.Process.Pid {
 		t.Errorf("markedHeadlessChild %d, want %d", pid, orphan.Process.Pid)
@@ -773,7 +802,7 @@ func TestHeadlessReapsOrphansBeforeARefusal(t *testing.T) {
 	sid := newUUID()
 	os.WriteFile(headlessPath(state, "h1", ".json"), []byte(`{"sessionId":"`+sid+`","wanted":true}`), 0o600)
 	orphan := func() chan struct{} {
-		cmd := otherClaude(t, headlessArgv(sid, true, headlessPath(state, "h1", ".mcp.json"), true)...)
+		cmd := otherClaude(t, headlessArgv(sid, false, headlessPath(state, "h1", ".mcp.json"), true)...)
 		waitUntil(t, 5*time.Second, "it runs", func() bool { return markedHeadlessChild(state, "h1") == cmd.Process.Pid })
 		gone := make(chan struct{})
 		go func() { cmd.Wait(); close(gone) }()

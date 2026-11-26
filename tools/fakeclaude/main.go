@@ -5,6 +5,7 @@
 //	claude --version                 FAKECLAUDE_VERSION (default 2.1.322)
 //	claude auth status --json        FAKECLAUDE_AUTH = <authMethod>/<subscriptionType> (default claude.ai/max)
 //	claude -p … stream-json …        a session over stdin/stdout, as Claude Code 2.1.322 does it
+//	                                 (--resume of a session with no transcript yet: exit 1, as it does)
 //
 // In -p mode it connects to the --mcp-config server (its yoicks tools join --tools's, the
 // --permission-prompt-tool one hidden). Each turn starts with system/init (apiKeySource from
@@ -15,7 +16,7 @@
 //	slow N    work N s, a tool_progress heartbeat each second
 //	hang N    work N s without a single event
 //	crash     exit 1 mid-turn
-//	garbage   a line that isn't JSON, then the reply
+//	garbage N N lines (default 1) that aren't JSON, then the reply
 //	unknown   an event of a type Claude Code doesn't have, then the reply
 //	ask       an AskUserQuestion tool_use, then its permission call (approve) and the decision as the tool_result
 //	askstdio  the same through a can_use_tool control_request instead (the route yoicks warns about)
@@ -155,6 +156,13 @@ func session(args []string) {
 		return r
 	}, f.cwd)
 	f.transcript = filepath.Join(root, "projects", slug, f.id+".jsonl")
+	// as Claude Code 2.1.322 does: a session with no transcript yet (no message) can't be resumed
+	if id := argAfter(args, "--resume"); id != "" {
+		if _, err := os.Stat(f.transcript); err != nil {
+			fmt.Fprintln(os.Stderr, "No conversation found with session ID: "+id)
+			os.Exit(1)
+		}
+	}
 
 	switch os.Getenv("FAKECLAUDE_START") {
 	case "init": // an init before any message (Claude Code sends it at a turn's start)
@@ -282,7 +290,9 @@ func (f *fake) turn(q queued) {
 		fmt.Fprintln(os.Stderr, "fakeclaude: crashing as asked")
 		os.Exit(1)
 	case "garbage":
-		f.emitRaw("this is not json")
+		for i := 0; i < max(seconds, 1); i++ {
+			f.emitRaw("this is not json")
+		}
 	case "unknown":
 		f.emit(map[string]any{"type": "mystery_event", "session_id": f.id})
 	case "ask":
