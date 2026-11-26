@@ -282,17 +282,38 @@ export function renderAskQuestions(ask: AskQuestion[]): string {
   }).join('');
 }
 
-const YOICKS_NOTICE = /^\s*\[yoicks\] /;
+// the bridge writes each of its lines at a line's start: an indented one is the user's (a list item's, a quote's)
+const YOICKS_NOTICE = /^\[yoicks\] /;
+
+/**
+ * A user turn's leading and trailing `[yoicks] …` lines (the bridge's own word to a headless
+ * orchestrator: a worker's status change or start, a restart), apart from the user's own words
+ * between them: one turn can hold both (a notice pasted into a message, say).
+ */
+export function splitNotices(text: string): { before: string[]; body: string; after: string[] } {
+  const lines = text.split('\n');
+  const edge = (l: string): boolean => YOICKS_NOTICE.test(l) || !l.trim();
+  let a = 0;
+  let b = lines.length;
+  while (a < b && edge(lines[a])) a++;
+  while (b > a && edge(lines[b - 1])) b--;
+  const notices = (ls: string[]): string[] => ls.filter((l) => YOICKS_NOTICE.test(l)).map((l) => l.trim());
+  return { before: notices(lines.slice(0, a)), body: lines.slice(a, b).join('\n'), after: notices(lines.slice(b)) };
+}
 
 /** Render a single TimelineItem to a self-contained HTML block (safe to append). */
 export function renderItem(item: TimelineItem): string {
   const sub = item.sidechain ? ' chat-sidechain' : '';
   const subTag = item.sidechain ? '<span class="chat-sub-tag">subagent</span>' : '';
   switch (item.kind) {
-    case 'user':
-      // the bridge's own word to a headless orchestrator (a worker's status change, a restart): a dim line, not the user's
-      if (YOICKS_NOTICE.test(item.text)) return `<div class="chat-item chat-notice${sub}">${escapeHtml(item.text.trim())}</div>`;
-      return `<div class="chat-item chat-user${sub}">${subTag}<div class="chat-bubble chat-md">${renderMarkdown(item.text)}</div></div>`;
+    case 'user': {
+      const bubble = (text: string): string => `<div class="chat-item chat-user${sub}">${subTag}<div class="chat-bubble chat-md">${renderMarkdown(text)}</div></div>`;
+      const { before, body, after } = splitNotices(item.text);
+      if (!before.length && !after.length) return bubble(item.text);
+      // the bridge's notices: dim lines, not the user's
+      const notices = (ls: string[]): string => ls.map((l) => `<div class="chat-item chat-notice${sub}">${escapeHtml(l)}</div>`).join('');
+      return notices(before) + (body ? bubble(body) : '') + notices(after);
+    }
     case 'assistant':
       return `<div class="chat-item chat-assistant${sub}">${subTag}<div class="chat-md">${renderMarkdown(item.text)}</div></div>`;
     case 'thinking':
@@ -338,22 +359,30 @@ export function askAnswer(text: string): string | null {
   return pairs.length === 1 ? pairs[0][1] : pairs.map(([q, a]) => `${q}: ${a}`).join('\n');
 }
 
+// a headless orchestrator's tool that starts a worker (its result says whether the first task reached it)
+const START_TOOL = 'mcp__yoicks__agent_start';
+
 /**
  * The home (orchestrator) chat shows only the dialogue: the user's and the
  * assistant's own words, and its questions (AskUserQuestion) with what the user
- * answered as their own bubble. Other tool calls/results, thinking, subagent
- * traffic and injected user turns are hidden. `asks` (kept across appends: a
- * question and its answer arrive apart) holds the questions' tool_use ids.
+ * answered as their own bubble, and the workers it started (a headless one's
+ * agent_start: what the bridge answered, as a [yoicks] notice). Other tool
+ * calls/results, thinking, subagent traffic and injected user turns are hidden.
+ * `calls` (kept across appends: a call and its result arrive apart) maps those
+ * calls' tool_use ids to their tool.
  */
-export function conversationItems(items: TimelineItem[], asks = new Set<string>()): TimelineItem[] {
+export function conversationItems(items: TimelineItem[], calls = new Map<string, string>()): TimelineItem[] {
   const out: TimelineItem[] = [];
   for (const it of items) {
     if (it.sidechain) continue;
     if (it.kind === 'assistant' || (it.kind === 'user' && !INJECTED_USER_TURN.test(it.text))) out.push(it);
     else if (it.kind === 'tool_use' && it.name === 'AskUserQuestion' && it.ask?.length) {
-      asks.add(it.id);
+      calls.set(it.id, it.name);
       out.push(it);
-    } else if (it.kind === 'tool_result' && it.forId !== null && asks.has(it.forId)) {
+    } else if (it.kind === 'tool_use' && it.name === START_TOOL) calls.set(it.id, it.name);
+    else if (it.kind === 'tool_result' && it.forId !== null && calls.get(it.forId) === START_TOOL) {
+      out.push({ kind: 'user', text: `[yoicks] ${it.text.replace(/\s+/g, ' ').trim()}`, sidechain: false, ts: it.ts });
+    } else if (it.kind === 'tool_result' && it.forId !== null && calls.has(it.forId)) {
       const answer = it.truncated ? null : askAnswer(it.text); // cut short, it may name only some: shown as it is
       out.push(answer === null ? it : { kind: 'user', text: answer, sidechain: false, ts: it.ts });
     }
