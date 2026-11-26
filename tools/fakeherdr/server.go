@@ -10,6 +10,7 @@ package fakeherdr
 import (
 	"bufio"
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -31,6 +32,9 @@ type Reply struct {
 	Delay   time.Duration // wait this long before answering
 	Close   bool          // close the connection without answering (like an invalid enum)
 	Hang    bool          // never answer; the connection stays open until the client gives up
+	// Wait (when set) answers later: it is called with a channel closed once the client leaves
+	// (a held wait, like herdr's agent.wait), and what it returns is the answer
+	Wait func(gone <-chan struct{}) Reply
 }
 
 // Handler answers every request except events.subscribe. It runs on the request's
@@ -219,6 +223,11 @@ func (s *Server) serve(c net.Conn) {
 		return
 	}
 	rep := s.handler(req.Method, req.Params)
+	if rep.Wait != nil {
+		gone := make(chan struct{})
+		go func() { io.Copy(io.Discard, r); close(gone) }() // the client closes, or Close does
+		rep = rep.Wait(gone)
+	}
 	if rep.Delay > 0 {
 		time.Sleep(rep.Delay)
 	}
