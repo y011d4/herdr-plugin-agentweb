@@ -11,7 +11,7 @@ const [done, blocked] = messages.filter((m): m is WsAgentStatusMessage => m.type
 const working: WsAgentStatusMessage = { ...done, from: 'idle', to: 'working' };
 
 let hidden: boolean;
-let shown: Array<{ title: string; body?: string; tag?: string }>;
+let shown: Array<{ title: string; body?: string; tag?: string; renotify?: boolean }>;
 let closed: string[];
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
@@ -26,7 +26,7 @@ describe('notify', () => {
     vi.stubGlobal('Notification', { permission: 'granted' });
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
     const reg = {
-      showNotification: async (title: string, o: NotificationOptions) => { shown.push({ title, body: o.body, tag: o.tag }); },
+      showNotification: async (title: string, o: NotificationOptions & { renotify?: boolean }) => { shown.push({ title, body: o.body, tag: o.tag, renotify: o.renotify }); },
       getNotifications: async ({ tag }: { tag: string }) => [{ close: () => closed.push(tag) }],
     };
     Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { getRegistration: async () => reg } });
@@ -37,13 +37,14 @@ describe('notify', () => {
     delete (navigator as { serviceWorker?: unknown }).serviceWorker;
   });
 
-  it('blocked/done while hidden, on and permitted: an OS notification tagged with the pane', async () => {
+  it('blocked/done while hidden, on and permitted: an OS notification tagged with the pane, alerting again', async () => {
     notifyAgentStatus(done);
     notifyAgentStatus(blocked);
     await settle();
+    // renotify: replacing the pane's older notification still alerts
     assert.deepEqual(shown, [
-      { title: 'Claude Code done', body: 'repo-wt-feat / feat', tag: 'p3' },
-      { title: 'Agent blocked', body: ' / ', tag: 'p9' },
+      { title: 'Claude Code done', body: 'repo-wt-feat / feat', tag: 'p3', renotify: true },
+      { title: 'Agent blocked', body: ' / ', tag: 'p9', renotify: true },
     ]);
   });
 
