@@ -516,6 +516,7 @@ a {
   overflow-x: auto;
 }
 .input-image { position: relative; flex-shrink: 0; }
+.input-image button { display: block; padding: 0; }
 .input-image img {
   display: block;
   height: 56px;
@@ -524,7 +525,7 @@ a {
   border-radius: 6px;
   border: 1px solid var(--color-border);
 }
-.input-image button {
+.input-image .input-image-remove {
   position: absolute;
   top: -6px;
   right: -6px;
@@ -828,7 +829,8 @@ a {
 /* user prompt — a right-aligned accent bubble */
 .chat-user { align-self: flex-end; max-width: 88%; }
 .chat-images { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.chat-image { max-width: 100%; max-height: 160px; border-radius: 10px; }
+.chat-image-open { padding: 0; max-width: 100%; }
+.chat-image { display: block; max-width: 100%; max-height: 160px; border-radius: 10px; }
 .chat-bubble {
   background: var(--color-accent);
   color: #fff;
@@ -1116,6 +1118,22 @@ a {
   animation: modal-fade 0.15s ease-out;
 }
 @keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
+/* the image preview (Modals.tsx previewImage): the image fit to the screen; any tap closes it */
+.modal-overlay:has(> .image-preview) { background: rgba(0, 0, 0, 0.9); }
+.image-preview { width: 100%; height: 100%; }
+.image-preview img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.image-preview-close {
+  position: fixed;
+  top: calc(var(--safe-top) + 8px);
+  right: 12px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 24px;
+  line-height: 40px;
+}
 .modal {
   background: var(--color-surface);
   border: 1px solid var(--color-border);

@@ -70,7 +70,7 @@ All in `internal/bridge/` (one package):
   results of the user's actions, and the OS notifications; a status push or an alert never
   toasts). The screens are in `web/src/ui/`: Settings, Token, the agents list `Dashboard.tsx`,
   `Pane.tsx` and `PromptPanel.tsx`; `Toasts.tsx` draws into `#toast-container` and `Modals.tsx`
-  (Confirm, agent actions, Rename, New agent) is portalled into `#modal-root`. An opened
+  (Confirm, agent actions, Rename, New agent, the image preview) is portalled into `#modal-root`. An opened
   pane's body is `pane-view.ts` (`createPaneView` → setMode/onState/echo/destroy, one per opened
   pane or Home: the chat log, the transcript probe, its own WS messages and agent_status, the 3s
   refresh, the pane's visibilitychange, the prompt poll and going Back after an answer) over `terminal.ts` (`createTerminal`:
@@ -87,7 +87,7 @@ All in `internal/bridge/` (one package):
   `headless.pending`; its usage and warnings (■, Clear, the steps back to the TUI) sit on the status
   bar. `orchestrator_alert` raises an OS notification while hidden (`notifyOrchestratorAlert`);
   Settings shows the last Claude Code check and the TUI steps; the `[yoicks] …` lines at either end of a user turn render as dim lines (`splitNotices`), the rest as its bubble; an `agent_start` result shows as such a line. Its composer
-  takes images (+ or paste; `image.ts` scales them to JPEG, the bridge's `imageBlocks` checks them). `ansi.ts` — pure ANSI→HTML,
+  takes images (+ or paste; `image.ts` scales them to JPEG, the bridge's `imageBlocks` checks them); a tap on one, attached or sent, opens it full screen (`previewImage`: its own history entry, so Back closes it). `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
   (manifest, icons) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one

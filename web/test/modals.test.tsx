@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { act } from 'react';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { keptTasks, setAppState } from '../src/store.ts';
-import { confirmModal, Modals, openAgentMenu, openNewAgent } from '../src/ui/Modals.tsx';
+import { confirmModal, Modals, openAgentMenu, openNewAgent, previewImage } from '../src/ui/Modals.tsx';
 import { agentStart, errors, profiles, rename, state } from './contract.gen.ts';
 import { fire, render } from './render.ts';
 
@@ -214,5 +214,35 @@ describe('New agent', () => {
     await act(async () => { await openNewAgent(); });
     assert.ok(!open());
     assert.deepEqual(toastsShown(), ['No launch profiles: Configure launch_profiles in the bridge config.']);
+  });
+});
+
+describe('Image preview', () => {
+  const popped = (): Promise<void> => new Promise((r) => { addEventListener('popstate', () => r(), { once: true }); });
+  it('shows the image with focus on ×; a tap on it or around it, ×, Escape or Back closes it and the route stays', async () => {
+    location.hash = '#/home/pilot';
+    const opener = document.body.appendChild(document.createElement('button'));
+    for (const dismiss of [() => $('.image-preview-close').click(), () => $('.image-preview img').click(), () => $('.modal-overlay').click(),
+      () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))]) {
+      opener.focus();
+      await fire(() => previewImage('data:image/png;base64,x', 'Attached image'));
+      assert.equal($<HTMLImageElement>('.image-preview img').alt, 'Attached image');
+      assert.ok(document.activeElement === $('.image-preview-close'));
+      assert.equal(typeof history.state?.imagePreview, 'number');
+      const back = popped();
+      await fire(dismiss);
+      assert.ok(!open());
+      await back; // its history entry taken back off
+      assert.equal(history.state?.imagePreview, undefined);
+      assert.ok(document.activeElement === opener);
+    }
+    await fire(() => previewImage('data:image/png;base64,x', 'image'));
+    const back = popped();
+    history.back(); // the phone's Back
+    await back;
+    assert.ok(!open());
+    await settle();
+    assert.equal(location.hash, '#/home/pilot', 'one step back, not two');
+    opener.remove();
   });
 });

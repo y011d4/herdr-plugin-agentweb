@@ -307,7 +307,7 @@ export function renderItem(item: TimelineItem): string {
   // the images sent with a user turn: under its words, or alone (the bridge sends only data: URLs)
   if (item.kind === 'user' && item.images?.length) {
     const { images, ...words } = item;
-    const imgs = images.map((src) => `<img class="chat-image" src="${escapeHtml(src)}" alt="image">`).join('');
+    const imgs = images.map((src) => `<button type="button" class="chat-image-open" aria-label="View image"><img class="chat-image" src="${escapeHtml(src)}" alt="image"></button>`).join('');
     return (words.text.trim() ? renderItem(words) : '') + `<div class="chat-item chat-user chat-images${item.sidechain ? ' chat-sidechain' : ''}">${imgs}</div>`;
   }
   const sub = item.sidechain ? ' chat-sidechain' : '';
