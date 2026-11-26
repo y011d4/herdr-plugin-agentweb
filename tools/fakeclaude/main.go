@@ -21,7 +21,7 @@
 //	other     the reply "echo: <text>"
 //
 //	hold      wait 2 s before its turn begins (then the reply)
-//	replyhold send the reply, then wait 2 s before its result
+//	replyhold send the reply, then hold its result until an interrupt (at most 10 s)
 //
 // A control_request interrupt ends the turn running, or with none running the one message it
 // overtook, whose turn hasn't begun (result error_during_execution, terminal_reason aborted_*),
@@ -323,7 +323,10 @@ func (f *fake) reply(ctx context.Context, text string) {
 		"unifiedWindows": map[string]any{"five_hour": map[string]any{"utilization": 0.25, "resetsAt": 1795665000, "status": "allowed"},
 			"seven_day": map[string]any{"utilization": 0.5, "resetsAt": 1795928400, "status": "allowed"}}}})
 	if text == "echo: replyhold" {
-		time.Sleep(2 * time.Second) // the window between a reply and its result
+		select { // held in the window between a reply and its result until an interrupt (or 10 s)
+		case <-ctx.Done():
+		case <-time.After(10 * time.Second):
+		}
 	}
 	f.finish(ctx, map[string]any{"type": "result", "subtype": "success", "is_error": false, "terminal_reason": "completed", "result": text,
 		"session_id": f.id, "modelUsage": map[string]any{"fake": map[string]any{"contextWindow": 200000}}})
