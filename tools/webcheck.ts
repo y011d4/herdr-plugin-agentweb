@@ -3,7 +3,7 @@
  * tools/webcheck.ts: the headless-Chrome checks of the web UI (the gate before every deploy).
  * Dependency-free; run as `node tools/webcheck.ts …` (Node >= 22.18 type stripping).
  *
- *   node tools/webcheck.ts preview start --bin bin/yoicks [--port 8395] [--web-dir DIR]
+ *   node tools/webcheck.ts preview start --bin bin/yoicks [--port 8395] [--web-dir DIR] [--fake-claude BIN]
  *   node tools/webcheck.ts preview stop [--port 8395]
  *   node tools/webcheck.ts check --base http://127.0.0.1:8395 [--tier 1|2|1,2] [--only P10,P12] [--profile DIR]
  *   node tools/webcheck.ts setup --gonogo --base URL   # go/no-go: wc-less + a blocked wc-claude, held until SIGINT/SIGTERM
@@ -18,6 +18,10 @@
  * $RUN/webcheck.json whose live tab or workspace label starts with wc-. Each check prints
  * `PASS|FAIL <id> <measured> <condition>`; the exit code is the number of failures.
  * Tier 2 (real Claude) needs $WC_ROOT/.envrc pinning CLAUDE_CONFIG_DIR (direnv allow'ed).
+ * The headless orchestrators need --fake-claude (tools/fakeclaude built as `claude`): the preview then
+ * has wc-h1 on it, for Tier 1's H items, and with an account pinned the real wc-h2 for H-T2 (the fake
+ * execs the real claude for it: FAKECLAUDE_REAL; haiku, through its dir's settings.local.json). Both
+ * with YOICKS_HEADLESS_NO_TOOLS=1. Without --fake-claude the H items fail (ENV) and the rest runs.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -107,6 +111,8 @@ function teardown(dir: string): void {
   try { if (c && fs.readFileSync(`/proc/${c.pid}/cmdline`, 'utf8').includes(c.dir)) process.kill(c.pid, 'SIGKILL'); } catch { /* gone */ }
   // a just-killed Chrome's helpers may still write to its profile: retry, and never stop the closing for it
   const rm = (p: string) => { try { fs.rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) { console.log(`WARN ${(e as Error).message}`); } };
+  // the headless orchestrators it started stop (best-effort: stopping the preview ends them too)
+  for (const n of Object.keys(rec?.names ?? {}).filter((k) => /^wc-h[12]$/.test(k))) stopHeadless(rec!.base, n);
   if (rec) {
     const r = rec;
     const step = (id: string, args: string[]): boolean => {
@@ -130,6 +136,15 @@ function teardown(dir: string): void {
     }
   }
   rm(dir);
+}
+
+/** POST …/stop for a headless orchestrator of the preview at `base`; synchronous, for teardown (a signal
+ *  too). The token goes on curl's stdin, never in its argv, which any local user can read. */
+function stopHeadless(base: string, name: string): void {
+  let token = '';
+  try { token = fs.readFileSync(path.join(previewDir(new URL(base).port), 'state', 'token'), 'utf8').trim(); } catch { return; }
+  spawnSync('curl', ['-sf', '-m', '8', '-X', 'POST', '-H', '@-', `${base}/api/orchestrators/${name}/stop`],
+    { input: `Authorization: Bearer ${token}\n`, stdio: ['pipe', 'ignore', 'ignore'] });
 }
 
 function teardownAll(): void {
@@ -164,13 +179,17 @@ async function lock(): Promise<() => void> {
 
 // ── preview bridge ───────────────────────────────────────────────────────────
 
-interface Preview { bin: string; port: string; webDir?: string }
+interface Preview { bin: string; port: string; webDir?: string; fakeClaude?: string }
 const previewDir = (port: string) => path.join(WC_ROOT, `preview-${port}`);
 
 function previewEnv(p: Preview): NodeJS.ProcessEnv {
   const e: NodeJS.ProcessEnv = { ...process.env };
   delete e.HERDR_BIN_PATH;
   delete e.YOICKS_WEB_DIR;
+  delete e.YOICKS_CLAUDE_BIN;
+  // a headless orchestrator gets no yoicks tools, only its questions (as wc-o1/wc-o2 get no tasks)
+  e.YOICKS_HEADLESS_NO_TOOLS = '1';
+  if (p.fakeClaude) e.YOICKS_CLAUDE_BIN = p.fakeClaude;
   Object.assign(e, { HERDR_PLUGIN_STATE_DIR: path.join(previewDir(p.port), 'state'), HERDR_PLUGIN_CONFIG_DIR: path.join(previewDir(p.port), 'config'),
     XDG_DATA_HOME: path.join(WC_ROOT, 'data'), HERDR_YOICKS_PORT: p.port, HERDR_YOICKS_HOST: '127.0.0.1' });
   if (p.webDir) e.YOICKS_WEB_DIR = p.webDir;
@@ -218,27 +237,37 @@ function checkAccount(pane: string, name: string, account: string): void {
   if (got !== account) throw env(`${name} account mismatch (want ${accountName(account)}, got ${got === null ? 'no agent process' : got || 'unset'})`);
 }
 
-const orchConfig = (account: string | null) => js({ orchestrators: ['wc-o1', 'wc-o2'].map((name) =>
-  ({ name, label: name.toUpperCase(), ...(account ? { env: { CLAUDE_CONFIG_DIR: account } } : {}) })) });
+/** The real claude on PATH, which the fake execs for wc-h2. */
+const realClaude = (): string => spawnSync('sh', ['-c', 'command -v claude'], { encoding: 'utf8' }).stdout.trim();
+
+// wc-h1 runs the fake claude, unverified version and all (H6); wc-h2 the real one, in the pinned account
+const orchConfig = (account: string | null, fake: string | null) => js({ orchestrators: [
+  ...['wc-o1', 'wc-o2'].map((name) => ({ name, label: name.toUpperCase(), ...(account ? { env: { CLAUDE_CONFIG_DIR: account } } : {}) })),
+  ...(fake ? [{ name: 'wc-h1', label: 'WC-H1', mode: 'headless', env: { CLAUDE_CONFIG_DIR: path.join(WC_ROOT, 'fake-claude'), FAKECLAUDE_VERSION: '0.0.0-webcheck' } }] : []),
+  ...(fake && account !== null ? [{ name: 'wc-h2', label: 'WC-H2', mode: 'headless', env: { ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), FAKECLAUDE_REAL: realClaude() } }] : []),
+] });
 
 async function previewCmd(sub: string, o: Record<string, any>): Promise<number> {
   const port = String(o.port ?? '8395');
   if (port === PROD_PORT) throw env(`refusing port ${PROD_PORT} (production)`);
-  if (sub !== 'stop' && (sub !== 'start' || !o.bin)) throw new Error('usage: preview start --bin PATH [--port N] [--web-dir DIR] | preview stop [--port N]');
+  if (sub !== 'stop' && (sub !== 'start' || !o.bin)) throw new Error('usage: preview start --bin PATH [--port N] [--web-dir DIR] [--fake-claude BIN] | preview stop [--port N]');
   const unlock = await lock(); // never under a run; the holder process keeps the lock from the bridge
   try {
     const old = readPreview(port);
     if (old) await previewCtl(old, 'stop').catch((e) => console.log(`WARN ${e.message}`));
     if (sub === 'stop') { console.log(`preview ${port} stopped`); return 0; }
-    const p: Preview = { bin: path.resolve(o.bin), port, webDir: o['web-dir'] && path.resolve(o['web-dir']) };
+    const p: Preview = { bin: path.resolve(o.bin), port, webDir: o['web-dir'] && path.resolve(o['web-dir']), fakeClaude: o['fake-claude'] && path.resolve(o['fake-claude']) };
+    if (p.fakeClaude && path.basename(p.fakeClaude) !== 'claude') throw env('--fake-claude must be named claude (go build -o DIR/claude ./tools/fakeclaude)');
+    if (p.fakeClaude) fs.mkdirSync(path.join(WC_ROOT, 'fake-claude'), { recursive: true });
     // the orchestrators start with Tier 2's account (the bridge checks the started agent against it)
     const account = fs.existsSync(path.join(WC_ROOT, '.envrc')) ? pinnedAccount() : null;
     fs.rmSync(previewDir(port), { recursive: true, force: true });
     for (const d of ['state', 'config']) fs.mkdirSync(path.join(previewDir(port), d), { recursive: true });
-    fs.writeFileSync(path.join(previewDir(port), 'config', 'config.json'), orchConfig(account));
+    fs.writeFileSync(path.join(previewDir(port), 'config', 'config.json'), orchConfig(account, p.fakeClaude ?? null));
     fs.writeFileSync(path.join(previewDir(port), 'preview.json'), js(p));
     await previewCtl(p, 'start');
-    console.log(`preview ${port} up: http://127.0.0.1:${port} (token ${path.join(previewDir(port), 'state', 'token')}, account ${account === null ? 'none: Tier 1 only' : accountName(account)})`);
+    console.log(`preview ${port} up: http://127.0.0.1:${port} (token ${path.join(previewDir(port), 'state', 'token')}, account ${account === null ? 'none: Tier 1 only' : accountName(account)}, ` +
+      `headless ${!p.fakeClaude ? 'none (no --fake-claude: the H items fail)' : account !== null ? 'wc-h1 (fake) and wc-h2 (real)' : 'wc-h1 (fake)'})`);
     return 0;
   } finally {
     unlock();
@@ -351,7 +380,7 @@ class Page {
     const u = new URL(p.request.url);
     try {
       const id = u.pathname.match(/^\/api\/(?:panes|agents)\/([^/]+)/)?.[1];
-      if (p.request.method !== 'GET' && !/^\/api\/orchestrators\/wc-o[12]\/start$/.test(u.pathname)) {
+      if (p.request.method !== 'GET' && !/^\/api\/orchestrators\/(?:wc-o[12]\/start|wc-h[12]\/(?:start|send|answer|interrupt|clear|stop))$/.test(u.pathname)) {
         if (!id) throw new Error(`REFUSED ${p.request.method} ${u.pathname}`);
         guard(this.c.rec, decodeURIComponent(id));
       }
@@ -478,12 +507,13 @@ function paneConfigDir(pane: string): string | null {
 
 async function setup(c: Ctx, needs: Set<string>): Promise<void> {
   let account = '';
-  if (needs.has('claude') || needs.has('orch')) {
+  const fake = c.preview?.fakeClaude ?? null;
+  if (needs.has('claude') || needs.has('orch') || needs.has('hl2')) {
     account = pinnedAccount();
     // preview start gives the orchestrators that account as env; a preview from before the .envrc has none
     let cfg = '';
     try { cfg = fs.readFileSync(path.join(previewDir(c.port), 'config', 'config.json'), 'utf8'); } catch { /* not ours */ }
-    if (cfg !== orchConfig(account)) throw env(`the preview's orchestrators are not pinned to ${accountName(account)} (restart it with preview start)`);
+    if (cfg !== orchConfig(account, fake)) throw env(`the preview's orchestrators are not pinned to ${accountName(account)} (restart it with preview start)`);
   }
   if (!needs.size) return;
   fs.mkdirSync(WORK, { recursive: true });
@@ -1258,6 +1288,245 @@ async function p19(c: Ctx) {
   await pg.goto('#/agents');
 }
 
+// ── the headless orchestrators: wc-h1 on the fake claude (H1-H8), the real wc-h2 (H-T2) ──
+
+const hlView = async (c: Ctx, name: string): Promise<any> => (await api(c, 'GET', '/api/state')).orchestrators.find((o: any) => o.name === name);
+const hlStatus = async (c: Ctx, name: string): Promise<string | undefined> => (await hlView(c, name))?.headless?.status;
+const hlTranscript = (c: Ctx, name: string): Promise<any> => api(c, 'GET', `/api/panes/${enc(`hl:${name}`)}/transcript`);
+const CHAT = `(document.getElementById('chat-log')?.textContent ?? '')`;
+
+/** Where its transcript ends now, for hlItemsSince: the bridge serves only the tail (300 items) whole. */
+async function hlMark(c: Ctx, name: string): Promise<{ session?: string; cursor: number }> {
+  const t = await hlTranscript(c, name);
+  return { session: t.available ? t.sessionId : undefined, cursor: t.cursor ?? 0 };
+}
+
+/** Its transcript's items past `mark` (all of the tail when its session changed or had none yet). */
+async function hlItemsSince(c: Ctx, name: string, mark: { session?: string; cursor: number }): Promise<any[]> {
+  const q = mark.session ? `?session=${enc(mark.session)}&after=${mark.cursor}` : '';
+  return (await api(c, 'GET', `/api/panes/${enc(`hl:${name}`)}/transcript${q}`)).items ?? [];
+}
+
+const H_HINT = 'preview start --fake-claude DIR/claude (go build -o DIR/claude ./tools/fakeclaude), with $WC_ROOT/.envrc for wc-h2';
+
+/** `name` runs (started when it isn't), recorded so that the run's teardown stops it. */
+async function hlUp(c: Ctx, name: string): Promise<void> {
+  const o = await hlView(c, name);
+  if (!o) throw env(`no ${name} on this preview: ${H_HINT}`);
+  c.rec.names[name] = `hl:${name}`;
+  save(c.rec);
+  if (!o.paneId) await api(c, 'POST', `/api/orchestrators/${name}/start`);
+  if ((await waitFn(async () => ['idle', 'done'].includes((await hlStatus(c, name)) ?? ''), 30_000, 200)).timeout) throw env(`${name} not running`);
+}
+
+/** Its running Home on screen, its chat loaded (a baseline taken now is the transcript's). */
+async function hlHome(c: Ctx, name: string): Promise<void> {
+  await hlUp(c, name);
+  await c.pg.goto(`#/home/${name}`);
+  if ((await c.pg.until(`document.getElementById('chat-log')?.children.length > 0 && !!document.getElementById('pane-input')`, 5000)).timeout) throw env(`${name}'s running Home not shown`);
+}
+
+/** Types `text` into the Home's composer and taps Send. */
+async function compose(c: Ctx, text: string): Promise<number> {
+  await c.pg.ev(`(() => { const t = document.getElementById('pane-input'); t.value = ${js(text)}; t.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  return c.pg.tapEl(`document.getElementById('btn-send-enter')`);
+}
+
+/** H1: its stopped Home's Start runs it. A fresh session first (Clear, then Stop): each run's alerts go out again. */
+async function h1(c: Ctx) {
+  const { pg } = c;
+  await hlUp(c, 'wc-h1');
+  await api(c, 'POST', '/api/orchestrators/wc-h1/clear');
+  await api(c, 'POST', '/api/orchestrators/wc-h1/stop');
+  await pg.goto('#/home/wc-h1');
+  const stopped = await pg.until(`!!document.querySelector('#screen-home-stopped #btn-home-start')`, 3000);
+  const t0 = await pg.tapEl(`document.getElementById('btn-home-start')`);
+  const idle = await waitFn(async () => (await hlStatus(c, 'wc-h1')) === 'idle', 5000, 100);
+  const home = await pg.until(`!!document.getElementById('chat-log') && ${CHAT} === 'No messages yet.'`, 3000);
+  result(c, !stopped.timeout && !idle.timeout && !home.timeout, 'H1', `stopped=${ms(stopped)},idle=${idle.timeout ? 'timeout' : `${Date.now() - t0}ms`},home=${ms(home)}`,
+    "wc-h1's stopped Home: Start -> idle within 5s (/api/state), then its running Home with an empty chat (a fresh session)");
+}
+
+/** H6: the version it runs isn't the verified one: a warning line that offers the way back to the TUI. */
+async function h6(c: Ctx) {
+  const { pg } = c;
+  await hlHome(c, 'wc-h1');
+  const row = `document.querySelector('.home-warning[data-kind="version"]')`;
+  const r = await pg.until(`${row}?.textContent.includes('0.0.0-webcheck') && !!${row}.querySelector('[data-action="tui"]')`, 3000);
+  result(c, !r.timeout, 'H6', `warning=${ms(r)}`, "Claude Code 0.0.0-webcheck: a version warning line on wc-h1's Home within 3s, with 'Back to TUI'");
+}
+
+/** H2: a message from the Home: working, then done, its reply in the chat; done told on another screen; seen there, idle. */
+async function h2(c: Ctx) {
+  const { pg } = c;
+  await hlHome(c, 'wc-h1');
+  const n0 = await pg.ev(`document.querySelectorAll('#chat-log .chat-assistant').length`);
+  await compose(c, 'slow 3');
+  const working = await waitFn(async () => (await hlStatus(c, 'wc-h1')) === 'working', 3000, 100);
+  await pg.goto('#/agents'); // finishing while another screen is shown
+  const done = await waitFn(async () => (await hlStatus(c, 'wc-h1')) === 'done', 10_000, 200);
+  const toast = await pg.until(`[...document.querySelectorAll('.toast[data-pane-id="hl:wc-h1"]')].some((t) => /done/.test(t.textContent))`, 3000);
+  await pg.goto('#/home/wc-h1');
+  const reply = await pg.until(`document.querySelectorAll('#chat-log .chat-assistant').length > ${n0} && ${CHAT}.includes('echo: slow 3')`, 5000);
+  const dot = `document.querySelector('.home-switch-btn[data-orch="wc-h1"] i')?.className`;
+  const seen = await pg.until(`${dot} === 'home-dot idle'`, 3000);
+  const api0 = await hlStatus(c, 'wc-h1');
+  result(c, !working.timeout && !done.timeout && !toast.timeout && !reply.timeout && !seen.timeout && api0 === 'done', 'H2',
+    `working=${ms(working)},done=${ms(done)},toast=${ms(toast)},reply=${ms(reply)},dot=${seen.v ? 'idle' : await pg.ev(dot)},api=${api0}`,
+    "Send 'slow 3' on wc-h1's Home: working within 3s, done within 10s; on #/agents a toast for hl:wc-h1 'done' within 3s; back on its Home the reply, and its switcher dot idle (seen) while /api/state still says done");
+}
+
+/** H3: its question in the answer panel: a tap answers it (the fake's tool_result has the answer); the old id is 409. */
+async function h3(c: Ctx) {
+  const { pg } = c;
+  await hlHome(c, 'wc-h1');
+  const mark = await hlMark(c, 'wc-h1'); // a resumed session may hold an earlier answer: one past here
+  await compose(c, 'ask');
+  const panel = await pg.until(`[...document.querySelectorAll('#headless-prompt .ask-opt')].map((b) => b.textContent).join('|') === '1applered|2cherry'`, 5000);
+  const id = (await hlView(c, 'wc-h1'))?.headless?.pending?.id;
+  await pg.tapEl(`document.querySelectorAll('#headless-prompt .ask-opt')[1]`);
+  const answered = await waitFn(async () => (await hlItemsSince(c, 'wc-h1', mark)).some((i: any) => i.kind === 'tool_result' && i.text.includes('"Which fruit?":"cherry"')), 5000, 200);
+  const gone = await pg.until(`!document.getElementById('headless-prompt')`, 3000);
+  let stale = 0;
+  await api(c, 'POST', '/api/orchestrators/wc-h1/answer', { id: id ?? 'none', answers: { 'Which fruit?': 'apple' } }).catch((e) => { stale = /: 409 /.test(e.message) ? 409 : -1; });
+  result(c, !panel.timeout && !answered.timeout && !gone.timeout && stale === 409, 'H3', `panel=${ms(panel)},answer=${ms(answered)},gone=${ms(gone)},oldId=${stale}`,
+    "'ask': the panel shows apple/cherry within 5s; tapping cherry puts {\"Which fruit?\":\"cherry\"} in the fake's tool_result within 5s and the panel goes; the old id answers 409");
+}
+
+/** H4: ■ while it works ends the turn within 2s. */
+async function h4(c: Ctx) {
+  const { pg } = c;
+  await hlHome(c, 'wc-h1');
+  await compose(c, 'slow 30');
+  const btn = await pg.until(`!!document.getElementById('btn-home-interrupt')`, 5000);
+  const t0 = await pg.tapEl(`document.getElementById('btn-home-interrupt')`);
+  const out = await waitFn(async () => (await hlStatus(c, 'wc-h1')) !== 'working', 2000, 50);
+  result(c, !btn.timeout && !out.timeout, 'H4', `button=${ms(btn)},left=${out.timeout ? 'timeout' : `${Date.now() - t0}ms`}`, "'slow 30': ■ on the doing-now line; its tap leaves working within 2s (/api/state)");
+}
+
+/** H5: messages sent while it works all arrive, in order, each its own user bubble and reply. */
+async function h5(c: Ctx) {
+  const { pg } = c;
+  await hlHome(c, 'wc-h1');
+  const tag = `wc-h5-${Date.now() % 100000}`;
+  const mark = await hlMark(c, 'wc-h1');
+  await compose(c, 'slow 2');
+  if ((await waitFn(async () => (await hlStatus(c, 'wc-h1')) === 'working', 3000, 100)).timeout) throw env('wc-h1 not working');
+  await compose(c, `${tag}-a`);
+  await compose(c, `${tag}-b`);
+  const replies = await waitFn(async () => {
+    const items = await hlItemsSince(c, 'wc-h1', mark);
+    const said = items.filter((i: any) => i.kind === 'user' && i.text.startsWith(tag)).map((i: any) => i.text);
+    const echoed = items.filter((i: any) => i.kind === 'assistant' && i.text.startsWith(`echo: ${tag}`)).map((i: any) => i.text);
+    return said.join() === `${tag}-a,${tag}-b` && echoed.join() === `echo: ${tag}-a,echo: ${tag}-b`;
+  }, 10_000, 300);
+  const bubbles = await pg.until(`[...document.querySelectorAll('#chat-log .chat-user')].map((e) => e.textContent.trim()).filter((t) => t.startsWith(${js(tag)})).join() === ${js(`${tag}-a,${tag}-b`)}`, 3000);
+  result(c, !replies.timeout && !bubbles.timeout, 'H5', `transcript=${ms(replies)},bubbles=${ms(bubbles)}`,
+    "two messages sent during 'slow 2': both user items and both replies, in order, within 10s; two user bubbles in that order on the Home");
+}
+
+/** H8: lines it can't read: a stream_broken warning with the way back to the TUI, which opens in place; a toast. */
+async function h8(c: Ctx) {
+  const { pg } = c;
+  await hlHome(c, 'wc-h1');
+  await pg.ev(`document.getElementById('toast-clear-all')?.click(), 1`).catch(() => {});
+  await compose(c, 'garbage 3');
+  const row = `document.querySelector('.home-warning[data-kind="stream_broken"]')`;
+  const warn = await pg.until(`!!${row}?.querySelector('[data-action="tui"]')`, 5000);
+  const toast = await pg.until(`[...document.querySelectorAll('.toast[data-pane-id="hl:wc-h1"]')].some((t) => /stream_broken/.test(t.textContent))`, 3000);
+  let steps = { v: false, timeout: true, ms: 0 };
+  if (!warn.timeout) {
+    await pg.tapEl(`${row}.querySelector('[data-action="tui"]')`);
+    steps = await pg.until(`(document.querySelector('.home-warnings .tui-steps')?.textContent ?? '').includes('"wc-h1"')`, 2000);
+  }
+  result(c, !warn.timeout && !toast.timeout && !steps.timeout, 'H8', `warning=${ms(warn)},toast=${ms(toast)},steps=${ms(steps)}`,
+    "'garbage 3': a stream_broken warning line within 5s, a toast within 3s; its 'Back to TUI' shows the steps naming wc-h1");
+}
+
+/** H7: the preview restarts: wc-h1 comes back on the same session, its chat still there. */
+async function h7(c: Ctx) {
+  const { pg } = c;
+  if (!c.preview) throw env('no preview record: H7 restarts the preview');
+  await hlHome(c, 'wc-h1');
+  const tag = `wc-h7-${Date.now() % 100000}`;
+  await compose(c, tag);
+  if ((await pg.until(`${CHAT}.includes(${js(`echo: ${tag}`)})`, 5000)).timeout) throw env(`no reply to ${tag}`);
+  const before = (await hlTranscript(c, 'wc-h1')).sessionId;
+  await previewCtl(c.preview, 'stop');
+  await previewCtl(c.preview, 'start');
+  const back = await waitFn(async () => ['idle', 'done'].includes((await hlStatus(c, 'wc-h1')) ?? ''), 10_000, 300);
+  const after = (await hlTranscript(c, 'wc-h1')).sessionId;
+  const chat = await pg.until(`${CHAT}.includes(${js(`echo: ${tag}`)}) && document.getElementById('conn-dot').classList.contains('connected')`, 20_000, 300);
+  result(c, !back.timeout && !!before && before === after && !chat.timeout, 'H7', `back=${ms(back)},session=${before === after ? 'same' : `${before}->${after}`},chat=${ms(chat)}`,
+    'preview stop + start: wc-h1 running again within 10s on the same session id; the page reconnects and its chat still has the earlier reply within 20s');
+}
+
+/** H-T2: the real wc-h2 (haiku, no yoicks tools): a reply, a question answered, ■, a message sent while it works, Clear. */
+async function ht2(c: Ctx) {
+  const { pg } = c;
+  if (!(await hlView(c, 'wc-h2'))) throw env(`no wc-h2 on this preview: ${H_HINT}`);
+  // it answers on haiku: its managed dir's local settings (the bridge writes only settings.json there), read at its start
+  const data = path.join(WC_ROOT, 'data', fs.existsSync(path.join(WC_ROOT, 'data', 'herdr-agentweb')) ? 'herdr-agentweb' : 'herdr-yoicks');
+  const local = path.join(data, 'orchestrators', 'wc-h2', '.claude', 'settings.local.json');
+  let settings: Record<string, unknown> = {};
+  try { settings = JSON.parse(fs.readFileSync(local, 'utf8')); } catch { /* none yet */ }
+  if (settings.model !== 'haiku') {
+    fs.mkdirSync(path.dirname(local), { recursive: true });
+    fs.writeFileSync(local, js({ ...settings, model: 'haiku' }));
+    if ((await hlView(c, 'wc-h2'))?.paneId) await api(c, 'POST', '/api/orchestrators/wc-h2/stop'); // started before it: again
+  }
+  await hlHome(c, 'wc-h2');
+  const status = (s: string[], wait: number) => waitFn(async () => s.includes((await hlStatus(c, 'wc-h2')) ?? ''), wait, 300);
+  const out: string[] = [];
+  let ok = true;
+  const step = (name: string, pass: boolean, v: string) => { out.push(`${name}=${v}`); ok &&= pass; };
+
+  // a resumed session may have said OK before: one more
+  const oks = `[...document.querySelectorAll('#chat-log .chat-assistant')].filter((e) => e.textContent.trim() === 'OK').length`;
+  const ok0 = await pg.ev(oks);
+  await compose(c, OK_PROMPT);
+  const okReply = await pg.until(`${oks} > ${ok0}`, 60_000, 300);
+  const okDone = await status(['done', 'idle'], 30_000);
+  step('ok', !okDone.timeout && !okReply.timeout, `${ms(okReply)}/${ms(okDone)}`);
+  // only haiku from here on (the weekly quota): the session's file says which model answered
+  const sid = (await hlTranscript(c, 'wc-h2')).sessionId;
+  const root = path.join(pinnedAccount() || path.join(os.homedir(), '.claude'), 'projects');
+  const file = fs.readdirSync(root).map((d) => path.join(root, d, `${sid}.jsonl`)).find((f) => fs.existsSync(f));
+  // the model of its last assistant line, this OK (other lines name the account's default model too)
+  const model = file && fs.readFileSync(file, 'utf8').split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter((l) => l?.type === 'assistant').at(-1)?.message?.model;
+  if (!model?.includes('haiku')) throw env(`wc-h2 answered on ${model ?? 'an unknown model'}, not haiku: stopped here`);
+
+  await compose(c, ASK_PROMPT);
+  const panel = await pg.until(`document.querySelectorAll('#headless-prompt .ask-opt').length === 3`, 60_000, 300);
+  if (!panel.timeout) await pg.tapEl(`[...document.querySelectorAll('#headless-prompt .ask-opt')].find((b) => /cherry/.test(b.textContent))`);
+  const asked = await status(['done', 'idle'], 60_000);
+  step('ask', !panel.timeout && !asked.timeout && !(await hlView(c, 'wc-h2'))?.headless?.pending, `${ms(panel)}/${ms(asked)}`);
+
+  const LONG = 'Write the numbers from 1 to 300, one per line, and nothing else.';
+  const mark = await hlMark(c, 'wc-h2');
+  await compose(c, LONG);
+  const busy = await status(['working'], 15_000);
+  // sent while it works: queued until the turn ends (no tool call to take it in at), which ■ brings
+  const mid = `wc-mid-${Date.now() % 100000}: reply with exactly the word MID and nothing else.`;
+  await compose(c, mid);
+  await sleep(1000);
+  const still = (await hlStatus(c, 'wc-h2')) === 'working';
+  const t0 = await pg.tapEl(`document.getElementById('btn-home-interrupt')`).catch(() => 0);
+  const bubble = await pg.until(`[...document.querySelectorAll('#chat-log .chat-user')].some((e) => e.textContent.includes(${js(mid.slice(0, 14))}))`, 60_000, 300);
+  const cut = await waitFn(async () => (await hlItemsSince(c, 'wc-h2', mark)).some((i: any) => i.kind === 'assistant' && i.text.trim() === 'MID'), 60_000, 500);
+  step('midTurn', !busy.timeout && still && !!t0 && !bubble.timeout && !cut.timeout, `${ms(busy)}/working=${still}/${ms(bubble)}/${ms(cut)}`);
+  await status(['done', 'idle'], 60_000);
+
+  await pg.tapEl(`document.getElementById('btn-home-clear')`);
+  await pg.tapEl(`document.querySelector('#modal-root #cf-ok')`);
+  const cleared = await pg.until(`${CHAT} === 'No messages yet.'`, 15_000, 300);
+  const fresh = (await hlTranscript(c, 'wc-h2')).sessionId;
+  step('clear', !cleared.timeout && fresh !== sid, `${ms(cleared)}/${fresh === sid ? 'same-session' : 'new'}`);
+  result(c, ok, 'H-T2', out.join(','),
+    "wc-h2 (haiku): 'OK' answered; the question answered from the panel; a message sent while it works (still working 1s later), then ■: its user bubble and the reply MID; Clear empties the chat on a new session");
+}
+
 // ── Tier 2 items (real Claude in wc-claude; wc-o1/wc-o2 are only started, cleared, stopped) ──
 
 async function sendPrompt(c: Ctx, pane: string, text: string) {
@@ -1490,7 +1759,8 @@ async function p8t2(c: Ctx) {
   // wc-o1's Home: the switcher lists both, wc-o2 dimmed; tapping it opens wc-o2's stopped Home
   await pg.goto('#/home/wc-o1');
   const dim = `document.querySelector('.home-switch-btn.stopped[data-orch="wc-o2"]')`;
-  const sw = await pg.until(`document.querySelectorAll('.home-switch-btn').length === 2 && !!${dim}`, 5000);
+  const all = (await api(c, 'GET', '/api/state')).orchestrators.length; // wc-o1, wc-o2 and a wc-h
+  const sw = await pg.until(`document.querySelectorAll('.home-switch-btn').length === ${all} && !!${dim}`, 5000);
   if (!sw.timeout) {
     const at = await pg.at(dim);
     await pg.uncovered(dim, at); // wc-o1's start raised toasts
@@ -1579,6 +1849,15 @@ const ITEMS: Item[] = [
   { id: 'P13', tier: 1, run: p13 },
   { id: 'P6', tier: 1, needs: ['shell'], run: p6 }, // late: its lines reach wc-shell
   { id: 'P19', tier: 1, needs: ['shell'], run: p19 }, // last: it leaves a 1 typed in wc-shell
+  // the headless wc-h1 (fake claude), in this order: H1 starts it, H7 restarts the preview
+  { id: 'H1', tier: 1, needs: ['hl'], run: h1 },
+  { id: 'H6', tier: 1, needs: ['hl'], run: h6 },
+  { id: 'H2', tier: 1, needs: ['hl'], run: h2 },
+  { id: 'H3', tier: 1, needs: ['hl'], run: h3 },
+  { id: 'H4', tier: 1, needs: ['hl'], run: h4 },
+  { id: 'H5', tier: 1, needs: ['hl'], run: h5 },
+  { id: 'H8', tier: 1, needs: ['hl'], run: h8 },
+  { id: 'H7', tier: 1, needs: ['hl'], run: h7 },
   ...['P2.old', 'P2.upgrade', 'P2.downgrade'].map((id): Item => ({ id, tier: 1, manual: true, run: (c) => p2Round(c, id) })),
   { id: 'P4-T2', tier: 2, needs: ['claude'], run: p4t2 },
   { id: 'P17-T2', tier: 2, needs: ['claude'], run: p17t2 },
@@ -1587,6 +1866,7 @@ const ITEMS: Item[] = [
   { id: 'P9', tier: 2, needs: ['claude'], run: p9 },
   { id: 'P15-T2', tier: 2, needs: ['claude', 'orch'], run: p15t2 },
   { id: 'P8-T2', tier: 2, needs: ['orch'], run: p8t2 },
+  { id: 'H-T2', tier: 2, needs: ['hl2'], run: ht2 },
 ];
 
 async function readBuild(base: string): Promise<Ctx['build']> {
@@ -1711,7 +1991,7 @@ function block(): number {
 async function main(): Promise<number> {
   const { values: o, positionals: [cmd, sub] } = parseArgs({ allowPositionals: true, options: {
     base: { type: 'string' }, tier: { type: 'string', multiple: true }, only: { type: 'string' }, profile: { type: 'string' },
-    gonogo: { type: 'boolean' }, bin: { type: 'string' }, port: { type: 'string' }, 'web-dir': { type: 'string' } } });
+    gonogo: { type: 'boolean' }, bin: { type: 'string' }, port: { type: 'string' }, 'web-dir': { type: 'string' }, 'fake-claude': { type: 'string' } } });
   if (cmd === 'preview') return previewCmd(sub, o);
   if (cmd === 'teardown') { const unlock = await lock(); try { teardownAll(); } finally { unlock(); } return 0; }
   if (cmd === 'block') return block();

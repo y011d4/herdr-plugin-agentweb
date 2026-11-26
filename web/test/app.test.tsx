@@ -360,6 +360,36 @@ describe('App', () => {
     assert.deepEqual(watches.slice(watches.lastIndexOf('p1:chat') + 1).filter((w) => w.startsWith('p2:')), ['p2:terminal']);
   });
 
+  it("a headless orchestrator's Home watches its transcript only; its Stop and Clear go to /api/orchestrators/:name", async () => {
+    const pilot = (running: boolean): AppState => {
+      const s = fresh();
+      s.orchestrators.push({ name: 'pilot', label: 'Pilot', paneId: running ? 'hl:pilot' : null, agents: [], mode: 'headless',
+        headless: { status: running ? 'idle' : 'stopped', completionSeq: 0, pending: null, usage: null, warnings: [] } });
+      return s;
+    };
+    await act(async () => push!({ type: 'state', state: pilot(true) }));
+    await go('#/home/pilot');
+    assert.equal(reads('hl%3Apilot'), 0, 'no terminal to read');
+    assert.equal(watches.at(-1), 'hl:pilot:chat');
+    await answer('GET /api/panes/hl%3Apilot/transcript', { available: false });
+    assert.equal($('#chat-log')!.textContent, 'No messages yet.');
+
+    await click($('#btn-home-stop'));
+    await click($('#modal-root #cf-ok'));
+    await answer('POST /api/orchestrators/pilot/stop', { ok: true });
+    await act(async () => push!({ type: 'state', state: pilot(false) }));
+    await settle();
+    assert.ok($('#screen #screen-home-stopped #btn-home-start'), 'stopped, the Home stays');
+
+    await act(async () => push!({ type: 'state', state: pilot(true) }));
+    await settle();
+    await click($('#btn-home-clear'));
+    await click($('#modal-root #cf-ok'));
+    await answer('POST /api/orchestrators/pilot/clear', { ok: true, paneId: 'hl:pilot', name: 'pilot' });
+    assert.equal(location.hash, '#/home/pilot');
+    assert.equal(store.view.activePaneId, 'hl:pilot');
+  });
+
   it('a 401 shows the token screen with its message, without the topbar or the banner', async () => {
     await go('#/agents');
     store.wsConnected = false;

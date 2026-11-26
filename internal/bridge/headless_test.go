@@ -372,6 +372,8 @@ func TestHeadlessResumesAcrossBridgeRestarts(t *testing.T) {
 	b := startHeadless(t, state, nil, nil)
 	b.start(t)
 	b.waitStatus(t, "idle")
+	b.send(t, "hello")
+	b.waitStatus(t, "done")
 	b.send(t, "slow 30")
 	b.waitStatus(t, "working")
 	began := time.Now()
@@ -386,7 +388,11 @@ func TestHeadlessResumesAcrossBridgeRestarts(t *testing.T) {
 
 	b2 := startHeadless(t, state, nil, nil)
 	b2.srv.startHeadless()
-	b2.waitStatus(t, "done") // the notice was answered
+	// the notice was answered: the count goes on from the first bridge's (a phone's seen-done
+	// record is keyed on it)
+	if v := b2.waitStatus(t, "done"); v.Headless.CompletionSeq != 2 {
+		t.Errorf("completionSeq after the restart: %d, want 2", v.Headless.CompletionSeq)
+	}
 	runs, _ = b2.runs(t)
 	if len(runs) != 2 || runs[1].argv[6] != "--resume" || runs[1].argv[7] != runs[0].argv[7] {
 		t.Fatalf("runs %v", runs)
@@ -400,6 +406,34 @@ func TestHeadlessResumesAcrossBridgeRestarts(t *testing.T) {
 	waitUntil(t, 5*time.Second, "the fresh run", func() bool { runs, _ = b2.runs(t); return len(runs) == 3 })
 	if len(runs) != 3 || runs[2].argv[6] != "--session-id" || runs[2].argv[7] == runs[0].argv[7] {
 		t.Fatalf("after clear %v", runs)
+	}
+}
+
+// A session that never got a message has no transcript, and Claude Code (as the fake) can't resume
+// it: a Stop and Start, or a restart, begins it again under the same id instead of crash-looping.
+func TestHeadlessRestartsASessionWithNoMessage(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	if status, body := b.post(t, "stop", ""); status != 200 {
+		t.Fatalf("stop: %d %s", status, body)
+	}
+	b.start(t)
+	b.waitStatus(t, "idle")
+	var runs []procArgs
+	waitUntil(t, 5*time.Second, "the second run", func() bool { runs, _ = b.runs(t); return len(runs) == 2 })
+	if runs[1].argv[6] != "--session-id" || runs[1].argv[7] != runs[0].argv[7] {
+		t.Fatalf("runs %v", runs)
+	}
+	b.send(t, "hello")
+	b.waitStatus(t, "done")
+	if status, body := b.post(t, "stop", ""); status != 200 {
+		t.Fatalf("stop: %d %s", status, body)
+	}
+	b.start(t) // now it has a transcript: resumed
+	waitUntil(t, 5*time.Second, "the third run", func() bool { runs, _ = b.runs(t); return len(runs) == 3 })
+	if runs[2].argv[6] != "--resume" || runs[2].argv[7] != runs[0].argv[7] {
+		t.Fatalf("runs %v", runs)
 	}
 }
 
@@ -637,8 +671,9 @@ func TestHeadlessOrphanScan(t *testing.T) {
 	sid, mcp := runs[0].argv[7], headlessPath(state, "h1", ".mcp.json")
 	run := func(args ...string) *exec.Cmd { return otherClaude(t, args...) }
 
-	// the user's own claude on that session: never stopped, the start refused
-	user := run("-p", "--resume", sid)
+	// the user's own claude on that session (it has had no message: no --resume of it): never
+	// stopped, the start refused
+	user := run("-p", "--session-id", sid)
 	waitUntil(t, 5*time.Second, "it runs", func() bool { return len(claudeProcsWith(sid)) > 0 })
 	if status, body := b.post(t, "start", ""); status != 409 || !strings.Contains(body, "session_in_use") {
 		t.Errorf("start: %d %s", status, body)
@@ -650,7 +685,7 @@ func TestHeadlessOrphanScan(t *testing.T) {
 	user.Wait()
 
 	// an earlier bridge's child (with the marker): stopped, then the start goes on
-	orphan := run(headlessArgv(sid, true, mcp, true)...)
+	orphan := run(headlessArgv(sid, false, mcp, true)...)
 	waitUntil(t, 5*time.Second, "it runs", func() bool { return len(claudeProcsWith(sid)) > 0 })
 	if pid := markedHeadlessChild(state, "h1"); pid != orphan.Process.Pid {
 		t.Errorf("markedHeadlessChild %d, want %d", pid, orphan.Process.Pid)
@@ -767,7 +802,7 @@ func TestHeadlessReapsOrphansBeforeARefusal(t *testing.T) {
 	sid := newUUID()
 	os.WriteFile(headlessPath(state, "h1", ".json"), []byte(`{"sessionId":"`+sid+`","wanted":true}`), 0o600)
 	orphan := func() chan struct{} {
-		cmd := otherClaude(t, headlessArgv(sid, true, headlessPath(state, "h1", ".mcp.json"), true)...)
+		cmd := otherClaude(t, headlessArgv(sid, false, headlessPath(state, "h1", ".mcp.json"), true)...)
 		waitUntil(t, 5*time.Second, "it runs", func() bool { return markedHeadlessChild(state, "h1") == cmd.Process.Pid })
 		gone := make(chan struct{})
 		go func() { cmd.Wait(); close(gone) }()
@@ -958,5 +993,25 @@ func TestHeadlessClaudeCheck(t *testing.T) {
 	plain := startBridge(t, Config{StateDir: state}, nil, nil)
 	if _, body, _ := plain.do(t, "GET", "/api/state", plain.token, nil); !strings.Contains(body, `"claudeCheck":null`) {
 		t.Errorf("read without a headless entry: %s", body)
+	}
+}
+
+// Whether a session can be resumed is where Claude Code looks: under the slug of its cwd as the
+// child sees it (a linked orchestrator dir resolved), and a project dir linked elsewhere counts.
+func TestHeadlessHasTranscript(t *testing.T) {
+	cfg, outside, real := t.TempDir(), t.TempDir(), t.TempDir()
+	real, _ = filepath.EvalSymlinks(real)
+	dir := filepath.Join(t.TempDir(), "orch") // a link to real, as a linked XDG_DATA_HOME makes it
+	os.Symlink(real, dir)
+	r := newHeadlessRunner(OrchestratorDef{Name: "h1", Dir: dir, Env: map[string]string{"CLAUDE_CONFIG_DIR": cfg}, Managed: true, Mode: "headless"}, t.TempDir(), "")
+	r.sessionID = newUUID()
+	if r.hasTranscript() {
+		t.Fatal("a transcript before any")
+	}
+	os.MkdirAll(filepath.Join(cfg, "projects"), 0o700)
+	os.Symlink(outside, filepath.Join(cfg, "projects", slugForCwd(real)))
+	os.WriteFile(filepath.Join(outside, r.sessionID+".jsonl"), []byte("{}\n"), 0o600)
+	if !r.hasTranscript() {
+		t.Error("the transcript under the resolved dir's slug, in a linked project dir")
 	}
 }

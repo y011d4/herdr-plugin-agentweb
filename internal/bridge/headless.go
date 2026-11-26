@@ -311,6 +311,9 @@ type headlessState struct {
 	RulesHash   string    `json:"rulesHash,omitempty"`
 	Watches     []hlWatch `json:"watches,omitempty"`
 	Wakes       []string  `json:"wakes,omitempty"` // wake-ups not written to it yet
+	// its completed turns so far, kept across bridge restarts: a phone's seen-done record is
+	// keyed on it, so a count starting over would pass a new completion off as one seen
+	CompletionSeq int64 `json:"completionSeq,omitempty"`
 }
 
 // newHeadlessRunner is def's runner; the server fills in its herdr calls, profiles and
@@ -328,6 +331,7 @@ func newHeadlessRunner(def OrchestratorDef, stateDir, rules string) *headlessRun
 	var saved headlessState
 	if b, err := os.ReadFile(headlessPath(stateDir, def.Name, ".json")); err == nil && json.Unmarshal(b, &saved) == nil && (saved.SessionID == "" || sessionIDRe.MatchString(saved.SessionID)) {
 		r.sessionID, r.wanted, r.interrupted, r.rulesHash, r.saved, r.wakes = saved.SessionID, saved.Wanted, saved.Interrupted, saved.RulesHash, saved.Watches, saved.Wakes
+		r.model.CompletionSeq = saved.CompletionSeq
 	}
 	if kind, msg := r.refusedEnv(); msg != "" {
 		r.model.Status = "error"
@@ -383,6 +387,32 @@ func (r *headlessRunner) session() string {
 	return r.sessionID
 }
 
+// transcriptFile is its session's transcript in its account's projects ("" when there is none
+// yet: Claude Code writes it at the session's first message).
+func (r *headlessRunner) transcriptFile() string {
+	sid := r.session()
+	if sid == "" {
+		return ""
+	}
+	return resolveTranscriptPath(sid, r.def.Dir, []string{accountForConfigDir(r.def.Env["CLAUDE_CONFIG_DIR"], "")})
+}
+
+// hasTranscript is whether Claude Code has its session's transcript where it looks for one: its
+// account's projects/<slug of its cwd as the child sees it, links resolved>/<id>.jsonl, followed
+// wherever that links (unlike the chat's read, no containment applies to what Claude Code resumes).
+func (r *headlessRunner) hasTranscript() bool {
+	sid := r.session()
+	if sid == "" {
+		return false
+	}
+	dir := r.def.Dir
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
+	_, err := os.Stat(filepath.Join(accountForConfigDir(r.def.Env["CLAUDE_CONFIG_DIR"], ""), slugForCwd(dir), sid+".jsonl"))
+	return err == nil
+}
+
 func (r *headlessRunner) wantsToRun() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -401,7 +431,7 @@ func (r *headlessRunner) persist() {
 		}
 	}
 	slices.SortFunc(watches, func(a, b hlWatch) int { return strings.Compare(a.Pane, b.Pane) })
-	b, _ := json.Marshal(headlessState{r.sessionID, r.wanted, r.interrupted, r.rulesHash, watches, r.wakes})
+	b, _ := json.Marshal(headlessState{r.sessionID, r.wanted, r.interrupted, r.rulesHash, watches, r.wakes, r.model.CompletionSeq})
 	if os.MkdirAll(filepath.Join(r.stateDir, "headless"), 0o700) == nil {
 		writeFile0600(headlessPath(r.stateDir, r.def.Name, ".json"), b)
 	}
@@ -543,6 +573,9 @@ func (r *headlessRunner) start(resume bool) error {
 		}
 	}
 	mcpConfig := headlessPath(r.stateDir, r.def.Name, ".mcp.json")
+	// a session that has had no message has no transcript, and Claude Code can't resume it ("No
+	// conversation found"): it begins again under the same id (nothing of it is lost)
+	begin := resume && !r.hasTranscript()
 	if resume && len(others) > 0 {
 		return &LifecycleError{Status: 409, Code: "session_in_use", Message: fmt.Sprintf(
 			"another claude (pid %d) runs its session %s: end it first (yoicks never stops it; only Linux, with /proc, can see it)", others[0].pid, r.session())}
@@ -598,7 +631,7 @@ func (r *headlessRunner) start(resume bool) error {
 		r.sessionID = newUUID()
 	}
 	alert := func() {}
-	if !resume || r.rulesHash == "" {
+	if !resume || begin || r.rulesHash == "" {
 		r.rulesHash = hex.EncodeToString(hash[:])
 	} else if r.rulesHash != hex.EncodeToString(hash[:]) { // its system prompt keeps the rules it began with
 		alert = r.warn("rules", "the orchestrator rules changed since this session began: Clear to apply them")
@@ -610,7 +643,7 @@ func (r *headlessRunner) start(resume bool) error {
 	r.persist()
 	r.mu.Unlock()
 	alert()
-	if err := r.spawn(append(headlessArgv(r.session(), resume, mcpConfig, r.tools), r.extraArgs...), env); err != nil {
+	if err := r.spawn(append(headlessArgv(r.session(), resume && !begin, mcpConfig, r.tools), r.extraArgs...), env); err != nil {
 		return r.fail("start", &LifecycleError{Status: 500, Code: "claude_failed", Message: "could not start claude: " + err.Error()})
 	}
 	r.rearm()
@@ -806,9 +839,12 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 	epoch := c.epoch // its own: a Stop or Clear may already have begun the next epoch while it still talks
 	r.lastEvent = time.Now()
 	r.warnings = slices.DeleteFunc(r.warnings, func(w HeadlessWarning) bool { return w.Kind == "silent" })
-	from := r.model.Status
+	from, seq := r.model.Status, r.model.CompletionSeq
 	step := r.model.apply(line, nowMs())
 	to := r.model.Status
+	if r.model.CompletionSeq != seq {
+		r.persist()
+	}
 	for _, w := range step.Warnings {
 		alerts = append(alerts, r.warn(w.Kind, w.Message))
 	}

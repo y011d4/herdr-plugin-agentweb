@@ -13,8 +13,8 @@
  */
 import { Fragment, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { apiDelete, apiGet, apiPost, getToken, loadToken, onUnauthorized, setToken } from '../api.ts';
-import { dismissNotificationsForPane, dismissToastsForPane, notifyAgentStatus, showToast } from '../notify.ts';
+import { apiDelete, apiGet, apiPost, getToken, headlessName, loadToken, onUnauthorized, orchestratorPost, setToken } from '../api.ts';
+import { dismissNotificationsForPane, dismissToastsForPane, notifyAgentStatus, notifyOrchestratorAlert, showToast } from '../notify.ts';
 import { homeOf, nextPaneBackRoute, nextSettingsBackRoute, paneGoneRoute, paneRoute, resolveRoute } from '../routes.ts';
 import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, store, subscribe, type View } from '../store.ts';
 import type { AppState, ClearResponse, WsMessage } from '../types.ts';
@@ -101,6 +101,8 @@ function handleWsMessage(msg: WsMessage): void {
     onStateUpdate();
   } else if (msg.type === 'agent_status') {
     notifyAgentStatus(msg); // a toast; for blocked/done also an OS notification while hidden
+  } else if (msg.type === 'orchestrator_alert') {
+    notifyOrchestratorAlert(msg); // a headless orchestrator's new warning (or a failed Claude Code check)
   } else if (msg.type === 'pane_gone') {
     onPaneGone(msg.paneId);
   }
@@ -252,7 +254,8 @@ function handleRoute(e?: Event): void {
       markActivePaneSeen();
       renderPaneDetail(route.paneId, route.name);
     } else {
-      show('pane', <StoppedHome name={route.name} />, stoppedHomeTopbar(route.name));
+      // a headless one's warnings offer Clear while stopped too (a fresh session)
+      show('pane', <StoppedHome name={route.name} clear={() => { void clearAgentFlow(`hl:${route.name}`); }} />, stoppedHomeTopbar(route.name));
     }
   } else if (route.kind === 'agents') {
     show('agents', <Dashboard hash={location.hash} />, dashboardTopbar(location.hash));
@@ -299,7 +302,8 @@ function signIn(token: string): void {
 // ── Agent lifecycle UI (rename / clear / stop) ────────────────────────────────
 
 // A pane's ⋮ (ui/Modals.tsx): Rename… (the header follows the store), Clear, Stop. A Home has no ⋮:
-// its Clear and Stop are buttons on its status bar (ui/Pane.tsx), through the same confirm flows.
+// its Clear and Stop are buttons on its status bar (ui/Pane.tsx), through the same confirm flows. A
+// headless orchestrator's (hl:<name>) go to /api/orchestrators/:name/*: it has no herdr pane.
 function agentMenu(paneId: string): void {
   const agent = findPane(paneId)?.pane.agent;
   openAgentMenu(paneId, agent?.displayName || agent?.name || '', {
@@ -309,11 +313,13 @@ function agentMenu(paneId: string): void {
 }
 
 async function clearAgentFlow(paneId: string): Promise<void> {
-  const ok = await confirmModal('Clear agent?', 'Starts a fresh session (same profile & directory) and closes the current one. In-session context is lost.', 'Clear', false);
+  const hl = headlessName(paneId);
+  const ok = await confirmModal('Clear agent?', hl ? 'Starts a fresh session and ends the current one. In-session context is lost.'
+    : 'Starts a fresh session (same profile & directory) and closes the current one. In-session context is lost.', 'Clear', false);
   if (!ok) return;
   if (view.homeMode) homeClearing = true; // the gap before the replacement isn't a stop
   try {
-    const res = await apiPost<ClearResponse>(`/api/agents/${encodeURIComponent(paneId)}/clear`);
+    const res = hl ? await orchestratorPost<{ paneId: string }>(hl, 'clear') : await apiPost<ClearResponse>(`/api/agents/${encodeURIComponent(paneId)}/clear`);
     showToast('Cleared', 'Started a fresh session');
     // Clearing an orchestrator keeps the user on its Home: the state may not know the
     // replacement yet, so stay on #/home/<name> and let onStateUpdate re-resolve it. The hold's
@@ -328,11 +334,12 @@ async function clearAgentFlow(paneId: string): Promise<void> {
 }
 
 async function stopAgentFlow(paneId: string): Promise<void> {
-  const ok = await confirmModal('Stop agent?', 'Closes the pane and terminates the agent running in it.', 'Stop', true);
+  const hl = headlessName(paneId);
+  const ok = await confirmModal('Stop agent?', hl ? 'Stops the orchestrator. Start resumes its session.' : 'Closes the pane and terminates the agent running in it.', 'Stop', true);
   if (!ok) return;
   try {
-    await apiDelete(`/api/panes/${encodeURIComponent(paneId)}`);
-    showToast('Stopped', 'Agent pane closed');
+    await (hl ? orchestratorPost(hl, 'stop') : apiDelete(`/api/panes/${encodeURIComponent(paneId)}`));
+    showToast('Stopped', hl ? 'The orchestrator stopped' : 'Agent pane closed');
     if (!view.homeMode) navigate(paneGoneRoute(view)); // a Home stays: the State shows it stopped
   } catch (err) {
     showToast('Stop failed', (err as Error).message);
