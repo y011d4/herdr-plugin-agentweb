@@ -500,6 +500,44 @@ a {
 }
 .input-send-btn:active { opacity: 0.8; }
 
+/* a headless Home's images: + picks them, a thumbnail each above the composer until sent */
+.input-attach-btn {
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+  border-radius: 8px;
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  font-size: 20px;
+}
+.input-images {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px 0;
+  overflow-x: auto;
+}
+.input-image { position: relative; flex-shrink: 0; }
+.input-image img {
+  display: block;
+  height: 56px;
+  max-width: 96px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+}
+.input-image button {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+
 /* Quick-key row */
 .quickkey-row {
   display: flex;
@@ -789,6 +827,8 @@ a {
 
 /* user prompt — a right-aligned accent bubble */
 .chat-user { align-self: flex-end; max-width: 88%; }
+.chat-images { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.chat-image { max-width: 100%; max-height: 160px; border-radius: 10px; }
 .chat-bubble {
   background: var(--color-accent);
   color: #fff;

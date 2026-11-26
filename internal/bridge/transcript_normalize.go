@@ -16,6 +16,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -292,8 +294,22 @@ func toolResultText(content any) string {
 	return ""
 }
 
-// userItems is a user turn's content (a string, or text / tool_result blocks) as
-// TimelineItems.
+var base64Data = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
+
+// imageURL is a user's image block as a data: URL, or "" for any other source or type: it goes
+// into an <img src>.
+func imageURL(block any) string {
+	src := jsGet(block, "source")
+	mt, _ := jsGet(src, "media_type").(string)
+	data, _ := jsGet(src, "data").(string)
+	if jsGet(src, "type") != "base64" || !slices.Contains([]string{"image/jpeg", "image/png", "image/gif", "image/webp"}, mt) || !base64Data.MatchString(data) {
+		return ""
+	}
+	return "data:" + mt + ";base64," + data
+}
+
+// userItems is a user turn's content (a string, or text / image / tool_result blocks) as
+// TimelineItems. Its images go with its last words, or alone.
 func userItems(content any, sidechain bool, ts *int64) []TimelineItem {
 	var out []TimelineItem
 	switch c := content.(type) {
@@ -302,8 +318,13 @@ func userItems(content any, sidechain bool, ts *int64) []TimelineItem {
 			out = append(out, TimelineItem{Kind: "user", Text: text, Sidechain: sidechain, TS: ts})
 		}
 	case []any:
+		var images []string
 		for _, b := range c {
 			switch jsGet(b, "type") {
+			case "image":
+				if url := imageURL(b); url != "" {
+					images = append(images, url)
+				}
 			case "text":
 				if t, ok := jsGet(b, "text").(string); ok && jsTrim(t) != "" {
 					out = append(out, TimelineItem{Kind: "user", Text: t, Sidechain: sidechain, TS: ts})
@@ -319,6 +340,11 @@ func userItems(content any, sidechain bool, ts *int64) []TimelineItem {
 					IsError: jsGet(b, "is_error") == true, Sidechain: sidechain, TS: ts,
 				})
 			}
+		}
+		if n := len(out); len(images) > 0 && n > 0 && out[n-1].Kind == "user" {
+			out[n-1].Images = images
+		} else if len(images) > 0 {
+			out = append(out, TimelineItem{Kind: "user", Images: images, Sidechain: sidechain, TS: ts})
 		}
 	}
 	return out

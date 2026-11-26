@@ -6,9 +6,16 @@ package bridge
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1013,5 +1020,86 @@ func TestHeadlessHasTranscript(t *testing.T) {
 	os.WriteFile(filepath.Join(outside, r.sessionID+".jsonl"), []byte("{}\n"), 0o600)
 	if !r.hasTranscript() {
 		t.Error("the transcript under the resolved dir's slug, in a linked project dir")
+	}
+}
+
+func b64Image(t *testing.T, encode func(io.Writer, image.Image) error, w, h int) string {
+	t.Helper()
+	var b bytes.Buffer
+	if err := encode(&b, image.NewRGBA(image.Rect(0, 0, w, h))); err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(b.Bytes())
+}
+
+func TestHeadlessImageBlocks(t *testing.T) {
+	img := func(mt, data string) any { return map[string]any{"mediaType": mt, "data": data} }
+	small, jpg := b64Image(t, png.Encode, 8, 8), b64Image(t, func(w io.Writer, m image.Image) error { return jpeg.Encode(w, m, nil) }, 8, 8)
+	blocks, err := imageBlocks([]any{img("image/png", small), img("image/jpeg", jpg)})
+	if b, _ := json.Marshal(blocks); err != nil || string(b) != `[{"source":{"data":"`+small+`","media_type":"image/png","type":"base64"},"type":"image"},`+
+		`{"source":{"data":"`+jpg+`","media_type":"image/jpeg","type":"base64"},"type":"image"}]` {
+		t.Fatalf("%s %v", b, err)
+	}
+	if blocks, err := imageBlocks(nil); blocks != nil || err != nil {
+		t.Errorf("none: %v %v", blocks, err)
+	}
+	raw, _ := base64.StdEncoding.DecodeString(small)
+	for name, c := range map[string]struct {
+		v    any
+		want string
+	}{
+		"not a list":          {"x", "a list of at most 4"},
+		"five":                {[]any{img("image/png", small), img("image/png", small), img("image/png", small), img("image/png", small), img("image/png", small)}, "at most 4"},
+		"an svg":              {[]any{img("image/svg+xml", "PHN2Zz4=")}, "image/jpeg, image/png or image/gif"},
+		"not base64":          {[]any{img("image/png", "@@")}, "isn't base64"},
+		"a png called a jpeg": {[]any{img("image/jpeg", small)}, "isn't a whole image/jpeg"},
+		"cut short":           {[]any{img("image/png", base64.StdEncoding.EncodeToString(raw[:len(raw)-8]))}, "isn't a whole image/png"},
+		"too wide":            {[]any{img("image/png", b64Image(t, png.Encode, 2001, 1))}, "over 2000 px a side"},
+		"over 1 MiB in all":   {[]any{img("image/png", base64.StdEncoding.EncodeToString(make([]byte, 1<<20+1)))}, "over 1 MiB in all"},
+	} {
+		var le *LifecycleError
+		if _, err := imageBlocks(c.v); !errors.As(err, &le) || le.Status != 400 || !strings.Contains(le.Message, c.want) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// A message with images: the images then the text on its stdin, its user turn in the chat with
+// them; images alone are a message, an image can't answer a question.
+func TestHeadlessSendsImages(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	small := b64Image(t, png.Encode, 8, 8)
+	send := func(text string) (int, string) {
+		body, _ := json.Marshal(map[string]any{"text": text, "images": []any{map[string]any{"mediaType": "image/png", "data": small}}})
+		return b.post(t, "send", string(body))
+	}
+	if status, out := send("what is it?"); status != 200 {
+		t.Fatalf("send: %d %s", status, out)
+	}
+	b.waitStdin(t, `{"message":{"content":[{"source":{"data":"`+small+`","media_type":"image/png","type":"base64"},"type":"image"},{"text":"what is it?","type":"text"}],"role":"user"},"type":"user"}`)
+	waitUntil(t, 5*time.Second, "the chat", func() bool {
+		_, body, _ := b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
+		return strings.Contains(body, `"text":"what is it?","images":["data:image/png;base64,`+small+`"]`)
+	})
+	b.waitStatus(t, "done")
+	if status, out := send(" "); status != 200 {
+		t.Fatalf("an image alone: %d %s", status, out)
+	}
+	b.waitStdin(t, `"type":"image"}],"role":"user"}`)
+	b.waitStatus(t, "done")
+	for _, body := range []string{`{"text":" "}`, `{"text":"x","images":[{"mediaType":"image/png","data":"@@"}]}`} {
+		if status, out := b.post(t, "send", body); status != 400 {
+			t.Errorf("%s: %d %s", body, status, out)
+		}
+	}
+	if status, out := send(strings.Repeat("x", bodyLimit+1)); status != 413 { // text keeps its own limit
+		t.Errorf("long text: %d %s", status, out)
+	}
+	b.send(t, "ask")
+	b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
+	if status, out := send("banana"); status != 409 || !strings.Contains(out, "question_pending") {
+		t.Errorf("with a question: %d %s", status, out)
 	}
 }

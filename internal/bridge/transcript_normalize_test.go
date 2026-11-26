@@ -78,6 +78,37 @@ func TestTranscriptNormalize(t *testing.T) {
 			}
 		})
 
+		// a pasted image as Claude Code records it (TUI: the text first, with "[Image #1]"; the
+		// bridge's to a headless one: the images first)
+		img := func(mt, data string) obj {
+			return obj{"type": "image", "source": obj{"type": "base64", "media_type": mt, "data": data}}
+		}
+		t.Run("gives a user turn's images to its last words, as data: URLs", func(t *testing.T) {
+			for _, content := range [][]any{
+				{obj{"type": "text", "text": "what is it?\n[Image #1]"}, img("image/png", "iVBORw0KGgo=")},
+				{img("image/png", "iVBORw0KGgo="), obj{"type": "text", "text": "what is it?\n[Image #1]"}},
+			} {
+				items := normalizeLine(jsonLine(obj{"type": "user", "message": obj{"role": "user", "content": content}}))
+				want := `[{"kind":"user","text":"what is it?\n[Image #1]","images":["data:image/png;base64,iVBORw0KGgo="],"sidechain":false,"ts":null}]`
+				if got := itemsJSON(t, items); got != want {
+					t.Fatalf("got %s, want %s", got, want)
+				}
+			}
+		})
+		t.Run("images alone are a user item with no text; an odd one is left out", func(t *testing.T) {
+			items := normalizeLine(jsonLine(obj{"type": "user", "message": obj{"role": "user", "content": []any{
+				img("image/jpeg", "/9j/4A=="), img("image/svg+xml", "PHN2Zz4="), img("image/png", `x" onerror="y`), img("image/gif", ""),
+				obj{"type": "image", "source": obj{"type": "url", "media_type": "image/png", "url": "https://a.b/c.png"}},
+			}}}))
+			want := `[{"kind":"user","text":"","images":["data:image/jpeg;base64,/9j/4A=="],"sidechain":false,"ts":null}]`
+			if got := itemsJSON(t, items); got != want {
+				t.Fatalf("got %s, want %s", got, want)
+			}
+			if items := normalizeLine(jsonLine(obj{"type": "user", "message": obj{"role": "user", "content": []any{img("text/html", "PGI+")}}})); len(items) != 0 {
+				t.Fatalf("got %s", itemsJSON(t, items))
+			}
+		})
+
 		// A message sent while the agent was working, taken in mid-turn: Claude Code records it
 		// only as a queued_command attachment (shape as seen in real transcripts).
 		queued := func(prompt any, kind string, extra obj) string {
