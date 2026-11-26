@@ -77,6 +77,17 @@ export interface AppState {
   orchestrators: OrchestratorView[];
   /** the first running orchestrator's pane, kept for clients older than `orchestrators` */
   orchestratorPaneId: string | null;
+  /** the last check of Claude Code's headless mode (scripts/claude-canary.sh); null when none has run */
+  claudeCheck: ClaudeCheck | null;
+}
+
+export interface ClaudeCheck {
+  /** ms */
+  at: number;
+  version: string;
+  ok: boolean;
+  /** the live test's items that failed */
+  failed: string[];
 }
 
 export interface OrchestratorView {
@@ -207,7 +218,8 @@ export interface WsAgentStatusMessage {
   tabLabel: string | null;
 }
 
-/** a headless orchestrator's new warning (once per kind and session) */
+/** a headless orchestrator's new warning (once per kind and session); name '' with kind 'canary': a
+ *  failed claude check (once) */
 export interface WsOrchestratorAlertMessage {
   type: 'orchestrator_alert';
   name: string;

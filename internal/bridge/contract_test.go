@@ -88,6 +88,7 @@ func withHeadless(state ClientState) ClientState {
 		Warnings: []HeadlessWarning{{Kind: "silent", Message: "no event for 3m0s while working", Since: now, Actions: []string{"interrupt", "clear"}},
 			{Kind: "unknown_event", Message: "Claude Code sent an event yoicks doesn't know (mystery)", Since: now, Actions: []string{}}}}
 	state.Orchestrators = append(slices.Clone(state.Orchestrators), v)
+	state.ClaudeCheck = &ClaudeCheck{At: now, Version: "2.1.330", OK: false, Failed: []string{"interrupt", "resume"}}
 	return state
 }
 
@@ -118,6 +119,7 @@ func contractMessages(state ClientState, items []TimelineItem) []any {
 			WorkspaceLabel: strp("repo-wt-feat"), TabLabel: strp("feat")},
 		WsAgentStatusMessage{Type: "agent_status", PaneID: "p9", From: "unknown", To: "blocked"},
 		WsOrchestratorAlertMessage{Type: "orchestrator_alert", Name: "pilot", Kind: "silent", Message: "no event for 3m0s while working"},
+		WsOrchestratorAlertMessage{Type: "orchestrator_alert", Kind: "canary", Message: "the Claude Code check failed on 2026-11-26 09:00 (2.1.330: resume)"},
 		WsPongMessage{Type: "pong"},
 		WsPaneOutputMessage{Type: "pane_output", PaneID: "p1", Ansi: "\u001b[1m❯\u001b[0m hi <b>&", AppScroll: true},
 		WsPaneGoneMessage{Type: "pane_gone", PaneID: "p2"},

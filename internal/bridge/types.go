@@ -330,6 +330,17 @@ type ClientState struct {
 	Orchestrators []OrchestratorView `json:"orchestrators"`
 	// the first running orchestrator's pane, for older clients
 	OrchestratorPaneID *string `json:"orchestratorPaneId"`
+	// the last check of Claude Code's headless mode; null when none has run
+	ClaudeCheck *ClaudeCheck `json:"claudeCheck"`
+}
+
+// ClaudeCheck is the last periodic check of Claude Code's headless mode: what
+// scripts/claude-canary.sh wrote to <state>/canary.json.
+type ClaudeCheck struct {
+	At      int64    `json:"at"` // ms
+	Version string   `json:"version"`
+	OK      bool     `json:"ok"`
+	Failed  []string `json:"failed"` // the live test's items that failed
 }
 
 type WsStateMessage struct {
@@ -348,10 +359,10 @@ type WsAgentStatusMessage struct {
 }
 
 // WsOrchestratorAlertMessage is a headless orchestrator's new warning, sent once per kind
-// and session.
+// and session; or (Name "", Kind "canary") a failed claude check, once.
 type WsOrchestratorAlertMessage struct {
 	Type    string `json:"type"` // "orchestrator_alert"
-	Name    string `json:"name"`
+	Name    string `json:"name"` // "": not one orchestrator's (the claude check)
 	Kind    string `json:"kind"`
 	Message string `json:"message"`
 }

@@ -17,7 +17,9 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
@@ -81,8 +83,10 @@ type server struct {
 	// the headless orchestrators' runners, by name (none without a headless entry)
 	headless map[string]*headlessRunner
 	mcp      *mcpHost // their MCP listener (nil: none)
-	stop     chan struct{}
-	stopOnce sync.Once
+	// the last claude check (<state>/canary.json; nil: none), read at the start and each minute
+	claudeCheck atomic.Pointer[ClaudeCheck]
+	stop        chan struct{}
+	stopOnce    sync.Once
 	// how often a transcript watch re-resolves the session (a field so tests can shorten it)
 	transcriptResolve time.Duration
 
@@ -153,12 +157,14 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 			}
 		}()
 	}
+	s.checkClaude()
 	go func() {
 		t := time.NewTicker(accountRefreshInterval)
 		defer t.Stop()
 		for {
 			select {
 			case <-t.C:
+				s.checkClaude()
 				s.broadcastState()
 			case <-s.stop:
 				return
@@ -223,7 +229,7 @@ func (s *server) clientState(st *State) ClientState {
 			break
 		}
 	}
-	return ClientState{State: st, Orchestrators: views, OrchestratorPaneID: first}
+	return ClientState{State: st, Orchestrators: views, OrchestratorPaneID: first, ClaudeCheck: s.claudeCheck.Load()}
 }
 
 func (s *server) workspaces() []*WorkspaceNode {
@@ -624,6 +630,42 @@ func (s *server) broadcastAlert(def OrchestratorDef, kind, message string) {
 		go postNtfy(*s.cfg.NotifyURL, "yoicks "+def.Name+": "+kind, message)
 	}
 	s.showOnPC(def, firstNonEmpty(def.Label, def.Name)+": "+kind, message, "request")
+}
+
+// checkClaude reads the last claude check (scripts/claude-canary.sh's <state>/canary.json):
+// it goes into the state and to the headless orchestrators, and a failed one not seen before
+// alerts once, to every client (orchestrator_alert, no name), ntfy and the PC. Only with a
+// headless entry: without one the check concerns nothing here.
+func (s *server) checkClaude() {
+	if len(s.headless) == 0 {
+		return
+	}
+	var c *ClaudeCheck
+	if b, err := os.ReadFile(filepath.Join(s.cfg.StateDir, "canary.json")); err == nil && json.Unmarshal(b, &c) != nil {
+		c = nil // not a whole check
+	}
+	if c != nil && c.Failed == nil {
+		c.Failed = []string{}
+	}
+	old := s.claudeCheck.Swap(c)
+	for _, h := range s.headless {
+		h.setClaudeCheck(c)
+	}
+	if c == nil || c.OK || old != nil && old.At == c.At {
+		return
+	}
+	message := "the Claude Code check " + c.describe() + ": a headless orchestrator may not work"
+	if msg, err := marshalRaw(WsOrchestratorAlertMessage{Type: "orchestrator_alert", Kind: "canary", Message: message}); err == nil {
+		s.bmu.Lock()
+		for cl := range s.clients {
+			cl.queueMsg(msg)
+		}
+		s.bmu.Unlock()
+	}
+	if s.cfg.NotifyURL != nil && *s.cfg.NotifyURL != "" {
+		go postNtfy(*s.cfg.NotifyURL, "yoicks: claude check failed", message)
+	}
+	go s.rpc("notification.show", map[string]any{"title": "yoicks: claude check failed", "body": message, "sound": "request"})
 }
 
 // headlessStatus tells a headless orchestrator's change to done or blocked like an agent's
