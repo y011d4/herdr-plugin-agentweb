@@ -334,8 +334,9 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
       paneView?.echo();
     } catch (err) {
       if (kept) restored = keptTasks.finishSend(paneId, false);
-      // still the stored draft (unless replaced meanwhile): a composer reopened empty under its key
-      // (a Home's survives a Clear's new pane) shows it again
+      // the draft again, unless a newer one is stored (a later send's success left none); a composer
+      // empty under its key (reopened, a Home's after a Clear's new pane too) shows it
+      if (text && !getDraft(key)) setDraft(key, text);
       const live = shownKey === key ? shownInput : null;
       if (text && live && !live.value && getDraft(key) === text) {
         live.value = text;
