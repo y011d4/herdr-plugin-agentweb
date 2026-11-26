@@ -174,6 +174,7 @@ type HeadlessPending struct {
 type HeadlessUsage struct {
 	FiveHour   *UsageWindow `json:"fiveHour"`
 	SevenDay   *UsageWindow `json:"sevenDay"`
+	Fable      *UsageWindow `json:"fable"`      // Claude Code's "Fable limit" (seven_day_overage_included): only in answers to a Fable request
 	ContextPct *float64     `json:"contextPct"` // percent of the context window; null until a turn ends
 	At         int64        `json:"at"`         // when the rate limits were read (ms); 0 = not yet
 }
