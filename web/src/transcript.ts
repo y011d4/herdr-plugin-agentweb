@@ -282,7 +282,8 @@ export function renderAskQuestions(ask: AskQuestion[]): string {
   }).join('');
 }
 
-const YOICKS_NOTICE = /^\s*\[yoicks\] /;
+// the bridge writes each of its lines at a line's start: an indented one is the user's (a list item's, a quote's)
+const YOICKS_NOTICE = /^\[yoicks\] /;
 
 /**
  * A user turn's leading and trailing `[yoicks] …` lines (the bridge's own word to a headless
