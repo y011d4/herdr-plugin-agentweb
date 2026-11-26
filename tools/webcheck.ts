@@ -18,9 +18,10 @@
  * $RUN/webcheck.json whose live tab or workspace label starts with wc-. Each check prints
  * `PASS|FAIL <id> <measured> <condition>`; the exit code is the number of failures.
  * Tier 2 (real Claude) needs $WC_ROOT/.envrc pinning CLAUDE_CONFIG_DIR (direnv allow'ed).
- * The headless orchestrators: with --fake-claude (tools/fakeclaude built as `claude`) the preview has
- * wc-h1 on it, for Tier 1's H items; without it, and with an account pinned, the real wc-h2 for H-T2
- * (haiku, through its dir's settings.local.json). Either way with YOICKS_HEADLESS_NO_TOOLS=1.
+ * The headless orchestrators need --fake-claude (tools/fakeclaude built as `claude`): the preview then
+ * has wc-h1 on it, for Tier 1's H items, and with an account pinned the real wc-h2 for H-T2 (the fake
+ * execs the real claude for it: FAKECLAUDE_REAL; haiku, through its dir's settings.local.json). Both
+ * with YOICKS_HEADLESS_NO_TOOLS=1. Without --fake-claude the H items fail (ENV) and the rest runs.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -110,6 +111,8 @@ function teardown(dir: string): void {
   try { if (c && fs.readFileSync(`/proc/${c.pid}/cmdline`, 'utf8').includes(c.dir)) process.kill(c.pid, 'SIGKILL'); } catch { /* gone */ }
   // a just-killed Chrome's helpers may still write to its profile: retry, and never stop the closing for it
   const rm = (p: string) => { try { fs.rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) { console.log(`WARN ${(e as Error).message}`); } };
+  // the headless orchestrators it started stop (best-effort: stopping the preview ends them too)
+  for (const n of Object.keys(rec?.names ?? {}).filter((k) => /^wc-h[12]$/.test(k))) stopHeadless(rec!.base, n);
   if (rec) {
     const r = rec;
     const step = (id: string, args: string[]): boolean => {
@@ -133,6 +136,15 @@ function teardown(dir: string): void {
     }
   }
   rm(dir);
+}
+
+/** POST …/stop for a headless orchestrator of the preview at `base`; synchronous, for teardown (a signal
+ *  too). The token goes on curl's stdin, never in its argv, which any local user can read. */
+function stopHeadless(base: string, name: string): void {
+  let token = '';
+  try { token = fs.readFileSync(path.join(previewDir(new URL(base).port), 'state', 'token'), 'utf8').trim(); } catch { return; }
+  spawnSync('curl', ['-sf', '-m', '8', '-X', 'POST', '-H', '@-', `${base}/api/orchestrators/${name}/stop`],
+    { input: `Authorization: Bearer ${token}\n`, stdio: ['pipe', 'ignore', 'ignore'] });
 }
 
 function teardownAll(): void {
@@ -225,11 +237,14 @@ function checkAccount(pane: string, name: string, account: string): void {
   if (got !== account) throw env(`${name} account mismatch (want ${accountName(account)}, got ${got === null ? 'no agent process' : got || 'unset'})`);
 }
 
+/** The real claude on PATH, which the fake execs for wc-h2. */
+const realClaude = (): string => spawnSync('sh', ['-c', 'command -v claude'], { encoding: 'utf8' }).stdout.trim();
+
 // wc-h1 runs the fake claude, unverified version and all (H6); wc-h2 the real one, in the pinned account
 const orchConfig = (account: string | null, fake: string | null) => js({ orchestrators: [
   ...['wc-o1', 'wc-o2'].map((name) => ({ name, label: name.toUpperCase(), ...(account ? { env: { CLAUDE_CONFIG_DIR: account } } : {}) })),
-  ...(fake ? [{ name: 'wc-h1', label: 'WC-H1', mode: 'headless', env: { CLAUDE_CONFIG_DIR: path.join(WC_ROOT, 'fake-claude'), FAKECLAUDE_VERSION: '0.0.0-webcheck' } }]
-    : account !== null ? [{ name: 'wc-h2', label: 'WC-H2', mode: 'headless', ...(account ? { env: { CLAUDE_CONFIG_DIR: account } } : {}) }] : []),
+  ...(fake ? [{ name: 'wc-h1', label: 'WC-H1', mode: 'headless', env: { CLAUDE_CONFIG_DIR: path.join(WC_ROOT, 'fake-claude'), FAKECLAUDE_VERSION: '0.0.0-webcheck' } }] : []),
+  ...(fake && account !== null ? [{ name: 'wc-h2', label: 'WC-H2', mode: 'headless', env: { ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), FAKECLAUDE_REAL: realClaude() } }] : []),
 ] });
 
 async function previewCmd(sub: string, o: Record<string, any>): Promise<number> {
@@ -252,7 +267,7 @@ async function previewCmd(sub: string, o: Record<string, any>): Promise<number> 
     fs.writeFileSync(path.join(previewDir(port), 'preview.json'), js(p));
     await previewCtl(p, 'start');
     console.log(`preview ${port} up: http://127.0.0.1:${port} (token ${path.join(previewDir(port), 'state', 'token')}, account ${account === null ? 'none: Tier 1 only' : accountName(account)}, ` +
-      `headless ${p.fakeClaude ? 'wc-h1 (fake claude: H1-H8)' : account !== null ? 'wc-h2 (real claude: H-T2)' : 'none'})`);
+      `headless ${!p.fakeClaude ? 'none (no --fake-claude: the H items fail)' : account !== null ? 'wc-h1 (fake) and wc-h2 (real)' : 'wc-h1 (fake)'})`);
     return 0;
   } finally {
     unlock();
@@ -493,21 +508,12 @@ function paneConfigDir(pane: string): string | null {
 async function setup(c: Ctx, needs: Set<string>): Promise<void> {
   let account = '';
   const fake = c.preview?.fakeClaude ?? null;
-  if (needs.has('hl') && !fake) throw env('the H items need wc-h1: preview start --fake-claude DIR/claude (go build -o DIR/claude ./tools/fakeclaude)');
-  if (needs.has('hl2') && fake) throw env('H-T2 needs the real wc-h2: preview start without --fake-claude');
   if (needs.has('claude') || needs.has('orch') || needs.has('hl2')) {
     account = pinnedAccount();
     // preview start gives the orchestrators that account as env; a preview from before the .envrc has none
     let cfg = '';
     try { cfg = fs.readFileSync(path.join(previewDir(c.port), 'config', 'config.json'), 'utf8'); } catch { /* not ours */ }
     if (cfg !== orchConfig(account, fake)) throw env(`the preview's orchestrators are not pinned to ${accountName(account)} (restart it with preview start)`);
-  }
-  if (needs.has('hl2')) {
-    // the real wc-h2 answers on haiku: its managed dir's local settings (the bridge writes only settings.json there)
-    const data = path.join(WC_ROOT, 'data', fs.existsSync(path.join(WC_ROOT, 'data', 'herdr-agentweb')) ? 'herdr-agentweb' : 'herdr-yoicks');
-    const dir = path.join(data, 'orchestrators', 'wc-h2', '.claude');
-    if (!fs.existsSync(dir)) throw env(`no managed dir ${dir} (the preview writes it at its start)`);
-    fs.writeFileSync(path.join(dir, 'settings.local.json'), js({ model: 'haiku' }));
   }
   if (!needs.size) return;
   fs.mkdirSync(WORK, { recursive: true });
@@ -1289,10 +1295,23 @@ const hlStatus = async (c: Ctx, name: string): Promise<string | undefined> => (a
 const hlTranscript = (c: Ctx, name: string): Promise<any> => api(c, 'GET', `/api/panes/${enc(`hl:${name}`)}/transcript`);
 const CHAT = `(document.getElementById('chat-log')?.textContent ?? '')`;
 
-/** Its running Home on screen, the composer there. */
+const H_HINT = 'preview start --fake-claude DIR/claude (go build -o DIR/claude ./tools/fakeclaude), with $WC_ROOT/.envrc for wc-h2';
+
+/** `name` runs (started when it isn't), recorded so that the run's teardown stops it. */
+async function hlUp(c: Ctx, name: string): Promise<void> {
+  const o = await hlView(c, name);
+  if (!o) throw env(`no ${name} on this preview: ${H_HINT}`);
+  c.rec.names[name] = `hl:${name}`;
+  save(c.rec);
+  if (!o.paneId) await api(c, 'POST', `/api/orchestrators/${name}/start`);
+  if ((await waitFn(async () => ['idle', 'done'].includes((await hlStatus(c, name)) ?? ''), 30_000, 200)).timeout) throw env(`${name} not running`);
+}
+
+/** Its running Home on screen, its chat loaded (a baseline taken now is the transcript's). */
 async function hlHome(c: Ctx, name: string): Promise<void> {
+  await hlUp(c, name);
   await c.pg.goto(`#/home/${name}`);
-  if ((await c.pg.until(`!!document.querySelector('#screen-pane #chat-log') && !!document.getElementById('pane-input')`, 5000)).timeout) throw env(`${name}'s running Home not shown`);
+  if ((await c.pg.until(`document.getElementById('chat-log')?.children.length > 0 && !!document.getElementById('pane-input')`, 5000)).timeout) throw env(`${name}'s running Home not shown`);
 }
 
 /** Types `text` into the Home's composer and taps Send. */
@@ -1304,8 +1323,7 @@ async function compose(c: Ctx, text: string): Promise<number> {
 /** H1: its stopped Home's Start runs it. A fresh session first (Clear, then Stop): each run's alerts go out again. */
 async function h1(c: Ctx) {
   const { pg } = c;
-  c.rec.names['wc-h1'] = 'hl:wc-h1'; // stopped at the run's end
-  save(c.rec);
+  await hlUp(c, 'wc-h1');
   await api(c, 'POST', '/api/orchestrators/wc-h1/clear');
   await api(c, 'POST', '/api/orchestrators/wc-h1/stop');
   await pg.goto('#/home/wc-h1');
@@ -1416,12 +1434,15 @@ async function h7(c: Ctx) {
   const { pg } = c;
   if (!c.preview) throw env('no preview record: H7 restarts the preview');
   await hlHome(c, 'wc-h1');
+  const tag = `wc-h7-${Date.now() % 100000}`;
+  await compose(c, tag);
+  if ((await pg.until(`${CHAT}.includes(${js(`echo: ${tag}`)})`, 5000)).timeout) throw env(`no reply to ${tag}`);
   const before = (await hlTranscript(c, 'wc-h1')).sessionId;
   await previewCtl(c.preview, 'stop');
   await previewCtl(c.preview, 'start');
   const back = await waitFn(async () => ['idle', 'done'].includes((await hlStatus(c, 'wc-h1')) ?? ''), 10_000, 300);
   const after = (await hlTranscript(c, 'wc-h1')).sessionId;
-  const chat = await pg.until(`${CHAT}.includes('echo: slow 3') && document.getElementById('conn-dot').classList.contains('connected')`, 20_000, 300);
+  const chat = await pg.until(`${CHAT}.includes(${js(`echo: ${tag}`)}) && document.getElementById('conn-dot').classList.contains('connected')`, 20_000, 300);
   result(c, !back.timeout && !!before && before === after && !chat.timeout, 'H7', `back=${ms(back)},session=${before === after ? 'same' : `${before}->${after}`},chat=${ms(chat)}`,
     'preview stop + start: wc-h1 running again within 10s on the same session id; the page reconnects and its chat still has the earlier reply within 20s');
 }
@@ -1429,10 +1450,15 @@ async function h7(c: Ctx) {
 /** H-T2: the real wc-h2 (haiku, no yoicks tools): a reply, a question answered, ■, a message sent while it works, Clear. */
 async function ht2(c: Ctx) {
   const { pg } = c;
-  c.rec.names['wc-h2'] = 'hl:wc-h2';
-  save(c.rec);
-  if (!(await hlView(c, 'wc-h2'))?.paneId) await api(c, 'POST', '/api/orchestrators/wc-h2/start');
-  if ((await waitFn(async () => ['idle', 'done'].includes((await hlStatus(c, 'wc-h2')) ?? ''), 30_000, 500)).timeout) throw env('wc-h2 not running');
+  if (!(await hlView(c, 'wc-h2'))) throw env(`no wc-h2 on this preview: ${H_HINT}`);
+  // it answers on haiku: its managed dir's local settings (the bridge writes only settings.json there), read at its start
+  const data = path.join(WC_ROOT, 'data', fs.existsSync(path.join(WC_ROOT, 'data', 'herdr-agentweb')) ? 'herdr-agentweb' : 'herdr-yoicks');
+  const local = path.join(data, 'orchestrators', 'wc-h2', '.claude', 'settings.local.json');
+  if (!fs.existsSync(local)) {
+    fs.mkdirSync(path.dirname(local), { recursive: true });
+    fs.writeFileSync(local, js({ model: 'haiku' }));
+    if ((await hlView(c, 'wc-h2'))?.paneId) await api(c, 'POST', '/api/orchestrators/wc-h2/stop'); // started before it: again
+  }
   await hlHome(c, 'wc-h2');
   const status = (s: string[], wait: number) => waitFn(async () => s.includes((await hlStatus(c, 'wc-h2')) ?? ''), wait, 300);
   const out: string[] = [];
@@ -1450,9 +1476,9 @@ async function ht2(c: Ctx) {
   const sid = (await hlTranscript(c, 'wc-h2')).sessionId;
   const root = path.join(pinnedAccount() || path.join(os.homedir(), '.claude'), 'projects');
   const file = fs.readdirSync(root).map((d) => path.join(root, d, `${sid}.jsonl`)).find((f) => fs.existsSync(f));
-  // its assistant lines' model (other lines name the account's default model too)
+  // the model of its last assistant line, this OK (other lines name the account's default model too)
   const model = file && fs.readFileSync(file, 'utf8').split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } })
-    .find((l) => l?.type === 'assistant')?.message?.model;
+    .filter((l) => l?.type === 'assistant').at(-1)?.message?.model;
   if (!model?.includes('haiku')) throw env(`wc-h2 answered on ${model ?? 'an unknown model'}, not haiku: stopped here`);
 
   await compose(c, ASK_PROMPT);
@@ -1902,8 +1928,6 @@ async function check(o: Record<string, any>): Promise<number> {
         break;
       }
     }
-    // the headless orchestrators this run started stop (a preview stop ends them anyway)
-    for (const n of ['wc-h1', 'wc-h2']) if (c.rec.names[n]) await api(c, 'POST', `/api/orchestrators/${n}/stop`).catch(() => {});
     if (c.pg.refused.length) {
       result(c, false, 'GUARD', `refused=${c.pg.refused.length}`, 'the page made no request the guard refused');
       console.log(c.out.at(-1));

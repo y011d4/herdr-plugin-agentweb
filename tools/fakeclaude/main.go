@@ -33,7 +33,8 @@
 // then is answered; messages queued behind it stay and run next (as S0 measured).
 // Stdin's end while idle exits 0; while working, after the turn. FAKECLAUDE_START=init sends
 // an init at once, before any message; =exit exits 1 at once. FAKECLAUDE_LOG, when set, gets
-// a JSON line for the argv (and env keys) and each stdin line.
+// a JSON line for the argv (and env keys) and each stdin line. FAKECLAUDE_REAL=<path> execs that
+// (real) claude instead, whatever the arguments.
 package main
 
 import (
@@ -47,12 +48,20 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func main() {
+	// one YOICKS_CLAUDE_BIN for the whole bridge: an orchestrator whose env names the real claude
+	// runs that one instead (webcheck's real wc-h2 beside the fake wc-h1)
+	if real := os.Getenv("FAKECLAUDE_REAL"); real != "" {
+		err := syscall.Exec(real, append([]string{real}, os.Args[1:]...), os.Environ())
+		fmt.Fprintln(os.Stderr, "fakeclaude: exec", real+":", err)
+		os.Exit(1)
+	}
 	args := os.Args[1:]
 	logLine(map[string]any{"pid": os.Getpid(), "argv": args, "env": envKeys()})
 	switch {
