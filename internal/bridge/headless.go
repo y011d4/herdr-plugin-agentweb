@@ -863,23 +863,29 @@ func (r *headlessRunner) Interrupt() error {
 	return r.start(true)
 }
 
-// stopChild ends a child: interrupt, close stdin (alone it lets a turn run to its end), up
-// to 1.5 s, SIGTERM to its group, 0.5 s, SIGKILL.
+// stopChild ends a child, on one clock from its call: interrupt (skipped while another write
+// is stuck on a child that stopped reading), close stdin (alone it lets a turn run to its end;
+// it also fails that stuck write), SIGTERM to its group at 1.5 s, SIGKILL at 2 s, given up at 4 s.
 func (r *headlessRunner) stopChild(c *hlChild) {
+	began := time.Now()
 	r.mu.Lock()
 	c.expected = true
 	r.mu.Unlock()
-	c.write(map[string]any{"type": "control_request", "request_id": "yoicks-stop", "request": map[string]any{"subtype": "interrupt"}})
+	if c.wmu.TryLock() {
+		c.stdin.SetWriteDeadline(began.Add(500 * time.Millisecond))
+		c.stdin.Write([]byte(`{"type":"control_request","request_id":"yoicks-stop","request":{"subtype":"interrupt"}}` + "\n"))
+		c.wmu.Unlock()
+	}
 	c.closeStdin()
 	pid := c.cmd.Process.Pid
 	for _, step := range []struct {
-		wait time.Duration
-		sig  syscall.Signal
-	}{{1500 * time.Millisecond, syscall.SIGTERM}, {500 * time.Millisecond, syscall.SIGKILL}, {2 * time.Second, 0}} {
+		at  time.Duration
+		sig syscall.Signal
+	}{{1500 * time.Millisecond, syscall.SIGTERM}, {2 * time.Second, syscall.SIGKILL}, {4 * time.Second, 0}} {
 		select {
 		case <-c.done:
 			return
-		case <-time.After(step.wait):
+		case <-time.After(time.Until(began.Add(step.at))):
 		}
 		if step.sig != 0 {
 			syscall.Kill(-pid, step.sig)
