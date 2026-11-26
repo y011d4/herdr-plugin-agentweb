@@ -30,14 +30,9 @@ export interface View {
   settingsBackRoute: string;
 }
 
-export const store: {
-  appState: AppState | null; wsConnected: boolean; view: View; seenDone: SeenDone;
-  /** an orchestrator started from the list (its Start button shows it): its Home opens once the State shows it running */
-  startingHome: string | null;
-} = {
+export const store: { appState: AppState | null; wsConnected: boolean; view: View; seenDone: SeenDone } = {
   appState: null,
   wsConnected: false,
-  startingHome: null,
   view: { screen: 'loading', activePaneId: null, homeMode: false, paneViewMode: 'terminal', paneBackRoute: '#/agents', settingsBackRoute: '#/agents' },
   seenDone: (() => {
     try { return JSON.parse(localStorage.getItem(STORAGE_SEEN) ?? '{}') ?? {}; } catch { return {}; }
@@ -58,11 +53,6 @@ export function emit(): void {
 /** A new State (null: signed out), with an emit(); the shell's onStateUpdate (ui/App.tsx) stays its caller's job. */
 export function setAppState(state: AppState | null): void {
   store.appState = state;
-  emit();
-}
-
-export function setStartingHome(name: string | null): void {
-  store.startingHome = name;
   emit();
 }
 

@@ -5,6 +5,7 @@ import { act } from 'react';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { keptTasks, setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
+import { orchestratorOfPane } from '../src/routes.ts';
 import { Pane, paneTopbar, paneViewOnState } from '../src/ui/Pane.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
 import { fire, render } from './render.ts';
@@ -37,7 +38,7 @@ async function show(paneId: string, home = false, back = '#/agents'): Promise<vo
   store.view.activePaneId = paneId;
   store.view.homeMode = home;
   const t = paneTopbar(paneId, home, back, () => {});
-  ({ container, unmount } = await render(<><div id="tb">{t.left}{t.title}{t.right}</div><Pane paneId={paneId} home={home} /></>));
+  ({ container, unmount } = await render(<><div id="tb">{t.left}{t.title}{t.right}</div><Pane paneId={paneId} home={home} name={home ? orchestratorOfPane(store.appState, paneId)?.name : undefined} /></>));
 }
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => container.querySelector<T>(sel)!;
 const ta = () => $<HTMLTextAreaElement>('#pane-input');
@@ -240,7 +241,10 @@ describe('Home', () => {
     await home(fresh());
     assert.equal($('#tb').textContent, 'Personal· readyAgents>_⚙', "a Home's topbar ends with Settings, no ⋮");
     assert.equal($('.home-counts').textContent, '1 working1 done0 idleAll agents ›'); // p1, p3 (p4 is the orchestrator)
-    assert.equal(container.querySelector('.home-switch'), null, 'one orchestrator running: no switcher');
+    // two configured, one running: the switcher lists both, the stopped one dimmed
+    const sw = [...container.querySelectorAll<HTMLElement>('.home-switch-btn')];
+    assert.deepEqual(sw.map((b) => `${b.className}|${b.dataset.orch}|${b.querySelector('i')!.className}|${b.textContent}`),
+      ['home-switch-btn active|personal|home-dot idle|Personal', 'home-switch-btn stopped|work|home-dot stopped|work']);
     assert.equal(container.querySelector('.home-attn'), null);
     await fire(() => $('.home-counts').click());
     assert.equal(location.hash, '#/agents/personal');

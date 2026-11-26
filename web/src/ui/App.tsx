@@ -15,13 +15,13 @@ import { Fragment, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { apiDelete, apiGet, apiPost, getToken, loadToken, onUnauthorized, setToken } from '../api.ts';
 import { dismissNotificationsForPane, dismissToastsForPane, notifyAgentStatus, showToast } from '../notify.ts';
-import { homeHash, homeOf, isAgentsRoute, nextPaneBackRoute, nextSettingsBackRoute, paneGoneRoute, paneRoute, resolveRoute } from '../routes.ts';
-import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, setStartingHome, store, subscribe, type View } from '../store.ts';
-import type { AppState, ClearResponse, OrchestratorView, WsMessage } from '../types.ts';
+import { homeOf, nextPaneBackRoute, nextSettingsBackRoute, paneGoneRoute, paneRoute, resolveRoute } from '../routes.ts';
+import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, store, subscribe, type View } from '../store.ts';
+import type { AppState, ClearResponse, WsMessage } from '../types.ts';
 import { onWsMessage, wsConnect, wsSendWatch } from '../ws.ts';
 import { Dashboard, dashboardTopbar } from './Dashboard.tsx';
 import { Modals, confirmModal, openAgentMenu } from './Modals.tsx';
-import { closePaneView, Pane, paneTopbar, paneViewOnState } from './Pane.tsx';
+import { closePaneView, Pane, paneTopbar, paneViewOnState, StoppedHome, stoppedHomeTopbar } from './Pane.tsx';
 import { Settings, settingsTopbar } from './Settings.tsx';
 import { Toasts } from './Toasts.tsx';
 import { Token } from './Token.tsx';
@@ -127,20 +127,19 @@ function leaveClosedPane(): void {
   navigate(paneGoneRoute(view));
 }
 
-/** herdr closed a pane (pane_gone): the open one leaves, or, on a Home, holds for a replacement. */
+/** herdr closed a pane (pane_gone): the open one leaves; a Home's orchestrator going is the State's to show. */
 function onPaneGone(paneId: string): void {
   if (paneId !== view.activePaneId) return;
-  if (view.homeMode) holdHomeForReplacement(); // the orchestrator may be mid-replacement; state decides
-  else leaveClosedPane();
+  if (!view.homeMode) leaveClosedPane();
 }
 
-/** A state on a Home: without its orchestrator's pane it holds for a replacement, with a
- *  new pane it re-routes onto it (true: either happened). */
+/** A state on a Home whose orchestrator's pane changed: a new pane (started, or cleared) re-routes
+ *  onto it; none shows the stopped Home, unless a Clear is replacing it (true: either happened). */
 function homeReplaced(hash: string): boolean {
   const id = homeOf(hash, store.appState)?.paneId ?? null;
-  if (id === view.activePaneId) { stopHoldingHome(); return false; }
-  if (id) { stopHoldingHome(); handleRoute(); } // replaced (e.g. cleared): re-resolve Home onto the new pane
-  else holdHomeForReplacement(); // gone — maybe being replaced
+  if (id === view.activePaneId) { if (id) stopHoldingHome(); return false; }
+  if (id || !homeClearing) { stopHoldingHome(); handleRoute(); }
+  else holdHomeForReplacement(); // gone mid-Clear: the replacement is on its way
   return true;
 }
 
@@ -150,12 +149,6 @@ function homeReplaced(hash: string): boolean {
 // this is also where a first state routes the app, whichever source wins the race.
 function onStateUpdate(): void {
   if (goHomeToOrchestrator()) return; // first state of a fresh open: decide home
-  // an orchestrator started from the list is up: open its Home, if the list is still on screen
-  const started = store.startingHome ? orchestrators().find((o) => o.name === store.startingHome && o.paneId) : undefined;
-  if (started) {
-    setStartingHome(null);
-    if (isAgentsRoute(location.hash)) { navigate(homeHash(started.name)); return; }
-  }
   // Nothing rendered yet (startup), or the token was just (re-)entered and the
   // token screen is still up: render the current route.
   if (!routeRendered || view.screen === 'token') { handleRoute(); return; }
@@ -183,9 +176,6 @@ function navigate(hash: string): void {
   location.hash = hash;
 }
 
-// Orchestrators (one per Claude account, say) each have a Home: #/home/<name>.
-const orchestrators = (): OrchestratorView[] => store.appState?.orchestrators ?? [];
-
 // Opening the app without a route (the PWA's start_url) is decided once, on the first
 // state (resolveRoute): location.replace keeps the empty-hash entry out of history.
 function goHomeToOrchestrator(): boolean {
@@ -205,28 +195,32 @@ let routeRendered = false;
 // dialogue-only chat (no tool calls or injected notifications), a "doing now" line
 // while it works, and a plain messenger composer without terminal keys (ui/Pane.tsx).
 
-// A cleared or restarted orchestrator leaves a gap: its old pane is gone before the
-// replacement is detected as an agent. Home holds through that gap instead of
-// bouncing to the list, and gives up only if no orchestrator shows up in time.
+// A cleared orchestrator leaves a gap: its old pane is gone before the replacement is
+// detected as an agent. Its Home holds through that gap instead of showing the stopped
+// Home, and gives up only if no orchestrator shows up in time.
 const HOME_REPLACE_GRACE_MS = 8_000;
 let homeLostTimer: ReturnType<typeof setTimeout> | null = null;
+let homeClearing = false; // a Home's Clear is in flight or replacing its orchestrator
 
 function holdHomeForReplacement(): void {
   if (homeLostTimer) return;
   homeLostTimer = setTimeout(() => {
     homeLostTimer = null;
+    homeClearing = false;
     if (!location.hash.startsWith('#/home/') || homeOf(location.hash, store.appState)?.paneId) return; // left, or onStateUpdate re-resolved
-    showToast('Orchestrator stopped', 'Showing all agents.');
-    handleRoute(); // no orchestrator → the list
+    showToast('Orchestrator stopped', 'It did not come back after Clear.');
+    handleRoute(); // the stopped Home
   }, HOME_REPLACE_GRACE_MS);
 }
 
 function stopHoldingHome(): void {
   if (homeLostTimer) clearTimeout(homeLostTimer);
   homeLostTimer = null;
+  homeClearing = false;
 }
 
 function handleRoute(e?: Event): void {
+  stopHoldingHome(); // a route rendered afresh (left the Home, or its replacement is in) ends any hold
   if (!getToken()) {
     renderTokenScreen();
     return;
@@ -252,10 +246,14 @@ function handleRoute(e?: Event): void {
     view.homeMode = true;
     view.activePaneId = route.paneId;
     try { localStorage.setItem(STORAGE_HOME, route.name); } catch { /* memory-only */ }
-    dismissToastsForPane(route.paneId);
-    dismissNotificationsForPane(route.paneId);
-    markActivePaneSeen();
-    renderPaneDetail(route.paneId);
+    if (route.paneId) {
+      dismissToastsForPane(route.paneId);
+      dismissNotificationsForPane(route.paneId);
+      markActivePaneSeen();
+      renderPaneDetail(route.paneId, route.name);
+    } else {
+      show('pane', <StoppedHome name={route.name} />, stoppedHomeTopbar(route.name));
+    }
   } else if (route.kind === 'agents') {
     show('agents', <Dashboard hash={location.hash} />, dashboardTopbar(location.hash));
   } else if (route.kind === 'pane') {
@@ -313,6 +311,7 @@ function agentMenu(paneId: string): void {
 async function clearAgentFlow(paneId: string): Promise<void> {
   const ok = await confirmModal('Clear agent?', 'Starts a fresh session (same profile & directory) and closes the current one. In-session context is lost.', 'Clear', false);
   if (!ok) return;
+  if (view.homeMode) homeClearing = true; // the gap before the replacement isn't a stop
   try {
     const res = await apiPost<ClearResponse>(`/api/agents/${encodeURIComponent(paneId)}/clear`);
     showToast('Cleared', 'Started a fresh session');
@@ -321,7 +320,9 @@ async function clearAgentFlow(paneId: string): Promise<void> {
     if (view.homeMode) return;
     navigate(res.paneId ? paneRoute(store.appState, res.paneId) : '#/agents');
   } catch (err) {
+    stopHoldingHome();
     showToast('Clear failed', (err as Error).message);
+    if (view.homeMode) handleRoute(); // it may have stopped meanwhile: show what the State says
   }
 }
 
@@ -331,7 +332,7 @@ async function stopAgentFlow(paneId: string): Promise<void> {
   try {
     await apiDelete(`/api/panes/${encodeURIComponent(paneId)}`);
     showToast('Stopped', 'Agent pane closed');
-    navigate(paneGoneRoute(view));
+    if (!view.homeMode) navigate(paneGoneRoute(view)); // a Home stays: the State shows it stopped
   } catch (err) {
     showToast('Stop failed', (err as Error).message);
   }
@@ -339,12 +340,12 @@ async function stopAgentFlow(paneId: string): Promise<void> {
 
 // ── Pane detail ───────────────────────────────────────────────────────────────
 
-function renderPaneDetail(paneId: string): void {
+function renderPaneDetail(paneId: string, homeName?: string): void {
   // A pane view opens on the terminal (pane-view.ts) but mounts after the route's watch goes
   // out (handleRoute's wsSendWatch): set its mode now, or that watch follows the last pane's chat.
   view.paneViewMode = 'terminal';
   const actions = view.homeMode ? { clear: () => { void clearAgentFlow(paneId); }, stop: () => { void stopAgentFlow(paneId); } } : undefined;
-  show('pane', <Pane paneId={paneId} home={view.homeMode} actions={actions} />,
+  show('pane', <Pane paneId={paneId} home={view.homeMode} actions={actions} name={homeName} />,
     paneTopbar(paneId, view.homeMode, view.paneBackRoute, () => agentMenu(paneId)));
 }
 

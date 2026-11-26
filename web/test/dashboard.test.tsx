@@ -2,8 +2,8 @@
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { act } from 'react';
-import { clearToasts, getToasts } from '../src/notify.ts';
-import { setAppState, setStartingHome, store } from '../src/store.ts';
+import { clearToasts } from '../src/notify.ts';
+import { setAppState, store } from '../src/store.ts';
 import type { AppState } from '../src/types.ts';
 import { Dashboard, dashboardTopbar } from '../src/ui/Dashboard.tsx';
 import { state as recorded } from './contract.gen.ts';
@@ -26,7 +26,6 @@ beforeEach(() => {
   unmounts = [];
   location.hash = '#/agents';
   store.seenDone = {};
-  setStartingHome(null);
   clearToasts();
   localStorage.clear();
 });
@@ -79,31 +78,6 @@ describe('Dashboard list', () => {
     assert.equal(c.querySelector<HTMLElement>('#screen-agents')!.dataset.ready, '1');
   });
 
-  it("Start: POSTs, the button shows it's starting; a failure says so and frees it", async () => {
-    let status = 200;
-    const posts: string[] = [];
-    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
-      posts.push(`${init.method} ${url}`);
-      return new Response(JSON.stringify(status === 200 ? { paneId: 'p9' } : { error: { code: 'already_running', message: 'it runs' } }), { status });
-    });
-    const c = await show('#/agents', fresh());
-    const btn = () => c.querySelector<HTMLButtonElement>('.orch-start .orch-start-btn[data-orch="work"]')!;
-    assert.equal(c.querySelector('.orch-start-label')!.textContent, 'Start');
-    assert.equal(c.querySelectorAll('.orch-start-btn').length, 1); // personal runs
-    assert.deepEqual([btn().disabled, btn().textContent], [false, 'work']); // no label: the name
-    await fire(() => btn().click());
-    await settle();
-    assert.deepEqual(posts, ['POST /api/orchestrators/work/start']);
-    assert.deepEqual([btn().disabled, btn().textContent, store.startingHome], [true, 'work …', 'work']);
-
-    setStartingHome(null);
-    status = 409;
-    await settle();
-    await fire(() => btn().click());
-    await settle();
-    assert.deepEqual([btn().disabled, btn().textContent, store.startingHome], [false, 'work', null]);
-    assert.deepEqual(getToasts().map((t) => `${t.title}: ${t.body}`), ['Could not start the orchestrator: it runs']);
-  });
 });
 
 describe('Dashboard under state pushes', () => {
@@ -173,19 +147,30 @@ describe('Dashboard topbar', () => {
     assert.equal(location.hash, '#/home/personal');
   });
 
-  it('the full list: ← Home to the one used last while it runs, else the first running; none without one', async () => {
+  it('the full list: ← Home to the one used last, running or not, else the first running, else the first', async () => {
     let c = await bar('#/agents', fresh());
     assert.equal(c.querySelector('#t')!.textContent, 'Agents');
     await fire(() => c.querySelector<HTMLElement>('#l .topbar-back')!.click());
     assert.equal(location.hash, '#/home/personal');
-    localStorage.setItem('herdr_home', 'work'); // not running: the first running one
+    localStorage.setItem('herdr_home', 'work'); // not running: its Home has Start
     location.hash = '#/agents';
+    c = await bar('#/agents', fresh());
     await fire(() => c.querySelector<HTMLElement>('#l .topbar-back')!.click());
-    assert.equal(location.hash, '#/home/personal');
+    assert.equal(location.hash, '#/home/work');
+    localStorage.clear();
     const stopped = fresh();
     stopped.orchestrators[0].paneId = null;
     c = await bar('#/agents', stopped);
-    assert.equal(c.querySelector('#l')!.children.length, 0);
+    location.hash = '#/agents';
+    await fire(() => c.querySelector<HTMLElement>('#l .topbar-back')!.click());
+    assert.equal(location.hash, '#/home/personal', 'none running: the first configured');
+  });
+
+  it('has no Start buttons: each orchestrator starts from its own Home', async () => {
+    const stopped = fresh();
+    stopped.orchestrators[0].paneId = null;
+    const c = await show('#/agents', stopped);
+    assert.equal(c.querySelector('.orch-start, .orch-start-btn'), null);
   });
 
   it('+ (New agent) and ⚙ (Settings)', async () => {

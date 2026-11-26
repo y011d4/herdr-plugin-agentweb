@@ -1,17 +1,17 @@
 /**
  * routes.ts — what a hash shows, decided from the State alone (pure; ui/App.tsx renders it):
  *   #/agents         the list; #/agents/<name> one orchestrator's account's agents
- *   #/home/<name>    an orchestrator's Home; #/home opens the default one
+ *   #/home/<name>    an orchestrator's Home, running or stopped (Start); #/home opens the default one
  *   #/pane/<id>      a pane (an orchestrator's pane opens as its Home)
  *   #/settings
- * An empty hash (a fresh open) goes to the default Home, else the list, once a State exists.
+ * An empty hash (a fresh open) goes to the default Home once a State exists.
  */
 import type { AppState, OrchestratorView } from './types.ts';
 
 export type Route =
   | { kind: 'redirect'; hash: string; replace: boolean }
   | { kind: 'loading' } // a Home before the first State: the first State re-routes
-  | { kind: 'home'; name: string; paneId: string }
+  | { kind: 'home'; name: string; paneId: string | null } // null: stopped
   | { kind: 'agents' }
   | { kind: 'pane'; paneId: string }
   | { kind: 'settings' };
@@ -38,10 +38,11 @@ export function homeOf(hash: string, state: AppState | null): OrchestratorView |
   return orchestrators(state).find((o) => o.name === name);
 }
 
-/** The Home to open by default: the one last opened here (`lastHome`) while it runs, else the first running one. */
+/** The Home to open by default: the one last opened here (`lastHome`), running or not, else the
+ *  first running one, else the first configured. */
 export function defaultHome(state: AppState | null, lastHome: string | null): OrchestratorView | undefined {
-  const running = orchestrators(state).filter((o) => o.paneId);
-  return running.find((o) => o.name === lastHome) ?? running[0];
+  const all = orchestrators(state);
+  return all.find((o) => o.name === lastHome) ?? all.find((o) => o.paneId) ?? all[0];
 }
 
 /** The list #/agents/<name> shows: that orchestrator's account (undefined: every agent). */
@@ -72,9 +73,8 @@ export function nextSettingsBackRoute(fromHash: string | null, prev: string): st
 }
 
 export function resolveRoute(hash: string, state: AppState | null, lastHome: string | null): Route {
-  // Opening the app without a route (the PWA's start_url) lands on an orchestrator's
-  // chat when one is running, and on the agents list otherwise. Replaced either way, so
-  // an orchestrator that starts later never yanks the user off the list.
+  // Opening the app without a route (the PWA's start_url) lands on the default Home (a stopped
+  // one shows Start), replaced so the empty-hash entry stays out of history.
   if (!hash && state) {
     const home = defaultHome(state, lastHome);
     return { kind: 'redirect', hash: home ? homeHash(home.name) : '#/agents', replace: true };
@@ -88,7 +88,7 @@ export function resolveRoute(hash: string, state: AppState | null, lastHome: str
   if (h === '#/home' || h.startsWith('#/home/')) {
     if (!state) return { kind: 'loading' };
     const o = homeOf(h, state);
-    return o?.paneId ? { kind: 'home', name: o.name, paneId: o.paneId } : { kind: 'redirect', hash: '#/agents', replace: false };
+    return o ? { kind: 'home', name: o.name, paneId: o.paneId } : { kind: 'redirect', hash: '#/agents', replace: false };
   }
   if (isAgentsRoute(h) || h === '#/') return { kind: 'agents' };
   if (h.startsWith('#/pane/')) {
