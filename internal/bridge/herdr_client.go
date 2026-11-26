@@ -13,6 +13,7 @@ package bridge
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,22 +57,47 @@ func safeParamsForLog(params map[string]any) string {
 // herdrRPC sends one request on its own connection: herdr answers one request per
 // connection and closes it.
 func herdrRPC(socketPath, method string, params map[string]any) (json.RawMessage, error) {
+	return herdrCall(context.Background(), socketPath, method, params, requestTimeout)
+}
+
+// herdrCall is herdrRPC with a deadline of timeout (0: none, for herdr's waits, which have
+// none of their own); ctx's end closes the connection, so a wait can be given up.
+func herdrCall(ctx context.Context, socketPath, method string, params map[string]any, timeout time.Duration) (json.RawMessage, error) {
 	if params == nil {
 		params = map[string]any{}
 	}
 	id := fmt.Sprintf("yoicks:%d:%d", time.Now().UnixMilli(), rpcSeq.Add(1))
-	conn, err := net.DialTimeout("unix", socketPath, requestTimeout)
+	dialCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	conn, err := (&net.Dialer{}).DialContext(dialCtx, "unix", socketPath)
+	cancel()
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		logf("[herdr-client] rpc %s error: %s %s", method, err, safeParamsForLog(params))
 		return nil, err
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(requestTimeout))
+	// the request goes out only while ctx stands: the cancellation closes the connection at
+	// once, a write in progress or not (a blocked write then fails; half a line is no request
+	// to herdr), and a write after the close sends nothing
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
+	if timeout > 0 {
+		_ = conn.SetDeadline(time.Now().Add(timeout))
+	} else {
+		_ = conn.SetWriteDeadline(time.Now().Add(requestTimeout)) // a wait's request still goes out promptly
+	}
 	line, err := json.Marshal(map[string]any{"type": "request", "id": id, "method": method, "params": params})
 	if err != nil {
 		return nil, err
 	}
-	if _, err := conn.Write(append(line, '\n')); err != nil {
+	if ctx.Err() == nil {
+		_, err = conn.Write(append(line, '\n'))
+	}
+	if ctx.Err() != nil { // given up: nothing more goes to herdr
+		return nil, ctx.Err()
+	}
+	if err != nil {
 		logf("[herdr-client] rpc %s error: %s %s", method, err, safeParamsForLog(params))
 		return nil, err
 	}
@@ -82,6 +108,9 @@ func herdrRPC(socketPath, method string, params map[string]any) (json.RawMessage
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				return nil, fmt.Errorf("RPC timeout: %s", method)
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
 			}
 			logf("[herdr-client] rpc %s closed without response %s", method, safeParamsForLog(params))
 			return nil, errors.New("connection closed")
@@ -216,6 +245,11 @@ func (c *HerdrClient) State() *State { return c.published.Load() }
 // RPC sends one request to herdr.
 func (c *HerdrClient) RPC(method string, params map[string]any) (json.RawMessage, error) {
 	return herdrRPC(c.socketPath, method, params)
+}
+
+// Wait is RPC with no deadline (herdr's agent.wait and agent.prompt's wait), ended by ctx.
+func (c *HerdrClient) Wait(ctx context.Context, method string, params map[string]any) (json.RawMessage, error) {
+	return herdrCall(ctx, c.socketPath, method, params, 0)
 }
 
 // Refresh re-fetches the snapshot now and pushes it, for changes herdr sends no

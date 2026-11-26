@@ -93,9 +93,30 @@ func orchestratorFiles(def OrchestratorDef, rules, ctl string) map[string]string
 
 @local.md
 `,
-		"rules.md":              strings.ReplaceAll(rules, "{{yoicks}}", ctl),
+		"rules.md":              strings.ReplaceAll(rulesFor(rules, firstNonEmpty(def.Mode, "tui")), "{{yoicks}}", ctl),
 		".claude/settings.json": js.String(),
 	}
+}
+
+// rulesFor is the bundled rules for mode: the shared text and that mode's sections, each
+// written "<!-- mode -->\n…<!-- /mode -->\n", their markers left out (the other mode's go whole).
+func rulesFor(rules, mode string) string {
+	for _, m := range []string{"tui", "headless"} {
+		open, end := "<!-- "+m+" -->\n", "<!-- /"+m+" -->\n"
+		for {
+			i := strings.Index(rules, open)
+			j := strings.Index(rules, end)
+			if i < 0 || j < i {
+				break
+			}
+			if m == mode {
+				rules = rules[:i] + rules[i+len(open):j] + rules[j+len(end):]
+			} else {
+				rules = rules[:i] + rules[j+len(end):]
+			}
+		}
+	}
+	return rules
 }
 
 // ensureOrchestratorDir writes a managed orchestrator's dir (see the top of this

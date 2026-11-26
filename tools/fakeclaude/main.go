@@ -6,7 +6,8 @@
 //	claude auth status --json        FAKECLAUDE_AUTH = <authMethod>/<subscriptionType> (default claude.ai/max)
 //	claude -p … stream-json …        a session over stdin/stdout, as Claude Code 2.1.322 does it
 //
-// In -p mode each turn starts with system/init (tools from --tools, apiKeySource from
+// In -p mode it connects to the --mcp-config server (its yoicks tools join --tools's, the
+// --permission-prompt-tool one hidden). Each turn starts with system/init (apiKeySource from
 // FAKECLAUDE_APIKEYSOURCE, default none) and writes the transcript to
 // $CLAUDE_CONFIG_DIR (else ~/.claude)/projects/<slug of the cwd>/<session>.jsonl. A message
 // is a script by its text:
@@ -16,7 +17,10 @@
 //	crash     exit 1 mid-turn
 //	garbage   a line that isn't JSON, then the reply
 //	unknown   an event of a type Claude Code doesn't have, then the reply
-//	ask       an AskUserQuestion tool_use and a can_use_tool control_request, then wait for its answer
+//	ask       an AskUserQuestion tool_use, then its permission call (approve) and the decision as the tool_result
+//	askstdio  the same through a can_use_tool control_request instead (the route yoicks warns about)
+//	asknoroute an AskUserQuestion tool_use that never reaches the permission tool
+//	tool      call the yoicks overview tool; call <tool> <json args> any one: its text is the reply
 //	deaf      stop reading stdin (what's written to it backs up)
 //	other     the reply "echo: <text>"
 //
@@ -43,6 +47,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func main() {
@@ -108,7 +114,9 @@ func argAfter(args []string, flag string) string {
 
 type fake struct {
 	id, cwd, transcript string
-	tools               []string
+	tools               []string // built-in, then its MCP server's
+	mcpServers          []any
+	mcp                 *mcp.ClientSession
 
 	outMu sync.Mutex
 
@@ -129,6 +137,11 @@ func session(args []string) {
 	f := &fake{id: firstNonEmpty(argAfter(args, "--session-id"), argAfter(args, "--resume")), answers: map[string]chan map[string]any{}, skip: map[int]bool{}}
 	if t := argAfter(args, "--tools"); t != "" {
 		f.tools = strings.Split(t, ",")
+	}
+	if cfg := argAfter(args, "--mcp-config"); cfg != "" {
+		names := f.connectMCP(cfg, argAfter(args, "--permission-prompt-tool"))
+		f.tools = append(f.tools, names...)
+		f.mcpServers = []any{map[string]any{"name": "yoicks", "source": "dynamic", "status": map[bool]string{true: "connected", false: "failed"}[f.mcp != nil]}}
 	}
 	f.cwd, _ = os.Getwd()
 	root := os.Getenv("CLAUDE_CONFIG_DIR")
@@ -206,7 +219,7 @@ func session(args []string) {
 
 func (f *fake) init() map[string]any {
 	return map[string]any{"type": "system", "subtype": "init", "session_id": f.id, "cwd": f.cwd, "tools": f.tools,
-		"mcp_servers": []any{}, "model": "fake", "permissionMode": "default",
+		"mcp_servers": f.mcpServers, "model": "fake", "permissionMode": "default",
 		"apiKeySource": env("FAKECLAUDE_APIKEYSOURCE", "none"), "claude_code_version": env("FAKECLAUDE_VERSION", "2.1.322")}
 }
 
@@ -273,7 +286,25 @@ func (f *fake) turn(q queued) {
 	case "unknown":
 		f.emit(map[string]any{"type": "mystery_event", "session_id": f.id})
 	case "ask":
+		f.askMCP(ctx)
+	case "asknoroute": // the question in the stream, never through the permission tool
+		f.emit(assistant([]any{map[string]any{"type": "tool_use", "id": "toolu_lost", "name": "AskUserQuestion", "input": map[string]any{"questions": []any{}}}}))
+	case "askstdio":
 		f.ask(ctx)
+	case "tool", "call": // a yoicks tool: overview, or call <tool> <json args>
+		tool, js, _ := strings.Cut(arg, " ")
+		args := map[string]any{}
+		json.Unmarshal([]byte(js), &args)
+		if word == "tool" {
+			tool = "overview"
+		}
+		res, err := f.call(ctx, tool, args)
+		if err != nil {
+			res = "the call failed: " + err.Error()
+		}
+		f.toolResult("toolu_call", res)
+		f.reply(ctx, "tool: "+res)
+		return
 	case "slow", "hang":
 		f.emit(assistant([]any{map[string]any{"type": "tool_use", "id": "toolu_slow", "name": "Bash", "input": map[string]any{"command": "sleep " + arg}}}))
 		for i := 1; i <= seconds; i++ {
@@ -352,7 +383,7 @@ func (f *fake) ask(ctx context.Context) {
 		b, _ := json.Marshal(resp)
 		result = string(b)
 	case <-ctx.Done():
-	case <-time.After(10 * time.Second):
+	case <-time.After(60 * time.Second):
 	}
 	f.emit(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "toolu_ask", "content": result}}}})
 }

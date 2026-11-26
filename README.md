@@ -496,7 +496,7 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   `null`; `agents` the agent panes of its Claude account, itself included, or `null` when unknown;
   `mode` is `"tui"`, or `"headless"` for one the bridge runs itself as `claude -p` (config
   `"mode": "headless"`, managed entries only), whose `paneId` is `"hl:<name>"` while it runs and whose
-  `headless` is `{ status: stopped|idle|working|blocked|done|error, completionSeq, pending: null,
+  `headless` is `{ status: stopped|idle|working|blocked|done|error, completionSeq, pending: { id, questions } | null,
   usage: { fiveHour, sevenDay: { utilization (0–1), resetsAt (ms) } | null, contextPct | null, at } | null,
   warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }] }`, `null` for a tui one)
   and `orchestratorPaneId` (the first running tui one's, or `null`). Each agent's `completionSeq` is herdr's
@@ -534,8 +534,13 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
 - `POST /api/orchestrators/:name/send` `{"text": "…"}`, `…/interrupt`, `…/clear` and `…/stop` — for a
   headless orchestrator: send a message (also while it works) and interrupt its turn, both 409 when it
   isn't running; clear starts it in a fresh session (returning `{"paneId", "name"}` like start), running
-  or not; stop ends it, and succeeds when it is already stopped. A headless orchestrator has no herdr pane: `/api/panes/hl:<name>/…` and
+  or not; stop ends it, and succeeds when it is already stopped. A message sent while a question is
+  pending refuses that question, with the message as the reason. A headless orchestrator has no herdr pane: `/api/panes/hl:<name>/…` and
   `/api/agents/hl:<name>/…` answer 404, except `GET /api/panes/hl:<name>/transcript`.
+- `POST /api/orchestrators/:name/answer` `{"id": "…", "answers": {"<question>": "<label>"}}` or
+  `{"id": "…", "deny": "<message>"}` — answer (or refuse) the headless orchestrator's pending question
+  (`headless.pending`, its AskUserQuestion): a multiSelect's labels joined by `", "`, free text allowed;
+  409 when that id isn't the one pending.
 - `POST /api/worktrees` `{"cwd": "/repo", "branch": "feat/x", "base": "origin/main"}` — create a git
   worktree next to the repo, as above (herdr `worktree.create`; `cwd` is any path in the source repo,
   `branch`/`base` optional) and return `{"workspaceId", "checkoutPath", "branch", "paneId"}`. Standalone (create a worktree
@@ -555,7 +560,9 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   `agent.prompt`; `text` must be non-empty)
 - `WS /ws?token=…` — `{"type":"state"}` snapshots and `{"type":"agent_status"}`
   transitions, and `{"type":"orchestrator_alert","name","kind","message"}` for a headless
-  orchestrator's new warning (once per session and kind; also to ntfy when `notify_url` is set). `{"type":"watch_transcript","paneId":…}` starts a live tail that
+  orchestrator's new warning (once per session and kind; also to ntfy when `notify_url` is set). A
+  headless orchestrator's working → done and → blocked come as `agent_status` with `paneId: "hl:<name>"`
+  and its label as `workspaceLabel`. `{"type":"watch_transcript","paneId":…}` starts a live tail that
   pushes `{"type":"transcript_items",…}` (`reset` rebuilds, else appends);
   `{"type":"unwatch_transcript"}` stops it (mirrors `watch_pane`/`pane_output`).
 
