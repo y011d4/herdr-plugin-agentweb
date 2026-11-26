@@ -68,16 +68,17 @@ func (f *fake) connectMCP(configPath, permissionTool string) []string {
 	return names
 }
 
-// call calls a yoicks tool (with a progress token, as Claude Code does); its text, or the error's.
-func (f *fake) call(ctx context.Context, tool string, args map[string]any) (string, error) {
+// call calls a yoicks tool for the tool_use id (with a progress token and the id in _meta, as
+// Claude Code does); its text, or the error's, and whether it is an error.
+func (f *fake) call(ctx context.Context, tool, id string, args map[string]any) (string, bool, error) {
 	if f.mcp == nil {
-		return "", context.Canceled
+		return "", true, context.Canceled
 	}
-	params := &mcp.CallToolParams{Name: tool, Arguments: args}
+	params := &mcp.CallToolParams{Name: tool, Arguments: args, Meta: mcp.Meta{"claudecode/toolUseId": id}}
 	params.SetProgressToken("fake-" + tool)
 	res, err := f.mcp.CallTool(ctx, params)
 	if err != nil {
-		return "", err
+		return "", true, err
 	}
 	var text []string
 	for _, c := range res.Content {
@@ -85,7 +86,7 @@ func (f *fake) call(ctx context.Context, tool string, args map[string]any) (stri
 			text = append(text, t.Text)
 		}
 	}
-	return strings.Join(text, "\n"), nil
+	return strings.Join(text, "\n"), res.IsError, nil
 }
 
 // askMCP: an AskUserQuestion through the permission tool, its decision the tool_result.
@@ -93,16 +94,16 @@ func (f *fake) askMCP(ctx context.Context) {
 	input := map[string]any{"questions": []any{map[string]any{"question": "Which fruit?", "header": "Fruit", "multiSelect": false,
 		"options": []any{map[string]any{"label": "apple", "description": "red"}, map[string]any{"label": "cherry", "description": ""}}}}}
 	f.emit(assistant([]any{map[string]any{"type": "tool_use", "id": "toolu_ask", "name": "AskUserQuestion", "input": input}}))
-	result, err := f.call(ctx, "approve", map[string]any{"tool_name": "AskUserQuestion", "input": input, "tool_use_id": "toolu_ask"})
+	result, _, err := f.call(ctx, "approve", "toolu_ask", map[string]any{"tool_name": "AskUserQuestion", "input": input, "tool_use_id": "toolu_ask"})
 	if err != nil {
 		result = "the permission call failed: " + err.Error()
 	}
-	f.toolResult("toolu_ask", result)
+	f.toolResult("toolu_ask", result, false)
 }
 
 // toolResult emits a tool_result and writes it to the transcript.
-func (f *fake) toolResult(id, text string) {
-	msg := map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": id, "content": text}}}
+func (f *fake) toolResult(id, text string, isError bool) {
+	msg := map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": id, "content": text, "is_error": isError}}}
 	f.emit(map[string]any{"type": "user", "message": msg})
 	f.record(map[string]any{"type": "user", "message": msg})
 }

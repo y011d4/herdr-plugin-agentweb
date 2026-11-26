@@ -298,13 +298,17 @@ func (f *fake) turn(q queued) {
 		if word == "tool" {
 			tool = "overview"
 		}
-		res, err := f.call(ctx, tool, args)
+		f.emit(assistant([]any{map[string]any{"type": "tool_use", "id": "toolu_call", "name": "mcp__yoicks__" + tool, "input": args}}))
+		res, isError, err := f.call(ctx, tool, "toolu_call", args)
 		if err != nil {
 			res = "the call failed: " + err.Error()
 		}
-		f.toolResult("toolu_call", res)
+		f.toolResult("toolu_call", res, isError)
 		f.reply(ctx, "tool: "+res)
 		return
+	case "mcpfail": // a yoicks call failing in Claude Code itself: an error result, the bridge never called
+		f.emit(assistant([]any{map[string]any{"type": "tool_use", "id": "toolu_lost_call", "name": "mcp__yoicks__overview", "input": map[string]any{}}}))
+		f.toolResult("toolu_lost_call", "<tool_use_error>Error calling tool (overview): fake transport failure\nmore detail</tool_use_error>", true)
 	case "slow", "hang":
 		f.emit(assistant([]any{map[string]any{"type": "tool_use", "id": "toolu_slow", "name": "Bash", "input": map[string]any{"command": "sleep " + arg}}}))
 		for i := 1; i <= seconds; i++ {

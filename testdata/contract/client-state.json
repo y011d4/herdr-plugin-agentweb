@@ -196,5 +196,6 @@
    "headless": null
   }
  ],
- "orchestratorPaneId": "p4"
+ "orchestratorPaneId": "p4",
+ "claudeCheck": null
 }
