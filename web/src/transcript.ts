@@ -282,12 +282,16 @@ export function renderAskQuestions(ask: AskQuestion[]): string {
   }).join('');
 }
 
+const YOICKS_NOTICE = /^\s*\[yoicks\] /;
+
 /** Render a single TimelineItem to a self-contained HTML block (safe to append). */
 export function renderItem(item: TimelineItem): string {
   const sub = item.sidechain ? ' chat-sidechain' : '';
   const subTag = item.sidechain ? '<span class="chat-sub-tag">subagent</span>' : '';
   switch (item.kind) {
     case 'user':
+      // the bridge's own word to a headless orchestrator (a worker's status change, a restart): a dim line, not the user's
+      if (YOICKS_NOTICE.test(item.text)) return `<div class="chat-item chat-notice${sub}">${escapeHtml(item.text.trim())}</div>`;
       return `<div class="chat-item chat-user${sub}">${subTag}<div class="chat-bubble chat-md">${renderMarkdown(item.text)}</div></div>`;
     case 'assistant':
       return `<div class="chat-item chat-assistant${sub}">${subTag}<div class="chat-md">${renderMarkdown(item.text)}</div></div>`;

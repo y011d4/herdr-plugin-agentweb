@@ -89,6 +89,14 @@ export async function apiPost<T = unknown>(path: string, body: Record<string, un
   return resp.json() as Promise<T>;
 }
 
+/** A headless orchestrator's name from its pane id (hl:<name>); null for a herdr pane. */
+export const headlessName = (paneId: string): string | null => (paneId.startsWith('hl:') ? paneId.slice(3) : null);
+
+/** A headless orchestrator's action: it has no herdr pane, so its send, answer, interrupt, Clear and
+ *  Stop go to POST /api/orchestrators/:name/<action> (start too, as for any orchestrator). */
+export const orchestratorPost = <T = unknown>(name: string, action: 'start' | 'send' | 'answer' | 'interrupt' | 'clear' | 'stop', body: Record<string, unknown> = {}): Promise<T> =>
+  apiPost<T>(`/api/orchestrators/${encodeURIComponent(name)}/${action}`, body);
+
 export async function apiDelete(path: string): Promise<unknown> {
   const resp = await apiFetch(path, { method: 'DELETE' });
   if (!resp.ok) throw apiError(await resp.json().catch(() => ({})) as ErrorBody, resp.status);

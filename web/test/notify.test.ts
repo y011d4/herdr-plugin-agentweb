@@ -44,7 +44,7 @@ describe('notify', () => {
     // renotify: replacing the pane's older notification still alerts
     assert.deepEqual(shown, [
       { title: 'Claude Code done', body: 'repo-wt-feat / feat', tag: 'p3', renotify: true },
-      { title: 'Agent blocked', body: ' / ', tag: 'p9', renotify: true },
+      { title: 'Agent blocked', body: '', tag: 'p9', renotify: true },
     ]);
   });
 

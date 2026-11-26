@@ -4,22 +4,26 @@
  * the counts, Clear and Stop) and "doing now" line, the composer and the quick keys, around the pane's body. The
  * body (terminal, chat) is pane-view.ts, imperative, in #pane-view: created on mount, destroyed on
  * unmount, one at a time. Below it, while the view reports a prompt, the answer panel (PromptPanel.tsx).
+ * A headless orchestrator's Home (hl:<name>: no herdr pane) sends through /api/orchestrators/:name/*,
+ * has ■ on its "doing now" line, its usage and warnings on the status bar and its question (the
+ * State's headless.pending) in HeadlessPrompt; no terminal and no keys.
  *
  * State pushes re-render it constantly. The composer's textarea is uncontrolled (React never sets its
  * value), so a push never resets what is being typed, an IME composition included.
  */
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
-import { apiPost } from '../api.ts';
+import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
 import { homeSummary, shownStatus } from '../dashboard-group.ts';
 import { showToast } from '../notify.ts';
 import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
 import { homeAgentsHash, homeHash, orchestratorOfPane, paneRoute } from '../routes.ts';
 import { emit, findPane, keptTasks, store, subscribe } from '../store.ts';
-import type { AppState } from '../types.ts';
-import { agentCards, cardTitle, orchestratorLabel } from './Dashboard.tsx';
+import type { AppState, HeadlessUsage, OrchestratorView } from '../types.ts';
+import { agentCards, cardTitle, orchestratorLabel, relativeTime } from './Dashboard.tsx';
 import type { Topbar } from './App.tsx';
-import { PromptPanel } from './PromptPanel.tsx';
+import { HeadlessPrompt, PromptPanel } from './PromptPanel.tsx';
+import { TuiSteps } from './Settings.tsx';
 
 type Mode = 'terminal' | 'chat';
 
@@ -72,6 +76,14 @@ async function sendKey(paneId: string, payload: Record<string, unknown>): Promis
   }
 }
 
+async function interrupt(name: string): Promise<void> {
+  try {
+    await orchestratorPost(name, 'interrupt');
+  } catch (err) {
+    showToast('Interrupt failed', (err as Error).message);
+  }
+}
+
 /** A Home's Clear and Stop (App.tsx's confirm flows), on its status bar: a Home has no ⋮. */
 export type HomeActions = { clear: () => void; stop: () => void };
 
@@ -100,13 +112,18 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
   }, [paneId]);
   // "doing now": only while the orchestrator works — its latest tool call, or "thinking…" between them
   const working = findPane(paneId)?.pane?.agent?.status === 'working';
+  const hl = headlessName(paneId);
+  const pending = hl ? state?.orchestrators?.find((o) => o.name === hl)?.headless?.pending : null;
   return (
     <div id="screen-pane" className={home ? 'screen-home' : undefined} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       {home && <HomeStatus name={name} state={state} actions={actions} />}
       <div id="pane-view" ref={body} style={{ display: 'contents' }}></div>
       {prompt && paneView && <PromptPanel paneId={paneId} prompt={prompt} view={paneView} />}
+      {hl && pending && <HeadlessPrompt key={pending.id} name={hl} pending={pending} />}
       {home && (
         <div className="home-activity" id="home-activity" style={working ? undefined : { display: 'none' }}>
+          {/* first: a float beside the one-line text */}
+          {hl && working && <button className="home-interrupt" id="btn-home-interrupt" aria-label="Interrupt" onClick={() => { void interrupt(hl); }}>&#9632;</button>}
           {working ? (activity ? `▸ ${activity}` : 'thinking…') : null}
         </div>
       )}
@@ -125,11 +142,13 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
 
 // Home status bar: with two or more orchestrators configured a switcher between their Homes (a
 // stopped one dimmed: its Home has Start), its account's agents waiting on the user (tap → that
-// agent) and counts of the rest (tap → its list), then the orchestrator's Clear and Stop.
-function HomeStatus({ name, state, actions }: { name: string; state: AppState | null; actions?: HomeActions }) {
+// agent) and counts of the rest (tap → its list), then the orchestrator's Clear and Stop; for a
+// headless one also its usage and its warnings (`clear`: their Clear, on a stopped Home too).
+function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: string; state: AppState | null; actions?: HomeActions; clear?: () => void }) {
   if (!state) return <div className="home-status" id="home-status"></div>;
   const all = state.orchestrators ?? [];
-  const s = homeSummary(agentCards(state, all.find((o) => o.name === name)), store.seenDone);
+  const self = all.find((o) => o.name === name);
+  const s = homeSummary(agentCards(state, self), store.seenDone);
   const open = (id: string): void => { location.hash = paneRoute(store.appState, id); };
   return (
     <div className="home-status" id="home-status">
@@ -171,6 +190,56 @@ function HomeStatus({ name, state, actions }: { name: string; state: AppState | 
           </span>
         )}
       </div>
+      {self?.headless?.usage && <Usage usage={self.headless.usage} />}
+      {self?.headless && <HeadlessWarnings o={self} clear={clear} />}
+    </div>
+  );
+}
+
+const STALE_LIMITS_MS = 10 * 60_000;
+const pct = (n: number): string => `${Math.round(n)}%`;
+
+/** The usage parts a headless Home shows: 5h and 7d (stale: read over 10 min ago) and the context,
+ *  each only when known. */
+export function usageParts(u: HeadlessUsage, now: number): Array<{ text: string; stale: boolean }> {
+  const stale = !u.at || now - u.at > STALE_LIMITS_MS;
+  const parts: Array<{ text: string; stale: boolean }> = [];
+  if (u.fiveHour) parts.push({ text: `5h ${pct(u.fiveHour.utilization * 100)}`, stale });
+  if (u.sevenDay) parts.push({ text: `7d ${pct(u.sevenDay.utilization * 100)}`, stale });
+  if (u.contextPct != null) parts.push({ text: `ctx ${pct(u.contextPct)}`, stale: false });
+  return parts;
+}
+
+function Usage({ usage }: { usage: HeadlessUsage }) {
+  const parts = usageParts(usage, Date.now());
+  if (!parts.length) return null;
+  return (
+    <div className="home-usage" id="home-usage">
+      {parts.map((p, i) => <span key={p.text} className={p.stale ? 'stale' : undefined}>{i ? ` · ${p.text}` : p.text}</span>)}
+    </div>
+  );
+}
+
+// A headless orchestrator's warnings, one line each (what went wrong, since when) with what it
+// offers: ■ (interrupt), Clear, and the steps back to the TUI, shown in place (the config is edited
+// by hand: the app never writes it).
+function HeadlessWarnings({ o, clear }: { o: OrchestratorView; clear?: () => void }) {
+  const [steps, setSteps] = useState(false);
+  const warnings = o.headless?.warnings ?? [];
+  if (!warnings.length) return null;
+  return (
+    <div className="home-warnings" id="home-warnings">
+      {warnings.map((w) => (
+        <div key={w.kind} className="home-warning" data-kind={w.kind}>
+          <span className="home-warning-text">{`⚠ ${w.message}`}<span className="home-warning-since">{` · ${relativeTime(w.since) || 'now'}`}</span></span>
+          <span className="home-warning-actions">
+            {w.actions.includes('interrupt') && <button className="home-action" data-action="interrupt" onClick={() => { void interrupt(o.name); }}>&#9632; Interrupt</button>}
+            {w.actions.includes('clear') && clear && <button className="home-action" data-action="clear" onClick={clear}>Clear</button>}
+            {w.actions.includes('tui') && <button className="home-action" data-action="tui" onClick={() => setSteps(!steps)}>Back to TUI</button>}
+          </span>
+        </div>
+      ))}
+      {steps && <TuiSteps name={o.name} />}
     </div>
   );
 }
@@ -215,7 +284,8 @@ function Composer({ paneId, home }: { paneId: string; home: boolean }) {
       // raw control byte a full-screen / non-readline TUI could act on. Other panes just get
       // text+enter. enter:true then submits in the same request.
       const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
-      await apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) });
+      const hl = headlessName(paneId); // no pane to type into: its message goes to the bridge's child
+      await (hl ? orchestratorPost(hl, 'send', { text }) : apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) }));
       if (kept) keptTasks.finishSend(paneId, true);
       if (t.value === text) { // clear on success, but keep text typed mid-send
         t.value = '';
@@ -321,15 +391,16 @@ export const stoppedHomeTopbar = (name: string): Topbar => ({
   right: <>{agentsButton}{settingsButton}</>,
 });
 
-/** #/home/<name> while that orchestrator isn't running: its account's agents and Start. Once the
- *  State shows it running, the shell (ui/App.tsx) opens its running Home in place of this. */
-export function StoppedHome({ name }: { name: string }) {
+/** #/home/<name> while that orchestrator isn't running: its account's agents and Start (a headless
+ *  one's warnings too, with `clear`). Once the State shows it running, the shell (ui/App.tsx) opens
+ *  its running Home in place of this. */
+export function StoppedHome({ name, clear }: { name: string; clear?: () => void }) {
   const state = useAppState();
   const [busy, setBusy] = useState(false);
   const start = async (): Promise<void> => {
     setBusy(true); // until the State shows it running
     try {
-      await apiPost(`/api/orchestrators/${encodeURIComponent(name)}/start`);
+      await orchestratorPost(name, 'start');
     } catch (err) {
       setBusy(false);
       showToast('Could not start the orchestrator', (err as Error).message);
@@ -337,7 +408,7 @@ export function StoppedHome({ name }: { name: string }) {
   };
   return (
     <div id="screen-home-stopped" className="screen-home" style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-      <HomeStatus name={name} state={state} />
+      <HomeStatus name={name} state={state} clear={clear} />
       <div className="home-stopped">
         <p>{`${orchestratorLabel(state?.orchestrators?.find((o) => o.name === name))} is not running.`}</p>
         <button className="btn-primary" id="btn-home-start" disabled={busy} onClick={() => { void start(); }}>{busy ? 'Starting…' : 'Start'}</button>
