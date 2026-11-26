@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -99,12 +100,26 @@ func TestClaudeLive(t *testing.T) {
 		}
 		fmt.Printf("%s %s %s\n", verdict, name, fmt.Sprintf(detail, a...))
 	}
+	// one deadline for every step, well inside go test's default 10 min and the canary's 15: past
+	// it no step starts, and the deferred verdict and cleanup still get their time
+	deadline := time.Now().Add(8 * time.Minute)
 	poll := func(timeout time.Duration, ok func() bool) bool {
-		for end := time.Now().Add(timeout); !ok(); time.Sleep(200 * time.Millisecond) {
+		end := time.Now().Add(timeout)
+		if end.After(deadline) {
+			end = deadline
+		}
+		for ; !ok(); time.Sleep(200 * time.Millisecond) {
 			if time.Now().After(end) {
 				return false
 			}
 		}
+		return true
+	}
+	late := func(step string) bool {
+		if time.Now().Before(deadline) {
+			return false
+		}
+		item("deadline", false, "out of time before %s", step)
 		return true
 	}
 	status := func() string {
@@ -142,6 +157,10 @@ func TestClaudeLive(t *testing.T) {
 	}
 	resultWith := func(word string) bool { return resultsWith(word) > 0 }
 
+	// the version first: a start that fails still names the claude it checked (the canary's gate)
+	if out, err := exec.Command(claudeBin(), "--version").Output(); err == nil {
+		version, _, _ = strings.Cut(strings.TrimSpace(string(out)), " ")
+	}
 	if code, body := b.post(t, "start", ""); code != 200 || !poll(60*time.Second, func() bool { return status() == "idle" }) {
 		item("start", false, "the start: %d %s, status %s, warnings %+v", code, body, status(), b.view(t).Headless.Warnings)
 		return
@@ -162,7 +181,9 @@ func TestClaudeLive(t *testing.T) {
 		init = lines[i]
 	}
 	mu.Unlock()
-	version, _ = init["claude_code_version"].(string)
+	if v, _ := init["claude_code_version"].(string); v != "" {
+		version = v
+	}
 	var missing, interrupts []string
 	for _, k := range []string{"session_id", "tools", "mcp_servers", "apiKeySource", "claude_code_version", "model", "permissionMode", "capabilities"} {
 		if _, ok := init[k]; !ok {
@@ -222,6 +243,9 @@ func TestClaudeLive(t *testing.T) {
 		"rate_limit_events %d, results with a contextWindow %d, state usage: contextPct %v, fiveHour %v, sevenDay %v, at %v", rateEvent, window,
 		u != nil && u.ContextPct != nil, u != nil && u.FiveHour != nil, u != nil && u.SevenDay != nil, u != nil && u.At > 0)
 
+	if late("ask_answered") {
+		return
+	}
 	// T2: an AskUserQuestion, answered through /answer: a multiSelect and a free-text answer
 	results := count(isResult)
 	b.post(t, "send", `{"text":"Use the AskUserQuestion tool exactly once, with two questions in that one call: first 'Which fruits do you like?' with multiSelect true and the options apple, banana and cherry; second 'What size?' with the options small and large. After my answer, reply with exactly the answers you received and nothing else."}`)
@@ -251,6 +275,9 @@ func TestClaudeLive(t *testing.T) {
 			return len(pending.Questions)
 		}(), multi, asked, resultWith("medium"))
 
+	if late("interrupt") {
+		return
+	}
 	// T3, T4: an interrupt mid-turn, then the next message
 	t3 := count(isInit)
 	b.post(t, "send", `{"text":"Write the numbers from 1 to 2000 in English words, one per line, and nothing else."}`)
@@ -266,6 +293,9 @@ func TestClaudeLive(t *testing.T) {
 	next := turn("Reply with just the word PELICAN.", 120*time.Second) && resultWith("PELICAN")
 	item("interrupt", code == 200 && aborted && next, "interrupt %d, the turn aborted: %v, the next message answered: %v", code, aborted, next)
 
+	if late("transcript") {
+		return
+	}
 	// the transcript: written, and read by normalizeLine (the message sent mid-turn a user item)
 	_, body, _ := b.do(t, "GET", "/api/panes/hl:live/transcript", b.token, nil)
 	var tr struct {
@@ -295,6 +325,9 @@ func TestClaudeLive(t *testing.T) {
 	item("transcript", tr.Available && len(files) == 1 && kinds["user"] > 0 && kinds["assistant"] > 0 && kinds["tool_use"] > 0 && normalized > 0,
 		"available %v, %d file(s), %d lines → %d items, the tail's kinds %v", tr.Available, len(files), raw, normalized, kinds)
 
+	if late("resume") {
+		return
+	}
 	// stop, then start again: --resume, the word remembered
 	session, words := h.session(), resultsWith("ZEBRA-17")
 	b.post(t, "stop", "")
@@ -304,6 +337,9 @@ func TestClaudeLive(t *testing.T) {
 	remembered := resumed && turn("What was the code word I asked you to remember? Reply with just the code word.", 120*time.Second) && resultsWith("ZEBRA-17") > words
 	item("resume", stopped && resumed && remembered, "stopped %v, resumed session %v, the word remembered: %v", stopped, resumed, remembered)
 
+	if late("mcp_failure") {
+		return
+	}
 	// a yoicks call failing before it reaches the bridge: the bearer revoked at the turn's start
 	mu.Lock()
 	revoke = true
