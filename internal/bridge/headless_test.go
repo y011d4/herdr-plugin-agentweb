@@ -469,6 +469,20 @@ func TestHeadlessRefusesBilling(t *testing.T) {
 			t.Errorf("runs %v", runs)
 		}
 	})
+	t.Run("a home of its own", func(t *testing.T) {
+		for _, k := range []string{"HOME", "XDG_CONFIG_HOME"} {
+			b := startHeadless(t, t.TempDir(), map[string]string{k: "/elsewhere"}, nil)
+			if v := b.view(t); v.Headless.Status != "error" || !hasWarning(v, "env") || !strings.Contains(v.Headless.Warnings[0].Message, k) {
+				t.Fatalf("%s: %+v", k, v.Headless)
+			}
+			if status, body := b.post(t, "start", ""); status != 409 || !strings.Contains(body, "env_refused") {
+				t.Errorf("%s: start: %d %s", k, status, body)
+			}
+		}
+		if runs, _ := (&hlBridge{log: os.Getenv("FAKECLAUDE_LOG")}).runs(t); len(runs) != 0 {
+			t.Errorf("runs %v", runs)
+		}
+	})
 	t.Run("not a claude.ai subscription", func(t *testing.T) {
 		var mu sync.Mutex
 		var logged []string

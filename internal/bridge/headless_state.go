@@ -35,7 +35,7 @@ var knownEvents = map[string][]string{
 // warningActions is what the Home offers for each kind of warning (none for the rest).
 var warningActions = map[string][]string{
 	"silent": {"interrupt", "clear"}, "permission_route": {"interrupt"}, "stream_broken": {"clear", "tui"},
-	"restart_limit": {"clear", "tui"}, "panic": {"clear", "tui"}, "init": {"tui"}, "billing": {"tui"},
+	"restart_limit": {"clear", "tui"}, "panic": {"clear", "tui"}, "init": {"tui"}, "billing": {"tui"}, "env": {"tui"},
 	"auth": {"tui"}, "version": {"tui"}, "start": {"tui"},
 }
 
