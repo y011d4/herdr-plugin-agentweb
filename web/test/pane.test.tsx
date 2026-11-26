@@ -101,6 +101,7 @@ describe('composer', () => {
 
   it('adds clear:true only on a claude pane', async () => {
     await show('p1');
+    assert.ok(container.querySelector('#btn-attach') === null, 'no + on a TUI pane'); // images: a headless Home's only
     await type('hi');
     await fire(() => $('#btn-send-enter').click());
     assert.deepEqual(posts('p1'), [{ text: 'hi', enter: true, clear: true }]);

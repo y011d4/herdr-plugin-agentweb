@@ -744,6 +744,15 @@ export const messages: WsMessage[] = [
     "ts": 1795478400000
    },
    {
+    "kind": "user",
+    "text": "what is it?",
+    "images": [
+     "data:image/png;base64,iVBORw0KGgo="
+    ],
+    "sidechain": false,
+    "ts": null
+   },
+   {
     "kind": "assistant",
     "text": "Done: **fixed** <it> & more.",
     "sidechain": true,
@@ -849,6 +858,15 @@ export const items: TimelineItem[] = [
   "text": "fix the bug",
   "sidechain": false,
   "ts": 1795478400000
+ },
+ {
+  "kind": "user",
+  "text": "what is it?",
+  "images": [
+   "data:image/png;base64,iVBORw0KGgo="
+  ],
+  "sidechain": false,
+  "ts": null
  },
  {
   "kind": "assistant",
