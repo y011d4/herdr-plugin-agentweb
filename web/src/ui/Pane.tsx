@@ -14,6 +14,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
+import { draftKey, getDraft, setDraft } from '../drafts.ts';
 import { homeSummary, shownStatus } from '../dashboard-group.ts';
 import { fitImages, MAX_IMAGES, toAttachment, type ImageAttachment } from '../image.ts';
 import { showToast } from '../notify.ts';
@@ -129,7 +130,7 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
         </div>
       )}
       <div className="input-bar">
-        <Composer paneId={paneId} home={home} />
+        <Composer paneId={paneId} home={home} name={name} />
         {/* Home hides the terminal keys while chatting; they come back with the terminal */}
         <div className="quickkey-row" id="quickkey-row" style={home && mode !== 'terminal' ? { display: 'none' } : undefined}>
           {KEYS.map(([label, payload]) => (
@@ -253,11 +254,13 @@ const autoGrow = (t: HTMLTextAreaElement): void => {
 
 // The one composer: an agent's pane and an orchestrator's Home alike. On a touch device Enter
 // inserts a newline and only the Send button sends, so the phone keyboard can't fire off half-typed
-// commands; on a PC Enter sends and Shift+Enter inserts a newline (composer-keys.ts). A headless
-// orchestrator's also takes images (+, or pasted), shown above it until sent.
-function Composer({ paneId, home }: { paneId: string; home: boolean }) {
+// commands; on a PC Enter sends and Shift+Enter inserts a newline (composer-keys.ts). What is typed is
+// kept as the Home's (`name`) or the pane's draft (drafts.ts) until it is sent. A headless
+// orchestrator's also takes images (+, or pasted), shown above it until sent (not kept as a draft).
+function Composer({ paneId, home, name }: { paneId: string; home: boolean; name: string }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
+  const key = draftKey(paneId, home ? name : undefined);
   const [placeholder] = useState(() => (home ? `Message ${orchestratorLabel(orchestratorOfPane(store.appState, paneId))}…` : 'Send text…'));
   const hl = headlessName(paneId); // no pane to type into: its message goes to the bridge's child
   const [images, setImages] = useState<ImageAttachment[]>([]);
@@ -288,14 +291,14 @@ function Composer({ paneId, home }: { paneId: string; home: boolean }) {
   useLayoutEffect(() => {
     const t = input.current!;
     shownInput = t;
-    const draft = keptTasks.draft(paneId);
-    if (draft !== null) {
+    const draft = keptTasks.draft(paneId) ?? getDraft(key);
+    if (draft) {
       t.value = draft;
       autoGrow(t);
     }
     t.disabled = keptTasks.sending(paneId);
     return () => { if (shownInput === t) shownInput = null; };
-  }, [paneId]);
+  }, [paneId, key]);
 
   const send = async (): Promise<void> => {
     const t = input.current!;
@@ -315,10 +318,14 @@ function Composer({ paneId, home }: { paneId: string; home: boolean }) {
       const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
       await (hl ? orchestratorPost(hl, 'send', sent.length ? { text, images: sent } : { text }) : apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) }));
       if (kept) keptTasks.finishSend(paneId, true);
-      if (t.value === text) { // clear on success, but keep text typed mid-send
-        t.value = '';
-        autoGrow(t);
+      // clear on success, but keep text typed mid-send: here, and in a view reopened meanwhile (it showed the draft)
+      for (const x of [t, store.view.activePaneId === paneId ? shownInput : null]) {
+        if (x?.value === text) {
+          x.value = '';
+          autoGrow(x);
+        }
       }
+      if (getDraft(key) === text) setDraft(key, '');
       if (sent.length) setImages((cur) => cur.filter((i) => !sent.includes(i))); // and images added mid-send
       paneView?.echo();
     } catch (err) {
@@ -378,7 +385,7 @@ function Composer({ paneId, home }: { paneId: string; home: boolean }) {
           </>
         )}
         <textarea id="pane-input" ref={input} rows={1} placeholder={placeholder} autoCorrect="off" autoCapitalize="off" spellCheck={false}
-          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); keptTasks.edit(paneId, e.currentTarget.value); }}></textarea>
+          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); keptTasks.edit(paneId, e.currentTarget.value); setDraft(key, e.currentTarget.value); }}></textarea>
         <button className="input-send-btn" id="btn-send-enter" disabled={preparing > 0} onClick={() => { void send(); }}>Send</button>
       </div>
     </>

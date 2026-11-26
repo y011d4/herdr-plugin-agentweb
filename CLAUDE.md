@@ -63,7 +63,9 @@ All in `internal/bridge/` (one package):
   reconnect banner, the SW's `navigate` message, visibilitychange's global part (the watch, the
   open pane's OS notifications, seen done), `visualViewport` → `--app-height` and the startup (token,
   WS, first `/api/state`, a 401 → the token screen). Under it: `api.ts` (token, REST; a 401 →
-  callback), `store.ts` (State, WS link, `view`, seen done, kept tasks; subscribe/emit), `ws.ts`
+  callback), `store.ts` (State, WS link, `view`, seen done, kept tasks; subscribe/emit), `drafts.ts` (the
+  composer's unsent text per Home name or pane id, in localStorage until sent; a connected State
+  drops those of panes and orchestrators it no longer has), `ws.ts`
   (socket, ping, backoff, state polling, watches) and `notify.ts` (the toast store: short-lived
   results of the user's actions, and the OS notifications; a status push or an alert never
   toasts). The screens are in `web/src/ui/`: Settings, Token, the agents list `Dashboard.tsx`,

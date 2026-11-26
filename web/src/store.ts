@@ -5,6 +5,7 @@
  * something changed. Also the lookups over it that more than one screen needs.
  */
 import { markSeen } from './dashboard-group.ts';
+import { pruneDrafts } from './drafts.ts';
 import type { SeenDone } from './dashboard-group.ts';
 import { KeptTasks } from './kept-tasks.ts';
 import type { AgentStatus, AppState, PaneNode, WorkspaceNode } from './types.ts';
@@ -53,6 +54,7 @@ export function emit(): void {
 /** A new State (null: signed out), with an emit(); the shell's onStateUpdate (ui/App.tsx) stays its caller's job. */
 export function setAppState(state: AppState | null): void {
   store.appState = state;
+  if (state) pruneDrafts(state);
   emit();
 }
 
