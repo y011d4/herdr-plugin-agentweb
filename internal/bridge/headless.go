@@ -247,7 +247,8 @@ type headlessRunner struct {
 	onStatus     func(from, to string)      // it went done or blocked
 	log          func(format string, a ...any)
 
-	// its MCP server (mcp.go); tools false: approve only (YOICKS_HEADLESS_NO_TOOLS, tests)
+	// its MCP server (mcp.go): its URL, its current child's bearer ("": none, r.mu); tools
+	// false: approve only (YOICKS_HEADLESS_NO_TOOLS, tests)
 	mcpURL, mcpBearer string
 	tools             bool
 
@@ -535,9 +536,10 @@ func (r *headlessRunner) start(resume bool) error {
 	if r.mcpURL == "" {
 		return r.fail("start", &LifecycleError{Status: 500, Code: "error", Message: "the bridge's MCP listener isn't open (see bridge.log)"})
 	}
+	bearer := newBearer() // this child's own: a child from before reaches nothing
 	err = os.MkdirAll(filepath.Join(r.stateDir, "headless"), 0o700)
 	if err == nil {
-		err = writeFile0600(mcpConfig, r.mcpConfig())
+		err = writeFile0600(mcpConfig, r.mcpConfig(bearer))
 	}
 	if err != nil {
 		return r.fail("start", &LifecycleError{Status: 500, Code: "error", Message: "could not write " + mcpConfig + ": " + err.Error()})
@@ -553,7 +555,7 @@ func (r *headlessRunner) start(resume bool) error {
 	} else if r.rulesHash != hex.EncodeToString(hash[:]) { // its system prompt keeps the rules it began with
 		alert = r.warn("rules", "the orchestrator rules changed since this session began: Clear to apply them")
 	}
-	r.wanted = true
+	r.wanted, r.mcpBearer = true, bearer
 	notice := r.interrupted
 	r.interrupted = false
 	r.persist()
@@ -1100,10 +1102,12 @@ func (r *headlessRunner) Clear() error {
 }
 
 // forgetWorkers ends what it follows of its workers: the watches (and the saved ones) and the
-// queued wake-ups, with a new generation that every late callback of theirs finds changed;
+// queued wake-ups, with a new generation that every late callback of theirs finds changed, and
+// its child's bearer (that child's calls are refused);
 // r.mu held, the caller saves.
 func (r *headlessRunner) forgetWorkers() {
 	r.gen++
+	r.mcpBearer = "" // its child's calls are refused from now on
 	for _, w := range r.watches {
 		w.cancel()
 	}

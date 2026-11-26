@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,13 +48,25 @@ func (h headerRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r)
 }
 
+// bearer is h's current child's bearer.
+func bearer(h *headlessRunner) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.mcpBearer
+}
+
 func TestMCPListener(t *testing.T) {
 	b := startHeadless(t, t.TempDir(), nil, nil)
 	h := b.srv.headless["h1"]
 	if !strings.HasPrefix(h.mcpURL, "http://127.0.0.1:") {
 		t.Fatalf("url %s", h.mcpURL)
 	}
-	for _, bearer := range []string{"", "wrong", strings.Repeat("0", len(h.mcpBearer))} {
+	if bearer(h) != "" {
+		t.Fatal("a bearer before any child")
+	}
+	b.start(t)
+	b.waitStatus(t, "idle")
+	for _, bearer := range []string{"", "wrong", strings.Repeat("0", len(bearer(h)))} {
 		req, _ := http.NewRequest("POST", h.mcpURL, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
 		if bearer != "" {
 			req.Header.Set("Authorization", "Bearer "+bearer)
@@ -70,7 +83,7 @@ func TestMCPListener(t *testing.T) {
 	// its six tools and approve; a second session (Claude Code initializes again every ~18
 	// min, S0 row 20) is served the same
 	for range 2 {
-		cs, err := mcpClient(t, h.mcpURL, h.mcpBearer)
+		cs, err := mcpClient(t, h.mcpURL, bearer(h))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -86,14 +99,12 @@ func TestMCPListener(t *testing.T) {
 			t.Errorf("tools %v", names)
 		}
 	}
-	// the child's mcp.json: 0600, the bridge's server and bearer
-	b.start(t)
-	b.waitStatus(t, "idle")
+	// the child's mcp.json: 0600, the bridge's server and that child's bearer
 	path := headlessPath(b.srv.cfg.StateDir, "h1", ".mcp.json")
 	if st, err := os.Stat(path); err != nil || st.Mode().Perm() != 0o600 {
 		t.Fatalf("%s: %v %v", path, st, err)
 	}
-	if got, _ := os.ReadFile(path); !strings.Contains(string(got), h.mcpBearer) || !strings.Contains(string(got), h.mcpURL) {
+	if got, _ := os.ReadFile(path); !strings.Contains(string(got), bearer(h)) || !strings.Contains(string(got), h.mcpURL) {
 		t.Errorf("mcp.json %s", got)
 	}
 	// no headless entry, no listener
@@ -450,7 +461,7 @@ func TestHeadlessPromptNeedsText(t *testing.T) {
 	b := startHeadless(t, t.TempDir(), nil, nil)
 	b.start(t)
 	b.waitStatus(t, "idle")
-	cs, err := mcpClient(t, b.srv.headless["h1"].mcpURL, b.srv.headless["h1"].mcpBearer)
+	cs, err := mcpClient(t, b.srv.headless["h1"].mcpURL, bearer(b.srv.headless["h1"]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -639,7 +650,7 @@ func TestHeadlessStartWithABlankTask(t *testing.T) {
 	}
 	b.start(t)
 	b.waitStatus(t, "idle")
-	cs, err := mcpClient(t, h.mcpURL, h.mcpBearer)
+	cs, err := mcpClient(t, h.mcpURL, bearer(h))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -658,5 +669,63 @@ func TestHeadlessStartWithABlankTask(t *testing.T) {
 	defer h.mu.Unlock()
 	if len(h.watches) != 0 {
 		t.Errorf("%d watches", len(h.watches))
+	}
+}
+
+// A tool call is bound to the child it came from: one in flight across a Clear makes no
+// watch (its worker gets nothing), and that child's bearer reaches nothing after.
+func TestHeadlessCallAcrossAClear(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	h := b.srv.headless["h1"]
+	var prompted atomic.Bool
+	worker(t, b, "idle", func(w *fakeherdr.World, pane string) { prompted.Store(true) })
+	entered, release := make(chan struct{}), make(chan struct{})
+	var gate sync.Once
+	rpc := h.rpc
+	h.rpc = func(method string, params map[string]any) (json.RawMessage, error) {
+		if method == "agent.get" && params["target"] == "w1" {
+			gate.Do(func() { close(entered); <-release }) // the tool's agent lookup, held
+		}
+		return rpc(method, params)
+	}
+	b.start(t)
+	b.waitStatus(t, "idle")
+	old := bearer(h)
+	cs, err := mcpClient(t, h.mcpURL, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result := make(chan *mcp.CallToolResult, 1)
+	go func() {
+		res, _ := cs.CallTool(ctx, &mcp.CallToolParams{Name: "agent_prompt", Arguments: map[string]any{"name": "w1", "text": "do the thing"}})
+		result <- res
+	}()
+	<-entered
+	if status, body := b.post(t, "clear", ""); status != 200 {
+		t.Fatalf("clear: %d %s", status, body)
+	}
+	b.waitStatus(t, "idle")
+	close(release)
+	res := <-result
+	if res == nil || !res.IsError || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "stopped or cleared") {
+		t.Fatalf("the call from before the Clear: %+v", res)
+	}
+	time.Sleep(time.Second)
+	h.mu.Lock()
+	watches := len(h.watches)
+	h.mu.Unlock()
+	if watches != 0 || prompted.Load() {
+		t.Errorf("a watch survived the Clear (%d), the worker prompted: %v", watches, prompted.Load())
+	}
+	if now := bearer(h); now == "" || now == old {
+		t.Errorf("the fresh child's bearer: %q", now)
+	}
+	if _, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "overview"}); err == nil {
+		t.Error("the old child's session still answered")
+	}
+	if _, err := mcpClient(t, h.mcpURL, old); err == nil {
+		t.Error("the old bearer still connects")
 	}
 }

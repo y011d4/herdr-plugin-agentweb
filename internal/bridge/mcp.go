@@ -49,22 +49,24 @@ const (
 
 type mcpHost struct {
 	srv     *http.Server
-	servers map[string]*mcp.Server // by bearer
+	runners []*headlessRunner
+	servers map[*headlessRunner]*mcp.Server
 }
 
-// startMCPHost opens the listener and gives each runner its bearer, URL and server.
+// startMCPHost opens the listener and gives each runner its URL and server. The bearer is
+// per child: each start issues a new one, and Stop or Clear revoke it, so a child from
+// before reaches nothing.
 func startMCPHost(runners map[string]*headlessRunner) (*mcpHost, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
-	h := &mcpHost{servers: map[string]*mcp.Server{}}
+	h := &mcpHost{servers: map[*headlessRunner]*mcp.Server{}}
 	url := "http://" + ln.Addr().String() + "/mcp"
 	for _, r := range runners {
-		b := make([]byte, 16)
-		rand.Read(b)
-		r.mcpURL, r.mcpBearer = url, hex.EncodeToString(b)
-		h.servers[r.mcpBearer] = r.mcpServer()
+		r.mcpURL = url
+		h.runners = append(h.runners, r)
+		h.servers[r] = r.mcpServer()
 	}
 	inner := mcp.NewStreamableHTTPHandler(h.serverFor, nil)
 	h.srv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -78,24 +80,41 @@ func startMCPHost(runners map[string]*headlessRunner) (*mcpHost, error) {
 	return h, nil
 }
 
-// serverFor is the server whose bearer the request carries (nil: none).
+// serverFor is the server of the runner whose current child's bearer the request carries
+// (nil: none).
 func (h *mcpHost) serverFor(req *http.Request) *mcp.Server {
-	got, ok := strings.CutPrefix(req.Header.Get("Authorization"), "Bearer ")
 	var found *mcp.Server
-	for bearer, s := range h.servers {
-		if ok && subtle.ConstantTimeCompare([]byte(got), []byte(bearer)) == 1 {
-			found = s
+	for _, r := range h.runners {
+		if _, ok := r.caller(req.Header); ok {
+			found = h.servers[r]
 		}
 	}
 	return found
 }
 
+// caller is whether header carries its current child's bearer, and the workers' generation
+// then (a tool binds to it at its call: a Stop or Clear since makes it a call from before).
+func (r *headlessRunner) caller(header http.Header) (gen int, ok bool) {
+	got, has := strings.CutPrefix(header.Get("Authorization"), "Bearer ")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ok = has && r.mcpBearer != "" && subtle.ConstantTimeCompare([]byte(got), []byte(r.mcpBearer)) == 1
+	return r.gen, ok
+}
+
+// newBearer is a fresh bearer.
+func newBearer() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 func (h *mcpHost) Close() { h.srv.Close() }
 
-// mcpConfig is the child's --mcp-config: the bridge's server, with its bearer.
-func (r *headlessRunner) mcpConfig() []byte {
+// mcpConfig is a child's --mcp-config: the bridge's server, with that child's bearer.
+func (r *headlessRunner) mcpConfig(bearer string) []byte {
 	b, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"yoicks": map[string]any{
-		"type": "http", "url": r.mcpURL, "headers": map[string]string{"Authorization": "Bearer " + r.mcpBearer}}}})
+		"type": "http", "url": r.mcpURL, "headers": map[string]string{"Authorization": "Bearer " + bearer}}}})
 	return b
 }
 
@@ -148,8 +167,33 @@ func (r *headlessRunner) account() string {
 	return accountForConfigDir(r.def.Env["CLAUDE_CONFIG_DIR"], "")
 }
 
+type genKey struct{}
+
+// boundCalls binds each tool call to its caller: one from a child that is no longer the
+// current one (a Stop or Clear revoked its bearer) is refused before its tool runs; the
+// others carry the workers' generation of their arrival (genOf), which a watch they start
+// must still match.
+func (r *headlessRunner) boundCalls(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		if method != "tools/call" {
+			return next(ctx, method, req)
+		}
+		gen, ok := 0, false
+		if extra := req.GetExtra(); extra != nil {
+			gen, ok = r.caller(extra.Header)
+		}
+		if !ok {
+			return textResult("this orchestrator's session has ended (stopped or cleared)", true), nil
+		}
+		return next(context.WithValue(ctx, genKey{}, gen), method, req)
+	}
+}
+
+func genOf(ctx context.Context) int { gen, _ := ctx.Value(genKey{}).(int); return gen }
+
 func (r *headlessRunner) mcpServer() *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "yoicks", Version: Version}, nil)
+	s.AddReceivingMiddleware(r.boundCalls)
 	mcp.AddTool(s, &mcp.Tool{Name: "approve", Description: "Permission prompt handler (yoicks: AskUserQuestion goes to the user's Home)."}, r.approve)
 	if !r.tools {
 		return s
@@ -202,13 +246,13 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in promptIn) (*mcp.CallToolResult, any, error) {
 			r.log("tool agent_prompt %s", in.Name)
 			if strings.TrimSpace(in.Text) == "" {
-				return r.prompt("", in.Name, in.Text), nil, nil // its error, before any herdr call
+				return r.prompt("", in.Name, in.Text, genOf(ctx)), nil, nil // its error, before any herdr call
 			}
 			pane, err := ownAgentPane(r.rpc, in.Name, r.account())
 			if err != nil {
 				return errResult(err)
 			}
-			return r.prompt(pane, in.Name, in.Text), nil, nil
+			return r.prompt(pane, in.Name, in.Text, genOf(ctx)), nil, nil
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "agent_start", Description: "Start a worker from a launch profile in a directory of your account (a new tab where a workspace is already at it, else a new workspace), or in a new worktree of the repository there; optionally send it its first task."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in startIn) (*mcp.CallToolResult, any, error) {
@@ -229,7 +273,7 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 			if strings.TrimSpace(in.Task) == "" {
 				return textResult(started, false), nil, nil
 			}
-			res := r.prompt(pane, in.Name, in.Task)
+			res := r.prompt(pane, in.Name, in.Task, genOf(ctx))
 			res.Content[0].(*mcp.TextContent).Text = started + "; " + res.Content[0].(*mcp.TextContent).Text
 			return res, nil, nil
 		})
@@ -403,14 +447,12 @@ func agentState(raw json.RawMessage) (status string, seq int64, cwd string) {
 }
 
 // prompt sends a worker text and watches it: delivered (the result says so), not
-// delivered (herdr's answer), or not sent because it waits on a startup question.
-func (r *headlessRunner) prompt(pane, name, text string) *mcp.CallToolResult {
+// delivered (herdr's answer), or not sent because it waits on a startup question. gen is the
+// call's: after a Stop or Clear since, no watch is made.
+func (r *headlessRunner) prompt(pane, name, text string, gen int) *mcp.CallToolResult {
 	if strings.TrimSpace(text) == "" { // nothing to send: no watch to wait on
 		return textResult("text must be non-empty", true)
 	}
-	r.mu.Lock()
-	gen := r.gen // a Stop or Clear meanwhile: no watch for the session gone
-	r.mu.Unlock()
 	deadline := time.Now().Add(agentReadyTimeout)
 	for {
 		raw, err := r.rpc("agent.get", map[string]any{"target": pane})
