@@ -13,6 +13,7 @@ package bridge
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +57,12 @@ func safeParamsForLog(params map[string]any) string {
 // herdrRPC sends one request on its own connection: herdr answers one request per
 // connection and closes it.
 func herdrRPC(socketPath, method string, params map[string]any) (json.RawMessage, error) {
+	return herdrCall(context.Background(), socketPath, method, params, requestTimeout)
+}
+
+// herdrCall is herdrRPC with a deadline of timeout (0: none, for herdr's waits, which have
+// none of their own); ctx's end closes the connection, so a wait can be given up.
+func herdrCall(ctx context.Context, socketPath, method string, params map[string]any, timeout time.Duration) (json.RawMessage, error) {
 	if params == nil {
 		params = map[string]any{}
 	}
@@ -66,7 +73,10 @@ func herdrRPC(socketPath, method string, params map[string]any) (json.RawMessage
 		return nil, err
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(requestTimeout))
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
+	if timeout > 0 {
+		_ = conn.SetDeadline(time.Now().Add(timeout))
+	}
 	line, err := json.Marshal(map[string]any{"type": "request", "id": id, "method": method, "params": params})
 	if err != nil {
 		return nil, err
@@ -82,6 +92,9 @@ func herdrRPC(socketPath, method string, params map[string]any) (json.RawMessage
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				return nil, fmt.Errorf("RPC timeout: %s", method)
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
 			}
 			logf("[herdr-client] rpc %s closed without response %s", method, safeParamsForLog(params))
 			return nil, errors.New("connection closed")
@@ -216,6 +229,11 @@ func (c *HerdrClient) State() *State { return c.published.Load() }
 // RPC sends one request to herdr.
 func (c *HerdrClient) RPC(method string, params map[string]any) (json.RawMessage, error) {
 	return herdrRPC(c.socketPath, method, params)
+}
+
+// Wait is RPC with no deadline (herdr's agent.wait and agent.prompt's wait), ended by ctx.
+func (c *HerdrClient) Wait(ctx context.Context, method string, params map[string]any) (json.RawMessage, error) {
+	return herdrCall(ctx, c.socketPath, method, params, 0)
 }
 
 // Refresh re-fetches the snapshot now and pushes it, for changes herdr sends no
