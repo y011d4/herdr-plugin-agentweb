@@ -397,6 +397,18 @@ func (r *headlessRunner) transcriptFile() string {
 	return resolveTranscriptPath(sid, r.def.Dir, []string{accountForConfigDir(r.def.Env["CLAUDE_CONFIG_DIR"], "")})
 }
 
+// hasTranscript is whether Claude Code has its session's transcript where it looks for one (its
+// account's projects/<slug of the dir>/<id>.jsonl, followed wherever it links: unlike the chat's
+// read, no containment applies to what Claude Code itself resumes).
+func (r *headlessRunner) hasTranscript() bool {
+	sid := r.session()
+	if sid == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(accountForConfigDir(r.def.Env["CLAUDE_CONFIG_DIR"], ""), slugForCwd(r.def.Dir), sid+".jsonl"))
+	return err == nil
+}
+
 func (r *headlessRunner) wantsToRun() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -559,7 +571,7 @@ func (r *headlessRunner) start(resume bool) error {
 	mcpConfig := headlessPath(r.stateDir, r.def.Name, ".mcp.json")
 	// a session that has had no message has no transcript, and Claude Code can't resume it ("No
 	// conversation found"): it begins again under the same id (nothing of it is lost)
-	begin := resume && r.transcriptFile() == ""
+	begin := resume && !r.hasTranscript()
 	if resume && len(others) > 0 {
 		return &LifecycleError{Status: 409, Code: "session_in_use", Message: fmt.Sprintf(
 			"another claude (pid %d) runs its session %s: end it first (yoicks never stops it; only Linux, with /proc, can see it)", others[0].pid, r.session())}
