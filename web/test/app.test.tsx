@@ -101,7 +101,7 @@ describe('App', () => {
     assert.equal(location.hash, '#/home/work');
     assert.ok($('#screen #screen-pane.screen-home'), 'the Home');
     assert.equal(store.view.activePaneId, 'p6');
-    assert.ok($('#topbar-right #btn-home-agents'), "the Home's topbar");
+    assert.ok($('#topbar-right #btn-settings'), "the Home's topbar");
     assert.equal($('#conn-dot')!.className, 'conn-dot connected');
     assert.equal($('#conn-dot')!.title, 'Connected');
     replace.mockRestore();
@@ -159,6 +159,7 @@ describe('App', () => {
     await go('#/home/work');
     assert.ok($('#screen #screen-home-stopped'));
     assert.equal(store.view.activePaneId, null);
+    assert.equal($('#topbar-right')!.textContent, '⚙', 'a stopped Home\'s topbar: Settings alone');
     assert.ok(!$('#btn-home-clear') && $('#btn-settings'), 'no Clear/Stop to a stopped Home; Settings');
     await click($('#btn-home-start'));
     await answer('POST /api/orchestrators/work/start', { ok: true, paneId: 'p6' });

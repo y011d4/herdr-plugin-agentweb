@@ -118,7 +118,7 @@ describe("a headless orchestrator's Home", () => {
     assert.equal($('#chat-log').textContent, 'No messages yet.');
     assert.equal($('#btn-view-toggle').style.display, 'none');
     assert.equal($('#quickkey-row').style.display, 'none');
-    assert.equal($('#tb').textContent, 'Pilot· readyAgents>_⚙'); // the toggle stays hidden
+    assert.equal($('#tb').textContent, 'Pilot· ready>_⚙'); // the toggle stays hidden
   });
 
   it('sends the composer to /api/orchestrators/:name/send', async () => {
