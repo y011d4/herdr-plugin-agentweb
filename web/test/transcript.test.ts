@@ -33,10 +33,54 @@ describe('renderMarkdown — inline', () => {
 });
 
 describe('renderMarkdown — links', () => {
-  it('linkifies http(s) and mailto with safe rel/target', () => {
+  it('linkifies http(s) with safe rel/target, and nothing else', () => {
     const h = renderMarkdown('see [docs](https://example.com/a?b=1&c=2)');
     assert.match(h, /<a class="chat-link" href="https:\/\/example\.com\/a\?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">docs<\/a>/);
-    assert.match(renderMarkdown('[mail](mailto:a@b.com)'), /href="mailto:a@b\.com"/);
+    assert.doesNotMatch(renderMarkdown('[mail](mailto:a@b.com)'), /<a /);
+  });
+
+  // The bare URL a transcript line links, or null for none.
+  const bare = (md: string): string | null => /<a class="chat-link" href="([^"]*)"[^>]*>\1<\/a>/.exec(renderMarkdown(md))?.[1] ?? null;
+
+  it('links bare http(s) URLs, with the same safe rel/target', () => {
+    assert.match(renderMarkdown('PR: https://github.com/o/r/pull/1'),
+      /PR: <a class="chat-link" href="https:\/\/github\.com\/o\/r\/pull\/1" target="_blank" rel="noopener noreferrer">https:\/\/github\.com\/o\/r\/pull\/1<\/a>/);
+    assert.equal(bare('HTTP://EXAMPLE.COM/x'), 'HTTP://EXAMPLE.COM/x');
+    assert.equal(bare('http://127.0.0.1:8392/?token=ab&x=1#y'), 'http://127.0.0.1:8392/?token=ab&amp;x=1#y');
+  });
+
+  it('cuts a bare URL before Japanese text and punctuation around it', () => {
+    assert.equal(bare('詳細はhttps://example.com/docsを見て'), 'https://example.com/docs');
+    for (const tail of ['。', '、', '」', '）', '』', '】', ' です']) {
+      assert.equal(bare(`「https://example.com/a${tail}`), 'https://example.com/a', tail);
+    }
+    assert.match(renderMarkdown('見て:https://a.example/b。'), /見て:<a [^>]*>https:\/\/a\.example\/b<\/a>。/);
+  });
+
+  it('cuts trailing ASCII punctuation, emphasis markers and unopened brackets', () => {
+    for (const s of ['https://a.example/b.', 'https://a.example/b,', '(see https://a.example/b)', '(see https://a.example/b).',
+      '[https://a.example/b]', "'https://a.example/b'", '"https://a.example/b"', '<https://a.example/b>', 'https://a.example/b?!',
+      'https://a.example/b:', 'https://a.example/b;', 'https://a.example/b&']) {
+      assert.equal(bare(s), 'https://a.example/b', s);
+    }
+    assert.equal(bare('https://en.wikipedia.org/wiki/Foo_(bar)'), 'https://en.wikipedia.org/wiki/Foo_(bar)');
+    assert.equal(bare('https://a.example/x_y_z/'), 'https://a.example/x_y_z/', 'underscores inside stay (no <em>)');
+    assert.match(renderMarkdown('**https://a.example/b**'), /<strong><a [^>]*>https:\/\/a\.example\/b<\/a><\/strong>/);
+  });
+
+  it('leaves code, markdown link text and non-http schemes alone', () => {
+    assert.doesNotMatch(renderMarkdown('`https://a.example/b`'), /<a /);
+    assert.doesNotMatch(renderMarkdown('```\nhttps://a.example/b\n```'), /<a /);
+    assert.equal((renderMarkdown('[https://a.example](https://b.example)').match(/<a /g) ?? []).length, 1, 'no anchor inside an anchor');
+    for (const s of ['javascript:alert(1)', 'data:text/html,x', 'ftp://a.example', 'https://', 'see http:// then']) {
+      assert.doesNotMatch(renderMarkdown(s), /<a /, s);
+    }
+  });
+
+  it('keeps a bare URL from breaking out of its href', () => {
+    const h = renderMarkdown('https://a.example/"onmouseover="alert(1) https://a.example/<img src=x onerror=alert(1)>');
+    assert.doesNotMatch(h, /<img|" ?onmouseover=/);
+    assert.equal(bare('https://a.example/"x'), 'https://a.example/');
   });
 
   it('resolves inline code nested inside link text (no leaked placeholder)', () => {
