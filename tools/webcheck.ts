@@ -1295,6 +1295,18 @@ const hlStatus = async (c: Ctx, name: string): Promise<string | undefined> => (a
 const hlTranscript = (c: Ctx, name: string): Promise<any> => api(c, 'GET', `/api/panes/${enc(`hl:${name}`)}/transcript`);
 const CHAT = `(document.getElementById('chat-log')?.textContent ?? '')`;
 
+/** Where its transcript ends now, for hlItemsSince: the bridge serves only the tail (300 items) whole. */
+async function hlMark(c: Ctx, name: string): Promise<{ session?: string; cursor: number }> {
+  const t = await hlTranscript(c, name);
+  return { session: t.available ? t.sessionId : undefined, cursor: t.cursor ?? 0 };
+}
+
+/** Its transcript's items past `mark` (all of the tail when its session changed or had none yet). */
+async function hlItemsSince(c: Ctx, name: string, mark: { session?: string; cursor: number }): Promise<any[]> {
+  const q = mark.session ? `?session=${enc(mark.session)}&after=${mark.cursor}` : '';
+  return (await api(c, 'GET', `/api/panes/${enc(`hl:${name}`)}/transcript${q}`)).items ?? [];
+}
+
 const H_HINT = 'preview start --fake-claude DIR/claude (go build -o DIR/claude ./tools/fakeclaude), with $WC_ROOT/.envrc for wc-h2';
 
 /** `name` runs (started when it isn't), recorded so that the run's teardown stops it. */
@@ -1368,14 +1380,12 @@ async function h2(c: Ctx) {
 async function h3(c: Ctx) {
   const { pg } = c;
   await hlHome(c, 'wc-h1');
-  // a resumed session may hold an earlier answer: one more
-  const cherries = async () => ((await hlTranscript(c, 'wc-h1')).items ?? []).filter((i: any) => i.kind === 'tool_result' && i.text.includes('"Which fruit?":"cherry"')).length;
-  const n0 = await cherries();
+  const mark = await hlMark(c, 'wc-h1'); // a resumed session may hold an earlier answer: one past here
   await compose(c, 'ask');
   const panel = await pg.until(`[...document.querySelectorAll('#headless-prompt .ask-opt')].map((b) => b.textContent).join('|') === '1applered|2cherry'`, 5000);
   const id = (await hlView(c, 'wc-h1'))?.headless?.pending?.id;
   await pg.tapEl(`document.querySelectorAll('#headless-prompt .ask-opt')[1]`);
-  const answered = await waitFn(async () => (await cherries()) > n0, 5000, 200);
+  const answered = await waitFn(async () => (await hlItemsSince(c, 'wc-h1', mark)).some((i: any) => i.kind === 'tool_result' && i.text.includes('"Which fruit?":"cherry"')), 5000, 200);
   const gone = await pg.until(`!document.getElementById('headless-prompt')`, 3000);
   let stale = 0;
   await api(c, 'POST', '/api/orchestrators/wc-h1/answer', { id: id ?? 'none', answers: { 'Which fruit?': 'apple' } }).catch((e) => { stale = /: 409 /.test(e.message) ? 409 : -1; });
@@ -1399,12 +1409,13 @@ async function h5(c: Ctx) {
   const { pg } = c;
   await hlHome(c, 'wc-h1');
   const tag = `wc-h5-${Date.now() % 100000}`;
+  const mark = await hlMark(c, 'wc-h1');
   await compose(c, 'slow 2');
   if ((await waitFn(async () => (await hlStatus(c, 'wc-h1')) === 'working', 3000, 100)).timeout) throw env('wc-h1 not working');
   await compose(c, `${tag}-a`);
   await compose(c, `${tag}-b`);
   const replies = await waitFn(async () => {
-    const items = (await hlTranscript(c, 'wc-h1')).items ?? [];
+    const items = await hlItemsSince(c, 'wc-h1', mark);
     const said = items.filter((i: any) => i.kind === 'user' && i.text.startsWith(tag)).map((i: any) => i.text);
     const echoed = items.filter((i: any) => i.kind === 'assistant' && i.text.startsWith(`echo: ${tag}`)).map((i: any) => i.text);
     return said.join() === `${tag}-a,${tag}-b` && echoed.join() === `echo: ${tag}-a,echo: ${tag}-b`;
@@ -1457,9 +1468,11 @@ async function ht2(c: Ctx) {
   // it answers on haiku: its managed dir's local settings (the bridge writes only settings.json there), read at its start
   const data = path.join(WC_ROOT, 'data', fs.existsSync(path.join(WC_ROOT, 'data', 'herdr-agentweb')) ? 'herdr-agentweb' : 'herdr-yoicks');
   const local = path.join(data, 'orchestrators', 'wc-h2', '.claude', 'settings.local.json');
-  if (!fs.existsSync(local)) {
+  let settings: Record<string, unknown> = {};
+  try { settings = JSON.parse(fs.readFileSync(local, 'utf8')); } catch { /* none yet */ }
+  if (settings.model !== 'haiku') {
     fs.mkdirSync(path.dirname(local), { recursive: true });
-    fs.writeFileSync(local, js({ model: 'haiku' }));
+    fs.writeFileSync(local, js({ ...settings, model: 'haiku' }));
     if ((await hlView(c, 'wc-h2'))?.paneId) await api(c, 'POST', '/api/orchestrators/wc-h2/stop'); // started before it: again
   }
   await hlHome(c, 'wc-h2');
@@ -1491,6 +1504,7 @@ async function ht2(c: Ctx) {
   step('ask', !panel.timeout && !asked.timeout && !(await hlView(c, 'wc-h2'))?.headless?.pending, `${ms(panel)}/${ms(asked)}`);
 
   const LONG = 'Write the numbers from 1 to 300, one per line, and nothing else.';
+  const mark = await hlMark(c, 'wc-h2');
   await compose(c, LONG);
   const busy = await status(['working'], 15_000);
   // sent while it works: queued until the turn ends (no tool call to take it in at), which ■ brings
@@ -1500,10 +1514,7 @@ async function ht2(c: Ctx) {
   const still = (await hlStatus(c, 'wc-h2')) === 'working';
   const t0 = await pg.tapEl(`document.getElementById('btn-home-interrupt')`).catch(() => 0);
   const bubble = await pg.until(`[...document.querySelectorAll('#chat-log .chat-user')].some((e) => e.textContent.includes(${js(mid.slice(0, 14))}))`, 60_000, 300);
-  const cut = await waitFn(async () => {
-    const items = (await hlTranscript(c, 'wc-h2')).items ?? [];
-    return items.some((i: any) => i.kind === 'assistant' && i.text.trim() === 'MID');
-  }, 60_000, 500);
+  const cut = await waitFn(async () => (await hlItemsSince(c, 'wc-h2', mark)).some((i: any) => i.kind === 'assistant' && i.text.trim() === 'MID'), 60_000, 500);
   step('midTurn', !busy.timeout && still && !!t0 && !bubble.timeout && !cut.timeout, `${ms(busy)}/working=${still}/${ms(bubble)}/${ms(cut)}`);
   await status(['done', 'idle'], 60_000);
 
