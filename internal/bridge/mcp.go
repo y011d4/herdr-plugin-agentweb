@@ -499,6 +499,8 @@ func (r *headlessRunner) watch(w *hlWatch, text string, first chan<- error, gen 
 		old.cancel()
 	}
 	r.watches[w.Pane] = w
+	// it takes a saved one's place in this same save, so no later save brings that one back
+	r.saved = slices.DeleteFunc(r.saved, func(s hlWatch) bool { return s.Pane == w.Pane })
 	r.persist()
 	r.mu.Unlock()
 	go r.runWatch(ctx, w, text, first)
@@ -702,17 +704,12 @@ func (r *headlessRunner) scheduleWakes() {
 
 // rearm restarts the saved watches (after a bridge restart): level waits from the saved
 // status and seq, so a change meanwhile wakes once and a replay of the same state doesn't.
-// They stay in the saved state until then, and become the running ones.
+// Each leaves the saved ones as it becomes a running one (watch), in the same save.
 func (r *headlessRunner) rearm() {
 	r.mu.Lock()
-	saved, gen := r.saved, r.gen // (r.op held: no Stop or Clear meanwhile)
+	saved, gen := slices.Clone(r.saved), r.gen // (r.op held: no Stop or Clear meanwhile)
 	r.mu.Unlock()
 	for i := range saved {
-		w := saved[i]
-		r.watch(&w, "", nil, gen)
+		r.watch(&saved[i], "", nil, gen)
 	}
-	r.mu.Lock()
-	r.saved = nil
-	r.persist()
-	r.mu.Unlock()
 }
