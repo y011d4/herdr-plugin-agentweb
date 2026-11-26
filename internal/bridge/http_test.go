@@ -32,6 +32,7 @@ type override func(method string, params json.RawMessage) (rep fakeherdr.Reply, 
 
 type testBridge struct {
 	fake  *fakeherdr.Server
+	world *fakeherdr.World
 	srv   *server
 	http  *httptest.Server
 	token string
@@ -90,7 +91,7 @@ func startBridge(t *testing.T, cfg Config, over override, tweak func(*server)) *
 		tweak(srv)
 	}
 	client.Start()
-	b := &testBridge{fake: fake, srv: srv, http: httptest.NewServer(srv), token: token}
+	b := &testBridge{fake: fake, world: world, srv: srv, http: httptest.NewServer(srv), token: token}
 	t.Cleanup(func() {
 		b.http.Close()
 		client.Destroy()

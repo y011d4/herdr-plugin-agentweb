@@ -8,6 +8,7 @@ package bridge
 // (the pane profile store, the account cache, the WS client set).
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,7 +63,7 @@ var (
 	paneRoute   = regexp.MustCompile(`^/api/panes/([^/]+)/(\w+)$`)
 	paneIDRoute = regexp.MustCompile(`^/api/panes/([^/]+)$`) // DELETE = stop the agent
 	agentRoute  = regexp.MustCompile(`^/api/agents/([^/]+)/(\w+)$`)
-	orchRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/(start|send|interrupt|clear|stop)$`)
+	orchRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/(start|send|answer|interrupt|clear|stop)$`)
 )
 
 // server is the HTTP + WS server over one herdr client.
@@ -79,6 +80,7 @@ type server struct {
 	expected atomic.Pointer[[]string]
 	// the headless orchestrators' runners, by name (none without a headless entry)
 	headless map[string]*headlessRunner
+	mcp      *mcpHost // their MCP listener (nil: none)
 	stop     chan struct{}
 	stopOnce sync.Once
 	// how often a transcript watch re-resolves the session (a field so tests can shorten it)
@@ -104,9 +106,24 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 		headless:          map[string]*headlessRunner{},
 	}
 	for _, d := range cfg.Orchestrators {
-		if d.Mode == "headless" {
-			s.headless[d.Name] = newHeadlessRunner(d, cfg.StateDir, rules, s.rpc, s.broadcastState,
-				func(kind, message string) { s.broadcastAlert(d.Name, kind, message) })
+		if d.Mode != "headless" {
+			continue
+		}
+		h := newHeadlessRunner(d, cfg.StateDir, rules)
+		h.rpc, h.waitRPC, h.profiles = s.rpc, client.Wait, cfg.LaunchProfiles
+		h.slowRPC = func(method string, params map[string]any) (json.RawMessage, error) {
+			return herdrCall(context.Background(), cfg.SocketPath, method, params, 60*time.Second)
+		}
+		h.onChange = s.broadcastState
+		h.onAlert = func(kind, message string) { s.broadcastAlert(d, kind, message) }
+		h.onStatus = func(from, to string) { s.headlessStatus(d, from, to) }
+		s.headless[d.Name] = h
+	}
+	if len(s.headless) > 0 { // its MCP listener, only with a headless entry
+		if m, err := startMCPHost(s.headless); err != nil {
+			logf("[headless] could not open the MCP listener: %s", err)
+		} else {
+			s.mcp = m
 		}
 	}
 	// Each agent pane's Claude account, so an orchestrator's agents list shows just
@@ -165,7 +182,14 @@ func withExpected(cur *[]string, n, i int, a string, read bool) []string {
 	return next
 }
 
-func (s *server) close() { s.stopOnce.Do(func() { close(s.stop) }) }
+func (s *server) close() {
+	s.stopOnce.Do(func() {
+		close(s.stop)
+		if s.mcp != nil {
+			s.mcp.Close()
+		}
+	})
+}
 
 // clientState is the JSON state sent to clients (REST + WS): the normalized tree plus
 // which pane runs each orchestrator (the phone opens on their chats).
@@ -547,6 +571,25 @@ func (s *server) headlessRoute(w http.ResponseWriter, r *http.Request, h *headle
 			return
 		}
 		err = h.Send(text)
+	case "answer":
+		// {id, answers: {question: label(s)}} answers the pending question; {id, deny: message} refuses it
+		body := readBody(w, r)
+		if body == nil {
+			return
+		}
+		id, _ := body["id"].(string)
+		answers, isObject := body["answers"].(map[string]any)
+		deny, isText := body["deny"].(string)
+		for _, v := range answers {
+			if _, ok := v.(string); !ok {
+				isObject = false
+			}
+		}
+		if id == "" || isObject == isText {
+			jsonError(w, http.StatusBadRequest, "invalid_params", "an id, and answers (question → label) or deny (a message)")
+			return
+		}
+		err = h.Answer(id, answers, deny)
 	case "interrupt":
 		err = h.Interrupt()
 	case "stop":
@@ -567,9 +610,10 @@ func (s *server) headlessRoute(w http.ResponseWriter, r *http.Request, h *headle
 	jsonOK(w, okWith(struct{}{}))
 }
 
-// broadcastAlert sends a headless orchestrator's new warning to every client, and to ntfy.
-func (s *server) broadcastAlert(name, kind, message string) {
-	if msg, err := marshalRaw(WsOrchestratorAlertMessage{Type: "orchestrator_alert", Name: name, Kind: kind, Message: message}); err == nil {
+// broadcastAlert sends a headless orchestrator's new warning to every client, to ntfy and to
+// the PC.
+func (s *server) broadcastAlert(def OrchestratorDef, kind, message string) {
+	if msg, err := marshalRaw(WsOrchestratorAlertMessage{Type: "orchestrator_alert", Name: def.Name, Kind: kind, Message: message}); err == nil {
 		s.bmu.Lock()
 		for c := range s.clients {
 			c.queueMsg(msg)
@@ -577,8 +621,30 @@ func (s *server) broadcastAlert(name, kind, message string) {
 		s.bmu.Unlock()
 	}
 	if s.cfg.NotifyURL != nil && *s.cfg.NotifyURL != "" {
-		go postNtfy(*s.cfg.NotifyURL, "yoicks "+name+": "+kind, message)
+		go postNtfy(*s.cfg.NotifyURL, "yoicks "+def.Name+": "+kind, message)
 	}
+	s.showOnPC(def, firstNonEmpty(def.Label, def.Name)+": "+kind, message, "request")
+}
+
+// headlessStatus tells a headless orchestrator's change to done or blocked like an agent's
+// (WS agent_status, ntfy), and on the PC.
+func (s *server) headlessStatus(def OrchestratorDef, from, to string) {
+	label := firstNonEmpty(def.Label, def.Name)
+	change := StatusChange{PaneID: "hl:" + def.Name, From: from, To: to, Agent: &AgentInfo{Name: &def.Name, DisplayName: &label, Status: to}}
+	if st := s.client.State(); st != nil {
+		s.broadcastAgentStatus(change, st)
+		go sendNtfyNotification(change, st, s.cfg.NotifyURL)
+	}
+	sound := map[string]string{"done": "done", "blocked": "request"}[to]
+	s.showOnPC(def, label+" → "+to, "headless orchestrator", sound)
+}
+
+// showOnPC is herdr's notification.show, never for webcheck's wc- orchestrators.
+func (s *server) showOnPC(def OrchestratorDef, title, body, sound string) {
+	if strings.HasPrefix(def.Name, "wc-") {
+		return
+	}
+	go s.rpc("notification.show", map[string]any{"title": title, "body": body, "sound": sound})
 }
 
 // startHeadless starts the headless orchestrators that ran when the bridge last stopped; for

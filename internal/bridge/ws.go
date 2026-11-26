@@ -113,6 +113,9 @@ func (s *server) broadcastState() {
 		}
 	}
 	s.accounts.Refresh(agentPanes)
+	for _, h := range s.headless { // a worker gone ends its watch
+		h.dropGone(st)
+	}
 	msg, err := marshalRaw(WsStateMessage{Type: "state", State: s.clientState(st)})
 	if err != nil || bytes.Equal(msg, s.lastState) {
 		return

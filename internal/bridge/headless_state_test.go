@@ -130,18 +130,42 @@ func TestHeadlessStream(t *testing.T) {
 		}
 	})
 
-	t.Run("a can_use_tool over stdio is denied and warned about; another request gets an error", func(t *testing.T) {
+	t.Run("a can_use_tool over stdio goes to the supervisor, warned about; another request gets an error", func(t *testing.T) {
 		m := hlModel{}
 		st := m.apply([]byte(lineCanUse), 0)
-		reply, _ := json.Marshal(st.Reply)
-		if !strings.Contains(string(reply), `"behavior":"deny"`) || !strings.Contains(string(reply), `"request_id":"c1"`) ||
-			warningKinds([]hlStep{st})[0] != "permission_route" {
-			t.Errorf("%s %+v", reply, st)
+		if cu := st.CanUse; cu == nil || cu.RequestID != "c1" || cu.Tool != "AskUserQuestion" || cu.ToolUseID != "toolu_2" || cu.Input == nil ||
+			st.Reply != nil || warningKinds([]hlStep{st})[0] != "permission_route" {
+			t.Errorf("%+v", st)
 		}
 		st = m.apply([]byte(`{"type":"control_request","request_id":"c2","request":{"subtype":"mcp_message"}}`), 0)
-		reply, _ = json.Marshal(st.Reply)
+		reply, _ := json.Marshal(st.Reply)
 		if !strings.Contains(string(reply), `"subtype":"error"`) || !strings.Contains(string(reply), `"request_id":"c2"`) {
 			t.Errorf("%s", reply)
+		}
+	})
+
+	t.Run("an AskUserQuestion in the stream is reported (to check it reaches the Home)", func(t *testing.T) {
+		m := hlModel{}
+		st := m.apply([]byte(`{"type":"assistant","message":{"model":"m","content":[{"type":"text","text":"let me ask"},{"type":"tool_use","id":"toolu_9","name":"AskUserQuestion","input":{}}]}}`), 0)
+		if st.Ask != "toolu_9" {
+			t.Errorf("%+v", st)
+		}
+	})
+
+	t.Run("with the bridge's tools: init must list them and have yoicks connected", func(t *testing.T) {
+		tools := headlessTools(true)
+		good := strings.Replace(strings.Replace(lineInit, `"tools":["AskUserQuestion"]`, `"tools":["mcp__yoicks__overview","mcp__yoicks__agent_get","mcp__yoicks__agent_read","mcp__yoicks__agent_prompt","mcp__yoicks__agent_start","mcp__yoicks__worktree_remove","AskUserQuestion"]`, 1),
+			`"mcp_servers":[]`, `"mcp_servers":[{"name":"yoicks","source":"dynamic","status":"connected"}]`, 1)
+		for line, fatal := range map[string]string{
+			good: "",
+			strings.Replace(good, `"status":"connected"`, `"status":"failed"`, 1): "isn't connected",
+			strings.Replace(good, `"mcp__yoicks__overview",`, ``, 1):              "tools",
+			lineInit: "tools",
+		} {
+			m := hlModel{expectTools: tools, expectMCP: true}
+			if st := m.apply([]byte(line), 0); !strings.Contains(st.Fatal, fatal) || fatal == "" && st.Fatal != "" {
+				t.Errorf("%s: fatal %q", line, st.Fatal)
+			}
 		}
 	})
 
