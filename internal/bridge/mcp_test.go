@@ -336,25 +336,13 @@ func TestHeadlessWakeUps(t *testing.T) {
 		b.prompt(t)
 		b.waitWakes(t, "[yoicks] w1: working → done", "[yoicks] w1: working → blocked", "[yoicks] w1: working → done")
 	})
-	t.Run("blocked at its start: the task isn't sent, a wake-up once it is ready", func(t *testing.T) {
-		b := startHeadless(t, t.TempDir(), nil, nil)
-		w := worker(t, b, "blocked", nil)
-		w.SetReady("w1p", false)
-		b.start(t)
-		b.waitStatus(t, "idle")
-		b.send(t, `call agent_prompt {"name":"w1","text":"do the thing"}`)
-		b.waitStatus(t, "done")
-		_, tr, _ := b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
-		if !strings.Contains(tr, "task not sent") {
-			t.Fatalf("the tool's result: %s", tr)
-		}
-		w.SetReady("w1p", true)
-		w.Set("w1p", "idle") // the user answered the folder-trust question
-		b.waitWakes(t, "[yoicks] w1: ready, task not sent")
-		if n := len(w.Prompts()); n != 0 {
-			t.Errorf("%d prompts", n)
-		}
-	})
+	for _, ready := range []bool{false, true} {
+		// herdr answers agent_not_ready while a startup question holds it, agent_blocked at a dialog
+		// (the folder-trust one of a worker in a new dir, as the pilot met)
+		t.Run(fmt.Sprintf("blocked at its start (interactive %v): the task isn't sent, a wake-up once it is ready", ready), func(t *testing.T) {
+			blockedAtStart(t, ready)
+		})
+	}
 	t.Run("a stalled prompt goes on with the level wait", func(t *testing.T) {
 		b := startHeadless(t, t.TempDir(), nil, nil)
 		w := worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
@@ -911,5 +899,27 @@ func TestHeadlessMCPCallFailure(t *testing.T) {
 			!slices.Equal(w.Actions, []string{"clear"})) {
 			t.Errorf("%+v", w)
 		}
+	}
+}
+
+// blockedAtStart: a worker blocked at its start takes no task; the orchestrator is told so and woken
+// once the user has answered in its pane.
+func blockedAtStart(t *testing.T, ready bool) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	w := worker(t, b, "blocked", nil)
+	w.SetReady("w1p", ready)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	b.send(t, `call agent_prompt {"name":"w1","text":"do the thing"}`)
+	b.waitStatus(t, "done")
+	_, tr, _ := b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
+	if !strings.Contains(tr, "task not sent") {
+		t.Fatalf("the tool's result: %s", tr)
+	}
+	w.SetReady("w1p", true)
+	w.Set("w1p", "idle") // the user answered the folder-trust question
+	b.waitWakes(t, "[yoicks] w1: ready, task not sent")
+	if n := len(w.Prompts()); n != 0 {
+		t.Errorf("%d prompts", n)
 	}
 }

@@ -298,6 +298,9 @@ func (w *World) agentCall(method string, raw json.RawMessage) Reply {
 	if p.NotReady {
 		return Reply{Code: "agent_not_ready", Message: "agent is not ready"}
 	}
+	if p.Status == "blocked" { // herdr 0.9.5: an agent at a dialog takes no prompt
+		return Reply{Code: "agent_blocked", Message: "agent " + p.ID + " is blocked and requires interactive input"}
+	}
 	w.prompts = append(w.prompts, Prompt{p.ID, params.Text})
 	if hook := w.onPrompt; hook != nil {
 		id := p.ID
