@@ -180,6 +180,24 @@ describe('App', () => {
     assert.equal(($('#btn-home-start') as HTMLButtonElement).disabled, false);
   });
 
+  it("a Clear that ends with no gap seen still lets go within 8s: a later exit shows the stopped Home at once", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/home/personal');
+    await click($('#btn-home-clear'));
+    await click($('#modal-root #cf-ok'));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const r = reqs.find((q) => !q.answered && q.method === 'POST' && q.url === '/api/agents/p4/clear')!;
+    await act(async () => { r.answered = true; r.answer(200, { ok: true, paneId: 'p8' }); for (let i = 0; i < 20; i++) await Promise.resolve(); });
+    await act(async () => { vi.advanceTimersByTime(8_000); }); // the old pane still listed all along
+    assert.equal(store.view.activePaneId, 'p4');
+    vi.useRealTimers();
+    const s = fresh();
+    s.orchestrators[0].paneId = null; // it exits later (not a Clear)
+    await act(async () => push!({ type: 'state', state: s }));
+    await settle();
+    assert.ok($('#screen #screen-home-stopped'), 'no hold left over from the Clear');
+  });
+
   it("a Home whose orchestrator goes shows it stopped; a Clear holds for the replacement, up to 8s", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/home/personal');
