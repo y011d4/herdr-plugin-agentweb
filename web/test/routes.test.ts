@@ -15,17 +15,17 @@ describe('resolveRoute — the default Home (a fresh open, and #/home)', () => {
   const two = state(orch('a', 'p1'), orch('stopped', null), orch('b', 'p2'));
 
   for (const hash of ['', '#/home']) {
-    it(`${hash || '(empty)'}: the Home used last while it runs, else the first running one`, () => {
+    it(`${hash || '(empty)'}: the Home used last, running or not, else the first running one`, () => {
       assert.deepEqual(resolveRoute(hash, two, 'b'), replace('#/home/b'));
       assert.deepEqual(resolveRoute(hash, two, null), replace('#/home/a'));
-      assert.deepEqual(resolveRoute(hash, two, 'stopped'), replace('#/home/a'));
+      assert.deepEqual(resolveRoute(hash, two, 'stopped'), replace('#/home/stopped'));
       assert.deepEqual(resolveRoute(hash, two, 'gone'), replace('#/home/a'));
       assert.deepEqual(resolveRoute(hash, state(orch('wc o1', 'p1')), null), replace('#/home/wc%20o1'));
     });
 
-    it(`${hash || '(empty)'}: the list when no orchestrator runs`, () => {
+    it(`${hash || '(empty)'}: none running, the first configured (stopped); the list only without any`, () => {
+      assert.deepEqual(resolveRoute(hash, state(orch('x', null), orch('y', null)), null), replace('#/home/x'));
       assert.deepEqual(resolveRoute(hash, state(), null), replace('#/agents'));
-      assert.deepEqual(resolveRoute(hash, state(orch('stopped', null)), 'stopped'), replace('#/agents'));
     });
   }
 
@@ -43,8 +43,12 @@ describe('resolveRoute — #/home/<name>', () => {
     assert.deepEqual(resolveRoute('#/home/wc%20o1', s, null), { kind: 'home', name: 'wc o1', paneId: 'p3' });
   });
 
-  it('a stopped, unknown or broken name goes to the list (a new history entry)', () => {
-    for (const hash of ['#/home/stopped', '#/home/nope', '#/home/%E0%A4%A']) assert.deepEqual(resolveRoute(hash, s, null), push('#/agents'), hash);
+  it('a stopped orchestrator opens its Home too, without a pane', () => {
+    assert.deepEqual(resolveRoute('#/home/stopped', s, null), { kind: 'home', name: 'stopped', paneId: null });
+  });
+
+  it('an unknown or broken name goes to the list (a new history entry)', () => {
+    for (const hash of ['#/home/nope', '#/home/%E0%A4%A']) assert.deepEqual(resolveRoute(hash, s, null), push('#/agents'), hash);
   });
 
   it('waits for the first state', () => {

@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -72,6 +73,9 @@ type server struct {
 	rules    string // the bundled orchestrator/rules.md
 	profiles *PaneProfileStore
 	accounts *PaneAccountCache
+	// each configured orchestrator's expectedAccount ("": not found yet), found in the
+	// background (direnv can take seconds); nil until the first is found
+	expected atomic.Pointer[[]string]
 	stop     chan struct{}
 	stopOnce sync.Once
 	// how often a transcript watch re-resolves the session (a field so tests can shorten it)
@@ -100,6 +104,28 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 	// nothing changes (an unchanged push is deduped), and a changed answer re-pushes.
 	s.accounts = newPaneAccountCache(func(id string) (string, error) { return paneAccount(s.rpc, id) },
 		s.broadcastState, accountRefreshInterval, time.Now)
+	// Each orchestrator's expectedAccount, found on its own (an env-set one is instant, a direnv
+	// one can take seconds), published as found, and found again each refresh interval so an
+	// edited .envrc catches up. A direnv that can't tell keeps the account read before (else the
+	// default stands in).
+	var emu sync.Mutex
+	for i, d := range cfg.Orchestrators {
+		go func() {
+			for {
+				a, read := expectedAccountRead(d)
+				emu.Lock()
+				next := withExpected(s.expected.Load(), len(cfg.Orchestrators), i, a, read)
+				s.expected.Store(&next)
+				emu.Unlock()
+				s.broadcastState() // deduped when nothing changed
+				select {
+				case <-time.After(accountRefreshInterval):
+				case <-s.stop:
+					return
+				}
+			}
+		}()
+	}
 	go func() {
 		t := time.NewTicker(accountRefreshInterval)
 		defer t.Stop()
@@ -115,6 +141,20 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 	return s
 }
 
+// withExpected is cur (nil: none yet) with orchestrator i's account a: a fresh copy, so a
+// published slice never changes. An account not read (direnv couldn't tell) replaces only
+// an unknown one, so a refresh that fails keeps the account read before.
+func withExpected(cur *[]string, n, i int, a string, read bool) []string {
+	next := make([]string, n)
+	if cur != nil {
+		copy(next, *cur)
+	}
+	if read || next[i] == "" {
+		next[i] = a
+	}
+	return next
+}
+
 func (s *server) close() { s.stopOnce.Do(func() { close(s.stop) }) }
 
 // clientState is the JSON state sent to clients (REST + WS): the normalized tree plus
@@ -122,7 +162,16 @@ func (s *server) close() { s.stopOnce.Do(func() { close(s.stop) }) }
 // orchestratorPaneId (the first running one) stays for clients of the
 // single-orchestrator contract.
 func (s *server) clientState(st *State) ClientState {
-	views := findOrchestrators(st, s.cfg.Orchestrators, s.accounts.Accounts())
+	accounts := s.accounts.Accounts()
+	views := findOrchestrators(st, s.cfg.Orchestrators, accounts)
+	// a stopped orchestrator's Home lists the agents of the account it would run under
+	if expected := s.expected.Load(); expected != nil {
+		for i := range views {
+			if views[i].PaneID == nil && (*expected)[i] != "" {
+				views[i].Agents = agentsOfAccount(st, accounts, (*expected)[i])
+			}
+		}
+	}
 	var first *string
 	for _, v := range views {
 		if v.PaneID != nil {

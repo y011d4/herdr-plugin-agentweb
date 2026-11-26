@@ -711,38 +711,46 @@ async function p7(c: Ctx) {
 }
 
 /** Without a running orchestrator, a fresh open (/) and #/home land on #/agents by location.replace. */
+/** A Home's status bar total: its counts (working, done, idle) plus its blocked chips. */
+const HOME_TOTAL = `[...document.querySelectorAll('.home-counts > span:not(.home-counts-more)')].reduce((n, e) => n + parseInt(e.textContent), 0)
+  + document.querySelectorAll('.home-chip').length`;
+
+/** The stopped Home of `name` (Start) within `wait`, and its status bar total = /api/state's agents of its account (within 5s, as P7). */
+async function stoppedHome(c: Ctx, name: string, wait: number): Promise<{ ok: boolean; s: string }> {
+  const r = await c.pg.until(`location.hash === ${js(`#/home/${enc(name)}`)} && !!document.querySelector('#screen-home-stopped #btn-home-start')`, wait);
+  let last = '';
+  const n = await waitFn(async () => {
+    const dom = await c.pg.ev(HOME_TOTAL);
+    const want = expectedCards(await api(c, 'GET', '/api/state'), name);
+    last = `${dom}/${want}`;
+    return dom === want;
+  }, 5000, 300);
+  return { ok: !r.timeout && !n.timeout, s: `${ms(r)}:agents=${last}` };
+}
+
 async function p8(c: Ctx) {
   const { pg } = c;
-  const running = (await api(c, 'GET', '/api/state')).orchestrators.filter((o: any) => o.paneId).map((o: any) => o.name);
+  const st = await api(c, 'GET', '/api/state');
+  const running = st.orchestrators.filter((o: any) => o.paneId).map((o: any) => o.name);
   if (running.length) {
     result(c, true, 'P8', `n/a(running:${running.join('+')})`, 'needs no orchestrator running (/api/state)');
     return;
   }
-  /** #/agents within 3s, then its .agent-card count = /api/state's (within 5s, as P7) */
-  const landed = async (): Promise<{ ok: boolean; s: string }> => {
-    const r = await pg.until(`location.hash === '#/agents' && !!document.querySelector('#screen-agents[data-ready]')`, 3000);
-    let last = '';
-    const n = await waitFn(async () => {
-      const dom = await pg.ev(`document.querySelectorAll('.agent-card').length`);
-      const want = expectedCards(await api(c, 'GET', '/api/state'));
-      last = `${dom}/${want}`;
-      return dom === want;
-    }, 5000, 300);
-    return { ok: !r.timeout && !n.timeout, s: `${ms(r)}:cards=${last}` };
-  };
+  const first = st.orchestrators[0].name; // no Home used last on this phone (cleared below): the first configured
+  await pg.ev(`localStorage.removeItem('herdr_home')`);
   // a fresh document's history.length already counts its own entry: a replace keeps it, a push adds one
   const { identifier } = await pg.S('Page.addScriptToEvaluateOnNewDocument', { source: 'window.__wcHist0 = history.length' });
   try { await pg.load(`${c.base}/`); } finally { await pg.S('Page.removeScriptToEvaluateOnNewDocument', { identifier }); }
-  const root = await landed();
+  const root = await stoppedHome(c, first, 3000);
   const [h1, h0] = await pg.ev(`[history.length, window.__wcHist0]`);
   // in the app: the hash assignment adds one entry, the redirect none
   const g0 = await pg.ev('history.length');
   await pg.ev(`location.hash = '#/home'`);
-  const home = await landed();
+  const home = await stoppedHome(c, first, 3000);
   const g1 = await pg.ev('history.length');
   result(c, root.ok && h1 === h0 && home.ok && g1 === g0 + 1, 'P8',
     `/=${root.s},history=${h0}->${h1};#/home=${home.s},history=${g0}->${g1}`,
-    'no orchestrator running: / and #/home are replaced by #/agents within 3s (history.length +0, +1 for the #/home assignment itself); .agent-card count = /api/state');
+    `nothing running: / and #/home are replaced by #/home/${first} (the first configured) within 3s, a stopped Home with Start (history.length +0, +1 for the #/home assignment itself); its status bar total = /api/state's agents of its account`);
 }
 
 async function p10(c: Ctx) {
@@ -1472,23 +1480,31 @@ async function p8t2(c: Ctx) {
   const running = async (name: string): Promise<string | undefined> =>
     (await api(c, 'GET', '/api/state')).orchestrators.find((o: any) => o.name === name)?.paneId;
   if (!(await running('wc-o1'))) await startOrch(c, 'wc-o1');
-  // wc-o2 starts from the list's Start button (a retry may find it running: stopped first)
+  // wc-o2 starts from its stopped Home's Start button (a retry may find it running: stopped first)
   const old2 = await running('wc-o2');
   if (old2) {
     recordPane(c, old2, 'o2');
     await api(c, 'DELETE', `/api/panes/${enc(old2)}`);
     if ((await waitFn(async () => !(await running('wc-o2')), 10_000, 300)).timeout) throw env('wc-o2 still running');
   }
-  await pg.goto('#/agents');
-  const btn = `document.querySelector('.orch-start-btn[data-orch="wc-o2"]')`;
-  if ((await pg.until(`!!${btn}`, 5000)).timeout) throw new Error('no Start button for wc-o2');
+  // wc-o1's Home: the switcher lists both, wc-o2 dimmed; tapping it opens wc-o2's stopped Home
+  await pg.goto('#/home/wc-o1');
+  const dim = `document.querySelector('.home-switch-btn.stopped[data-orch="wc-o2"]')`;
+  const sw = await pg.until(`document.querySelectorAll('.home-switch-btn').length === 2 && !!${dim}`, 5000);
+  if (!sw.timeout) {
+    const at = await pg.at(dim);
+    await pg.uncovered(dim, at); // wc-o1's start raised toasts
+    await pg.tap(at.x, at.y);
+  } else await pg.goto('#/home/wc-o2');
+  const stopped = await stoppedHome(c, 'wc-o2', 3000);
+  const btn = `document.getElementById('btn-home-start')`;
   const at = await pg.at(btn);
-  await pg.uncovered(btn, at); // wc-o1's start raised toasts
-  // the busy button is recorded in the page as it happens: the push of wc-o2 running can take the page Home
+  await pg.uncovered(btn, at);
+  // the busy button is recorded in the page as it happens: the push of wc-o2 running replaces the stopped Home
   // before a poll from here would see it
   await pg.ev(`(() => { window.__wcBusy = 0; window.__wcBusyMo?.disconnect(); const t0 = performance.now();
     window.__wcBusyMo = new MutationObserver(() => { const b = ${btn};
-      if (!window.__wcBusy && b && b.disabled && b.textContent.endsWith(' \\u2026')) window.__wcBusy = Math.max(1, Math.round(performance.now() - t0)); });
+      if (!window.__wcBusy && b && b.disabled && b.textContent === 'Starting\\u2026') window.__wcBusy = Math.max(1, Math.round(performance.now() - t0)); });
     window.__wcBusyMo.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true }); })()`);
   const tb = Date.now();
   await pg.tap(at.x, at.y);
@@ -1502,7 +1518,7 @@ async function p8t2(c: Ctx) {
     throw env(`wc-o2 not running 60s after its Start button (busy=${!busy.timeout}, POST ${post}, toasts: ${toasts || 'none'})`);
   }
   recordPane(c, up.v!, 'o2');
-  const toHome = await pg.until(`location.hash === '#/home/wc-o2'`, 3000);
+  const live = await pg.until(`location.hash === '#/home/wc-o2' && !!document.querySelector('#screen-pane.screen-home') && !document.getElementById('screen-home-stopped')`, 3000);
   await agentReady(c, up.v!, 60_000);
   checkAccount(up.v!, 'wc-o2', pinnedAccount());
   const st = await api(c, 'GET', '/api/state');
@@ -1510,27 +1526,36 @@ async function p8t2(c: Ctx) {
   await pg.ev(`localStorage.removeItem('herdr_home')`);
   await pg.load(`${c.base}/`);
   const home = await pg.until(`location.hash === ${js(`#/home/${enc(first)}`)}`, 3000);
-  const sw = await pg.until(`document.querySelectorAll('.home-switch-btn').length === 2`, 3000);
+  // clearing wc-o1 with its Home's Clear holds the running Home through the gap (no stopped Home flashes) and follows
   await pg.goto('#/home/wc-o1');
+  await pg.ev(`(() => { window.__wcStopped = false; window.__wcStoppedMo?.disconnect();
+    window.__wcStoppedMo = new MutationObserver(() => { if (document.getElementById('screen-home-stopped')) window.__wcStopped = true; });
+    window.__wcStoppedMo.observe(document.body, { subtree: true, childList: true }); })()`);
   const t0 = Date.now();
-  const { fresh, stayed } = await clearOrch(c, 'wc-o1');
+  const { fresh, stayed } = await clearOrch(c, 'wc-o1', true);
+  const flashed = await pg.ev('(() => { window.__wcStoppedMo.disconnect(); return window.__wcStopped; })()');
   const followed = pg.wsSent.some((f) => f.t >= t0 && f.payload.includes(js(fresh)));
+  // stopping wc-o2 with its Home's Stop leaves its Home, stopped (Start), without a toast or a trip to the list
   await pg.goto('#/home/wc-o2');
   await sleep(1000);
   const o2 = c.rec.names.o2;
   guard(c.rec, o2);
+  const stopBtn = `document.getElementById('btn-home-stop')`;
+  const sat = await pg.at(stopBtn);
+  await pg.uncovered(stopBtn, sat);
+  await pg.tap(sat.x, sat.y);
+  if ((await pg.until(`!!document.getElementById('cf-ok')`, 3000)).timeout) throw new Error('no confirm after the Home\'s Stop');
   const ts = Date.now();
-  await api(c, 'DELETE', `/api/panes/${enc(o2)}`);
-  const toast = await pg.until(`[...document.querySelectorAll('.toast')].some((t) => /Orchestrator stopped/.test(t.textContent))`, 12_000, 100);
-  // the grace runs from when the page learns the pane is gone (pane_gone), which herdr's close delays past the DELETE
-  const gone = pg.wsRecv.find((f) => f.t >= ts && f.msg.type === 'pane_gone' && f.msg.paneId === o2)?.t;
-  const tToast = Date.now() - (gone ?? ts);
-  const list = await pg.until(`location.hash === '#/agents'`, 2000);
-  result(c, !busy.timeout && !toHome.timeout && !home.timeout && !sw.timeout && stayed && followed && !toast.timeout && Math.abs(tToast - 8000) <= 1000 && !list.timeout,
-    'P8-T2', `startButton=${busy.timeout ? 'not-busy' : `disabled…:${busy.ms}ms`},running=${up.ms}ms,toHomeO2=${ms(toHome)},home=${ms(home)}(${first}),switcher=${!sw.timeout},` +
-      `clearStayed=${stayed},followed=${followed},paneGone=${gone ? `${gone - ts}ms` : 'none'},stopToast=${tToast}ms(from ${gone ? 'pane_gone' : 'DELETE'}),toList=${!list.timeout}`,
-    "wc-o2's Start button on #/agents: disabled with ' …' within 1s, then #/home/wc-o2 within 3s of it running; " +
-      '/ -> the first running Home within 3s with 2 switcher buttons; clear wc-o1 holds its Home 8s then follows; stop wc-o2 -> toast 8+-1s after its pane_gone, then #/agents');
+  await pg.tapEl(`document.getElementById('cf-ok')`);
+  const after = await stoppedHome(c, 'wc-o2', 10_000);
+  const tStopped = Date.now() - ts;
+  const noToast = !(await pg.ev(`[...document.querySelectorAll('.toast')].some((t) => /Orchestrator stopped/.test(t.textContent))`));
+  result(c, !sw.timeout && stopped.ok && !busy.timeout && !live.timeout && !home.timeout && stayed && !flashed && followed && after.ok && noToast,
+    'P8-T2', `switcher=${!sw.timeout},stoppedHome=${stopped.s},startButton=${busy.timeout ? 'not-busy' : `Starting…:${busy.ms}ms`},running=${up.ms}ms,` +
+      `liveHome=${ms(live)},home=${ms(home)}(${first}),clearStayed=${stayed},stoppedFlash=${flashed},followed=${followed},stop=${after.s}(${tStopped}ms),noToast=${noToast}`,
+    "wc-o1's Home lists wc-o2 dimmed; its tap opens wc-o2's stopped Home (status bar = its account's agents); Start shows 'Starting…' within 1s, " +
+      "then the running Home within 3s of it running; / -> the first running Home within 3s; wc-o1's Clear keeps its running Home (no stopped flash) and follows; " +
+      "wc-o2's Stop leaves its stopped Home (Start) within 10s, no toast");
 }
 
 // ── runner ───────────────────────────────────────────────────────────────────
