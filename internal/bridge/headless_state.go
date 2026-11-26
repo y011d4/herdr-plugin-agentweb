@@ -190,7 +190,7 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 			return &UsageWindow{Utilization: num(w["utilization"]), ResetsAt: int64(num(w["resetsAt"])) * 1000}
 		}
 		u := m.usage()
-		u.FiveHour, u.SevenDay, u.At = read("five_hour"), read("seven_day"), now
+		u.FiveHour, u.SevenDay, u.Fable, u.At = read("five_hour"), read("seven_day"), read("seven_day_overage_included"), now
 	case "control_request":
 		id := ev["request_id"]
 		req := ev["request"].(map[string]any)

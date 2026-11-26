@@ -199,13 +199,14 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
 const STALE_LIMITS_MS = 10 * 60_000;
 const pct = (n: number): string => `${Math.round(n)}%`;
 
-/** The usage parts a headless Home shows: 5h and 7d (stale: read over 10 min ago) and the context,
+/** The usage parts a headless Home shows: 5h, 7d and fable (stale: read over 10 min ago) and the context,
  *  each only when known. */
 export function usageParts(u: HeadlessUsage, now: number): Array<{ text: string; stale: boolean }> {
   const stale = !u.at || now - u.at > STALE_LIMITS_MS;
   const parts: Array<{ text: string; stale: boolean }> = [];
   if (u.fiveHour) parts.push({ text: `5h ${pct(u.fiveHour.utilization * 100)}`, stale });
   if (u.sevenDay) parts.push({ text: `7d ${pct(u.sevenDay.utilization * 100)}`, stale });
+  if (u.fable) parts.push({ text: `fable ${pct(u.fable.utilization * 100)}`, stale });
   if (u.contextPct != null) parts.push({ text: `ctx ${pct(u.contextPct)}`, stale: false });
   return parts;
 }
