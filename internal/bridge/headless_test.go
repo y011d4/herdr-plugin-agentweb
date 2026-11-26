@@ -995,3 +995,19 @@ func TestHeadlessClaudeCheck(t *testing.T) {
 		t.Errorf("read without a headless entry: %s", body)
 	}
 }
+
+// Whether a session can be resumed is where Claude Code looks: a project dir linked elsewhere counts.
+func TestHeadlessHasTranscript(t *testing.T) {
+	cfg, outside, dir := t.TempDir(), t.TempDir(), "/srv/orch"
+	r := newHeadlessRunner(OrchestratorDef{Name: "h1", Dir: dir, Env: map[string]string{"CLAUDE_CONFIG_DIR": cfg}, Managed: true, Mode: "headless"}, t.TempDir(), "")
+	r.sessionID = newUUID()
+	if r.hasTranscript() {
+		t.Fatal("a transcript before any")
+	}
+	os.MkdirAll(filepath.Join(cfg, "projects"), 0o700)
+	os.Symlink(outside, filepath.Join(cfg, "projects", slugForCwd(dir)))
+	os.WriteFile(filepath.Join(outside, r.sessionID+".jsonl"), []byte("{}\n"), 0o600)
+	if !r.hasTranscript() {
+		t.Error("the transcript in a linked project dir")
+	}
+}
