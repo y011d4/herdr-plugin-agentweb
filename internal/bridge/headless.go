@@ -397,15 +397,19 @@ func (r *headlessRunner) transcriptFile() string {
 	return resolveTranscriptPath(sid, r.def.Dir, []string{accountForConfigDir(r.def.Env["CLAUDE_CONFIG_DIR"], "")})
 }
 
-// hasTranscript is whether Claude Code has its session's transcript where it looks for one (its
-// account's projects/<slug of the dir>/<id>.jsonl, followed wherever it links: unlike the chat's
-// read, no containment applies to what Claude Code itself resumes).
+// hasTranscript is whether Claude Code has its session's transcript where it looks for one: its
+// account's projects/<slug of its cwd as the child sees it, links resolved>/<id>.jsonl, followed
+// wherever that links (unlike the chat's read, no containment applies to what Claude Code resumes).
 func (r *headlessRunner) hasTranscript() bool {
 	sid := r.session()
 	if sid == "" {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(accountForConfigDir(r.def.Env["CLAUDE_CONFIG_DIR"], ""), slugForCwd(r.def.Dir), sid+".jsonl"))
+	dir := r.def.Dir
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
+	_, err := os.Stat(filepath.Join(accountForConfigDir(r.def.Env["CLAUDE_CONFIG_DIR"], ""), slugForCwd(dir), sid+".jsonl"))
 	return err == nil
 }
 
