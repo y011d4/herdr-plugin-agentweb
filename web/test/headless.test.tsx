@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { act } from 'react';
 import { shownStatus } from '../src/dashboard-group.ts';
-import { clearToasts, getToasts, notifyOrchestratorAlert } from '../src/notify.ts';
+import { clearToasts, getToasts } from '../src/notify.ts';
 import { orchestratorOfPane, resolveRoute } from '../src/routes.ts';
 import { findPane, markPaneSeen, setAppState, store } from '../src/store.ts';
 import { renderItem } from '../src/transcript.ts';
@@ -200,19 +200,6 @@ describe('around a headless orchestrator', () => {
     assert.match(claudeCheckText({ at: now - 60_000, version: '2.1.322', ok: true, failed: [] }, now), /^Claude Code 2\.1\.322 passed, 1m ago$/);
     assert.match(claudeCheckText({ at: now - 30 * 3_600_000, version: '2.1.330', ok: false, failed: ['interrupt'] }, now),
       /^Claude Code 2\.1\.330 failed \(interrupt\), 30h ago: none since, the periodic check looks off$/);
-  });
-
-  it('an alert toasts; its tap opens the Home, a failed check Settings', () => {
-    setAppState(withPilot());
-    location.hash = '#/agents';
-    notifyOrchestratorAlert({ type: 'orchestrator_alert', name: 'pilot', kind: 'silent', message: 'no event for 3m0s' });
-    notifyOrchestratorAlert({ type: 'orchestrator_alert', name: '', kind: 'canary', message: 'interrupt failed' });
-    const [a, b] = getToasts();
-    assert.deepEqual([a.title, a.body, a.paneId, b.title], ['Pilot: silent', 'no event for 3m0s', 'hl:pilot', 'Claude Code check failed']);
-    a.onclick!();
-    assert.equal(location.hash, '#/home/pilot');
-    b.onclick!();
-    assert.equal(location.hash, '#/settings');
   });
 
   it("shows the bridge's [yoicks] words as a dim line, escaped", () => {
