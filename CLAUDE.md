@@ -417,6 +417,9 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   a touch disqualifies it) — fast swipe flicks must not trigger it.
 - WS pushes are deduped server-side against the last serialized state;
   `sinceUnixMs` carries over across re-snapshots so rebuilds don't defeat it.
+- **Wide screens (a PC)**: the PC layout is `web/style.css`'s last block, `@media (min-width:
+  1024px)`; none of it applies below 1024px (every phone, landscape too), so the phone layout stays
+  as it is. It keeps the scroll containers full width and makes the readable column with their padding.
 
 ## Security invariants
 
