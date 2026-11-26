@@ -73,6 +73,10 @@ export function previewImage(src: string, alt: string): void {
   }, 'image-preview');
   addEventListener('popstate', close);
 }
+// Arriving on a closed preview's entry (Forward, or Back onto one a hash change left behind) skips it:
+// it shows nothing, and at the same URL the next Back would seem to do nothing. An open preview's entry
+// is always the newest, so no popstate lands on it.
+addEventListener('popstate', () => { if (history.state?.imagePreview) history.back(); });
 
 const textInput = { type: 'text', autoCapitalize: 'off', autoCorrect: 'off', spellCheck: false } as const;
 

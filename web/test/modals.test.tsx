@@ -243,6 +243,15 @@ describe('Image preview', () => {
     assert.ok(!open());
     await settle();
     assert.equal(location.hash, '#/home/pilot', 'one step back, not two');
+    const forwardAndBack = new Promise<void>((r) => {
+      let n = 0;
+      const f = (): void => { if (++n === 2) { removeEventListener('popstate', f); r(); } };
+      addEventListener('popstate', f);
+    });
+    history.forward(); // onto the closed preview's entry, which is skipped
+    await forwardAndBack;
+    assert.equal(history.state?.imagePreview, undefined);
+    assert.ok(!open());
     opener.remove();
   });
 });
