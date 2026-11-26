@@ -531,9 +531,10 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   come from the config; the request names it only) in a new workspace and return `{"paneId", "name"}`.
   409 when it already runs. A headless one starts as the bridge's child instead (resuming its session),
   after checking it stays on the Claude subscription (409 otherwise), and returns `{"paneId": "hl:<name>", "name"}`.
-- `POST /api/orchestrators/:name/send` `{"text": "…"}`, `…/interrupt`, `…/clear` (a fresh session) and
-  `…/stop` — a headless orchestrator's message (also while it works), interrupt, clear and stop; 409
-  when it isn't running. A headless orchestrator has no herdr pane: `/api/panes/hl:<name>/…` and
+- `POST /api/orchestrators/:name/send` `{"text": "…"}`, `…/interrupt`, `…/clear` and `…/stop` — for a
+  headless orchestrator: send a message (also while it works) and interrupt its turn, both 409 when it
+  isn't running; clear starts it in a fresh session (returning `{"paneId", "name"}` like start), running
+  or not; stop ends it, and succeeds when it is already stopped. A headless orchestrator has no herdr pane: `/api/panes/hl:<name>/…` and
   `/api/agents/hl:<name>/…` answer 404, except `GET /api/panes/hl:<name>/transcript`.
 - `POST /api/worktrees` `{"cwd": "/repo", "branch": "feat/x", "base": "origin/main"}` — create a git
   worktree next to the repo, as above (herdr `worktree.create`; `cwd` is any path in the source repo,
