@@ -354,7 +354,7 @@ export function conversationItems(items: TimelineItem[], asks = new Set<string>(
       asks.add(it.id);
       out.push(it);
     } else if (it.kind === 'tool_result' && it.forId !== null && asks.has(it.forId)) {
-      const answer = askAnswer(it.text);
+      const answer = it.truncated ? null : askAnswer(it.text); // cut short, it may name only some: shown as it is
       out.push(answer === null ? it : { kind: 'user', text: answer, sidechain: false, ts: it.ts });
     }
   }

@@ -199,6 +199,9 @@ describe('conversationItems / latestActivity (home chat)', () => {
     // several questions: one line each; no answer named (refused, interrupted): the result as it is
     assert.equal(askAnswer('answered: "A?"="x", "B?"="y, z". Go on.'), 'A?: x\nB?: y, z');
     assert.equal(conversationItems([answered('q1', 'ほげ', true)], asks)[0].kind, 'tool_result');
+    // a result cut short may name only some answers: it stays as it is, its "truncated" with it
+    const cut = { ...answered('q1', 'answered: "A?"="x", "B?"="y'), truncated: true } as TimelineItem;
+    assert.equal(conversationItems([cut], asks)[0].kind, 'tool_result');
   });
 
   it('hides only Claude Code\'s injected tags, not user text that starts with "<"', () => {
