@@ -15,7 +15,7 @@ import { Fragment, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { apiDelete, apiGet, apiPost, getToken, loadToken, onUnauthorized, setToken } from '../api.ts';
 import { dismissNotificationsForPane, dismissToastsForPane, notifyAgentStatus, showToast } from '../notify.ts';
-import { homeHash, homeOf, isAgentsRoute, nextPaneBackRoute, paneGoneRoute, paneRoute, resolveRoute } from '../routes.ts';
+import { homeHash, homeOf, isAgentsRoute, nextPaneBackRoute, nextSettingsBackRoute, paneGoneRoute, paneRoute, resolveRoute } from '../routes.ts';
 import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, setStartingHome, store, subscribe, type View } from '../store.ts';
 import type { AppState, ClearResponse, OrchestratorView, WsMessage } from '../types.ts';
 import { onWsMessage, wsConnect, wsSendWatch } from '../ws.ts';
@@ -267,7 +267,8 @@ function handleRoute(e?: Event): void {
     markActivePaneSeen();
     renderPaneDetail(route.paneId);
   } else {
-    show('settings', <Settings toast={showToast} onSignedOut={() => renderTokenScreen()} />, settingsTopbar);
+    view.settingsBackRoute = nextSettingsBackRoute(e instanceof HashChangeEvent ? new URL(e.oldURL).hash : null, view.settingsBackRoute);
+    show('settings', <Settings toast={showToast} onSignedOut={() => renderTokenScreen()} />, settingsTopbar(view.settingsBackRoute));
   }
 
   wsSendWatch(); // sync the server-side pane watch with the current route

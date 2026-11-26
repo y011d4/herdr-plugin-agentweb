@@ -26,6 +26,8 @@ export interface View {
   paneViewMode: 'terminal' | 'chat';
   /** where a pane's Back goes: Home or an account's list when it was opened from there, else the list */
   paneBackRoute: string;
+  /** where Settings' Back goes: the Home or list that opened it, else the list */
+  settingsBackRoute: string;
 }
 
 export const store: {
@@ -36,7 +38,7 @@ export const store: {
   appState: null,
   wsConnected: false,
   startingHome: null,
-  view: { screen: 'loading', activePaneId: null, homeMode: false, paneViewMode: 'terminal', paneBackRoute: '#/agents' },
+  view: { screen: 'loading', activePaneId: null, homeMode: false, paneViewMode: 'terminal', paneBackRoute: '#/agents', settingsBackRoute: '#/agents' },
   seenDone: (() => {
     try { return JSON.parse(localStorage.getItem(STORAGE_SEEN) ?? '{}') ?? {}; } catch { return {}; }
   })(),
