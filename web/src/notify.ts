@@ -128,7 +128,7 @@ function showSystemNotification(title: string, body: string, paneId: string): vo
         // check above and when the notification is registered, so a visibilitychange
         // dismiss can run too early and miss it. Once it provably exists, dismiss it
         // if the user is now looking at this very pane.
-        return reg.showNotification(title, { body, tag: paneId }).then(() => {
+        return reg.showNotification(title, notificationOptions(body, paneId)).then(() => {
           if (!document.hidden && store.view.activePaneId === paneId) dismissNotificationsForPane(paneId);
         });
       })
@@ -138,13 +138,19 @@ function showSystemNotification(title: string, body: string, paneId: string): vo
   }
 }
 
+// One notification per pane (tag), and renotify: a new one replacing the pane's older one still in
+// the notification center alerts again; without it the replacement is silent (the "first one never
+// arrives" report). TypeScript's DOM lib dropped renotify, browsers didn't.
+const notificationOptions = (body: string, paneId: string): NotificationOptions =>
+  ({ body, tag: paneId, renotify: true }) as NotificationOptions;
+
 // Page-constructor notifications are not reachable via getNotifications(), so track
 // them per pane to close on pane open.
 const pageNotifications = new Map<string, Notification[]>();
 
 function pageNotification(title: string, body: string, paneId: string): void {
   try {
-    const n = new Notification(title, { body, tag: paneId });
+    const n = new Notification(title, notificationOptions(body, paneId));
     n.onclick = () => {
       window.focus();
       location.hash = paneRoute(store.appState, paneId);

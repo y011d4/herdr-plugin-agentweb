@@ -64,6 +64,13 @@ export function nextPaneBackRoute(fromHash: string | null, prev: string): string
   return fromHash?.startsWith('#/pane/') ? prev : '#/agents';
 }
 
+/** Settings' Back after arriving from `fromHash`: the Home or list it was opened from, else the list.
+ *  No hash change (a re-render, a reload on #/settings) keeps `prev`. */
+export function nextSettingsBackRoute(fromHash: string | null, prev: string): string {
+  if (fromHash === null) return prev;
+  return fromHash.startsWith('#/home/') || fromHash.startsWith('#/agents') ? fromHash : '#/agents';
+}
+
 export function resolveRoute(hash: string, state: AppState | null, lastHome: string | null): Route {
   // Opening the app without a route (the PWA's start_url) lands on an orchestrator's
   // chat when one is running, and on the agents list otherwise. Replaced either way, so

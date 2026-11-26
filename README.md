@@ -17,7 +17,8 @@ mobile-first PWA:
 - Start, rename, clear, and stop agents from the phone: **+** on the dashboard launches an
   agent from a named launch profile — in an existing workspace/worktree you pick, or in a
   **fresh worktree** it creates for you — and each pane's **⋮** menu renames, clears
-  (fresh session), or stops it
+  (fresh session), or stops it (an orchestrator's Home has **Clear** and **Stop** buttons
+  instead, and **⚙** for the settings)
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
   scrollback by swiping down, multiline input, and quick keys
   (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …). On a PC's browser, Enter sends and

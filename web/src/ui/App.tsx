@@ -15,7 +15,7 @@ import { Fragment, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { apiDelete, apiGet, apiPost, getToken, loadToken, onUnauthorized, setToken } from '../api.ts';
 import { dismissNotificationsForPane, dismissToastsForPane, notifyAgentStatus, showToast } from '../notify.ts';
-import { homeHash, homeOf, isAgentsRoute, nextPaneBackRoute, paneGoneRoute, paneRoute, resolveRoute } from '../routes.ts';
+import { homeHash, homeOf, isAgentsRoute, nextPaneBackRoute, nextSettingsBackRoute, paneGoneRoute, paneRoute, resolveRoute } from '../routes.ts';
 import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, setStartingHome, store, subscribe, type View } from '../store.ts';
 import type { AppState, ClearResponse, OrchestratorView, WsMessage } from '../types.ts';
 import { onWsMessage, wsConnect, wsSendWatch } from '../ws.ts';
@@ -267,7 +267,8 @@ function handleRoute(e?: Event): void {
     markActivePaneSeen();
     renderPaneDetail(route.paneId);
   } else {
-    show('settings', <Settings toast={showToast} onSignedOut={() => renderTokenScreen()} />, settingsTopbar);
+    view.settingsBackRoute = nextSettingsBackRoute(e instanceof HashChangeEvent ? new URL(e.oldURL).hash : null, view.settingsBackRoute);
+    show('settings', <Settings toast={showToast} onSignedOut={() => renderTokenScreen()} />, settingsTopbar(view.settingsBackRoute));
   }
 
   wsSendWatch(); // sync the server-side pane watch with the current route
@@ -299,7 +300,8 @@ function signIn(token: string): void {
 
 // ── Agent lifecycle UI (rename / clear / stop) ────────────────────────────────
 
-// The pane's ⋮ (ui/Modals.tsx): Rename… (the header follows the store), Clear, Stop.
+// A pane's ⋮ (ui/Modals.tsx): Rename… (the header follows the store), Clear, Stop. A Home has no ⋮:
+// its Clear and Stop are buttons on its status bar (ui/Pane.tsx), through the same confirm flows.
 function agentMenu(paneId: string): void {
   const agent = findPane(paneId)?.pane.agent;
   openAgentMenu(paneId, agent?.displayName || agent?.name || '', {
@@ -341,7 +343,8 @@ function renderPaneDetail(paneId: string): void {
   // A pane view opens on the terminal (pane-view.ts) but mounts after the route's watch goes
   // out (handleRoute's wsSendWatch): set its mode now, or that watch follows the last pane's chat.
   view.paneViewMode = 'terminal';
-  show('pane', <Pane paneId={paneId} home={view.homeMode} />,
+  const actions = view.homeMode ? { clear: () => { void clearAgentFlow(paneId); }, stop: () => { void stopAgentFlow(paneId); } } : undefined;
+  show('pane', <Pane paneId={paneId} home={view.homeMode} actions={actions} />,
     paneTopbar(paneId, view.homeMode, view.paneBackRoute, () => agentMenu(paneId)));
 }
 
