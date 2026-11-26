@@ -75,7 +75,15 @@ All in `internal/bridge/` (one package):
   engines, and an engine owns only its own DOM subtree: `#pane-view`'s children, an empty
   container React draws and never renders into. `ui/Pane.tsx` draws the topbar, Home's
   bits, the composer (an uncontrolled textarea) and the quick keys around `#pane-view`, and
-  `ui/PromptPanel.tsx` the answer panel pane-view reports (`opts.prompt`: taps, in-flight guard, cooldown, 409). `ansi.ts` — pure ANSI→HTML,
+  `ui/PromptPanel.tsx` the answer panel pane-view reports (`opts.prompt`: taps, in-flight guard, cooldown, 409). A headless
+  orchestrator's Home (`hl:<name>`) is the same screen: `findPane`/`markPaneSeen` (`store.ts`) make it
+  a pane from its `OrchestratorView` (never in `appState.workspaces`: New agent's dirs and "No workspaces
+  found" go by those), `api.ts`'s `orchestratorPost` sends its composer, Clear, Stop, ■ and answers to
+  `/api/orchestrators/:name/*`, `watch.ts` watches only its transcript, pane-view has no terminal for
+  it (the chat, empty until its session's first line) and `PromptPanel.tsx`'s `HeadlessPrompt` answers
+  `headless.pending`; its usage and warnings (■, Clear, the steps back to the TUI) sit on the status
+  bar. `orchestrator_alert` toasts (`notifyOrchestratorAlert`); Settings shows the last Claude Code
+  check and the TUI steps; a `[yoicks] …` user turn renders as a dim line. `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
   (manifest, icons) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one
@@ -122,18 +130,19 @@ All in `internal/bridge/` (one package):
   `pane.agent_detected` (fires on detect *and* release) is rebuild-triggering, so agent presence and
   `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `yoicks agent …`, waking on background
   `agent prompt --wait`) lives in that dir's `CLAUDE.md`, not in this repo.
-- **Headless orchestrators** (being built: plan in `.omc/plans/headless-orchestrator/`): a managed entry
+- **Headless orchestrators** (built through S5; the pilot and the switch, S6, in `.omc/plans/headless-orchestrator/`): a managed entry
   with `"mode": "headless"` (an unmanaged one stays tui, logged) runs as the bridge's own child,
   `claude -p` over stream-json, instead of an agent in a pane. `headless.go`: one `headlessRunner` per
   such entry (start with the billing checks and the orphan scan; send, also mid-turn; interrupt as a
   `control_request`, no answer in 2 s → kill + `--resume`; stop = interrupt, close stdin, 1.5 s, SIGTERM
-  the group, 0.5 s, SIGKILL; clear = a fresh session; a crash restarts with `--resume` after 2/10/30 s,
+  the group, 0.5 s, SIGKILL; clear = a fresh session; a crash restarts with `--resume` after 2/10/30 s
+  (a session without a transcript, i.e. no message yet, can't be resumed: it begins again under its id),
   more than 3 in 10 min = `error`; the bridge's shutdown stops them in parallel within `yoicks stop`'s
   5 s, Pdeathsig as the backstop). `headless_state.go` is pure: a stdout line → status, completionSeq,
   usage, warnings (unknown events, unreadable lines, the init check). Its state's `paneId` is
   `hl:<name>` while the child runs; the pane/agent routes and `watch_pane` refuse `hl:` (404 /
   nothing read), only the transcript route serves it (`resolvePaneTranscript`'s head). Saved in
-  `<state>/headless/<name>.json` (`{sessionId, wanted, rulesHash, watches}`); `<state>/headless/<name>.mcp.json` (only the
+  `<state>/headless/<name>.json` (`{sessionId, wanted, rulesHash, watches, completionSeq}`: the count goes on across restarts, a phone's seen-done is keyed on it); `<state>/headless/<name>.mcp.json` (only the
   bridge writes it, `--mcp-config` in the argv) is the marker that tells its own orphan from a user's
   `claude --resume`. Warnings also go out once per session and kind as WS `orchestrator_alert`, ntfy
   and herdr's `notification.show`; its working→done and →blocked go out as an agent's do, as
@@ -478,7 +487,8 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
 - **webcheck** (`tools/webcheck.ts`: headless Chrome over CDP, no dependencies) is the gate before
   deploying a web change: all of Tier 1 passes.
   ```bash
-  node tools/webcheck.ts preview start --bin bin/yoicks --port 8395  # throwaway bridge over the real herdr
+  go build -o "$FC/claude" ./tools/fakeclaude   # FC: any dir; the H items' wc-h1 runs it
+  node tools/webcheck.ts preview start --bin bin/yoicks --port 8395 --fake-claude "$FC/claude"  # throwaway bridge over the real herdr
   node tools/webcheck.ts check --base http://127.0.0.1:8395 --tier 1  # lock, setup, checks, teardown
   node tools/webcheck.ts preview stop --port 8395
   ```
@@ -494,6 +504,10 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
     a Claude it starts in another account stops the run (`ENV: … account mismatch`). The default
     account is `unset CLAUDE_CONFIG_DIR`, not `~/.claude`: set, Claude Code reads a stale
     `~/.claude/.claude.json` instead of `~/.claude.json`.
+  - The headless Home: Tier 1's H1–H8 drive `wc-h1` on the fake claude (`--fake-claude`, needed for
+    them); Tier 2's H-T2 the real `wc-h2`, which a preview *without* `--fake-claude` (and with the
+    `.envrc`) has, answering on haiku (its dir's `settings.local.json`; H-T2 stops if the transcript
+    says another model). Both with `YOICKS_HEADLESS_NO_TOOLS=1`; a run stops the ones it started.
   - Safety: the preview controls the real herdr, and production (so the phone, notifications
     included) sees the scratch agents: say so before a run. It mutates only what the run created
     and recorded whose live tab or workspace label starts with `wc-` (one guard, which the page's
