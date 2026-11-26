@@ -592,31 +592,59 @@ func (r *headlessRunner) retryWatch(ctx context.Context, w *hlWatch, err error) 
 	}
 }
 
-// wakeLine queues a wake-up; the ones within wakeCoalesce go out as one message.
+// wakeLine queues a wake-up (saved with the state until it is written).
 func (r *headlessRunner) wakeLine(line string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.wakes = append(r.wakes, "[yoicks] "+line)
-	if r.wakeTimer == nil {
-		r.wakeTimer = time.AfterFunc(wakeCoalesce, func() {
-			defer r.recoverAt("the wake-up")
-			r.mu.Lock()
-			lines := r.wakes
-			r.wakes, r.wakeTimer = nil, nil
-			r.mu.Unlock()
-			r.log("wake: %d line(s)", len(lines))
-			if err := r.write(strings.Join(lines, "\n")); err != nil {
-				r.log("wake not sent: %s", err)
-			}
-		})
+	r.persist()
+	r.scheduleWakes()
+}
+
+// scheduleWakes writes the queued wake-ups in wakeCoalesce, as one message; r.mu held. They
+// stay queued until a write succeeds: a child that is down gets them once it (re)starts.
+func (r *headlessRunner) scheduleWakes() {
+	if r.wakeTimer != nil || len(r.wakes) == 0 {
+		return
 	}
+	r.wakeTimer = time.AfterFunc(wakeCoalesce, func() {
+		defer r.recoverAt("the wake-up")
+		r.mu.Lock()
+		lines := slices.Clone(r.wakes)
+		r.mu.Unlock()
+		err := r.write(strings.Join(lines, "\n"))
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.wakeTimer = nil
+		if err != nil {
+			r.log("wake (%d line(s)) not sent yet: %s", len(lines), err)
+			if r.child != nil { // a failed write to a live child: try again
+				r.scheduleWakes()
+			}
+			return
+		}
+		r.log("wake: %d line(s)", len(lines))
+		if len(r.wakes) >= len(lines) { // (a Clear meanwhile emptied them)
+			r.wakes = r.wakes[len(lines):]
+		}
+		r.persist()
+		r.scheduleWakes() // ones queued meanwhile
+	})
 }
 
 // rearm restarts the saved watches (after a bridge restart): level waits from the saved
 // status and seq, so a change meanwhile wakes once and a replay of the same state doesn't.
-func (r *headlessRunner) rearm(saved []hlWatch) {
+// They stay in the saved state until then, and become the running ones.
+func (r *headlessRunner) rearm() {
+	r.mu.Lock()
+	saved := r.saved
+	r.mu.Unlock()
 	for i := range saved {
 		w := saved[i]
 		r.watch(&w, "", nil)
 	}
+	r.mu.Lock()
+	r.saved = nil
+	r.persist()
+	r.mu.Unlock()
 }
