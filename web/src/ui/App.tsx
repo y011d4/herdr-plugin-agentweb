@@ -299,7 +299,8 @@ function signIn(token: string): void {
 
 // ── Agent lifecycle UI (rename / clear / stop) ────────────────────────────────
 
-// The pane's ⋮ (ui/Modals.tsx): Rename… (the header follows the store), Clear, Stop.
+// A pane's ⋮ (ui/Modals.tsx): Rename… (the header follows the store), Clear, Stop. A Home has no ⋮:
+// its Clear and Stop are buttons on its status bar (ui/Pane.tsx), through the same confirm flows.
 function agentMenu(paneId: string): void {
   const agent = findPane(paneId)?.pane.agent;
   openAgentMenu(paneId, agent?.displayName || agent?.name || '', {
@@ -341,7 +342,8 @@ function renderPaneDetail(paneId: string): void {
   // A pane view opens on the terminal (pane-view.ts) but mounts after the route's watch goes
   // out (handleRoute's wsSendWatch): set its mode now, or that watch follows the last pane's chat.
   view.paneViewMode = 'terminal';
-  show('pane', <Pane paneId={paneId} home={view.homeMode} />,
+  const actions = view.homeMode ? { clear: () => { void clearAgentFlow(paneId); }, stop: () => { void stopAgentFlow(paneId); } } : undefined;
+  show('pane', <Pane paneId={paneId} home={view.homeMode} actions={actions} />,
     paneTopbar(paneId, view.homeMode, view.paneBackRoute, () => agentMenu(paneId)));
 }
 

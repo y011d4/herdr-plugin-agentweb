@@ -1214,6 +1214,32 @@ a {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
+/* the counts, then the orchestrator's Clear and Stop at the right end */
+.home-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.home-row .home-counts { flex: 1; min-width: 0; }
+.home-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.home-action {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  padding: 3px 10px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.home-action:active { background: var(--color-surface-2); }
+.home-action.danger { color: var(--color-blocked); }
 .home-dot {
   display: inline-block;
   width: 8px;

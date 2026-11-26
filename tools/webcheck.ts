@@ -1393,7 +1393,8 @@ async function p10t2(c: Ctx) {
 
 /** Clears an orchestrator from its Home. stayed: #/home/<name> held from the clear request through 8s and
  *  through the wait for the replacement (ready, in the pinned account), however long that took. */
-async function clearOrch(c: Ctx, name: string): Promise<{ fresh: string; stayed: boolean }> {
+/** Clears an orchestrator through the API, or (viaHome) with its Home's Clear button and the confirm. */
+async function clearOrch(c: Ctx, name: string, viaHome = false): Promise<{ fresh: string; stayed: boolean }> {
   const old = c.rec.names[name.slice(3)];
   guard(c.rec, old);
   const hash = `#/home/${name}`;
@@ -1404,13 +1405,30 @@ async function clearOrch(c: Ctx, name: string): Promise<{ fresh: string; stayed:
     return true;
   })().catch(() => false);
   try {
-    const out = await api(c, 'POST', `/api/agents/${enc(old)}/clear`);
-    recordPane(c, out.paneId, name.slice(3));
+    let fresh: string;
+    if (viaHome) {
+      const btn = `document.getElementById('btn-home-clear')`;
+      const at = await c.pg.at(btn);
+      await c.pg.uncovered(btn, at); // toasts (P15-T2's "Renamed") sit right below the topbar, over the status bar
+      await c.pg.tap(at.x, at.y);
+      if ((await c.pg.until(`!!document.getElementById('cf-ok')`, 3000)).timeout) throw new Error(`${name}: no confirm after the Home's Clear`);
+      await c.pg.tapEl(`document.getElementById('cf-ok')`);
+      // the page's POST (through guardRequest) answers with the replacement, which the State then names
+      const up = await waitFn(async () => {
+        const p = (await api(c, 'GET', '/api/state')).orchestrators.find((o: any) => o.name === name)?.paneId;
+        return p && p !== old ? p as string : undefined;
+      }, 60_000, 300);
+      if (up.timeout || !up.v) throw new Error(`${name}: no replacement after the Home's Clear`);
+      fresh = up.v;
+    } else {
+      fresh = (await api(c, 'POST', `/api/agents/${enc(old)}/clear`)).paneId;
+    }
+    recordPane(c, fresh, name.slice(3));
     // the replacement is a new Claude: it must come up in the pinned account too
-    await agentReady(c, out.paneId, 60_000);
-    checkAccount(out.paneId, name, pinnedAccount());
+    await agentReady(c, fresh, 60_000);
+    checkAccount(fresh, name, pinnedAccount());
     waiting = false;
-    return { fresh: out.paneId, stayed: await watch };
+    return { fresh, stayed: await watch };
   } finally { waiting = false; }
 }
 
@@ -1437,13 +1455,16 @@ async function p15t2(c: Ctx) {
   const ok = pg.resps.find((x) => x.t >= tr && x.url.endsWith(`/api/panes/${enc(cl)}/rename`))?.status;
   const r = { timeout: toast.timeout || named.timeout || ok !== 200, ms: Date.now() - tr };
   await pg.goto('#/home/wc-o1');
+  // a Home has no ⋮: Settings in its topbar, Clear and Stop on its status bar
+  const bar = await pg.until(`!!document.getElementById('btn-home-clear') && !!document.getElementById('btn-home-stop')
+    && !!document.getElementById('btn-settings') && !document.getElementById('btn-agent-menu')`, 5000);
   const t0 = Date.now();
-  const { fresh, stayed } = await clearOrch(c, 'wc-o1');
+  const { fresh, stayed } = await clearOrch(c, 'wc-o1', true);
   const now = (await api(c, 'GET', '/api/state')).orchestrators.find((o: any) => o.name === 'wc-o1')?.paneId;
   const watched = pg.wsSent.some((f) => f.t >= t0 && f.payload.includes(js(fresh)));
-  result(c, !r.timeout && stayed && now === fresh && watched, 'P15-T2',
-    `renamePost=${ok},toast=${ms(toast)},herdrName=${ms(named)},stayedHome8s=${stayed},replaced=${now === fresh},followed=${watched}`,
-    "UI rename: POST ok, a 'Renamed' toast and herdr's agent name wc-renamed within 3s; clearing wc-o1 keeps #/home/wc-o1 and follows the new pane");
+  result(c, !r.timeout && !bar.timeout && stayed && now === fresh && watched, 'P15-T2',
+    `renamePost=${ok},toast=${ms(toast)},herdrName=${ms(named)},homeButtons=${!bar.timeout},stayedHome8s=${stayed},replaced=${now === fresh},followed=${watched}`,
+    "UI rename: POST ok, a 'Renamed' toast and herdr's agent name wc-renamed within 3s; wc-o1's Home has Settings, Clear and Stop and no ⋮; its Clear button keeps #/home/wc-o1 and follows the new pane");
 }
 
 async function p8t2(c: Ctx) {

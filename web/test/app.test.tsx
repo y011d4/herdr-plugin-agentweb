@@ -211,12 +211,29 @@ describe('App', () => {
     await answer('POST /api/agents/p1/clear', { ok: true, paneId: 'p8' });
     assert.equal(location.hash, '#/pane/p8');
 
+    // a Home has no ⋮: Settings in its topbar, Clear and Stop on its status bar
     await go('#/home/personal');
-    await click($('#btn-agent-menu'));
-    await click($('#modal-root #am-clear'));
+    assert.ok(!$('#btn-agent-menu') && $('#btn-settings'), "a Home's topbar: Settings, no agent-actions menu");
+    await click($('#btn-home-clear'));
     await click($('#modal-root #cf-ok'));
     await answer('POST /api/agents/p4/clear', { ok: true, paneId: 'p9' });
     assert.equal(location.hash, '#/home/personal', 'the State routes onto the replacement');
+  });
+
+  it("a Home's Stop button closes its orchestrator's pane after the confirm", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/home/personal');
+    await click($('#btn-home-stop'));
+    await click($('#modal-root #cf-ok'));
+    await answer('DELETE /api/panes/p4', { ok: true });
+    assert.deepEqual(toastTitles(), ['Stopped']);
+  });
+
+  it("a Home's Settings button opens the settings", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/home/personal');
+    await click($('#btn-settings'));
+    assert.equal(location.hash, '#/settings');
   });
 
   it("routes the SW's navigate message; an orchestrator's pane lands on its Home, drawn afresh", async () => {
