@@ -17,6 +17,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -407,6 +408,9 @@ func (r *headlessRunner) prompt(pane, name, text string) *mcp.CallToolResult {
 	if strings.TrimSpace(text) == "" { // nothing to send: no watch to wait on
 		return textResult("text must be non-empty", true)
 	}
+	r.mu.Lock()
+	gen := r.gen // a Stop or Clear meanwhile: no watch for the session gone
+	r.mu.Unlock()
 	deadline := time.Now().Add(agentReadyTimeout)
 	for {
 		raw, err := r.rpc("agent.get", map[string]any{"target": pane})
@@ -416,7 +420,9 @@ func (r *headlessRunner) prompt(pane, name, text string) *mcp.CallToolResult {
 		status, seq, cwd := agentState(raw)
 		w := &hlWatch{Pane: pane, Name: name, Cwd: cwd, Status: status, Seq: seq}
 		first := make(chan error, 1)
-		r.watch(w, text, first)
+		if !r.watch(w, text, first, gen) {
+			return textResult("not delivered to "+name+": the orchestrator was stopped or cleared", true)
+		}
 		err = <-first
 		if err == nil {
 			return textResult("delivered to "+name+": you are woken when it finishes or stops for an answer", false)
@@ -427,7 +433,7 @@ func (r *headlessRunner) prompt(pane, name, text string) *mcp.CallToolResult {
 		}
 		if raw, err := r.rpc("agent.get", map[string]any{"target": pane}); err == nil {
 			if status, seq, cwd := agentState(raw); status == "blocked" {
-				r.watch(&hlWatch{Pane: pane, Name: name, Cwd: cwd, Status: status, Seq: seq, Startup: true}, "", nil)
+				r.watch(&hlWatch{Pane: pane, Name: name, Cwd: cwd, Status: status, Seq: seq, Startup: true}, "", nil, gen)
 				return textResult("task not sent: "+name+" waits on a startup question (folder trust?) the user answers in its pane; you are woken when it is ready", false)
 			}
 		}
@@ -436,11 +442,17 @@ func (r *headlessRunner) prompt(pane, name, text string) *mcp.CallToolResult {
 }
 
 // watch starts w's goroutine (text: first send it, reporting delivery on first) and keeps
-// it among the watches (one per pane: a newer one replaces it).
-func (r *headlessRunner) watch(w *hlWatch, text string, first chan<- error) {
+// it among the watches (one per pane: a newer one replaces it); false (and nothing started)
+// when its orchestrator was stopped or cleared since gen.
+func (r *headlessRunner) watch(w *hlWatch, text string, first chan<- error, gen int) bool {
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
 	r.mu.Lock()
+	if r.gen != gen {
+		r.mu.Unlock()
+		cancel()
+		return false
+	}
 	if old := r.watches[w.Pane]; old != nil {
 		old.cancel()
 	}
@@ -448,6 +460,7 @@ func (r *headlessRunner) watch(w *hlWatch, text string, first chan<- error) {
 	r.persist()
 	r.mu.Unlock()
 	go r.runWatch(ctx, w, text, first)
+	return true
 }
 
 // unwatch ends the watches match picks (closing their held connections); match runs with r.mu held.
@@ -500,9 +513,11 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 			return
 		}
 		once(nil)
-		r.told(w, "working", w.Seq) // delivered: from here it works
+		if !r.tell(w, "", "working", w.Seq, false) { // delivered: from here it works
+			return
+		}
 		if err == nil {
-			if !r.settle(ctx, w, raw, &until) {
+			if !r.settle(w, raw, &until) {
 				return
 			}
 		} else if ctx.Err() != nil {
@@ -518,8 +533,7 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 				}
 				continue
 			}
-			r.wakeLine(w.Name + ": ready, task not sent")
-			r.unwatch(func(o *hlWatch) bool { return o == w })
+			r.tell(w, w.Name+": ready, task not sent", w.Status, w.Seq, true)
 			return
 		}
 		raw, err := r.waitRPC(ctx, "agent.wait", map[string]any{"target": w.Pane, "until": until})
@@ -540,38 +554,48 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-		if !r.settle(ctx, w, raw, &until) {
+		if !r.settle(w, raw, &until) {
 			return
 		}
 	}
 }
 
-// settle tells a change the wait answered; false once the watch is over (settled).
-func (r *headlessRunner) settle(ctx context.Context, w *hlWatch, raw json.RawMessage, until *[]string) bool {
+// settle tells a change the wait answered; false once the watch is over (settled, or ended
+// meanwhile).
+func (r *headlessRunner) settle(w *hlWatch, raw json.RawMessage, until *[]string) bool {
 	status, seq, _ := agentState(raw)
-	r.mu.Lock()
-	from := w.Status
-	r.mu.Unlock()
 	if slices.Equal(*until, untilMoved) && status == "working" { // answered: back to waiting for its end
-		r.told(w, "working", seq)
 		*until = untilSettled
-		return true
+		return r.tell(w, "", "working", seq, false)
 	}
-	r.wakeLine(fmt.Sprintf("%s: %s → %s", w.Name, from, status))
-	r.told(w, status, seq)
-	if status == "blocked" {
+	end := status != "blocked"
+	if !end {
 		*until = untilMoved
-		return true
 	}
-	r.unwatch(func(o *hlWatch) bool { return o == w })
-	return false
+	// w.Status is only ever changed here, in its own goroutine
+	return r.tell(w, fmt.Sprintf("%s: %s → %s", w.Name, w.Status, status), status, seq, end) && !end
 }
 
-func (r *headlessRunner) told(w *hlWatch, status string, seq int64) {
+// tell is a watch's change, in one save: line (when not "") queued as a wake-up, its status
+// and seq, and (end) its removal. false when w is no watch any more (ended, replaced, or its
+// orchestrator stopped or cleared): then it changes nothing.
+func (r *headlessRunner) tell(w *hlWatch, line, status string, seq int64, end bool) bool {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.watches[w.Pane] != w {
+		return false
+	}
+	if line != "" {
+		r.wakes = append(r.wakes, "[yoicks] "+line)
+		r.scheduleWakes()
+	}
 	w.Status, w.Seq = status, seq
+	if end {
+		w.cancel()
+		delete(r.watches, w.Pane)
+	}
 	r.persist()
-	r.mu.Unlock()
+	return true
 }
 
 // retryWatch: a broken wait is re-armed (herdr restarting, say) unless the watch ended or
@@ -592,29 +616,33 @@ func (r *headlessRunner) retryWatch(ctx context.Context, w *hlWatch, err error) 
 	}
 }
 
-// wakeLine queues a wake-up (saved with the state until it is written).
-func (r *headlessRunner) wakeLine(line string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.wakes = append(r.wakes, "[yoicks] "+line)
-	r.persist()
-	r.scheduleWakes()
-}
-
-// scheduleWakes writes the queued wake-ups in wakeCoalesce, as one message; r.mu held. They
-// stay queued until a write succeeds: a child that is down gets them once it (re)starts.
+// scheduleWakes writes the queued wake-ups in wakeCoalesce, as one message, to the child of
+// the moment; r.mu held. They stay queued (and saved) until a write succeeds, so a child down
+// gets them once it (re)starts. The timer carries the generation: after a Stop or Clear
+// (which drop the queue) it does nothing.
 func (r *headlessRunner) scheduleWakes() {
 	if r.wakeTimer != nil || len(r.wakes) == 0 {
 		return
 	}
+	gen := r.gen
 	r.wakeTimer = time.AfterFunc(wakeCoalesce, func() {
 		defer r.recoverAt("the wake-up")
 		r.mu.Lock()
-		lines := slices.Clone(r.wakes)
+		if r.gen != gen {
+			r.mu.Unlock()
+			return
+		}
+		lines, c := slices.Clone(r.wakes), r.child
 		r.mu.Unlock()
-		err := r.write(strings.Join(lines, "\n"))
+		err := errors.New("no child")
+		if c != nil && len(lines) > 0 {
+			err = r.writeTo(c, strings.Join(lines, "\n"))
+		}
 		r.mu.Lock()
 		defer r.mu.Unlock()
+		if r.gen != gen { // stopped or cleared meanwhile: that queue is gone
+			return
+		}
 		r.wakeTimer = nil
 		if err != nil {
 			r.log("wake (%d line(s)) not sent yet: %s", len(lines), err)
@@ -624,9 +652,7 @@ func (r *headlessRunner) scheduleWakes() {
 			return
 		}
 		r.log("wake: %d line(s)", len(lines))
-		if len(r.wakes) >= len(lines) { // (a Clear meanwhile emptied them)
-			r.wakes = r.wakes[len(lines):]
-		}
+		r.wakes = r.wakes[len(lines):] // the same generation: only appended to since
 		r.persist()
 		r.scheduleWakes() // ones queued meanwhile
 	})
@@ -637,11 +663,11 @@ func (r *headlessRunner) scheduleWakes() {
 // They stay in the saved state until then, and become the running ones.
 func (r *headlessRunner) rearm() {
 	r.mu.Lock()
-	saved := r.saved
+	saved, gen := r.saved, r.gen // (r.op held: no Stop or Clear meanwhile)
 	r.mu.Unlock()
 	for i := range saved {
 		w := saved[i]
-		r.watch(&w, "", nil)
+		r.watch(&w, "", nil, gen)
 	}
 	r.mu.Lock()
 	r.saved = nil

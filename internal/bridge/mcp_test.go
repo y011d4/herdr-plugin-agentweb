@@ -375,7 +375,7 @@ func TestHeadlessWakeUps(t *testing.T) {
 		// a watch saved at that done answers at once with the same seq: it waits on, quiet
 		raw, _ := b.srv.rpc("agent.get", map[string]any{"target": "w1p"})
 		status, seq, _ := agentState(raw)
-		b.srv.headless["h1"].watch(&hlWatch{Pane: "w1p", Name: "w1", Status: status, Seq: seq}, "", nil)
+		b.srv.headless["h1"].watch(&hlWatch{Pane: "w1p", Name: "w1", Status: status, Seq: seq}, "", nil, 0)
 		b.srv.client.Refresh() // a reconnect's fresh snapshot
 		b.waitWakes(t, "[yoicks] w1: working → done")
 	})
@@ -468,7 +468,7 @@ func TestHeadlessPromptNeedsText(t *testing.T) {
 	}
 }
 
-// A wake-up the child can't take (stopped, or the bridge restarting, before the coalesced
+// A wake-up the child can't take (down, or the bridge restarting, before the coalesced
 // write) waits, saved, for its next start.
 func TestHeadlessWakeWaitsForTheChild(t *testing.T) {
 	script := func(w *fakeherdr.World, pane string) {
@@ -476,20 +476,37 @@ func TestHeadlessWakeWaitsForTheChild(t *testing.T) {
 		time.Sleep(300 * time.Millisecond)
 		w.Set(pane, "done")
 	}
-	t.Run("stopped, then started", func(t *testing.T) {
-		b := startHeadless(t, t.TempDir(), nil, nil)
+	t.Run("a child down when the timer fires gets it once restarted", func(t *testing.T) {
+		b := startHeadless(t, t.TempDir(), nil, func(h *headlessRunner) { h.restartDelays = []time.Duration{6 * time.Second} })
 		worker(t, b, "idle", script)
 		b.start(t)
 		b.waitStatus(t, "idle")
 		b.prompt(t)
 		time.Sleep(time.Second) // the worker is done: its wake-up queued, not written yet
-		b.post(t, "stop", "")
+		b.send(t, "crash")      // down for 6 s, past the 3 s timer
 		time.Sleep(wakeCoalesce + time.Second)
 		if got := b.wakes(t); len(got) != 0 {
-			t.Fatalf("written to a stopped child: %q", got)
+			t.Fatalf("written with no child: %q", got)
 		}
-		b.start(t)
 		b.waitWakes(t, "[yoicks] w1: working → done")
+	})
+	t.Run("a Stop drops the queue with the watches; the timer then writes nothing", func(t *testing.T) {
+		b := startHeadless(t, t.TempDir(), nil, nil)
+		worker(t, b, "idle", script)
+		b.start(t)
+		b.waitStatus(t, "idle")
+		b.prompt(t)
+		time.Sleep(time.Second)
+		b.post(t, "stop", "")
+		b.start(t)
+		b.waitStatus(t, "idle")
+		time.Sleep(wakeCoalesce + time.Second)
+		if got := b.wakes(t); len(got) != 0 {
+			t.Errorf("wakes %q", got)
+		}
+		if v := b.view(t); v.Headless.Status != "idle" {
+			t.Errorf("status %s: something was written", v.Headless.Status)
+		}
 	})
 	t.Run("across a bridge restart", func(t *testing.T) {
 		state := t.TempDir()
@@ -541,5 +558,51 @@ func TestHeadlessSavedWatchesOutliveARefusedStart(t *testing.T) {
 	waitUntil(t, 5*time.Second, "re-armed", func() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.watches["w1p"] != nil && h.saved == nil })
 	if got, _ := os.ReadFile(headlessPath(state, "h1", ".json")); !strings.Contains(string(got), `"pane":"w1p"`) {
 		t.Errorf("not saved once running: %s", got)
+	}
+}
+
+// Clear forgets its workers for good: the wake-up queued for the old session never reaches the
+// fresh one (its timer finds a new generation), and the cleared state is saved before the
+// start, so a refused start (and a bridge restart then) can't bring the old watches back.
+func TestHeadlessClearForgetsWorkers(t *testing.T) {
+	state := t.TempDir()
+	b := startHeadless(t, state, nil, nil)
+	worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
+		w.Set(pane, "working")
+		time.Sleep(300 * time.Millisecond)
+		w.Set(pane, "done")
+	})
+	b.start(t)
+	b.waitStatus(t, "idle")
+	b.prompt(t)
+	time.Sleep(time.Second) // queued, not written yet
+	saved, _ := os.ReadFile(headlessPath(state, "h1", ".json"))
+	if !strings.Contains(string(saved), `"wakes":["[yoicks] w1: working → done"]`) || strings.Contains(string(saved), `"pane":"w1p"`) {
+		t.Fatalf("the wake-up and the watch's end, saved together: %s", saved)
+	}
+	// a Clear whose start is refused (a settings file with an API key helper)
+	settings := filepath.Join(b.home, ".claude", "settings.json")
+	os.MkdirAll(filepath.Dir(settings), 0o700)
+	os.WriteFile(settings, []byte(`{"apiKeyHelper":"/bin/key"}`), 0o600)
+	if status, body := b.post(t, "clear", ""); status != 409 {
+		t.Fatalf("clear: %d %s", status, body)
+	}
+	saved, _ = os.ReadFile(headlessPath(state, "h1", ".json"))
+	if !strings.Contains(string(saved), `"sessionId":""`) || strings.Contains(string(saved), "wakes") || strings.Contains(string(saved), "w1p") {
+		t.Fatalf("after the refused clear: %s", saved)
+	}
+	os.Remove(settings)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	time.Sleep(wakeCoalesce + time.Second)
+	if got := b.wakes(t); len(got) != 0 {
+		t.Errorf("the old session's wake-up reached the fresh one: %q", got)
+	}
+	if v := b.view(t); v.Headless.Status != "idle" {
+		t.Errorf("status %s: something was written to the fresh child", v.Headless.Status)
+	}
+	runs, _ := b.runs(t)
+	if last := runs[len(runs)-1].argv; last[6] != "--session-id" || last[7] == runs[0].argv[7] {
+		t.Errorf("not a fresh session: %v", last)
 	}
 }

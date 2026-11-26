@@ -282,6 +282,7 @@ type headlessRunner struct {
 	saved        []hlWatch           // the watches saved by an earlier bridge, re-armed at the first start
 	wakes        []string
 	wakeTimer    *time.Timer
+	gen          int // its workers' generation: Stop and Clear begin a new one (forgetWorkers)
 }
 
 type hlChild struct {
@@ -317,7 +318,7 @@ func newHeadlessRunner(def OrchestratorDef, stateDir, rules string) *headlessRun
 		alerted: map[string]bool{}, interrupts: map[string]chan struct{}{}, asks: map[string]bool{}, watches: map[string]*hlWatch{}}
 	r.model.Status = "stopped"
 	var saved headlessState
-	if b, err := os.ReadFile(headlessPath(stateDir, def.Name, ".json")); err == nil && json.Unmarshal(b, &saved) == nil && sessionIDRe.MatchString(saved.SessionID) {
+	if b, err := os.ReadFile(headlessPath(stateDir, def.Name, ".json")); err == nil && json.Unmarshal(b, &saved) == nil && (saved.SessionID == "" || sessionIDRe.MatchString(saved.SessionID)) {
 		r.sessionID, r.wanted, r.interrupted, r.rulesHash, r.saved, r.wakes = saved.SessionID, saved.Wanted, saved.Interrupted, saved.RulesHash, saved.Watches, saved.Wakes
 	}
 	if kind, msg := r.refusedEnv(); msg != "" {
@@ -958,13 +959,20 @@ func (r *headlessRunner) Send(text string) error {
 func (r *headlessRunner) write(text string) error {
 	r.mu.Lock()
 	c, err := r.running()
-	if err == nil && r.model.Status != "working" && r.model.Status != "blocked" {
-		r.model.Status, r.lastEvent = "working", time.Now()
-	}
 	r.mu.Unlock()
 	if err != nil {
 		return err
 	}
+	return r.writeTo(c, text)
+}
+
+// writeTo writes a user message to child c (never to a later one); it works on it from then.
+func (r *headlessRunner) writeTo(c *hlChild, text string) error {
+	r.mu.Lock()
+	if r.child == c && r.model.Status != "working" && r.model.Status != "blocked" {
+		r.model.Status, r.lastEvent = "working", time.Now()
+	}
+	r.mu.Unlock()
 	if err := c.write(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}}); err != nil {
 		return &LifecycleError{Status: 502, Code: "write_failed", Message: "could not write to claude: " + err.Error()}
 	}
@@ -1053,13 +1061,9 @@ func (r *headlessRunner) Stop() error {
 		r.restartTimer = nil
 	}
 	r.wanted = false
+	r.forgetWorkers()
 	r.persist()
 	c := r.child
-	r.mu.Unlock()
-	r.unwatch(func(*hlWatch) bool { return true })
-	r.mu.Lock()
-	r.saved = nil // (its wake-ups still wait for its next start)
-	r.persist()
 	r.mu.Unlock()
 	if c != nil {
 		r.stopChild(c)
@@ -1080,21 +1084,34 @@ func (r *headlessRunner) Clear() error {
 	defer r.op.Unlock()
 	r.mu.Lock()
 	c := r.child
-	r.mu.Unlock()
-	r.unwatch(func(*hlWatch) bool { return true }) // the fresh session knows none of them
-	r.mu.Lock()
-	r.saved, r.wakes = nil, nil
+	r.forgetWorkers() // the fresh session knows none of them
 	r.mu.Unlock()
 	if c != nil {
 		r.stopChild(c)
 	}
 	r.mu.Lock()
 	r.resetLocked()
-	r.sessionID, r.interrupted = "", false
+	r.sessionID, r.interrupted = "", false // saved now: a refused start leaves a fresh session to come
 	r.alerted = map[string]bool{}
 	r.model = hlModel{Status: r.model.Status, CompletionSeq: r.model.CompletionSeq}
+	r.persist()
 	r.mu.Unlock()
 	return r.start(false)
+}
+
+// forgetWorkers ends what it follows of its workers: the watches (and the saved ones) and the
+// queued wake-ups, with a new generation that every late callback of theirs finds changed;
+// r.mu held, the caller saves.
+func (r *headlessRunner) forgetWorkers() {
+	r.gen++
+	for _, w := range r.watches {
+		w.cancel()
+	}
+	r.watches, r.saved, r.wakes = map[string]*hlWatch{}, nil, nil
+	if r.wakeTimer != nil {
+		r.wakeTimer.Stop()
+		r.wakeTimer = nil
+	}
 }
 
 // Shutdown ends the child for the bridge's exit (it resumes at the next bridge start). It
