@@ -636,6 +636,18 @@ var rpc5s = rpcWithin(5 * time.Second)
 // whose account can't be told, are left out). It touches only the herdr socket and
 // the claude transcripts, never the state dir or the bridge token.
 func (c cli) overview() int {
+	text, err := overviewText(rpc5s, ownAccount(), os.Getenv("HERDR_PANE_ID"), nowMs())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Println(text)
+	return 0
+}
+
+// overviewText is the overview of account own's agents but self (own "": none), as of now.
+// The CLI and an orchestrator's MCP tool both show it.
+func overviewText(rpc Rpc, own, self string, now int64) (string, error) {
 	var list struct {
 		Agents []OverviewAgent `json:"agents"`
 	}
@@ -646,24 +658,21 @@ func (c cli) overview() int {
 		method string
 		into   any
 	}{{"agent.list", &list}, {"session.snapshot", &snap}} {
-		raw, err := rpc5s(q.method, nil)
+		raw, err := rpc(q.method, nil)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "herdr unreachable: "+err.Error())
-			return 1
+			return "", errors.New("herdr unreachable: " + err.Error())
 		}
 		json.Unmarshal(raw, q.into)
 	}
-	own := ownAccount()
 	var agents []OverviewAgent
 	for _, a := range list.Agents {
 		if own == "" {
 			continue
 		}
-		if theirs, err := paneAccount(rpc5s, a.PaneID); err == nil && theirs == own {
+		if theirs, err := paneAccount(rpc, a.PaneID); err == nil && theirs == own {
 			agents = append(agents, a)
 		}
 	}
-	self := os.Getenv("HERDR_PANE_ID")
 	details := map[string]AgentDetail{}
 	for _, a := range orderAgents(agents, self) {
 		var d AgentDetail
@@ -680,7 +689,7 @@ func (c cli) overview() int {
 			}
 		}
 		if len(d.Items) == 0 {
-			if raw, err := rpc5s("pane.read", map[string]any{"pane_id": a.PaneID, "source": "recent", "lines": 40, "format": "text"}); err == nil {
+			if raw, err := rpc("pane.read", map[string]any{"pane_id": a.PaneID, "source": "recent", "lines": 40, "format": "text"}); err == nil {
 				var res struct {
 					Read struct {
 						Text string `json:"text"`
@@ -692,8 +701,7 @@ func (c cli) overview() int {
 		}
 		details[a.PaneID] = d
 	}
-	fmt.Println(formatOverview(agents, snap.Snapshot, details, self, nowMs()))
-	return 0
+	return formatOverview(agents, snap.Snapshot, details, self, now), nil
 }
 
 // ── orchestrator agent commands ──────────────────────────────────────────────
@@ -716,10 +724,23 @@ func (c cli) agent() int {
 		fmt.Fprintln(os.Stderr, agentUsage)
 		return 2
 	}
-	raw, err := rpc5s("agent.get", map[string]any{"target": target})
+	paneID, err := ownAgentPane(rpc5s, target, ownAccount())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %s\n", target, err)
+		fmt.Fprintln(os.Stderr, err)
 		return 1
+	}
+	// the pane id, not the name: what was checked is what herdr acts on
+	herdr := exec.Command(herdrBin(), append([]string{"agent", sub, paneID}, c.args[2:]...)...)
+	herdr.Stdin, herdr.Stdout, herdr.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return exitCode(herdr.Run())
+}
+
+// ownAgentPane is the pane of agent target (a name or a pane id) when it runs under
+// account own; refused otherwise, or when its account (or own) can't be told.
+func ownAgentPane(rpc Rpc, target, own string) (string, error) {
+	raw, err := rpc("agent.get", map[string]any{"target": target})
+	if err != nil {
+		return "", fmt.Errorf("%s: %s", target, err)
 	}
 	var got struct {
 		Agent *struct {
@@ -730,16 +751,12 @@ func (c cli) agent() int {
 	paneID, theirs := "", ""
 	if got.Agent != nil && got.Agent.PaneID != "" {
 		paneID = got.Agent.PaneID
-		theirs, _ = paneAccount(rpc5s, paneID)
+		theirs, _ = paneAccount(rpc, paneID)
 	}
-	if own := ownAccount(); own == "" || theirs != own {
-		fmt.Fprintf(os.Stderr, "refused: %s is not an agent of this Claude account (or its account can't be told)\n", target)
-		return 1
+	if own == "" || theirs != own {
+		return "", fmt.Errorf("refused: %s is not an agent of this Claude account (or its account can't be told)", target)
 	}
-	// the pane id, not the name: what was checked is what herdr acts on
-	herdr := exec.Command(herdrBin(), append([]string{"agent", sub, paneID}, c.args[2:]...)...)
-	herdr.Stdin, herdr.Stdout, herdr.Stderr = os.Stdin, os.Stdout, os.Stderr
-	return exitCode(herdr.Run())
+	return paneID, nil
 }
 
 // exitCode is a finished command's exit status as spawnSync reports it: 1 when it
@@ -776,6 +793,22 @@ func (c cli) agentStart(args []string) int {
 	if name == "" || strings.HasPrefix(name, "-") || opt["cwd"] == "" || opt["base"] != "" && opt["worktree"] == "" {
 		return usage()
 	}
+	// agent.start waits for the agent to come up, and worktree.create runs git: allow time
+	profiles := func() map[string]LaunchProfile { return parseLaunchProfiles(readConfig()["launch_profiles"]) }
+	started, err := startOwnAgent(rpcWithin(60*time.Second), profiles, ownAccount(), name, opt)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Println(started)
+	return 0
+}
+
+// startOwnAgent starts agent name from launch profile opt["profile"] (default claude) in
+// dir opt["cwd"], or in a new worktree opt["worktree"] (from opt["base"] when set) of the
+// repo there, when that place is under account own (see agentStart). It says where it started.
+// profiles is read only once the checks pass (the CLI reads config.json for it).
+func startOwnAgent(rpc Rpc, profiles func() map[string]LaunchProfile, own, name string, opt map[string]string) (string, error) {
 	dir, _ := filepath.Abs(opt["cwd"])
 	profile, ok := opt["profile"]
 	if !ok {
@@ -792,8 +825,7 @@ func (c cli) agentStart(args []string) int {
 		}
 		placed, err := placeWorktreeNextToRepo(spec, nil, nil)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 1
+			return "", err
 		}
 		wt := worktreeInput(placed)
 		in.Worktree = &wt
@@ -803,7 +835,6 @@ func (c cli) agentStart(args []string) int {
 	// A new tab/workspace starts with the caller's account (CLAUDE_CONFIG_DIR), so it
 	// needs no direnv; it is refused only where direnv says another account applies. A
 	// worktree gets no env from herdr, so its account must come from the dir itself.
-	own := ownAccount()
 	if in.Worktree == nil {
 		in.Env = accountEnv(own, "")
 	}
@@ -814,19 +845,15 @@ func (c cli) agentStart(args []string) int {
 			if in.Worktree != nil {
 				why = ", or can't be read"
 			}
-			fmt.Fprintf(os.Stderr, "refused: %s is not under this Claude account (its direnv CLAUDE_CONFIG_DIR differs%s)\n", p, why)
-			return 1
+			return "", fmt.Errorf("refused: %s is not under this Claude account (its direnv CLAUDE_CONFIG_DIR differs%s)", p, why)
 		}
 	}
 
-	// agent.start waits for the agent to come up, and worktree.create runs git: allow time
-	rpc := rpcWithin(60 * time.Second)
 	if in.Worktree == nil {
 		// the workspace already at this dir (a worktree checkout, or any pane launched there)
 		raw, err := rpc("session.snapshot", nil)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "start failed: "+err.Error())
-			return 1
+			return "", errors.New("start failed: " + err.Error())
 		}
 		var snap struct {
 			Snapshot RawSnapshot `json:"snapshot"`
@@ -850,7 +877,7 @@ func (c cli) agentStart(args []string) int {
 			in.NewWorkspace = true
 		}
 	}
-	out, err := startAgent(rpc, parseLaunchProfiles(readConfig()["launch_profiles"]), in, StartAgentOptions{
+	out, err := startAgent(rpc, profiles(), in, StartAgentOptions{
 		Verify: func(paneID string) error {
 			if err := waitForDetectedAgent(rpc, paneID); err != nil {
 				return err
@@ -866,11 +893,9 @@ func (c cli) agentStart(args []string) int {
 		},
 	})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "start failed: "+err.Error())
-		return 1
+		return "", errors.New("start failed: " + err.Error())
 	}
-	fmt.Printf("started %s (pane %s) in %s\n", out.Name, out.PaneID, where)
-	return 0
+	return fmt.Sprintf("started %s (pane %s) in %s", out.Name, out.PaneID, where), nil
 }
 
 // worktree removes a finished worker's worktree: the checkout (herdr's
@@ -883,15 +908,25 @@ func (c cli) worktree() int {
 		fmt.Fprintln(os.Stderr, "usage: yoicks worktree remove <checkout path>")
 		return 2
 	}
-	dir, _ := filepath.Abs(c.arg(1))
-	refuse := func(why string) int {
-		fmt.Fprintf(os.Stderr, "refused: %s; %s was left as it is\n", why, dir)
-		return 1
-	}
-	raw, err := rpc5s("session.snapshot", nil)
+	removed, err := removeOwnWorktree(rpc5s, rpcWithin(60*time.Second), ownAccount(), c.arg(1))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
+	}
+	fmt.Println(removed)
+	return 0
+}
+
+// removeOwnWorktree removes checkout path (see worktree) when it is under account own, and
+// says what it removed. rpc reads herdr's state; slow (allowing git time) removes the worktree.
+func removeOwnWorktree(rpc, slow Rpc, own, path string) (string, error) {
+	dir, _ := filepath.Abs(path)
+	refuse := func(why string) (string, error) {
+		return "", fmt.Errorf("refused: %s; %s was left as it is", why, dir)
+	}
+	raw, err := rpc("session.snapshot", nil)
+	if err != nil {
+		return "", err
 	}
 	var snap struct {
 		Snapshot RawSnapshot `json:"snapshot"`
@@ -907,7 +942,7 @@ func (c cli) worktree() int {
 	if ws == nil || ws.Worktree.RepoRoot == "" {
 		return refuse("not a linked worktree open in herdr")
 	}
-	if own := ownAccount(); own == "" || dirAccount(dir) != own {
+	if own == "" || dirAccount(dir) != own {
 		return refuse("it is not under this Claude account")
 	}
 	if checkoutInUse(snap.Snapshot.Panes, ws.WorkspaceID, dir) {
@@ -943,7 +978,7 @@ func (c cli) worktree() int {
 		return refuse(branch + " has commits not merged into " + upstream + " (nor the head of a merged PR)")
 	}
 
-	if _, err := cliRPC("worktree.remove", map[string]any{"workspace_id": ws.WorkspaceID}, 60*time.Second); err != nil {
+	if _, err := slow("worktree.remove", map[string]any{"workspace_id": ws.WorkspaceID}); err != nil {
 		if herdrCode(err) == "dirty_worktree_requires_force" {
 			return refuse("it has uncommitted or untracked files")
 		}
@@ -953,12 +988,10 @@ func (c cli) worktree() int {
 	del := exec.Command("git", "-C", ws.Worktree.RepoRoot, "branch", "-D", branch)
 	var stderr bytes.Buffer
 	del.Stderr = &stderr
-	if del.Run() == nil {
-		fmt.Printf("removed %s and branch %s\n", dir, branch)
-	} else {
-		fmt.Printf("removed %s (branch %s kept: %s)\n", dir, branch, jsTrim(stderr.String()))
+	if del.Run() != nil {
+		return fmt.Sprintf("removed %s (branch %s kept: %s)", dir, branch, jsTrim(stderr.String())), nil
 	}
-	return 0
+	return fmt.Sprintf("removed %s and branch %s", dir, branch), nil
 }
 
 // orchestrator starts a configured orchestrator (config.json `orchestrators`) the way

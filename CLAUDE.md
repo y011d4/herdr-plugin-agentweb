@@ -50,6 +50,9 @@ All in `internal/bridge/` (one package):
   caller's = its nearest `claude` ancestor's; a dir's = `direnv exec` with our own account/direnv
   vars stripped; unknown = refused). get/read/prompt/wait shell out to the herdr CLI on the resolved
   pane id after the check. Talks to the herdr socket + transcripts directly, never the token.
+  The commands' bodies take the account (and the rpc) as arguments — `overviewText`,
+  `ownAgentPane`, `startOwnAgent`, `removeOwnWorktree` — so a caller inside the bridge can use them;
+  the CLI passes `ownAccount()` and prints.
   herdr's `agent.start` RPC answers before the agent's process exists (the shell is still in the
   foreground), so `agent start` waits for `agent.get` to report the detected agent before
   checking the started agent's account.
