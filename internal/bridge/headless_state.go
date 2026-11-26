@@ -52,6 +52,7 @@ type hlModel struct {
 	unknown       map[string]bool   // event kinds already warned about this session
 	yoicksUses    map[string]string // the yoicks tool_use ids awaiting their result → the tool
 	check         *ClaudeCheck      // the last claude check (the version warning tells it)
+	version       string            // the Claude Code version it last reported (the version warning's)
 }
 
 type hlWarning struct{ Kind, Message string }
@@ -222,6 +223,7 @@ func (m *hlModel) checkInit(ev map[string]any) (st hlStep) {
 		tools = append(tools, s)
 	}
 	version, _ := ev["claude_code_version"].(string)
+	m.version = version
 	want := m.expectTools
 	if want == nil {
 		want = []string{"AskUserQuestion"}
