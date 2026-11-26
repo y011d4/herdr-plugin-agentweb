@@ -12,6 +12,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 )
 
 // verifiedClaudeVersion is the Claude Code version headless mode was checked against. Another
@@ -34,6 +35,7 @@ var warningActions = map[string][]string{
 	"silent": {"interrupt", "clear"}, "permission_route": {"interrupt"}, "stream_broken": {"clear", "tui"},
 	"restart_limit": {"clear", "tui"}, "panic": {"clear", "tui"}, "init": {"tui"}, "billing": {"tui"}, "env": {"tui"},
 	"auth": {"tui"}, "version": {"tui"}, "start": {"tui"}, "question_route": {"interrupt"}, "rules": {"clear"},
+	"mcp_call": {"clear"}, "canary": {"tui"},
 }
 
 // hlModel is what a headless child's stream has said so far.
@@ -41,13 +43,16 @@ type hlModel struct {
 	Status        string
 	CompletionSeq int64
 	Usage         *HeadlessUsage
-	expectTools   []string        // the exact tools its init must report (nil: AskUserQuestion)
-	expectMCP     bool            // and the yoicks MCP server connected
-	inited        bool            // this child's first init was checked
-	model         string          // the model of the last assistant message
-	ctxTokens     float64         // its context: input + cache tokens
-	unreadableRun int             // lines in a row that couldn't be read
-	unknown       map[string]bool // event kinds already warned about this session
+	expectTools   []string          // the exact tools its init must report (nil: AskUserQuestion)
+	expectMCP     bool              // and the yoicks MCP server connected
+	inited        bool              // this child's first init was checked
+	model         string            // the model of the last assistant message
+	ctxTokens     float64           // its context: input + cache tokens
+	unreadableRun int               // lines in a row that couldn't be read
+	unknown       map[string]bool   // event kinds already warned about this session
+	yoicksUses    map[string]string // the yoicks tool_use ids awaiting their result → the tool
+	check         *ClaudeCheck      // the last claude check (the version warning tells it)
+	version       string            // the Claude Code version it last reported (the version warning's)
 }
 
 type hlWarning struct{ Kind, Message string }
@@ -62,6 +67,15 @@ type hlStep struct {
 	Log      string // a line for bridge.log (keys and kinds only, never content)
 	Ask      string // the tool_use id of an AskUserQuestion it asked
 	CanUse   *hlCanUse
+	Results  []hlToolResult // the yoicks tools' results it carries
+}
+
+// hlToolResult is a yoicks tool's result in the stream: its tool_use id, the tool, whether it
+// is an error, and then the first line of its text.
+type hlToolResult struct {
+	ID, Tool string
+	IsError  bool
+	Error    string
 }
 
 // hlCanUse is a permission request over stdio (can_use_tool), which the supervisor answers.
@@ -117,9 +131,37 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 		}
 		content, _ := msg["content"].([]any)
 		for _, b := range content {
-			if b, _ := b.(map[string]any); b["type"] == "tool_use" && b["name"] == "AskUserQuestion" {
-				st.Ask, _ = b["id"].(string)
+			b, _ := b.(map[string]any)
+			name, _ := b["name"].(string)
+			id, _ := b["id"].(string)
+			switch {
+			case b["type"] != "tool_use":
+			case name == "AskUserQuestion":
+				st.Ask = id
+			case strings.HasPrefix(name, "mcp__yoicks__") && id != "":
+				if m.yoicksUses == nil {
+					m.yoicksUses = map[string]string{}
+				}
+				m.yoicksUses[id] = strings.TrimPrefix(name, "mcp__yoicks__")
 			}
+		}
+	case "user":
+		content, _ := ev["message"].(map[string]any)["content"].([]any)
+		for _, b := range content {
+			b, _ := b.(map[string]any)
+			id, _ := b["tool_use_id"].(string)
+			tool, ours := m.yoicksUses[id]
+			if b["type"] != "tool_result" || !ours {
+				continue
+			}
+			delete(m.yoicksUses, id)
+			res := hlToolResult{ID: id, Tool: tool, IsError: b["is_error"] == true}
+			if res.IsError {
+				text := strings.NewReplacer("<tool_use_error>", "", "</tool_use_error>", "").Replace(toolResultText(b["content"]))
+				first, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
+				res.Error, _ = truncateUnits(firstNonEmpty(strings.TrimSpace(first), "no error text"), 200)
+			}
+			st.Results = append(st.Results, res)
 		}
 	case "result":
 		if reason, _ := ev["terminal_reason"].(string); strings.HasPrefix(reason, "aborted") {
@@ -181,6 +223,7 @@ func (m *hlModel) checkInit(ev map[string]any) (st hlStep) {
 		tools = append(tools, s)
 	}
 	version, _ := ev["claude_code_version"].(string)
+	m.version = version
 	want := m.expectTools
 	if want == nil {
 		want = []string{"AskUserQuestion"}
@@ -202,7 +245,7 @@ func (m *hlModel) checkInit(ev map[string]any) (st hlStep) {
 		st.Fatal = "init: the yoicks MCP server isn't connected; stopped"
 	}
 	if version != verifiedClaudeVersion {
-		st.Warnings = []hlWarning{{"version", "Claude Code " + version + " is not verified (verified: " + verifiedClaudeVersion + "); it keeps running"}}
+		st.Warnings = []hlWarning{{"version", versionWarning(version, m.check)}}
 	}
 	return st
 }
@@ -266,4 +309,23 @@ func num(v any) float64 { f, _ := v.(float64); return f }
 func controlResponse(id any, response map[string]any) map[string]any {
 	response["request_id"] = id
 	return map[string]any{"type": "control_response", "response": response}
+}
+
+// versionWarning is the warning for a Claude Code version headless wasn't verified on, with
+// the last check's result (check nil: none has run).
+func versionWarning(version string, check *ClaudeCheck) string {
+	last := "no check has run (scripts/claude-canary.sh)"
+	if check != nil {
+		last = "the last check " + check.describe()
+	}
+	return "Claude Code " + version + " is not verified (verified: " + verifiedClaudeVersion + "); it keeps running; " + last
+}
+
+// describe is how the check went, when, and on which version.
+func (c *ClaudeCheck) describe() string {
+	when := time.UnixMilli(c.At).Format("2006-01-02 15:04")
+	if c.OK {
+		return "passed on " + when + " (" + c.Version + ")"
+	}
+	return "failed on " + when + " (" + c.Version + ": " + strings.Join(c.Failed, ", ") + ")"
 }

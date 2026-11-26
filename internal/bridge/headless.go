@@ -259,6 +259,7 @@ type headlessRunner struct {
 	silence       time.Duration
 	lineHook      func([]byte) // tests: runs on each stdout line, in the reader
 	startedHook   func()       // tests: runs once the child has started, before spawn goes on
+	extraArgs     []string     // tests: more argv (the claudelive test's --model haiku); never set in production
 
 	op sync.Mutex // start, stop, clear: one at a time
 
@@ -279,6 +280,7 @@ type headlessRunner struct {
 	lastEvent    time.Time
 	pending      *hlPending          // the question waiting for the user
 	asks         map[string]bool     // AskUserQuestion tool_use ids: did each reach approve?
+	served       map[string]bool     // the tool_use ids of the tool calls that reached the bridge, until their result
 	watches      map[string]*hlWatch // by pane
 	saved        []hlWatch           // the watches saved by an earlier bridge, re-armed at the first start
 	wakes        []string
@@ -320,7 +322,8 @@ func newHeadlessRunner(def OrchestratorDef, stateDir, rules string) *headlessRun
 		tools:         os.Getenv("YOICKS_HEADLESS_NO_TOOLS") != "1",
 		restartDelays: []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second},
 		crashWindow:   10 * time.Minute, interruptWait: 2 * time.Second, silence: 3 * time.Minute,
-		alerted: map[string]bool{}, interrupts: map[string]chan struct{}{}, asks: map[string]bool{}, watches: map[string]*hlWatch{}}
+		alerted: map[string]bool{}, interrupts: map[string]chan struct{}{}, asks: map[string]bool{}, served: map[string]bool{},
+		watches: map[string]*hlWatch{}}
 	r.model.Status = "stopped"
 	var saved headlessState
 	if b, err := os.ReadFile(headlessPath(stateDir, def.Name, ".json")); err == nil && json.Unmarshal(b, &saved) == nil && (saved.SessionID == "" || sessionIDRe.MatchString(saved.SessionID)) {
@@ -425,6 +428,41 @@ func (r *headlessRunner) warn(kind, message string) func() {
 	return func() { r.onAlert(kind, message) }
 }
 
+// setClaudeCheck takes the last claude check (the bridge's minute tick): see syncCheckLocked.
+func (r *headlessRunner) setClaudeCheck(c *ClaudeCheck) {
+	r.mu.Lock()
+	r.model.check = c
+	changed := r.syncCheckLocked()
+	r.mu.Unlock()
+	if changed {
+		r.onChange()
+	}
+}
+
+// syncCheckLocked keeps the warnings in line with the last claude check: a canary warning while
+// it is a failed one (alerted by the bridge, once for all orchestrators), and a version warning
+// telling it; r.mu held. Whether they changed.
+func (r *headlessRunner) syncCheckLocked() bool {
+	c, changed := r.model.check, false
+	i := slices.IndexFunc(r.warnings, func(w HeadlessWarning) bool { return w.Kind == "canary" })
+	if c != nil && !c.OK {
+		msg := "the last Claude Code check " + c.describe() + ": headless may not work; back to the TUI until a check passes"
+		if changed = i < 0 || r.warnings[i].Message != msg; changed {
+			r.warn("canary", msg)
+		}
+	} else if changed = i >= 0; changed {
+		r.warnings = slices.Delete(r.warnings, i, i+1)
+	}
+	if i := slices.IndexFunc(r.warnings, func(w HeadlessWarning) bool { return w.Kind == "version" }); i >= 0 {
+		if r.model.version == verifiedClaudeVersion { // the verified one now: the warning is stale
+			r.warnings, changed = slices.Delete(r.warnings, i, i+1), true
+		} else if msg := versionWarning(r.model.version, c); r.warnings[i].Message != msg {
+			r.warnings[i].Message, changed = msg, true
+		}
+	}
+	return changed
+}
+
 // fail makes it an error with a warning, and returns err.
 func (r *headlessRunner) fail(kind string, err *LifecycleError) error {
 	r.mu.Lock()
@@ -484,6 +522,7 @@ func (r *headlessRunner) resetLocked() {
 		r.restartTimer = nil
 	}
 	r.warnings, r.crashes = nil, nil
+	r.syncCheckLocked() // the last claude check's warning stands across a start
 	if r.model.Status == "error" {
 		r.model.Status = "stopped"
 	}
@@ -516,12 +555,17 @@ func (r *headlessRunner) start(resume bool) error {
 	if err != nil {
 		return r.fail("start", &LifecycleError{Status: 500, Code: "claude_failed", Message: "claude --version failed: " + err.Error()})
 	}
-	if version, _, _ := strings.Cut(strings.TrimSpace(string(out)), " "); version != verifiedClaudeVersion {
-		r.mu.Lock()
-		alert := r.warn("version", "Claude Code "+version+" is not verified (verified: "+verifiedClaudeVersion+"); it keeps running")
-		r.mu.Unlock()
-		alert()
+	version, _, _ := strings.Cut(strings.TrimSpace(string(out)), " ")
+	r.mu.Lock()
+	r.model.version = version
+	versionAlert := func() {}
+	if version != verifiedClaudeVersion {
+		versionAlert = r.warn("version", versionWarning(version, r.model.check))
+	} else { // back on the verified version (an update between restarts): no warning left over
+		r.warnings = slices.DeleteFunc(r.warnings, func(w HeadlessWarning) bool { return w.Kind == "version" })
 	}
+	r.mu.Unlock()
+	versionAlert()
 	// its output holds the account's email: only these two fields are ever read or logged
 	var auth struct {
 		AuthMethod       string `json:"authMethod"`
@@ -566,7 +610,7 @@ func (r *headlessRunner) start(resume bool) error {
 	r.persist()
 	r.mu.Unlock()
 	alert()
-	if err := r.spawn(headlessArgv(r.session(), resume, mcpConfig, r.tools), env); err != nil {
+	if err := r.spawn(append(headlessArgv(r.session(), resume, mcpConfig, r.tools), r.extraArgs...), env); err != nil {
 		return r.fail("start", &LifecycleError{Status: 500, Code: "claude_failed", Message: "could not start claude: " + err.Error()})
 	}
 	r.rearm()
@@ -682,7 +726,7 @@ func (r *headlessRunner) spawn(argv, env []string) error {
 		// find another child (the init check would be skipped, a dead child left as running)
 		r.mu.Lock()
 		r.child, r.lastEvent, c.epoch = c, time.Now(), r.epoch
-		r.model.inited, r.model.unreadableRun = false, 0
+		r.model.inited, r.model.unreadableRun, r.model.yoicksUses, r.served = false, 0, nil, map[string]bool{}
 		r.model.expectTools, r.model.expectMCP = headlessTools(r.tools), true
 		r.model.Status = "idle"
 		r.mu.Unlock()
@@ -771,6 +815,14 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 	if ch := r.interrupts[step.Acked]; ch != nil {
 		close(ch)
 		delete(r.interrupts, step.Acked)
+	}
+	for _, res := range step.Results {
+		// an error for a call the bridge never served failed on the way (the MCP session, its
+		// bearer, the transport), whatever Claude Code's words for it
+		if res.IsError && !r.served[res.ID] {
+			alerts = append(alerts, r.warn("mcp_call", res.Tool+" failed before reaching the bridge ("+res.Error+"); Clear to reconnect"))
+		}
+		delete(r.served, res.ID)
 	}
 	if step.Fatal != "" {
 		c.expected, c.failed = true, true
@@ -1105,7 +1157,7 @@ func (r *headlessRunner) Clear() error {
 	r.resetLocked()
 	r.sessionID, r.interrupted = "", false // saved now: a refused start leaves a fresh session to come
 	r.alerted = map[string]bool{}
-	r.model = hlModel{Status: r.model.Status, CompletionSeq: r.model.CompletionSeq}
+	r.model = hlModel{Status: r.model.Status, CompletionSeq: r.model.CompletionSeq, check: r.model.check}
 	r.persist()
 	r.mu.Unlock()
 	return r.start(false)

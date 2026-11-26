@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/y011d4/herdr-yoicks/tools/fakeherdr"
 )
 
 func TestHeadlessArgv(t *testing.T) {
@@ -862,4 +863,100 @@ func TestHeadlessStopWaitsForAWriteInProgress(t *testing.T) {
 	go func() { time.Sleep(50 * time.Millisecond); <-c.wlock }()
 	b.srv.shutdownHeadless()
 	b.waitStdin(t, `"request_id":"yoicks-stop"`)
+}
+
+// The last claude check (<state>/canary.json) reaches the state and the headless ones: a
+// failed one is a canary warning, and the version warning tells it; a failed one alerts once
+// (the PC's notification here), a passing one ends the warning.
+func TestHeadlessClaudeCheck(t *testing.T) {
+	log, home := fakeClaudeEnv(t)
+	state := t.TempDir()
+	write := func(at time.Time, ok bool, failed string) {
+		os.WriteFile(filepath.Join(state, "canary.json"), fmt.Appendf(nil, `{"at":%d,"version":"2.1.330","ok":%v,"failed":[%s]}`, at.UnixMilli(), ok, failed), 0o600)
+	}
+	first := time.Date(2026, 11, 26, 9, 0, 0, 0, time.Local)
+	write(first, false, `"resume"`)
+	var shown sync.Mutex
+	var alerts []string
+	def := OrchestratorDef{Name: "h1", Dir: filepath.Join(home, "orchestrators", "h1"), Managed: true, Mode: "headless",
+		Env: map[string]string{"FAKECLAUDE_LOG": log, "FAKECLAUDE_VERSION": "2.1.330"}}
+	tb := startBridge(t, Config{StateDir: state, Orchestrators: []OrchestratorDef{def}}, func(m string, p json.RawMessage) (fakeherdr.Reply, bool) {
+		if m == "notification.show" && strings.Contains(string(p), "claude check failed") {
+			shown.Lock()
+			alerts = append(alerts, string(p))
+			shown.Unlock()
+		}
+		return fakeherdr.Reply{}, false
+	}, nil)
+	t.Cleanup(tb.srv.shutdownHeadless)
+	b := &hlBridge{tb, log, home, "h1"}
+	nAlerts := func() int { shown.Lock(); defer shown.Unlock(); return len(alerts) }
+	warning := func(v OrchestratorView, kind string) string {
+		for _, w := range v.Headless.Warnings {
+			if w.Kind == kind {
+				return w.Message + " " + strings.Join(w.Actions, ",")
+			}
+		}
+		return ""
+	}
+	failedFirst := "failed on " + first.Format("2006-01-02 15:04") + " (2.1.330: resume)"
+
+	_, body, _ := b.do(t, "GET", "/api/state", b.token, nil)
+	if !strings.Contains(body, fmt.Sprintf(`"claudeCheck":{"at":%d,"version":"2.1.330","ok":false,"failed":["resume"]}`, first.UnixMilli())) {
+		t.Fatalf("state: %s", body)
+	}
+	if w := warning(b.view(t), "canary"); !strings.Contains(w, failedFirst) || !strings.HasSuffix(w, " tui") {
+		t.Errorf("canary warning %q", w)
+	}
+	waitUntil(t, 5*time.Second, "the alert", func() bool { return nAlerts() == 1 })
+	// a start and a Clear keep the check: its warnings stand at once, no tick needed
+	for _, action := range []string{"start", "clear"} {
+		if code, body := b.post(t, action, ""); code != 200 {
+			t.Fatalf("%s: %d %s", action, code, body)
+		}
+		v := b.waitStatus(t, "idle")
+		if w := warning(v, "canary"); !strings.Contains(w, failedFirst) {
+			t.Errorf("after %s: canary %q", action, w)
+		}
+		if w := warning(v, "version"); !strings.Contains(w, "Claude Code 2.1.330 is not verified") || !strings.Contains(w, "the last check "+failedFirst) {
+			t.Errorf("after %s: version %q", action, w)
+		}
+	}
+	// a passing check ends the canary warning, and the version warning says so
+	write(first.Add(time.Hour), true, "")
+	b.srv.checkClaude()
+	if v := b.view(t); warning(v, "canary") != "" || !strings.Contains(warning(v, "version"), "the last check passed on "+first.Add(time.Hour).Format("2006-01-02 15:04")) {
+		t.Errorf("after a passing check: %+v", v.Headless.Warnings)
+	}
+	write(first.Add(2*time.Hour), false, `"interrupt"`)
+	b.srv.checkClaude()
+	waitUntil(t, 5*time.Second, "the second alert", func() bool { return nAlerts() == 2 })
+	time.Sleep(200 * time.Millisecond)
+	if n := nAlerts(); n != 2 {
+		t.Errorf("%d alerts: %q", n, alerts)
+	}
+	// Claude Code back on the verified version, updated before an automatic restart: the version warning goes
+	h := b.srv.headless["h1"]
+	h.mu.Lock()
+	h.def.Env["FAKECLAUDE_VERSION"] = verifiedClaudeVersion
+	h.mu.Unlock()
+	b.restarted(t) // a crash, then the automatic restart (not a Clear, which drops every warning)
+	if w := warning(b.view(t), "version"); w != "" {
+		t.Errorf("the verified version still warned: %q", w)
+	}
+	b.srv.checkClaude()
+	if w := warning(b.view(t), "version"); w != "" {
+		t.Errorf("a check brought the version warning back: %q", w)
+	}
+	// a file that isn't a whole check is none; and without a headless entry it isn't read at all
+	os.WriteFile(filepath.Join(state, "canary.json"), []byte(`{"at":1,"ok":fal`), 0o600)
+	b.srv.checkClaude()
+	if _, body, _ := b.do(t, "GET", "/api/state", b.token, nil); !strings.Contains(body, `"claudeCheck":null`) {
+		t.Errorf("half a file: %s", body)
+	}
+	write(first, false, `"resume"`)
+	plain := startBridge(t, Config{StateDir: state}, nil, nil)
+	if _, body, _ := plain.do(t, "GET", "/api/state", plain.token, nil); !strings.Contains(body, `"claudeCheck":null`) {
+		t.Errorf("read without a headless entry: %s", body)
+	}
 }
