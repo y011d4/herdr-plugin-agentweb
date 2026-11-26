@@ -140,13 +140,15 @@ func TestHeadlessAskAndAnswer(t *testing.T) {
 		t.Errorf("answered twice: %d", status)
 	}
 
-	// a message while a question waits refuses it, with the message
+	// a message while a question waits is its answer, in the user's own words (no refusal: the
+	// model would read that as an error)
 	b.send(t, "ask")
 	b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
-	b.send(t, "no fruit, thanks")
+	b.send(t, "banana, please")
 	b.waitFor(t, "the turn's end", func(v OrchestratorView) bool { return v.Headless.Status == "done" && v.Headless.Pending == nil })
 	_, tr, _ = b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
-	if !strings.Contains(tr, `\"behavior\":\"deny\",\"message\":\"no fruit, thanks\"`) {
+	if !strings.Contains(tr, `\"behavior\":\"allow\"`) || !strings.Contains(tr, `\"answers\":{\"Which fruit?\":\"banana, please\"}`) ||
+		strings.Count(tr, `\"behavior\":\"deny\"`) != 0 {
 		t.Errorf("the tool_result: %s", tr)
 	}
 
@@ -334,21 +336,29 @@ func TestHeadlessWakeUps(t *testing.T) {
 		b.prompt(t)
 		b.waitWakes(t, "[yoicks] w1: working → done", "[yoicks] w1: working → blocked", "[yoicks] w1: working → done")
 	})
-	t.Run("blocked at its start: the task isn't sent, a wake-up once it is ready", func(t *testing.T) {
+	for _, ready := range []bool{false, true} {
+		// herdr answers agent_not_ready while a startup question holds it, agent_blocked at a dialog
+		// (the folder-trust one of a worker in a new dir, as the pilot met)
+		t.Run(fmt.Sprintf("blocked at its start (interactive %v): the task isn't sent, a wake-up once it is ready", ready), func(t *testing.T) {
+			blockedAtStart(t, ready)
+		})
+	}
+	t.Run("blocked in a task of its own: once answered it is followed, its next question wakes too", func(t *testing.T) {
 		b := startHeadless(t, t.TempDir(), nil, nil)
 		w := worker(t, b, "blocked", nil)
-		w.SetReady("w1p", false)
 		b.start(t)
 		b.waitStatus(t, "idle")
 		b.send(t, `call agent_prompt {"name":"w1","text":"do the thing"}`)
 		b.waitStatus(t, "done")
-		_, tr, _ := b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
-		if !strings.Contains(tr, "task not sent") {
-			t.Fatalf("the tool's result: %s", tr)
-		}
-		w.SetReady("w1p", true)
-		w.Set("w1p", "idle") // the user answered the folder-trust question
-		b.waitWakes(t, "[yoicks] w1: ready, task not sent")
+		w.Set("w1p", "working") // the user answered its permission question: it works on
+		time.Sleep(300 * time.Millisecond)
+		w.Set("w1p", "blocked") // and asks another
+		b.waitWakes(t, "[yoicks] w1: working → blocked")
+		w.Set("w1p", "working")
+		time.Sleep(300 * time.Millisecond)
+		w.Set("w1p", "done")
+		// its own task's end: the orchestrator's task still waits to be sent
+		b.waitWakes(t, "[yoicks] w1: working → blocked", "[yoicks] w1: working → done, ready, task not sent")
 		if n := len(w.Prompts()); n != 0 {
 			t.Errorf("%d prompts", n)
 		}
@@ -909,5 +919,27 @@ func TestHeadlessMCPCallFailure(t *testing.T) {
 			!slices.Equal(w.Actions, []string{"clear"})) {
 			t.Errorf("%+v", w)
 		}
+	}
+}
+
+// blockedAtStart: a worker blocked at its start takes no task; the orchestrator is told so and woken
+// once the user has answered in its pane.
+func blockedAtStart(t *testing.T, ready bool) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	w := worker(t, b, "blocked", nil)
+	w.SetReady("w1p", ready)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	b.send(t, `call agent_prompt {"name":"w1","text":"do the thing"}`)
+	b.waitStatus(t, "done")
+	_, tr, _ := b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
+	if !strings.Contains(tr, "task not sent") {
+		t.Fatalf("the tool's result: %s", tr)
+	}
+	w.SetReady("w1p", true)
+	w.Set("w1p", "idle") // the user answered the folder-trust question
+	b.waitWakes(t, "[yoicks] w1: ready, task not sent")
+	if n := len(w.Prompts()); n != 0 {
+		t.Errorf("%d prompts", n)
 	}
 }

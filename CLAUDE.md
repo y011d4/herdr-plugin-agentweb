@@ -155,7 +155,7 @@ All in `internal/bridge/` (one package):
   are the CLI's orchestrator commands as functions (`overview`, `agent_get`, `agent_read`, `agent_prompt`, `agent_start`,
   `worktree_remove`), confined to the account its child runs under; `approve` is the child's
   `--permission-prompt-tool`: AskUserQuestion becomes state `headless.pending` (answered by
-  `POST …/answer`; a `/send` meanwhile denies it with its text), held open with progress, anything
+  `POST …/answer`; a `/send` meanwhile answers it with its text, a free-text answer: a refusal reaches the model as an error), held open with progress, anything
   else is denied unasked. `agent_prompt` watches the worker (one goroutine, herdr's waits on a
   closable no-deadline connection, `HerdrClient.Wait`) and wakes the orchestrator with `[yoicks]
   <worker>: <from> → <to>` (names and status only, 3 s coalesced); the watches are saved and
@@ -286,7 +286,10 @@ Verified live against herdr 0.7.3 / protocol 16:
   matches, exactly: `done` doesn't match `until: [idle]`). Neither has a deadline of its own, so
   they go on a no-deadline connection (`HerdrClient.Wait`), and `until` always lists both idle
   and done. `interactive_ready` is often null on a running agent: a prompt is tried, and only an
-  `agent_not_ready` answer is waited out.
+  `agent_not_ready` answer is waited out. An agent already at a dialog (a permission, the folder-trust
+  question of a new dir) refuses a prompt with `agent_blocked` before any input is sent (herdr 0.9.5's
+  `agent prompt --help`, met in the pilot): the headless orchestrator's tools then say "task not sent"
+  and wake it once the agent is idle, as for `agent_not_ready` at startup.
 - herdr emits focus events ~10/s during desktop activity. Never let them
   trigger WS pushes; apply them to the model silently.
 - **`done` vs `idle` is the server's per-pane `seen` flag, and only focus sets it**

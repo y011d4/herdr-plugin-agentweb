@@ -449,9 +449,10 @@ type hlWatch struct {
 	Pane    string `json:"pane"`
 	Name    string `json:"name"`
 	Cwd     string `json:"cwd"`
-	Status  string `json:"status"`  // the last one told (or seen at the send)
-	Seq     int64  `json:"seq"`     // its state_change_seq then
-	Startup bool   `json:"startup"` // blocked at its start, its task not sent: wake when it's ready
+	Status  string `json:"status"`           // the last one told (or seen at the send)
+	Seq     int64  `json:"seq"`              // its state_change_seq then
+	Startup bool   `json:"startup"`          // blocked at its start, its task not sent: wake when it's ready
+	Unsent  bool   `json:"unsent,omitempty"` // followed on after that question with the task still unsent: its end says so
 	cancel  context.CancelFunc
 	seen    bool // its pane was in a state (a new worker's may not be yet)
 }
@@ -465,8 +466,10 @@ func agentState(raw json.RawMessage) (status string, seq int64, cwd string) {
 }
 
 // prompt sends a worker text and watches it: delivered (the result says so), not
-// delivered (herdr's answer), or not sent because it waits on a startup question. epoch is
-// the calling child's: that child replaced since, no watch is made.
+// delivered (herdr's answer), or not sent because it waits on a question in its pane (herdr
+// refuses a prompt then: agent_not_ready while a startup question holds it, agent_blocked at a
+// dialog, the folder-trust one included), with a wake-up once it is ready. epoch is the
+// calling child's: that child replaced since, no watch is made.
 func (r *headlessRunner) prompt(pane, name, text string, epoch int) *mcp.CallToolResult {
 	if strings.TrimSpace(text) == "" { // nothing to send: no watch to wait on
 		return textResult("text must be non-empty", true)
@@ -488,13 +491,13 @@ func (r *headlessRunner) prompt(pane, name, text string, epoch int) *mcp.CallToo
 			return textResult("delivered to "+name+": you are woken when it finishes or stops for an answer", false)
 		}
 		r.unwatch(func(o *hlWatch) bool { return o == w })
-		if herdrCode(err) != "agent_not_ready" || !time.Now().Before(deadline) {
+		if code := herdrCode(err); code != "agent_not_ready" && code != "agent_blocked" || !time.Now().Before(deadline) {
 			return textResult("not delivered to "+name+": "+err.Error(), true)
 		}
 		if raw, err := r.rpc("agent.get", map[string]any{"target": pane}); err == nil {
 			if status, seq, cwd := agentState(raw); status == "blocked" {
 				r.watch(&hlWatch{Pane: pane, Name: name, Cwd: cwd, Status: status, Seq: seq, Startup: true}, "", nil, epoch)
-				return textResult("task not sent: "+name+" waits on a startup question (folder trust?) the user answers in its pane; you are woken when it is ready", false)
+				return textResult("task not sent: "+name+" waits on a question in its pane (folder trust, a permission) that the user answers there; you are woken when it is ready", false)
 			}
 		}
 		time.Sleep(250 * time.Millisecond)
@@ -589,14 +592,27 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 	}
 	for ctx.Err() == nil {
 		if w.Startup {
-			if _, err := r.waitRPC(ctx, "agent.wait", map[string]any{"target": w.Pane, "until": []string{"idle", "done"}}); err != nil {
+			raw, err := r.waitRPC(ctx, "agent.wait", map[string]any{"target": w.Pane, "until": untilMoved})
+			if err != nil {
 				if !r.retryWatch(ctx, w, err) {
 					return
 				}
 				continue
 			}
-			r.tell(w, w.Name+": ready, task not sent", w.Status, w.Seq, true)
-			return
+			if status, _, _ := agentState(raw); status != "working" {
+				r.tell(w, w.Name+": ready, task not sent", w.Status, w.Seq, true)
+				return
+			}
+			// answered, it works on (a question in the middle of a task of its own): followed from
+			// here as any watch, so its next question or its end wakes the orchestrator too
+			r.mu.Lock()
+			w.Startup, w.Unsent = false, true
+			r.mu.Unlock()
+			until = untilMoved
+			if !r.settle(w, raw, &until) {
+				return
+			}
+			continue
 		}
 		raw, err := r.waitRPC(ctx, "agent.wait", map[string]any{"target": w.Pane, "until": until})
 		if err != nil {
@@ -635,7 +651,11 @@ func (r *headlessRunner) settle(w *hlWatch, raw json.RawMessage, until *[]string
 		*until = untilMoved
 	}
 	// w.Status is only ever changed here, in its own goroutine
-	return r.tell(w, fmt.Sprintf("%s: %s → %s", w.Name, w.Status, status), status, seq, end) && !end
+	line := fmt.Sprintf("%s: %s → %s", w.Name, w.Status, status)
+	if end && w.Unsent { // the end of a task of its own, not of the orchestrator's
+		line += ", ready, task not sent"
+	}
+	return r.tell(w, line, status, seq, end) && !end
 }
 
 // tell is a watch's change, in one save: line (when not "") queued as a wake-up, its status

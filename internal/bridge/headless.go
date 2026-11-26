@@ -1042,15 +1042,23 @@ func (r *headlessRunner) running() (*hlChild, error) {
 	return nil, &LifecycleError{Status: 409, Code: "not_running", Message: "orchestrator " + r.def.Name + " isn't running"}
 }
 
-// Send is the user's message: the answer to a pending question it isn't (that one is denied
-// with it as the message), else it is written, also mid-turn (Claude Code takes it in at the
-// next tool boundary).
+// Send is the user's message: with a question pending, the answer to it in the user's own
+// words (AskUserQuestion's free-text answer, which the model takes as said: S0 row 12), the same
+// text for each of its questions; else it is written, also mid-turn (Claude Code takes it in at
+// the next tool boundary). A refusal would reach the model as an error with the text as its
+// reason, which it reads as nonsense.
 func (r *headlessRunner) Send(text string) error {
 	r.mu.Lock()
 	p := r.pending
 	r.mu.Unlock()
-	if p != nil && r.Answer(p.id, nil, text) == nil {
-		return nil
+	if p != nil {
+		answers := map[string]any{}
+		for _, q := range p.questions {
+			answers[q.Question] = text
+		}
+		if r.Answer(p.id, answers, "") == nil {
+			return nil
+		}
 	}
 	return r.write(text)
 }
