@@ -104,29 +104,34 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 	// nothing changes (an unchanged push is deduped), and a changed answer re-pushes.
 	s.accounts = newPaneAccountCache(func(id string) (string, error) { return paneAccount(s.rpc, id) },
 		s.broadcastState, accountRefreshInterval, time.Now)
-	// Each orchestrator's expectedAccount, published one by one as found (an env-set one is
-	// instant, a direnv one can take seconds) and found again each refresh interval, so a
-	// direnv that failed (the default account stands in meanwhile) or an edited .envrc catches up.
-	go func() {
-		for {
-			cur := s.expected.Load()
-			for i, d := range cfg.Orchestrators {
+	// Each orchestrator's expectedAccount, found on its own (an env-set one is instant, a direnv
+	// one can take seconds), published as found, and found again each refresh interval so an
+	// edited .envrc catches up. A direnv that can't tell keeps the account read before (else the
+	// default stands in).
+	var emu sync.Mutex
+	for i, d := range cfg.Orchestrators {
+		go func() {
+			for {
+				a, read := expectedAccountRead(d)
+				emu.Lock()
 				next := make([]string, len(cfg.Orchestrators))
-				if cur != nil {
+				if cur := s.expected.Load(); cur != nil {
 					copy(next, *cur)
 				}
-				next[i] = expectedAccount(d)
-				cur = &next
-				s.expected.Store(cur)
+				if read || next[i] == "" {
+					next[i] = a
+				}
+				s.expected.Store(&next)
+				emu.Unlock()
 				s.broadcastState() // deduped when nothing changed
+				select {
+				case <-time.After(accountRefreshInterval):
+				case <-s.stop:
+					return
+				}
 			}
-			select {
-			case <-time.After(accountRefreshInterval):
-			case <-s.stop:
-				return
-			}
-		}
-	}()
+		}()
+	}
 	go func() {
 		t := time.NewTicker(accountRefreshInterval)
 		defer t.Stop()

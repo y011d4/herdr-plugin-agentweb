@@ -123,13 +123,20 @@ var orchestratorProfile = map[string]LaunchProfile{"claude": {Argv: []string{"cl
 // else what its dir sets (direnv; up to 15 s), else the default. startOrchestrator checks
 // the started agent against it; a stopped orchestrator's Home lists that account's agents.
 func expectedAccount(def OrchestratorDef) string {
+	a, _ := expectedAccountRead(def)
+	return a
+}
+
+// expectedAccountRead is expectedAccount, and whether it was read (false: direnv couldn't
+// tell, so the default stands in).
+func expectedAccountRead(def OrchestratorDef) (string, bool) {
 	if cfg := def.Env["CLAUDE_CONFIG_DIR"]; cfg != "" {
-		return accountForConfigDir(cfg, "")
+		return accountForConfigDir(cfg, ""), true
 	}
 	if a := dirAccount(def.Dir); a != "" {
-		return a
+		return a, true
 	}
-	return accountForConfigDir("", "")
+	return accountForConfigDir("", ""), false
 }
 
 // startOrchestrator starts an orchestrator in a new workspace at its dir, with its
