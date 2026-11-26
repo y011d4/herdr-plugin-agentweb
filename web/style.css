@@ -1162,11 +1162,14 @@ a {
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
 }
+/* at most ~3 rows of chips, so the counts row below (the way to the list) stays on screen */
 .home-attn {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  max-height: 88px;
+  overflow-y: auto;
 }
 .home-attn-label {
   font-size: 12px;
