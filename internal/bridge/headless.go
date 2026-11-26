@@ -279,25 +279,34 @@ func newHeadlessRunner(def OrchestratorDef, stateDir, rules string, rpc Rpc, onC
 	if b, err := os.ReadFile(headlessPath(stateDir, def.Name, ".json")); err == nil && json.Unmarshal(b, &saved) == nil && sessionIDRe.MatchString(saved.SessionID) {
 		r.sessionID, r.wanted, r.interrupted = saved.SessionID, saved.Wanted, saved.Interrupted
 	}
-	if msg := r.billingEnv(); msg != "" {
+	if kind, msg := r.refusedEnv(); msg != "" {
 		r.model.Status = "error"
-		r.warnings = []HeadlessWarning{{Kind: "billing", Message: msg, Since: nowMs(), Actions: warningActions["billing"]}}
+		r.warnings = []HeadlessWarning{{Kind: kind, Message: msg, Since: nowMs(), Actions: warningActions[kind]}}
 	}
 	return r
 }
 
-func (r *headlessRunner) billingEnv() string {
-	var vars []string
+// refusedEnv is why its entry's env can't run headless ("" = it can): a billing variable, or
+// a home of its own (the child would read that home's settings and keep its transcripts
+// there, while the checks, the account and the chat read the bridge's).
+func (r *headlessRunner) refusedEnv() (kind, message string) {
+	var billing, home []string
 	for k := range r.def.Env {
 		if isBillingVar(k) {
-			vars = append(vars, k)
+			billing = append(billing, k)
+		} else if k == "HOME" || k == "XDG_CONFIG_HOME" {
+			home = append(home, k)
 		}
 	}
-	if len(vars) == 0 {
-		return ""
+	slices.Sort(billing)
+	slices.Sort(home)
+	switch {
+	case len(billing) > 0:
+		return "billing", fmt.Sprintf("its env sets %s: a headless orchestrator never runs with billing or auth variables", strings.Join(billing, ", "))
+	case len(home) > 0:
+		return "env", fmt.Sprintf("its env sets %s: a headless orchestrator runs in the bridge's home (pick its account with CLAUDE_CONFIG_DIR)", strings.Join(home, ", "))
 	}
-	slices.Sort(vars)
-	return fmt.Sprintf("its env sets %s: a headless orchestrator never runs with billing or auth variables", strings.Join(vars, ", "))
+	return "", ""
 }
 
 // view is its state for clients, and whether its child runs.
@@ -422,8 +431,8 @@ func (r *headlessRunner) resetLocked() {
 
 // start runs the checks, then the child; r.op held.
 func (r *headlessRunner) start(resume bool) error {
-	if msg := r.billingEnv(); msg != "" {
-		return r.fail("billing", &LifecycleError{Status: 409, Code: "billing_refused", Message: msg})
+	if kind, msg := r.refusedEnv(); msg != "" {
+		return r.fail(kind, &LifecycleError{Status: 409, Code: kind + "_refused", Message: msg})
 	}
 	if r.rpc != nil {
 		// best-effort: herdr down must not keep the orchestrator from coming back

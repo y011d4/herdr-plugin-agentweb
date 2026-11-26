@@ -392,7 +392,8 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   allowlist (HOME PATH USER LOGNAME SHELL LANG LC_* TZ TMPDIR, TERM=dumb, then the entry's env; never
   `HERDR_*`, which would make herdr's hooks report it as a pane, nor a billing variable), and its argv
   never has `--bare` or `--dangerously-skip-permissions`. An entry env with `ANTHROPIC_*`,
-  `CLAUDE_CODE_USE_*` or `AWS_BEARER_TOKEN_BEDROCK` is refused; before each start `claude auth status
+  `CLAUDE_CODE_USE_*` or `AWS_BEARER_TOKEN_BEDROCK` is refused, and so is one with `HOME` or
+  `XDG_CONFIG_HOME` (the checks, the account and the chat read the bridge's home); before each start `claude auth status
   --json` must say `authMethod: claude.ai` with a subscription (only those two fields are read or
   logged: the output has the account's email), and no settings file it reads (the account's, the
   dir's `settings.json`/`settings.local.json`, the managed one) may set such an env or `apiKeyHelper`
