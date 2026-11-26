@@ -254,7 +254,7 @@ type headlessRunner struct {
 type hlChild struct {
 	cmd      *exec.Cmd
 	stdin    *os.File
-	wmu      sync.Mutex
+	wlock    chan struct{} // one write at a time; a channel, so a stop can wait for it a bounded time
 	stdinEnd sync.Once
 	stderr   *tailWriter
 	done     chan struct{} // closed once it has exited and its stdout is read
@@ -559,7 +559,7 @@ func (r *headlessRunner) spawn(argv, env []string) error {
 	cmd := exec.Command(claudeBin(), argv...)
 	cmd.Dir, cmd.Env = r.def.Dir, env
 	cmd.Stdin, cmd.Stdout = inR, outW
-	c := &hlChild{cmd: cmd, stdin: inW, stderr: &tailWriter{}, done: make(chan struct{})}
+	c := &hlChild{cmd: cmd, stdin: inW, stderr: &tailWriter{}, done: make(chan struct{}), wlock: make(chan struct{}, 1)}
 	cmd.Stderr = c.stderr
 	cmd.WaitDelay = time.Second
 	cmd.SysProcAttr = childSysProcAttr()
@@ -801,8 +801,8 @@ func (c *hlChild) write(v any) error {
 	if err != nil {
 		return err
 	}
-	c.wmu.Lock()
-	defer c.wmu.Unlock()
+	c.wlock <- struct{}{}
+	defer func() { <-c.wlock }()
 	c.stdin.SetWriteDeadline(time.Now().Add(5 * time.Second)) // a child that stopped reading can't hang a request
 	_, err = c.stdin.Write(append(b, '\n'))
 	return err
@@ -872,18 +872,21 @@ func (r *headlessRunner) Interrupt() error {
 	return r.start(true)
 }
 
-// stopChild ends a child, on one clock from its call: interrupt (skipped while another write
-// is stuck on a child that stopped reading), close stdin (alone it lets a turn run to its end;
-// it also fails that stuck write), SIGTERM to its group at 1.5 s, SIGKILL at 2 s, given up at 4 s.
+// stopChild ends a child, on one clock from its call: interrupt (after a write in progress,
+// waited for up to 200 ms; skipped when one is stuck on a child that stopped reading), close
+// stdin (alone it lets a turn run to its end; it also fails that stuck write), SIGTERM to its
+// group at 1.5 s, SIGKILL at 2 s, given up at 4 s.
 func (r *headlessRunner) stopChild(c *hlChild) {
 	began := time.Now()
 	r.mu.Lock()
 	c.expected = true
 	r.mu.Unlock()
-	if c.wmu.TryLock() {
+	select {
+	case c.wlock <- struct{}{}:
 		c.stdin.SetWriteDeadline(began.Add(500 * time.Millisecond))
 		c.stdin.Write([]byte(`{"type":"control_request","request_id":"yoicks-stop","request":{"subtype":"interrupt"}}` + "\n"))
-		c.wmu.Unlock()
+		<-c.wlock
+	case <-time.After(200 * time.Millisecond):
 	}
 	c.closeStdin()
 	pid := c.cmd.Process.Pid

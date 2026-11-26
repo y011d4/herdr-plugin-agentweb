@@ -773,3 +773,20 @@ func TestHeadlessInterruptKeepsQueuedMessages(t *testing.T) {
 		}
 	})
 }
+
+// A stop overlapping a write that finishes at once still interrupts the turn first.
+func TestHeadlessStopWaitsForAWriteInProgress(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	b.send(t, "slow 30")
+	b.waitStatus(t, "working")
+	h := b.srv.headless["h1"]
+	h.mu.Lock()
+	c := h.child
+	h.mu.Unlock()
+	c.wlock <- struct{}{} // a write in progress, done 50 ms later
+	go func() { time.Sleep(50 * time.Millisecond); <-c.wlock }()
+	b.srv.shutdownHeadless()
+	b.waitStdin(t, `"request_id":"yoicks-stop"`)
+}
