@@ -112,6 +112,10 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # the live test against the real claude: compiled so it can't rot, never run here
+      - name: Vet the claudelive test
+        run: go vet -tags claudelive ./internal/bridge
+
       - name: Test (race detector)
         run: go test -race ./...
 

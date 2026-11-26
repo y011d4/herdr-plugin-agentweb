@@ -259,6 +259,7 @@ type headlessRunner struct {
 	silence       time.Duration
 	lineHook      func([]byte) // tests: runs on each stdout line, in the reader
 	startedHook   func()       // tests: runs once the child has started, before spawn goes on
+	extraArgs     []string     // tests: more argv (the claudelive test's --model haiku); never set in production
 
 	op sync.Mutex // start, stop, clear: one at a time
 
@@ -590,7 +591,7 @@ func (r *headlessRunner) start(resume bool) error {
 	r.persist()
 	r.mu.Unlock()
 	alert()
-	if err := r.spawn(headlessArgv(r.session(), resume, mcpConfig, r.tools), env); err != nil {
+	if err := r.spawn(append(headlessArgv(r.session(), resume, mcpConfig, r.tools), r.extraArgs...), env); err != nil {
 		return r.fail("start", &LifecycleError{Status: 500, Code: "claude_failed", Message: "could not start claude: " + err.Error()})
 	}
 	r.rearm()
