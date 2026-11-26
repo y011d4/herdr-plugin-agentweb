@@ -284,6 +284,9 @@ type headlessRunner struct {
 	wakes        []string
 	wakeTimer    *time.Timer
 	gen          int // its workers' generation: Stop and Clear begin a new one (forgetWorkers)
+	// its child's epoch: each start (a restart's too), Stop and Clear begin a new one; a call
+	// or a question from another child registers nothing (watch, ask)
+	epoch int
 }
 
 type hlChild struct {
@@ -556,6 +559,7 @@ func (r *headlessRunner) start(resume bool) error {
 		alert = r.warn("rules", "the orchestrator rules changed since this session began: Clear to apply them")
 	}
 	r.wanted, r.mcpBearer = true, bearer
+	r.epoch++ // a new child: what the one before asked registers nothing
 	notice := r.interrupted
 	r.interrupted = false
 	r.persist()
@@ -754,6 +758,7 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 		r.mu.Unlock()
 		return
 	}
+	epoch := r.epoch
 	r.lastEvent = time.Now()
 	r.warnings = slices.DeleteFunc(r.warnings, func(w HeadlessWarning) bool { return w.Kind == "silent" })
 	from := r.model.Status
@@ -787,7 +792,7 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 		r.watchAsk(step.Ask)
 	}
 	if cu := step.CanUse; cu != nil {
-		r.canUse(c, cu)
+		r.canUse(c, cu, epoch)
 	}
 	for _, a := range alerts {
 		a()
@@ -798,7 +803,7 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 
 // canUse answers a permission request that came over stdio as approve would: AskUserQuestion
 // waits for the Home's answer, anything else is denied.
-func (r *headlessRunner) canUse(c *hlChild, cu *hlCanUse) {
+func (r *headlessRunner) canUse(c *hlChild, cu *hlCanUse, epoch int) {
 	reply := func(res map[string]any) {
 		c.write(controlResponse(cu.RequestID, map[string]any{"subtype": "success", "response": res}))
 	}
@@ -806,8 +811,12 @@ func (r *headlessRunner) canUse(c *hlChild, cu *hlCanUse) {
 		reply(map[string]any{"behavior": "deny", "message": "yoicks allows no tool but its own"})
 		return
 	}
+	p := r.ask(cu.Input, epoch)
+	if p == nil {
+		reply(map[string]any{"behavior": "deny", "message": "this orchestrator's session has ended"})
+		return
+	}
 	r.asked(cu.ToolUseID)
-	p := r.ask(cu.Input)
 	go func() { reply(<-p.reply) }() // every pending question gets its reply (answer, deny, the child's end)
 }
 
@@ -1103,11 +1112,12 @@ func (r *headlessRunner) Clear() error {
 
 // forgetWorkers ends what it follows of its workers: the watches (and the saved ones) and the
 // queued wake-ups, with a new generation that every late callback of theirs finds changed, and
-// its child's bearer (that child's calls are refused);
+// its child's bearer and epoch (that child's calls are refused, and register nothing);
 // r.mu held, the caller saves.
 func (r *headlessRunner) forgetWorkers() {
 	r.gen++
 	r.mcpBearer = "" // its child's calls are refused from now on
+	r.epoch++
 	for _, w := range r.watches {
 		w.cancel()
 	}

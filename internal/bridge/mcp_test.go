@@ -752,3 +752,95 @@ func TestHeadlessRearmedWatchLeavesNoSavedCopy(t *testing.T) {
 		t.Errorf("saved: %s", got)
 	}
 }
+
+// restarted crashes the child and waits for its automatic restart to come up.
+func (b *hlBridge) restarted(t *testing.T) {
+	t.Helper()
+	before, _ := b.runs(t)
+	b.send(t, "crash")
+	waitUntil(t, 10*time.Second, "the restart", func() bool { runs, _ := b.runs(t); return len(runs) > len(before) })
+	b.waitFor(t, "the new child up", func(v OrchestratorView) bool { return v.Headless.Status == "idle" || v.Headless.Status == "done" })
+}
+
+// A call from a child replaced by an automatic restart registers nothing: its agent_prompt,
+// held in its agent lookup across the restart, makes no watch and sends the worker nothing,
+// while the watch from before the crash lives on.
+func TestHeadlessCallAcrossARestart(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, func(h *headlessRunner) { h.restartDelays = []time.Duration{100 * time.Millisecond} })
+	h := b.srv.headless["h1"]
+	var prompts atomic.Int32
+	worker(t, b, "idle", func(w *fakeherdr.World, pane string) { prompts.Add(1); w.Set(pane, "working") })
+	var armed atomic.Bool
+	entered, release := make(chan struct{}), make(chan struct{})
+	var gate sync.Once
+	rpc := h.rpc
+	h.rpc = func(method string, params map[string]any) (json.RawMessage, error) {
+		if method == "agent.get" && params["target"] == "w1" && armed.Load() {
+			gate.Do(func() { close(entered); <-release }) // the tool's agent lookup, held
+		}
+		return rpc(method, params)
+	}
+	b.start(t)
+	b.waitStatus(t, "idle")
+	cs, err := mcpClient(t, h.mcpURL, bearer(h))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	call := func() *mcp.CallToolResult {
+		res, _ := cs.CallTool(ctx, &mcp.CallToolParams{Name: "agent_prompt", Arguments: map[string]any{"name": "w1", "text": "do the thing"}})
+		return res
+	}
+	if res := call(); res == nil || res.IsError { // the watch from before: it keeps working
+		t.Fatalf("the first prompt: %+v", res)
+	}
+	h.mu.Lock()
+	before := h.watches["w1p"]
+	h.mu.Unlock()
+	armed.Store(true)
+	result := make(chan *mcp.CallToolResult, 1)
+	go func() { result <- call() }()
+	<-entered
+	b.restarted(t)
+	close(release)
+	res := <-result
+	if res == nil || !res.IsError || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "restarted") {
+		t.Fatalf("the call from before the restart: %+v", res)
+	}
+	time.Sleep(time.Second)
+	h.mu.Lock()
+	after := h.watches["w1p"]
+	h.mu.Unlock()
+	if after == nil || after != before || prompts.Load() != 1 {
+		t.Errorf("the watch from before replaced (%v), the worker prompted %d times", after != before, prompts.Load())
+	}
+}
+
+// A question from a child replaced since (a call admitted before a restart that reaches
+// approve after it) is denied, and the current child's pending question stays as it was.
+func TestHeadlessQuestionFromAReplacedChild(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, func(h *headlessRunner) { h.restartDelays = []time.Duration{100 * time.Millisecond} })
+	h := b.srv.headless["h1"]
+	b.start(t)
+	b.waitStatus(t, "idle")
+	h.mu.Lock()
+	old := h.epoch // the first child's, as the middleware gave its calls
+	h.mu.Unlock()
+	b.restarted(t)
+	b.send(t, "ask") // the new child's question
+	p := b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil }).Headless.Pending
+	ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), epochKey{}, old), 2*time.Second)
+	defer cancel() // (taken as the pending question, it would wait for an answer)
+	res, _, err := h.approve(ctx, &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{}}, approveIn{ToolName: "AskUserQuestion", ToolUseID: "t-old", Input: map[string]any{"questions": []any{}}})
+	if err != nil || res == nil || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, `"behavior":"deny"`) {
+		t.Fatalf("the old child's question: %v %+v", err, res)
+	}
+	if v := b.view(t); v.Headless.Pending == nil || v.Headless.Pending.ID != p.ID || v.Headless.Status != "blocked" {
+		t.Fatalf("the pending question touched: %+v", v.Headless)
+	}
+	if status, body := b.post(t, "answer", `{"id":"`+p.ID+`","answers":{"Which fruit?":"apple"}}`); status != 200 {
+		t.Fatalf("answer: %d %s", status, body)
+	}
+	b.waitFor(t, "the turn's end", func(v OrchestratorView) bool { return v.Headless.Status == "done" && v.Headless.Pending == nil })
+}

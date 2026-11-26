@@ -140,7 +140,9 @@ All in `internal/bridge/` (one package):
   `StatusChange{PaneID: "hl:<name>"}` (WS `agent_status`, ntfy) and `notification.show` (never for
   `wc-` names). `mcp.go`: the child's MCP server (go-sdk, streamable HTTP on its own `127.0.0.1:0`
   listener; a bearer per child in its mcp.json, new at each start, revoked by Stop and Clear, so a
-  call from an old child reaches nothing; a call binds to the generation it arrived in). Its tools
+  call from an old child reaches nothing; an admitted call binds to its child's epoch, new at each
+  start, Stop and Clear, and a watch or question it registers once that child is replaced is
+  refused; the workers' generation, which a restart keeps, is separate). Its tools
   are the CLI's orchestrator commands as functions (`overview`, `agent_get`, `agent_read`, `agent_prompt`, `agent_start`,
   `worktree_remove`), confined to the account its child runs under; `approve` is the child's
   `--permission-prompt-tool`: AskUserQuestion becomes state `headless.pending` (answered by
