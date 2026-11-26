@@ -73,8 +73,8 @@ type server struct {
 	rules    string // the bundled orchestrator/rules.md
 	profiles *PaneProfileStore
 	accounts *PaneAccountCache
-	// each configured orchestrator's expectedAccount ("": unknown), found once in the
-	// background (direnv can take seconds); nil until then
+	// each configured orchestrator's expectedAccount ("": not found yet), found in the
+	// background (direnv can take seconds); nil until the first is found
 	expected atomic.Pointer[[]string]
 	stop     chan struct{}
 	stopOnce sync.Once
@@ -104,14 +104,28 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 	// nothing changes (an unchanged push is deduped), and a changed answer re-pushes.
 	s.accounts = newPaneAccountCache(func(id string) (string, error) { return paneAccount(s.rpc, id) },
 		s.broadcastState, accountRefreshInterval, time.Now)
-	// ponytail: found once per bridge start; an .envrc edited later shows after a restart
+	// Each orchestrator's expectedAccount, published one by one as found (an env-set one is
+	// instant, a direnv one can take seconds) and found again each refresh interval, so a
+	// direnv that failed (the default account stands in meanwhile) or an edited .envrc catches up.
 	go func() {
-		expected := make([]string, len(cfg.Orchestrators))
-		for i, d := range cfg.Orchestrators {
-			expected[i] = expectedAccount(d)
+		for {
+			cur := s.expected.Load()
+			for i, d := range cfg.Orchestrators {
+				next := make([]string, len(cfg.Orchestrators))
+				if cur != nil {
+					copy(next, *cur)
+				}
+				next[i] = expectedAccount(d)
+				cur = &next
+				s.expected.Store(cur)
+				s.broadcastState() // deduped when nothing changed
+			}
+			select {
+			case <-time.After(accountRefreshInterval):
+			case <-s.stop:
+				return
+			}
 		}
-		s.expected.Store(&expected)
-		s.broadcastState()
 	}()
 	go func() {
 		t := time.NewTicker(accountRefreshInterval)
