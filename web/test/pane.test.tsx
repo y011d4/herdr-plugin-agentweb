@@ -237,19 +237,16 @@ describe('Home', () => {
     await show('p4', true);
   };
 
-  it('shows the counts of its account and goes to its list from them and from Agents', async () => {
+  it('shows the counts of its account and goes to its list from them', async () => {
     await home(fresh());
-    assert.equal($('#tb').textContent, 'Personal· readyAgents>_⚙', "a Home's topbar ends with Settings, no ⋮");
-    assert.equal($('.home-counts').textContent, '1 working1 done0 idleAll agents ›'); // p1, p3 (p4 is the orchestrator)
+    assert.equal($('#tb').textContent, 'Personal· ready>_⚙', "a Home's topbar: no Agents, ends with Settings, no ⋮");
+    assert.equal($('.home-counts').textContent, '1 working1 done0 idleAgents ›'); // p1, p3 (p4 is the orchestrator)
     // two configured, one running: the switcher lists both, the stopped one dimmed
     const sw = [...container.querySelectorAll<HTMLElement>('.home-switch-btn')];
     assert.deepEqual(sw.map((b) => `${b.className}|${b.dataset.orch}|${b.querySelector('i')!.className}|${b.textContent}`),
       ['home-switch-btn active|personal|home-dot idle|Personal', 'home-switch-btn stopped|work|home-dot stopped|work']);
     assert.equal(container.querySelector('.home-attn'), null);
     await fire(() => $('.home-counts').click());
-    assert.equal(location.hash, '#/agents/personal');
-    location.hash = '#/home/personal';
-    await fire(() => $('#btn-home-agents').click());
     assert.equal(location.hash, '#/agents/personal');
   });
 

@@ -181,7 +181,7 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
           <span><i className="home-dot working"></i>{`${s.working} working`}</span>
           <span><i className="home-dot done"></i>{`${s.done} done`}</span>
           <span><i className="home-dot idle"></i>{`${s.idle} idle`}</span>
-          <span className="home-counts-more">All agents &#8250;</span>
+          <span className="home-counts-more">Agents &#8250;</span>
         </button>
         {actions && (
           <span className="home-actions">
@@ -360,11 +360,10 @@ function ViewToggle({ home }: { home: boolean }) {
   );
 }
 
-const agentsButton = <button className="topbar-action home-agents-btn" id="btn-home-agents" onClick={() => { location.hash = homeAgentsHash(location.hash); }}>Agents</button>;
 const settingsButton = <button className="topbar-action" id="btn-settings" aria-label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</button>;
 
-/** The topbar: a pane's Back (to `back`), a Home's Agents; the view toggle; a pane's agent-actions
- *  kebab (`menu`: rename, clear, stop), a Home's Settings (its Clear and Stop are on its status bar). */
+/** The topbar: a pane's Back (to `back`); the view toggle; a pane's agent-actions kebab (`menu`:
+ *  rename, clear, stop), a Home's Settings (its Agents ›, Clear and Stop are on its status bar). */
 export const paneTopbar = (paneId: string, home: boolean, back: string, menu: () => void): Topbar => ({
   title: <Title paneId={paneId} home={home} />,
   left: home ? undefined : (
@@ -372,7 +371,6 @@ export const paneTopbar = (paneId: string, home: boolean, back: string, menu: ()
   ),
   right: (
     <>
-      {home && agentsButton}
       <ViewToggle home={home} />
       {home ? settingsButton : <button className="topbar-action" id="btn-agent-menu" aria-label="Agent actions" onClick={menu}>&#8942;</button>}
     </>
@@ -388,7 +386,7 @@ function StoppedTitle({ name }: { name: string }) {
 
 export const stoppedHomeTopbar = (name: string): Topbar => ({
   title: <StoppedTitle name={name} />,
-  right: <>{agentsButton}{settingsButton}</>,
+  right: settingsButton,
 });
 
 /** #/home/<name> while that orchestrator isn't running: its account's agents and Start (a headless
