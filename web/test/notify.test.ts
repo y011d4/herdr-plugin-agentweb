@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
-import { clearToasts, dismissNotificationsForPane, getToasts, notifyAgentStatus } from '../src/notify.ts';
+import { clearToasts, dismissNotificationsForPane, getToasts, notifyAgentStatus, notifyOrchestratorAlert } from '../src/notify.ts';
 import { store } from '../src/store.ts';
 import type { WsAgentStatusMessage } from '../src/types.ts';
 import { messages } from './contract.gen.ts';
@@ -46,6 +46,13 @@ describe('notify', () => {
       { title: 'Claude Code done', body: 'repo-wt-feat / feat', tag: 'p3', renotify: true },
       { title: 'Agent blocked', body: '', tag: 'p9', renotify: true },
     ]);
+  });
+
+  it("an orchestrator_alert while hidden: tagged with its Home's pane, a failed check's with #/settings (opened there)", async () => {
+    notifyOrchestratorAlert({ type: 'orchestrator_alert', name: 'pilot', kind: 'silent', message: 'no event' });
+    notifyOrchestratorAlert({ type: 'orchestrator_alert', name: '', kind: 'canary', message: 'interrupt failed' });
+    await settle();
+    assert.deepEqual(shown.map((n) => `${n.title}|${n.tag}`), ['pilot: silent|hl:pilot', 'Claude Code check failed|#/settings']);
   });
 
   it('none while visible, turned off, not permitted, or for another status', async () => {

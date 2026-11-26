@@ -95,14 +95,13 @@ export function notifyAgentStatus({ paneId, agent, from, to, workspaceLabel, tab
 }
 
 /** An orchestrator_alert push: a headless orchestrator's new warning (once per kind and session), or with
- *  no name a failed Claude Code check. A sticky toast (a tap opens its Home; the check's: Settings, where it
- *  is shown) and, while hidden, an OS notification. Its Home shows it as a warning line meanwhile. */
+ *  no name a failed Claude Code check. A sticky toast and, while hidden, an OS notification; either's tap
+ *  opens its Home (the check's: Settings, where it is shown). Its Home shows it as a warning line meanwhile. */
 export function notifyOrchestratorAlert({ name, kind, message }: WsOrchestratorAlertMessage): void {
   const o = store.appState?.orchestrators?.find((x) => x.name === name);
   const title = name ? `${o?.label || name}: ${kind}` : 'Claude Code check failed';
-  const paneId = name ? `hl:${name}` : '';
-  showToast(title, message, { sticky: true, paneId: paneId || undefined, onclick: () => { location.hash = name ? homeHash(name) : '#/settings'; } });
-  osNotify(title, message, paneId);
+  showToast(title, message, { sticky: true, paneId: name ? `hl:${name}` : undefined, onclick: () => { location.hash = name ? homeHash(name) : '#/settings'; } });
+  osNotify(title, message, name ? `hl:${name}` : '#/settings'); // a tag that is a hash opens there (sw.ts)
 }
 
 // An OS notification while the page is hidden, notifications are on and permitted.
@@ -169,7 +168,7 @@ function pageNotification(title: string, body: string, paneId: string): void {
     const n = new Notification(title, notificationOptions(body, paneId));
     n.onclick = () => {
       window.focus();
-      location.hash = paneRoute(store.appState, paneId);
+      location.hash = paneId.startsWith('#/') ? paneId : paneRoute(store.appState, paneId);
     };
     const list = pageNotifications.get(paneId) ?? [];
     list.push(n);
