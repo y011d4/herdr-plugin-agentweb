@@ -14,7 +14,7 @@ import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
 import { homeSummary, shownStatus } from '../dashboard-group.ts';
 import { showToast } from '../notify.ts';
 import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
-import { homeAgentsHash, orchestratorOfPane, paneRoute } from '../routes.ts';
+import { homeAgentsHash, homeHash, orchestratorOfPane, paneRoute } from '../routes.ts';
 import { emit, findPane, keptTasks, store, subscribe } from '../store.ts';
 import type { AppState } from '../types.ts';
 import { agentCards, cardTitle, orchestratorLabel } from './Dashboard.tsx';
@@ -75,7 +75,8 @@ async function sendKey(paneId: string, payload: Record<string, unknown>): Promis
 /** A Home's Clear and Stop (App.tsx's confirm flows), on its status bar: a Home has no ⋮. */
 export type HomeActions = { clear: () => void; stop: () => void };
 
-export function Pane({ paneId, home, actions }: { paneId: string; home: boolean; actions?: HomeActions }) {
+/** A pane, or (with `home`: the orchestrator `name`) a running orchestrator's Home. */
+export function Pane({ paneId, home, actions, name = '' }: { paneId: string; home: boolean; actions?: HomeActions; name?: string }) {
   const state = useAppState();
   const { mode } = useToggle();
   const [activity, setActivity] = useState<string | null>(null); // Home: the latest tool call since it last spoke
@@ -101,7 +102,7 @@ export function Pane({ paneId, home, actions }: { paneId: string; home: boolean;
   const working = findPane(paneId)?.pane?.agent?.status === 'working';
   return (
     <div id="screen-pane" className={home ? 'screen-home' : undefined} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-      {home && <HomeStatus paneId={paneId} state={state} actions={actions} />}
+      {home && <HomeStatus name={name} state={state} actions={actions} />}
       <div id="pane-view" ref={body} style={{ display: 'contents' }}></div>
       {prompt && paneView && <PromptPanel paneId={paneId} prompt={prompt} view={paneView} />}
       {home && (
@@ -122,23 +123,24 @@ export function Pane({ paneId, home, actions }: { paneId: string; home: boolean;
   );
 }
 
-// Home status bar: with several orchestrators running a switcher between their Homes (tap = that
-// orchestrator's pane, which routes to its Home like any chip), its agents waiting on the user
-// (tap → that agent) and counts of the rest (tap → its list), then the orchestrator's Clear and Stop.
-function HomeStatus({ paneId, state, actions }: { paneId: string; state: AppState | null; actions?: HomeActions }) {
+// Home status bar: with two or more orchestrators configured a switcher between their Homes (a
+// stopped one dimmed: its Home has Start), its account's agents waiting on the user (tap → that
+// agent) and counts of the rest (tap → its list), then the orchestrator's Clear and Stop.
+function HomeStatus({ name, state, actions }: { name: string; state: AppState | null; actions?: HomeActions }) {
   if (!state) return <div className="home-status" id="home-status"></div>;
-  const s = homeSummary(agentCards(state, orchestratorOfPane(state, paneId)), store.seenDone);
-  const running = (state.orchestrators ?? []).filter((o) => o.paneId);
+  const all = state.orchestrators ?? [];
+  const s = homeSummary(agentCards(state, all.find((o) => o.name === name)), store.seenDone);
   const open = (id: string): void => { location.hash = paneRoute(store.appState, id); };
   return (
     <div className="home-status" id="home-status">
-      {running.length >= 2 && (
+      {all.length >= 2 && (
         <div className="home-switch">
-          {running.map((o) => {
-            const pane = findPane(o.paneId!)?.pane;
-            const st = pane?.agent ? shownStatus(pane, store.seenDone) : 'unknown';
+          {all.map((o) => {
+            const pane = o.paneId ? findPane(o.paneId)?.pane : undefined;
+            const st = !o.paneId ? 'stopped' : pane?.agent ? shownStatus(pane, store.seenDone) : 'unknown';
             return (
-              <button key={o.paneId} className={`home-switch-btn${o.paneId === paneId ? ' active' : ''}`} data-pane-id={o.paneId!} onClick={() => open(o.paneId!)}>
+              <button key={o.name} className={`home-switch-btn${o.name === name ? ' active' : ''}${o.paneId ? '' : ' stopped'}`}
+                data-orch={o.name} data-pane-id={o.paneId ?? undefined} onClick={() => { location.hash = homeHash(o.name); }}>
                 <i className={`home-dot ${st}`}></i>{orchestratorLabel(o)}
               </button>
             );
@@ -288,6 +290,9 @@ function ViewToggle({ home }: { home: boolean }) {
   );
 }
 
+const agentsButton = <button className="topbar-action home-agents-btn" id="btn-home-agents" onClick={() => { location.hash = homeAgentsHash(location.hash); }}>Agents</button>;
+const settingsButton = <button className="topbar-action" id="btn-settings" aria-label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</button>;
+
 /** The topbar: a pane's Back (to `back`), a Home's Agents; the view toggle; a pane's agent-actions
  *  kebab (`menu`: rename, clear, stop), a Home's Settings (its Clear and Stop are on its status bar). */
 export const paneTopbar = (paneId: string, home: boolean, back: string, menu: () => void): Topbar => ({
@@ -297,11 +302,46 @@ export const paneTopbar = (paneId: string, home: boolean, back: string, menu: ()
   ),
   right: (
     <>
-      {home && <button className="topbar-action home-agents-btn" id="btn-home-agents" onClick={() => { location.hash = homeAgentsHash(location.hash); }}>Agents</button>}
+      {home && agentsButton}
       <ViewToggle home={home} />
-      {home
-        ? <button className="topbar-action" id="btn-settings" aria-label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</button>
-        : <button className="topbar-action" id="btn-agent-menu" aria-label="Agent actions" onClick={menu}>&#8942;</button>}
+      {home ? settingsButton : <button className="topbar-action" id="btn-agent-menu" aria-label="Agent actions" onClick={menu}>&#8942;</button>}
     </>
   ),
 });
+
+// ── A stopped orchestrator's Home ─────────────────────────────────────────────
+
+function StoppedTitle({ name }: { name: string }) {
+  const o = useAppState()?.orchestrators?.find((x) => x.name === name);
+  return <>{orchestratorLabel(o)}<span className="topbar-subtitle home-state stopped">· stopped</span></>;
+}
+
+export const stoppedHomeTopbar = (name: string): Topbar => ({
+  title: <StoppedTitle name={name} />,
+  right: <>{agentsButton}{settingsButton}</>,
+});
+
+/** #/home/<name> while that orchestrator isn't running: its account's agents and Start. Once the
+ *  State shows it running, the shell (ui/App.tsx) opens its running Home in place of this. */
+export function StoppedHome({ name }: { name: string }) {
+  const state = useAppState();
+  const [busy, setBusy] = useState(false);
+  const start = async (): Promise<void> => {
+    setBusy(true); // until the State shows it running
+    try {
+      await apiPost(`/api/orchestrators/${encodeURIComponent(name)}/start`);
+    } catch (err) {
+      setBusy(false);
+      showToast('Could not start the orchestrator', (err as Error).message);
+    }
+  };
+  return (
+    <div id="screen-home-stopped" className="screen-home" style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+      <HomeStatus name={name} state={state} />
+      <div className="home-stopped">
+        <p>{`${orchestratorLabel(state?.orchestrators?.find((o) => o.name === name))} is not running.`}</p>
+        <button className="btn-primary" id="btn-home-start" disabled={busy} onClick={() => { void start(); }}>{busy ? 'Starting…' : 'Start'}</button>
+      </div>
+    </div>
+  );
+}

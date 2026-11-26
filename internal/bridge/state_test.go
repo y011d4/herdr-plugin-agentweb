@@ -428,6 +428,9 @@ func TestFindOrchestrators(t *testing.T) {
 				agents = append(agents, v.Agents)
 			}
 			checkEq(t, jsonOf(t, agents), `[["w0:p1","w0:p3"],["w0:p2","w0:p4"]]`) // p5 has no agent
+			// a stopped orchestrator's Home: the agents of the account it would run under
+			checkEq(t, jsonOf(t, agentsOfAccount(state, accounts, "B")), `["w0:p2","w0:p4"]`)
+			checkEq(t, jsonOf(t, agentsOfAccount(state, accounts, "C")), `[]`)
 			checkEq(t, jsonOf(t, findOrchestrators(state, []OrchestratorDef{{Name: "a", Label: "", Dir: "/o/a"}}, map[string]*string{})[0].Agents), "null")
 		})
 

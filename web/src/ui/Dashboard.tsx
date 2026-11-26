@@ -1,7 +1,7 @@
 /**
  * ui/Dashboard.tsx — the agents list: #/agents, and #/agents/<name> (opened from that orchestrator's
  * Home: its account's agents, with ← Home back to it). One flat list, most recent status change
- * first (dashboardCards), never the orchestrators; those that aren't running get Start buttons atop it.
+ * first (dashboardCards), never the orchestrators (each is started from its own Home).
  *
  * State pushes arrive constantly while the list is read. #screen-agents, the scroll container, stays
  * the same element while the list is shown and the cards are keyed by pane, so a push only rewrites
@@ -9,11 +9,9 @@
  * (a rewrite mid-drag can cancel the scroll); the latest State shows once it lifts.
  */
 import { useEffect, useRef, useState, useSyncExternalStore, type TouchEvent } from 'react';
-import { apiPost } from '../api.ts';
 import { dashboardCards, shownStatus, type DashboardCard } from '../dashboard-group.ts';
-import { showToast } from '../notify.ts';
 import { agentsScope, defaultHome, homeHash, paneRoute } from '../routes.ts';
-import { findPane, lastHome, setStartingHome, store, subscribe } from '../store.ts';
+import { findPane, lastHome, store, subscribe } from '../store.ts';
 import type { AppState, OrchestratorView } from '../types.ts';
 import type { Topbar } from './App.tsx';
 import { openNewAgent } from './Modals.tsx';
@@ -47,20 +45,9 @@ function relativeTime(ms: number): string {
 
 const openPane = (paneId: string): void => { location.hash = paneRoute(store.appState, paneId); };
 
-async function startOrchestrator(name: string): Promise<void> {
-  setStartingHome(name); // the button shows it's starting; the shell (ui/App.tsx) opens its Home once it runs
-  try {
-    await apiPost(`/api/orchestrators/${encodeURIComponent(name)}/start`);
-  } catch (err) {
-    setStartingHome(null);
-    showToast('Could not start the orchestrator', (err as Error).message);
-  }
-}
-
 /** The list for `hash` (#/agents or #/agents/<name>). */
 export function Dashboard({ hash }: { hash: string }) {
   const [state, setState] = useState(store.appState);
-  const startingHome = useSyncExternalStore(subscribe, () => store.startingHome);
   const touching = useRef(false);
   useEffect(() => {
     const apply = (): void => { if (!touching.current) setState(store.appState); };
@@ -79,20 +66,8 @@ export function Dashboard({ hash }: { hash: string }) {
   }
   const { workspaces = [] } = state;
   const cards = agentCards(state, agentsScope(hash, state));
-  const stopped = (state.orchestrators ?? []).filter((o) => !o.paneId);
   return (
     <div id="screen-agents" data-ready="1" onTouchStart={() => { touching.current = true; }} onTouchEnd={lift} onTouchCancel={lift}>
-      {stopped.length > 0 && (
-        <div className="orch-start">
-          <span className="orch-start-label">Start</span>
-          {stopped.map((o) => (
-            <button key={o.name} className="orch-start-btn" data-orch={o.name} disabled={startingHome === o.name}
-              onClick={() => { void startOrchestrator(o.name); }}>
-              {`${o.label || o.name}${startingHome === o.name ? ' …' : ''}`}
-            </button>
-          ))}
-        </div>
-      )}
       {workspaces.length === 0 ? <div className="empty-state">No workspaces found.</div>
         : cards.length === 0 ? <div className="empty-state">No active agents.</div>
         : <div className="agent-list">{cards.map((c) => <Card key={c.pane.paneId} card={c} />)}</div>}

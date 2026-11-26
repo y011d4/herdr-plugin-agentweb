@@ -409,12 +409,6 @@ func findOrchestrators(s *State, defs []OrchestratorDef, accounts map[string]*st
 			}
 		}
 	}
-	var agentPanes []string
-	for _, id := range s.paneOrder {
-		if s.paneByID[id].Agent != nil {
-			agentPanes = append(agentPanes, id)
-		}
-	}
 	views := make([]OrchestratorView, len(defs))
 	for i, d := range defs {
 		var account *string
@@ -423,14 +417,20 @@ func findOrchestrators(s *State, defs []OrchestratorDef, accounts map[string]*st
 		}
 		var agents []string // null: its account isn't known
 		if account != nil && *account != "" {
-			agents = []string{}
-			for _, id := range agentPanes {
-				if a := accounts[id]; a != nil && *a == *account {
-					agents = append(agents, id)
-				}
-			}
+			agents = agentsOfAccount(s, accounts, *account)
 		}
 		views[i] = OrchestratorView{Name: d.Name, Label: d.Label, PaneID: paneIDs[i], Agents: agents}
 	}
 	return views
+}
+
+// agentsOfAccount lists the agent panes of account (never null), in pane order.
+func agentsOfAccount(s *State, accounts map[string]*string, account string) []string {
+	agents := []string{}
+	for _, id := range s.paneOrder {
+		if a := accounts[id]; s.paneByID[id].Agent != nil && a != nil && *a == account {
+			agents = append(agents, id)
+		}
+	}
+	return agents
 }

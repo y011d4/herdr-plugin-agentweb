@@ -157,3 +157,19 @@ func TestStartOrchestrator(t *testing.T) {
 		})
 	})
 }
+
+func TestExpectedAccount(t *testing.T) {
+	// its env's config dir decides, whatever its dir says
+	def := testOrchestratorDef(func(d *OrchestratorDef) { d.Env["CLAUDE_CONFIG_DIR"] = "/cfg/work" })
+	checkEq(t, expectedAccount(def), accountForConfigDir("/cfg/work", ""))
+	// without one, a dir nothing can be read from (direnv fails on it) is the default account
+	if _, read := expectedAccountRead(def); !read {
+		t.Error("an env-set account counts as read")
+	}
+	def = testOrchestratorDef(func(d *OrchestratorDef) { d.Dir = filepath.Join(t.TempDir(), "missing") })
+	checkEq(t, expectedAccount(def), accountForConfigDir("", ""))
+	// ...standing in, not read: a refresh keeps the account it read before
+	if _, read := expectedAccountRead(def); read {
+		t.Error("the default standing in for a dir direnv can't read counts as not read")
+	}
+}

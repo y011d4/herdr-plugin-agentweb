@@ -100,8 +100,12 @@ All in `internal/bridge/` (one package):
   `orchestratorPaneId` = the first running one for older clients). Typically one per Claude account. Status events carry no cwd, so an
   agent appearing in an existing pane triggers a re-snapshot (a `cd` before launch must count).
   A fresh app open (empty hash) lands on a **Home** (`#/home/<name>`; bare `#/home` = the one used
-  last on this phone, else the first running): the pane view in `homeMode` — a switcher between
-  running orchestrators (2+), a
+  last on this phone, running or not, else the first running, else the first configured). A stopped
+  orchestrator's Home (`StoppedHome`, no pane) shows its account's agents and **Start** (the only
+  Start: the list has none); its account is `expectedAccount(def)` (the same rule `startOrchestrator`
+  checks against), found once in the background at bridge start. A running one's is the pane view in
+  `homeMode` (Stop leaves the Home stopped; a Clear holds it ≤8s for the replacement) — a switcher
+  between the configured orchestrators (2+; stopped ones dimmed), a
   status bar of its account's agents (blocked chips + counts, `homeSummary`; no orchestrators), dialogue-only chat
   (`conversationItems` hides tools/injected turns), a "doing now" line (`latestActivity`) and a
   composer (the terminal + quick keys stay one `>_` tap away — the only way to send Esc/Ctrl+C, and
