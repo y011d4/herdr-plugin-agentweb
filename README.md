@@ -23,9 +23,9 @@ mobile-first PWA:
   scrollback by swiping down, multiline input, and quick keys
   (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …). On a PC's browser, Enter sends and
   Shift+Enter inserts a newline; on a phone, Enter inserts a newline and Send sends
-- Live updates over WebSocket (sub-second); notifications when an agent
-  becomes blocked or done — tap to jump to the pane, swipe right to dismiss, or
-  Clear all to dismiss the whole stack
+- Live updates over WebSocket (sub-second); OS notifications (Settings) when an
+  agent becomes blocked or done while the app is in the background — tap to jump
+  to the pane
 - No accounts, no cloud, no third-party services. Everything stays on your machine;
   remote access is your choice of transport — a reverse proxy, a tunnel, or a VPN.
 
