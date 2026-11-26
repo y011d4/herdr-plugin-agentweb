@@ -35,11 +35,11 @@ let unmount: () => Promise<void>;
 let container: HTMLElement;
 
 /** The pane screen as mounted: its topbar's slots, then the screen. */
-async function show(paneId: string, home = false, back = '#/agents'): Promise<void> {
+async function show(paneId: string, home = false, back = '#/agents', name = home ? orchestratorOfPane(store.appState, paneId)?.name : undefined): Promise<void> {
   store.view.activePaneId = paneId;
   store.view.homeMode = home;
   const t = paneTopbar(paneId, home, back, () => {});
-  ({ container, unmount } = await render(<><div id="tb">{t.left}{t.title}{t.right}</div><Pane paneId={paneId} home={home} name={home ? orchestratorOfPane(store.appState, paneId)?.name : undefined} /></>));
+  ({ container, unmount } = await render(<><div id="tb">{t.left}{t.title}{t.right}</div><Pane paneId={paneId} home={home} name={name} /></>));
 }
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => container.querySelector<T>(sel)!;
 const ta = () => $<HTMLTextAreaElement>('#pane-input');
@@ -150,7 +150,7 @@ describe('composer', () => {
   });
 
   it('keeps an unsent draft per pane and per Home across leaving and reopening (stored: a reload too) until it is sent', async () => {
-    const reopen = async (paneId: string, home = false) => { await unmount(); await show(paneId, home); };
+    const reopen = async (paneId: string, home = false, name?: string) => { await unmount(); await show(paneId, home, '#/agents', name); };
     await show('p2');
     await type('p2 draft');
     await reopen('p1');
@@ -167,17 +167,22 @@ describe('composer', () => {
     await reopen('p2');
     assert.equal(ta().value, 'p2 draft', 'a failed send keeps it');
     await key({});
-    await reopen('p2'); // left and reopened while it is sent: shows it, and empties once it went
-    assert.equal(ta().value, 'p2 draft');
+    await reopen('p2');
+    assert.equal(ta().value, '', 'reopened while it is sent: the send took it, so it is not sent twice');
     await answer('POST /api/panes/p2/input', { ok: true });
     assert.equal(ta().value, '');
     await reopen('p2');
     assert.equal(ta().value, '', 'sent: forgotten');
-    await reopen('p4', true);
-    assert.equal(ta().value, 'home draft');
     await reopen('p1');
     assert.equal(ta().value, 'p1 draft');
+    await reopen('p4', true);
+    assert.equal(ta().value, 'home draft');
     assert.deepEqual(JSON.parse(localStorage.getItem('herdr_drafts')!), { 'pane:p1': 'p1 draft', 'home:personal': 'home draft' });
+    await key({});
+    await reopen('p9', true, 'personal'); // a Clear gave the Home a new pane while it was sent
+    assert.equal(ta().value, '');
+    await answer('POST /api/panes/p4/input', { error: { code: 'x', message: 'boom' } }, 500);
+    assert.equal(ta().value, 'home draft', 'a failed send shows it in the Home again');
   });
 
   it("drops the drafts of panes and orchestrators the State no longer has, but not while herdr is out of reach", async () => {

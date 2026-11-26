@@ -38,6 +38,7 @@ const setToggle = (t: Partial<typeof toggle>): void => { toggle = { ...toggle, .
 const useToggle = () => useSyncExternalStore(subscribe, () => toggle);
 const useAppState = (): AppState | null => useSyncExternalStore(subscribe, () => store.appState);
 let shownInput: HTMLTextAreaElement | null = null; // the composer on screen
+let shownKey = ''; // and its draft's key (drafts.ts)
 
 /** A new State: the answer panel follows the open pane's status. */
 export function paneViewOnState(): void {
@@ -291,6 +292,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
   useLayoutEffect(() => {
     const t = input.current!;
     shownInput = t;
+    shownKey = key;
     const draft = keptTasks.draft(paneId) ?? getDraft(key);
     if (draft) {
       t.value = draft;
@@ -308,6 +310,8 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
     sendingImages.current = sent.length > 0; // an upload takes a while: a second tap mustn't send them twice
     const kept = keptTasks.beginSend(paneId, text); // false unless the pane has a kept task
     if (kept) t.disabled = true;
+    // the send takes the draft: a composer reopened meanwhile starts empty, so it can't send it again
+    if (text) setDraft(key, '');
     let restored: string | null = null;
     try {
       // clear:true wipes the pane's composer first so this message submits on its own — never
@@ -318,18 +322,24 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
       const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
       await (hl ? orchestratorPost(hl, 'send', sent.length ? { text, images: sent } : { text }) : apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) }));
       if (kept) keptTasks.finishSend(paneId, true);
-      // clear on success, but keep text typed mid-send: here, and in a view reopened meanwhile (it showed the draft)
-      for (const x of [t, store.view.activePaneId === paneId ? shownInput : null]) {
-        if (x?.value === text) {
-          x.value = '';
-          autoGrow(x);
-        }
+      if (t.value === text) { // clear on success, but keep text typed mid-send
+        t.value = '';
+        autoGrow(t);
       }
-      if (getDraft(key) === text) setDraft(key, '');
       if (sent.length) setImages((cur) => cur.filter((i) => !sent.includes(i))); // and images added mid-send
       paneView?.echo();
     } catch (err) {
       if (kept) restored = keptTasks.finishSend(paneId, false);
+      // the draft again, unless something new was typed meanwhile; a composer reopened empty under its
+      // key (a Home's survives a Clear's new pane) shows it
+      if (text && !getDraft(key)) {
+        setDraft(key, text);
+        const live = shownKey === key ? shownInput : null;
+        if (live && !live.value) {
+          live.value = text;
+          autoGrow(live);
+        }
+      }
       showToast('Send failed', (err as Error).message);
     } finally {
       sendingImages.current = false;
