@@ -238,7 +238,7 @@ describe('Home', () => {
 
   it('shows the counts of its account and goes to its list from them and from Agents', async () => {
     await home(fresh());
-    assert.equal($('#tb').textContent!.replace(/[⋮]/g, ''), 'Personal· readyAgents>_');
+    assert.equal($('#tb').textContent, 'Personal· readyAgents>_⚙', "a Home's topbar ends with Settings, no ⋮");
     assert.equal($('.home-counts').textContent, '1 working1 done0 idleAll agents ›'); // p1, p3 (p4 is the orchestrator)
     assert.equal(container.querySelector('.home-switch'), null, 'one orchestrator running: no switcher');
     assert.equal(container.querySelector('.home-attn'), null);
