@@ -254,16 +254,8 @@ func (f *fake) turn(q queued) {
 		f.cancel = cancel
 	}
 	f.mu.Unlock()
-	// The turn stops being the running one before its result goes out: an interrupt that
-	// arrives after the result then overtakes the next queued message, as it should.
-	ended := func() {
-		f.mu.Lock()
-		f.cancel = nil
-		f.mu.Unlock()
-	}
-	defer ended()
 	if skipped { // an interrupt came after it was sent, before its turn began
-		f.aborted("aborted_streaming")
+		f.finish(ctx, aborted("aborted_streaming"))
 		return
 	}
 	f.emit(f.init())
@@ -286,8 +278,7 @@ func (f *fake) turn(q queued) {
 		for i := 1; i <= seconds; i++ {
 			select {
 			case <-ctx.Done():
-				ended()
-				f.aborted("aborted_tools")
+				f.finish(ctx, aborted("aborted_tools"))
 				return
 			case <-time.After(time.Second):
 			}
@@ -297,13 +288,21 @@ func (f *fake) turn(q queued) {
 		}
 		f.emit(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "toolu_slow", "content": "finished"}}}})
 	}
-	if ctx.Err() != nil {
-		ended()
-		f.aborted("aborted_streaming")
-		return
+	f.reply(ctx, "echo: "+text)
+}
+
+// finish emits the turn's terminal result as it stops being the running one, both under f.mu,
+// so an interrupt lands wholly before (the turn ends aborted, whatever it was about to send) or
+// wholly after (it overtakes the next queued message).
+func (f *fake) finish(ctx context.Context, result map[string]any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancel = nil
+	if ctx.Err() != nil && result["subtype"] == "success" {
+		result = aborted("aborted_streaming")
 	}
-	ended()
-	f.reply("echo: " + text)
+	result["session_id"] = f.id
+	f.emit(result)
 }
 
 func assistant(content []any) map[string]any {
@@ -311,19 +310,23 @@ func assistant(content []any) map[string]any {
 		"usage": map[string]any{"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 1990, "output_tokens": 5}}}
 }
 
-func (f *fake) reply(text string) {
+func (f *fake) reply(ctx context.Context, text string) {
+	if ctx.Err() != nil {
+		f.finish(ctx, aborted("aborted_streaming"))
+		return
+	}
 	content := []any{map[string]any{"type": "text", "text": text}}
 	f.emit(assistant(content))
 	f.record(map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "model": "fake", "content": content}})
 	f.emit(map[string]any{"type": "rate_limit_event", "session_id": f.id, "rate_limit_info": map[string]any{"status": "allowed",
 		"unifiedWindows": map[string]any{"five_hour": map[string]any{"utilization": 0.25, "resetsAt": 1795665000, "status": "allowed"},
 			"seven_day": map[string]any{"utilization": 0.5, "resetsAt": 1795928400, "status": "allowed"}}}})
-	f.emit(map[string]any{"type": "result", "subtype": "success", "is_error": false, "terminal_reason": "completed", "result": text,
+	f.finish(ctx, map[string]any{"type": "result", "subtype": "success", "is_error": false, "terminal_reason": "completed", "result": text,
 		"session_id": f.id, "modelUsage": map[string]any{"fake": map[string]any{"contextWindow": 200000}}})
 }
 
-func (f *fake) aborted(reason string) {
-	f.emit(map[string]any{"type": "result", "subtype": "error_during_execution", "is_error": true, "terminal_reason": reason, "session_id": f.id})
+func aborted(reason string) map[string]any {
+	return map[string]any{"type": "result", "subtype": "error_during_execution", "is_error": true, "terminal_reason": reason}
 }
 
 // ask: an AskUserQuestion, then (as when the permission tool isn't used) a can_use_tool
