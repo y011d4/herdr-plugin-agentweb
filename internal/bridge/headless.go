@@ -311,6 +311,9 @@ type headlessState struct {
 	RulesHash   string    `json:"rulesHash,omitempty"`
 	Watches     []hlWatch `json:"watches,omitempty"`
 	Wakes       []string  `json:"wakes,omitempty"` // wake-ups not written to it yet
+	// its completed turns so far, kept across bridge restarts: a phone's seen-done record is
+	// keyed on it, so a count starting over would pass a new completion off as one seen
+	CompletionSeq int64 `json:"completionSeq,omitempty"`
 }
 
 // newHeadlessRunner is def's runner; the server fills in its herdr calls, profiles and
@@ -328,6 +331,7 @@ func newHeadlessRunner(def OrchestratorDef, stateDir, rules string) *headlessRun
 	var saved headlessState
 	if b, err := os.ReadFile(headlessPath(stateDir, def.Name, ".json")); err == nil && json.Unmarshal(b, &saved) == nil && (saved.SessionID == "" || sessionIDRe.MatchString(saved.SessionID)) {
 		r.sessionID, r.wanted, r.interrupted, r.rulesHash, r.saved, r.wakes = saved.SessionID, saved.Wanted, saved.Interrupted, saved.RulesHash, saved.Watches, saved.Wakes
+		r.model.CompletionSeq = saved.CompletionSeq
 	}
 	if kind, msg := r.refusedEnv(); msg != "" {
 		r.model.Status = "error"
@@ -401,7 +405,7 @@ func (r *headlessRunner) persist() {
 		}
 	}
 	slices.SortFunc(watches, func(a, b hlWatch) int { return strings.Compare(a.Pane, b.Pane) })
-	b, _ := json.Marshal(headlessState{r.sessionID, r.wanted, r.interrupted, r.rulesHash, watches, r.wakes})
+	b, _ := json.Marshal(headlessState{r.sessionID, r.wanted, r.interrupted, r.rulesHash, watches, r.wakes, r.model.CompletionSeq})
 	if os.MkdirAll(filepath.Join(r.stateDir, "headless"), 0o700) == nil {
 		writeFile0600(headlessPath(r.stateDir, r.def.Name, ".json"), b)
 	}
@@ -806,9 +810,12 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 	epoch := c.epoch // its own: a Stop or Clear may already have begun the next epoch while it still talks
 	r.lastEvent = time.Now()
 	r.warnings = slices.DeleteFunc(r.warnings, func(w HeadlessWarning) bool { return w.Kind == "silent" })
-	from := r.model.Status
+	from, seq := r.model.Status, r.model.CompletionSeq
 	step := r.model.apply(line, nowMs())
 	to := r.model.Status
+	if r.model.CompletionSeq != seq {
+		r.persist()
+	}
 	for _, w := range step.Warnings {
 		alerts = append(alerts, r.warn(w.Kind, w.Message))
 	}
