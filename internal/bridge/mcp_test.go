@@ -442,3 +442,28 @@ func TestHeadlessQuestionNotReachingTheHome(t *testing.T) {
 		}
 	}
 }
+
+// agent_prompt with nothing to send answers an error at once (and watches nothing).
+func TestHeadlessPromptNeedsText(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	cs, err := mcpClient(t, b.srv.headless["h1"].mcpURL, b.srv.headless["h1"].mcpBearer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, text := range []string{"", "  \n"} {
+		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "agent_prompt", Arguments: map[string]any{"name": "w1", "text": text}})
+		if err != nil || !res.IsError || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "non-empty") {
+			t.Errorf("%q: %v %+v", text, err, res)
+		}
+	}
+	h := b.srv.headless["h1"]
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if n := len(h.watches); n != 0 {
+		t.Errorf("%d watches", n)
+	}
+}

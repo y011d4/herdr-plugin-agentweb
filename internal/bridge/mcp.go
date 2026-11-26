@@ -200,6 +200,9 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{Name: "agent_prompt", Description: "Send one of your account's agents a message (a task, a follow-up, /exit). Don't wait for it: a [yoicks] message wakes you when it finishes or stops for an answer."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in promptIn) (*mcp.CallToolResult, any, error) {
 			r.log("tool agent_prompt %s", in.Name)
+			if strings.TrimSpace(in.Text) == "" {
+				return r.prompt("", in.Name, in.Text), nil, nil // its error, before any herdr call
+			}
 			pane, err := ownAgentPane(r.rpc, in.Name, r.account())
 			if err != nil {
 				return errResult(err)
@@ -222,7 +225,7 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 			if err != nil {
 				return errResult(err)
 			}
-			if in.Task == "" {
+			if strings.TrimSpace(in.Task) == "" {
 				return textResult(started, false), nil, nil
 			}
 			res := r.prompt(pane, in.Name, in.Task)
@@ -401,6 +404,9 @@ func agentState(raw json.RawMessage) (status string, seq int64, cwd string) {
 // prompt sends a worker text and watches it: delivered (the result says so), not
 // delivered (herdr's answer), or not sent because it waits on a startup question.
 func (r *headlessRunner) prompt(pane, name, text string) *mcp.CallToolResult {
+	if strings.TrimSpace(text) == "" { // nothing to send: no watch to wait on
+		return textResult("text must be non-empty", true)
+	}
 	deadline := time.Now().Add(agentReadyTimeout)
 	for {
 		raw, err := r.rpc("agent.get", map[string]any{"target": pane})
