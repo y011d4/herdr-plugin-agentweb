@@ -935,6 +935,19 @@ func TestHeadlessClaudeCheck(t *testing.T) {
 	if n := nAlerts(); n != 2 {
 		t.Errorf("%d alerts: %q", n, alerts)
 	}
+	// Claude Code back on the verified version, updated before an automatic restart: the version warning goes
+	h := b.srv.headless["h1"]
+	h.mu.Lock()
+	h.def.Env["FAKECLAUDE_VERSION"] = verifiedClaudeVersion
+	h.mu.Unlock()
+	b.restarted(t) // a crash, then the automatic restart (not a Clear, which drops every warning)
+	if w := warning(b.view(t), "version"); w != "" {
+		t.Errorf("the verified version still warned: %q", w)
+	}
+	b.srv.checkClaude()
+	if w := warning(b.view(t), "version"); w != "" {
+		t.Errorf("a check brought the version warning back: %q", w)
+	}
 	// a file that isn't a whole check is none; and without a headless entry it isn't read at all
 	os.WriteFile(filepath.Join(state, "canary.json"), []byte(`{"at":1,"ok":fal`), 0o600)
 	b.srv.checkClaude()
