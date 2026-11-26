@@ -198,6 +198,7 @@ describe('App', () => {
     // a Clear: the gap before the replacement holds the Home, the replacement re-routes onto it
     await click($('#btn-home-clear'));
     await click($('#modal-root #cf-ok'));
+    await act(async () => push!({ type: 'state', state: s })); // a push while the old pane is still there
     s.orchestrators[0].paneId = null;
     await act(async () => push!({ type: 'state', state: s }));
     assert.equal(store.view.activePaneId, 'p4', 'held through the gap');
@@ -251,6 +252,11 @@ describe('App', () => {
     await click($('#modal-root #cf-ok'));
     await answer('POST /api/agents/p4/clear', { ok: true, paneId: 'p9' });
     assert.equal(location.hash, '#/home/personal', 'the State routes onto the replacement');
+    const s = fresh();
+    s.orchestrators[0].paneId = 'p1'; // the replacement (a pane the recorded State has)
+    await act(async () => push!({ type: 'state', state: s }));
+    await settle();
+    assert.equal(store.view.activePaneId, 'p1');
   });
 
   it("a Home's Stop button closes its orchestrator's pane after the confirm, and the Home stays, stopped", async () => {

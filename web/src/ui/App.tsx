@@ -137,7 +137,7 @@ function onPaneGone(paneId: string): void {
  *  onto it; none shows the stopped Home, unless a Clear is replacing it (true: either happened). */
 function homeReplaced(hash: string): boolean {
   const id = homeOf(hash, store.appState)?.paneId ?? null;
-  if (id === view.activePaneId) { if (id) stopHoldingHome(); return false; }
+  if (id === view.activePaneId) return false; // unchanged: a Clear in flight keeps holding (homeClearing)
   if (id || !homeClearing) { stopHoldingHome(); handleRoute(); }
   else holdHomeForReplacement(); // gone mid-Clear: the replacement is on its way
   return true;
@@ -316,8 +316,9 @@ async function clearAgentFlow(paneId: string): Promise<void> {
     const res = await apiPost<ClearResponse>(`/api/agents/${encodeURIComponent(paneId)}/clear`);
     showToast('Cleared', 'Started a fresh session');
     // Clearing an orchestrator keeps the user on its Home: the state may not know the
-    // replacement yet, so stay on #/home/<name> and let onStateUpdate re-resolve it.
-    if (view.homeMode) return;
+    // replacement yet, so stay on #/home/<name> and let onStateUpdate re-resolve it. The hold's
+    // timer bounds the Clear's flag too: it ends within 8s even if no gap is ever seen.
+    if (view.homeMode) { if (homeClearing) holdHomeForReplacement(); return; }
     navigate(res.paneId ? paneRoute(store.appState, res.paneId) : '#/agents');
   } catch (err) {
     stopHoldingHome();
