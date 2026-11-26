@@ -93,6 +93,15 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   const listeners = new AbortController();
   const { signal } = listeners;
   let destroyed = false;
+  // A tap on a link while text in the log is selected only ends the selection: on a phone
+  // that tap is how a selection is dismissed, so it mustn't open a tab. (A long press on a
+  // link keeps the browser's own menu: open, copy the link.)
+  chatEl.addEventListener('click', (e) => {
+    const sel = getSelection();
+    if (!sel || sel.isCollapsed || !chatEl.contains(sel.anchorNode) || !(e.target as Element).closest('a')) return;
+    e.preventDefault();
+    sel.removeAllRanges();
+  }, { signal });
 
   // ── Chat view (Claude Code transcript) ──────────────────────────────────────
   // A claude pane can be shown as its structured transcript instead of the raw
