@@ -100,18 +100,6 @@ Claude Code のメモリ、会話の履歴、フォルダの信頼設定もそ�
 `start` はそれが動いているあいだは起動を断ります。手順 1 を飛ばしても、古いブリッジが動き続けることはありません。`HERDR_AGENTWEB_HOST`/`_PORT` は
 `HERDR_YOICKS_HOST`/`_PORT` になりました。
 
-`herdr-yoicks` に移す場合 (任意) は、すべての orchestrator とブリッジを止めてから、
-`~/.local/share/herdr-agentweb` を `~/.local/share/herdr-yoicks` に移します。各 orchestrator の Claude
-アカウント (`~/.claude/projects`、または `$CLAUDE_CONFIG_DIR/projects`) にあるプロジェクトのディレクトリも
-移してください。名前は古いパスの `/`、`.`、`_` を `-` にしたもの
-(`-home-me--local-share-herdr-agentweb-orchestrators-personal`) で、移し先はその `herdr-agentweb` を
-`herdr-yoicks` にした名前です。どれも、まだない名前にだけ移します。こちらを移さなくても headless の
-orchestrator は古いディレクトリから会話を再開します。ただ、古いほうのメモリは読まれなくなり、メモリと
-Clear 後の新しい会話は新しいほうに入ります。
-最後にブリッジを起動します。`bridge.log` に、headless の orchestrator ごとに `started … (--resume)` が
-出ます。TUI の orchestrator は、新しいディレクトリで一度だけフォルダの信頼を尋ねます。既定は
-"No, exit" なので、"Yes, I trust this folder" を選んでください。
-
 ### 前の版に戻す
 
 前のリリースに戻すときは、ブリッジを止め、その版を入れ直して起動します:

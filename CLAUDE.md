@@ -115,7 +115,7 @@ All in `internal/bridge/` (one package):
   `orchestrator.go` writes `<data>/orchestrators/<name>/` (data = `$XDG_DATA_HOME` or
   `~/.local/share`, + `herdr-yoicks`; `herdr-agentweb`, the dir from before the rename, while it
   exists, so the orchestrators' cwds and with them Claude Code's memory/transcripts/folder trust
-  never move: `dataDir`; moving it is by hand, README "Renamed from agentweb") at bridge start and before each start: CLAUDE.md
+  never move: `dataDir`) at bridge start and before each start: CLAUDE.md
   (imports rules.md, then the user's local.md, which is created once and never overwritten),
   rules.md (the bundled `orchestrator/rules.md` with the real yoicks command filled in) and
   `.claude/settings.json` (dontAsk allowlist). It starts (phone Start button →
