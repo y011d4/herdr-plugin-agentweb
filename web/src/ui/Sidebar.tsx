@@ -12,7 +12,7 @@
 import { NavLink, Text } from '@mantine/core';
 import { useSyncExternalStore } from 'react';
 import { homeGroups, orchestratorStatus, shownStatus, type DashboardCard, type HomeGroup } from '../dashboard-group.ts';
-import { openAgent } from '../nav.ts';
+import { go, openAgent } from '../nav.ts';
 import { homeHash } from '../routes.ts';
 import { findPane, store } from '../store.ts';
 import { TopbarIcon, agentCards, cardLocation, cardTitle, orchestratorLabel, useHeldState } from './Dashboard.tsx';
@@ -47,7 +47,7 @@ export function Sidebar() {
       <div className="sticky top-0 z-1 -mx-2 mb-2 flex h-[52px] items-center gap-1 border-b border-(--color-border) bg-(--color-surface) pr-2 pl-4">
         <Text flex={1} fw={700} fz={16}>Yoicks</Text>
         <TopbarIcon data-action="new-agent" label="New agent" onClick={() => { void openNewAgent(); }}>+</TopbarIcon>
-        <TopbarIcon data-action="settings" label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</TopbarIcon>
+        <TopbarIcon data-action="settings" label="Settings" onClick={() => go('#/settings')}>&#9881;</TopbarIcon>
       </div>
       <NavLink href="#/agents" className="sidebar-all rounded-lg" label="All agents" rightSection={cards.length}
         active={hash === '#/agents'} aria-current={current(hash === '#/agents')} />

@@ -109,24 +109,26 @@ function osNotify(title: string, body: string, paneId: string): void {
 
 function showSystemNotification(title: string, body: string, paneId: string): void {
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  // out of the user's sight: the page hidden, or Settings covering this pane
+  const unseen = () => document.hidden || (store.view.settingsOpen && store.view.activePaneId === paneId);
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.getRegistration()
       .then((reg) => {
         // The app may have become visible while getRegistration() resolved; a
         // return-to-visible dismiss would then run before this notification exists.
         // Re-check the same document.hidden gate so a now-visible pane is never
-        // left with a stale OS notification.
-        if (!document.hidden) return;
+        // left with a stale OS notification (one Settings covers isn't seen: kept).
+        if (!unseen()) return;
         if (!reg) { pageNotification(title, body, paneId); return; }
         // showNotification() is itself async: the app can become visible between the
         // check above and when the notification is registered, so a visibilitychange
         // dismiss can run too early and miss it. Once it provably exists, dismiss it
         // if the user is now looking at this very pane.
         return reg.showNotification(title, notificationOptions(body, paneId)).then(() => {
-          if (!document.hidden && store.view.activePaneId === paneId) dismissNotificationsForPane(paneId);
+          if (!unseen() && store.view.activePaneId === paneId) dismissNotificationsForPane(paneId);
         });
       })
-      .catch(() => { if (document.hidden) pageNotification(title, body, paneId); });
+      .catch(() => { if (unseen()) pageNotification(title, body, paneId); });
   } else {
     pageNotification(title, body, paneId);
   }

@@ -6,7 +6,8 @@
  *   #/home/:name    — an orchestrator's Home; #/home opens the last one used
  *   #/pane/:id      — a pane, in a drawer (ui/AgentDrawer.tsx; its body: ui/Pane.tsx, pane-view.ts)
  *                     over the screen it was opened from (view.paneBackRoute), which stays as it is
- *   #/settings      — settings
+ *   #/settings      — Settings, in a sheet (ui/SettingsSheet.tsx) in front of the screen it was opened
+ *                     from, which stays as it is (a Home running on); one overlay at a time
  * What a hash shows is decided in routes.ts (resolveRoute); handleRoute renders it. Each render
  * of a route replaces the screen and its topbar with fresh instances (a new key), so a screen's
  * effects always start over; only the list under a drawer, and back from it, stays as it is.
@@ -21,7 +22,7 @@ import { apiDelete, apiGet, apiPost, getToken, headlessName, loadToken, onUnauth
 import { dismissNotificationsForPane, notifyAgentStatus, notifyOrchestratorAlert, showToast } from '../notify.ts';
 import { closeAgent, closingDrawer, go, openAgent } from '../nav.ts';
 import { openingMode } from '../pane-view.ts';
-import { homeOf, isAgentsRoute, nextPaneBackRoute, nextPaneOverBase, nextSettingsBackRoute, resolveRoute } from '../routes.ts';
+import { homeOf, isAgentsRoute, nextOverlayBase, nextOverlayOverBase, resolveRoute } from '../routes.ts';
 import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, store, subscribe, type View } from '../store.ts';
 import type { AppState, ClearResponse, WsMessage } from '../types.ts';
 import { WIDE_QUERY } from '../theme.ts';
@@ -30,7 +31,8 @@ import { AgentDrawer, type Sheet } from './AgentDrawer.tsx';
 import { Dashboard, dashboardTopbar } from './Dashboard.tsx';
 import { Modals, confirmModal, openRename } from './Modals.tsx';
 import { closePaneView, homeTopbar, Pane, paneViewOnState, resumePaneView, StoppedHome, stoppedHomeTopbar, suspendPaneView, type AgentActions } from './Pane.tsx';
-import { Settings, settingsTopbar } from './Settings.tsx';
+import { Settings } from './Settings.tsx';
+import { SettingsSheet } from './SettingsSheet.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { Toasts } from './Toasts.tsx';
 import { Token } from './Token.tsx';
@@ -73,6 +75,13 @@ function openSheet(paneId: string): void {
   changed();
 }
 
+/** Shows or hides Settings in front of #screen. */
+function setSettingsOpen(open: boolean): void {
+  if (open === view.settingsOpen) return;
+  view.settingsOpen = open;
+  changed();
+}
+
 /** Closes the drawer (its pane's view already stopped: closePaneView); `gone` drops it at once. */
 function closeSheet(gone = false): void {
   if (!sheet?.open && !gone) return;
@@ -85,8 +94,10 @@ export function App() {
   const link = useSyncExternalStore(subscribeShell, () => linkUp);
   const wide = useMediaQuery(WIDE_QUERY, false, { getInitialValueInEffect: false }); // read now: no first paint without it
   const drawer = useSyncExternalStore(subscribeShell, () => sheet);
-  // the screen under an agent's drawer is out of reach, the keyboard's too; a wide screen's sidebar isn't
-  const under = drawer?.open && kind !== 'token' ? true : undefined;
+  const settings = useSyncExternalStore(subscribeShell, () => view.settingsOpen) && kind !== 'token';
+  // the screen under an overlay is out of reach, the keyboard's too; a wide screen's sidebar isn't under a
+  // drawer (Settings is a modal: Mantine's overlay covers the sidebar too)
+  const under = (drawer?.open || settings) && kind !== 'token' ? true : undefined;
   const slot = (content: ReactNode): ReactNode => <Fragment key={key}>{content}</Fragment>;
   return (
     <>
@@ -106,7 +117,8 @@ export function App() {
       </div>
       <main id="screen" inert={under}>{slot(node)}</main>
       <div id="toast-container" aria-live="assertive" aria-atomic="false"><Toasts /></div>
-      {createPortal(<><AgentDrawer sheet={kind === 'token' ? null : drawer} actions={agentActions} /><Modals /></>, document.getElementById('modal-root')!)}
+      {createPortal(<><AgentDrawer sheet={kind === 'token' ? null : drawer} actions={agentActions} />
+        <SettingsSheet open={settings}><Settings toast={showToast} onSignedOut={() => renderTokenScreen()} /></SettingsSheet><Modals /></>, document.getElementById('modal-root')!)}
     </>
   );
 }
@@ -122,7 +134,8 @@ const { view } = store;
 // state push while the pane is open retries. Not while the bridge is cut off from
 // herdr: the pane state shown may be stale.
 function markActivePaneSeen(): void {
-  if (!view.activePaneId || document.hidden || !store.appState?.connected) return;
+  // not a Home under Settings either: out of sight (seen as Settings closes)
+  if (!view.activePaneId || document.hidden || view.settingsOpen || !store.appState?.connected) return;
   const agent = findPane(view.activePaneId)?.pane.agent;
   if (agent?.status !== 'done' || agent.completionSeq == null || store.seenDone[view.activePaneId] === agent.completionSeq) return;
   markPaneSeen(view.activePaneId);
@@ -209,6 +222,18 @@ function onStateUpdate(): void {
     if (homeReplaced(hash)) return;
     markActivePaneSeen(); // the orchestrator may have just finished while on screen
     paneViewOnState();
+  } else if (hash === '#/settings' && view.homeMode) { // a Home running on under Settings
+    const o = homeOf(view.paneBackRoute, store.appState);
+    if (o && o.paneId !== view.activePaneId) { // its orchestrator started, stopped or replaced: drawn afresh under it
+      if (!o.paneId && homeClearing) { holdHomeForReplacement(); return; } // a Clear's gap: the replacement is on its way
+      stopHoldingHome();
+      closePaneView();
+      showHome(o.name, o.paneId, view.paneBackRoute);
+      wsSendWatch();
+      return;
+    }
+    markActivePaneSeen();
+    paneViewOnState();
   }
 }
 
@@ -245,9 +270,12 @@ function holdHomeForReplacement(): void {
   homeLostTimer = setTimeout(() => {
     homeLostTimer = null;
     homeClearing = false;
-    if (!location.hash.startsWith('#/home/') || homeOf(location.hash, store.appState)?.paneId) return; // left, or onStateUpdate re-resolved
+    const covered = location.hash === '#/settings' && view.homeMode; // a Home running on under Settings
+    const hash = covered ? view.paneBackRoute : location.hash;
+    if (!hash.startsWith('#/home/') || homeOf(hash, store.appState)?.paneId) return; // left, or onStateUpdate re-resolved
     showToast('Orchestrator stopped', 'It did not come back after Clear.');
-    handleRoute(); // the stopped Home
+    if (covered) onStateUpdate(); // the stopped Home, drawn afresh under Settings
+    else handleRoute(); // the stopped Home
   }, HOME_REPLACE_GRACE_MS);
 }
 
@@ -258,8 +286,8 @@ function stopHoldingHome(): void {
 }
 
 function handleRoute(e?: Event): void {
-  stopHoldingHome(); // a route rendered afresh (left the Home, or its replacement is in) ends any hold
   if (!getToken()) {
+    stopHoldingHome();
     renderTokenScreen();
     return;
   }
@@ -267,6 +295,22 @@ function handleRoute(e?: Event): void {
   routeRendered = true;
   const from = e instanceof HashChangeEvent ? new URL(e.oldURL).hash : null;
   const route = resolveRoute(location.hash, store.appState, lastHome());
+  if (route.kind === 'settings') {
+    openSettingsRoute(from);
+    wsSendWatch();
+    return;
+  }
+  if (route.kind !== 'redirect') setSettingsOpen(false);
+  // back from Settings over a Home, which ran on under it: it stays as it is, in sight again (also while a
+  // Clear's replacement is on its way: the hold goes on)
+  if (route.kind === 'home' && from === '#/settings' && view.homeMode && shown.hash === location.hash
+    && (view.activePaneId === route.paneId || (homeClearing && !route.paneId))) {
+    if (view.activePaneId) dismissNotificationsForPane(view.activePaneId);
+    markActivePaneSeen();
+    wsSendWatch();
+    return;
+  }
+  stopHoldingHome(); // a route rendered afresh (left the Home, or its replacement is in) ends any hold
 
   // Back from a drawer onto the Home under it, its orchestrator's pane the same: its view goes on as it
   // was, nothing drawn afresh (a new view would empty its chat until the transcript came again).
@@ -308,23 +352,10 @@ function handleRoute(e?: Event): void {
     routeRendered = false;
     show('loading', <Center flex={1}><Loader size={20} /></Center>, BARE);
   } else if (route.kind === 'home') {
-    view.homeMode = true;
-    view.activePaneId = route.paneId;
-    try { localStorage.setItem(STORAGE_HOME, route.name); } catch { /* memory-only */ }
-    if (route.paneId) {
-      dismissNotificationsForPane(route.paneId);
-      markActivePaneSeen();
-      renderHome(route.paneId, route.name);
-    } else {
-      // a headless one's warnings offer Clear while stopped too (a fresh session)
-      show('pane', <StoppedHome name={route.name} clear={() => { void clearAgentFlow(`hl:${route.name}`); }} />, stoppedHomeTopbar(route.name), location.hash);
-    }
-  } else if (route.kind === 'agents') {
-    // back from a drawer over it, the list stays as it was: where it was scrolled to
-    if (shown.hash !== location.hash) showList(location.hash);
+    showHome(route.name, route.paneId, location.hash);
   } else {
-    view.settingsBackRoute = nextSettingsBackRoute(from, view.settingsBackRoute);
-    show('settings', <Settings toast={showToast} onSignedOut={() => renderTokenScreen()} />, settingsTopbar(view.settingsBackRoute), location.hash);
+    // back from an overlay over it, the list stays as it was: where it was scrolled to
+    if (shown.hash !== location.hash) showList(location.hash);
   }
 
   wsSendWatch(); // sync the server-side pane watch with the current route
@@ -332,15 +363,47 @@ function handleRoute(e?: Event): void {
 
 const showList = (hash: string): void => show('agents', <Dashboard hash={hash} />, dashboardTopbar(hash), hash);
 
+/** #/settings: Settings in front of the screen it was opened from, as it is (a Home's view running on),
+ *  else in front of the list, drawn now. Opened from a pane's drawer, in the drawer's place (it replaced
+ *  the drawer's entry: nav.ts's go), over the drawer's screen. */
+function openSettingsRoute(from: string | null): void {
+  setSettingsOpen(true); // first: a Home drawn under it is out of sight (markActivePaneSeen)
+  if (from === null && shown.hash === view.paneBackRoute) return; // drawn again with no hash change: as it is
+  let base = nextOverlayBase(from, view.paneBackRoute);
+  if (sheet?.open) { // one overlay at a time
+    closePaneView(); // the drawer's
+    view.activePaneId = null;
+    view.homeMode = false;
+    closeSheet();
+    // the drawer's Home under it, its view waiting: it goes on under Settings as it was (drawn afresh when
+    // its orchestrator's pane changed meanwhile)
+    const o = base.startsWith('#/home/') && shown.hash === base ? homeOf(base, store.appState) : undefined;
+    if (o && coveredHome?.hash === base && coveredHome.paneId === o.paneId && resumePaneView()) {
+      view.homeMode = true;
+      view.activePaneId = o.paneId;
+    } else if (o) showHome(o.name, o.paneId, base);
+    coveredHome = null;
+  }
+  if (shown.hash !== base) {
+    closePaneView();
+    view.activePaneId = null;
+    view.homeMode = false;
+    if (!isAgentsRoute(base)) base = '#/agents'; // a Home only as it is on show
+    showList(base);
+  }
+  view.paneOverBase = nextOverlayOverBase(from, base, view.paneOverBase);
+  view.paneBackRoute = base;
+}
+
 /** #/pane/<id>: the pane in the drawer, over the screen it was opened from (a Home or a list, left as it
  *  is: a Home's view stopped, its chat as it was), else over the list, drawn now. */
 function openPaneRoute(paneId: string, from: string | null): void {
-  let base = nextPaneBackRoute(from, view.paneBackRoute);
+  let base = nextOverlayBase(from, view.paneBackRoute);
   if (shown.hash !== base) {
     if (!isAgentsRoute(base)) base = '#/agents'; // a Home only as it is on show (one view at a time)
     showList(base);
   }
-  view.paneOverBase = nextPaneOverBase(from, base, view.paneOverBase);
+  view.paneOverBase = nextOverlayOverBase(from, base, view.paneOverBase);
   view.paneBackRoute = base;
   view.activePaneId = paneId;
   // A pane view mounts after the route's watch goes out (handleRoute's wsSendWatch): set the mode it
@@ -358,6 +421,7 @@ function renderTokenScreen(message?: string): void {
   closePaneView();
   view.activePaneId = null;
   closeSheet(true);
+  setSettingsOpen(false);
   show('token', <Token message={message} onToken={signIn} />);
 }
 
@@ -439,10 +503,21 @@ async function stopAgentFlow(paneId: string): Promise<void> {
 
 // ── A running Home ────────────────────────────────────────────────────────────
 
-function renderHome(paneId: string, name: string): void {
-  view.paneViewMode = openingMode(paneId); // as openPaneRoute's
-  const actions = { clear: () => { void clearAgentFlow(paneId); }, stop: () => { void stopAgentFlow(paneId); } };
-  show('pane', <Pane paneId={paneId} home actions={actions} name={name} />, homeTopbar(paneId), location.hash);
+/** The Home `hash` (#/home/<name>): its orchestrator's pane running (`paneId`), else stopped. */
+function showHome(name: string, paneId: string | null, hash: string): void {
+  view.homeMode = true;
+  view.activePaneId = paneId;
+  try { localStorage.setItem(STORAGE_HOME, name); } catch { /* memory-only */ }
+  if (paneId) {
+    if (!view.settingsOpen) dismissNotificationsForPane(paneId); // under Settings: as it closes
+    markActivePaneSeen();
+    view.paneViewMode = openingMode(paneId); // as openPaneRoute's
+    const actions = { clear: () => { void clearAgentFlow(paneId); }, stop: () => { void stopAgentFlow(paneId); } };
+    show('pane', <Pane paneId={paneId} home actions={actions} name={name} />, homeTopbar(paneId), hash);
+  } else {
+    // a headless one's warnings offer Clear while stopped too (a fresh session)
+    show('pane', <StoppedHome name={name} clear={() => { void clearAgentFlow(`hl:${name}`); }} />, stoppedHomeTopbar(name), hash);
+  }
 }
 
 // ── Startup ───────────────────────────────────────────────────────────────────
@@ -509,7 +584,7 @@ export function start(): void {
   // re-reads its screen or transcript from its own listener, pane-view.ts)
   document.addEventListener('visibilitychange', () => {
     if (view.paneViewMode !== 'chat') wsSendWatch(); // pause/resume the pane watch
-    if (document.hidden || !view.activePaneId) return;
+    if (document.hidden || !view.activePaneId || view.settingsOpen) return; // a Home under Settings: as it closes
     // Returning to a pane that's already open (app switch, no route change) won't
     // fire handleRoute, so clear any OS notification raised for it while hidden.
     dismissNotificationsForPane(view.activePaneId);
