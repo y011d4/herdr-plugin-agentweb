@@ -279,6 +279,7 @@ with defaults, is:
   "port": 8390,
   "public_url": null,
   "notify_url": null,
+  "pr_watch": false,
   "orchestrators": [
     { "name": "default", "label": "", "env": {} }
   ],
@@ -329,6 +330,12 @@ with defaults, is:
   your tailnet, point the ntfy Android app at the same topic.
 - `canary` — `false` turns off `scripts/claude-canary.sh`, the periodic check of Claude Code for
   headless orchestrators (see [Checking Claude Code](#checking-claude-code-for-headless-mode)).
+- `pr_watch` — `true` lets headless orchestrators notice merged PRs by themselves. Once a minute the
+  bridge asks your `gh` (its login, as on the PC) for the state of the github.com PR links on their
+  to-do lists, all in one GraphQL call. A merged or closed PR's item is removed and its orchestrator
+  is told (`[yoicks] PR merged: <url>`), so it can go on (a deploy its local rules allow, cleaning up
+  the worker). Needs `gh` on the bridge's PATH and logged in (`gh auth status`); when it fails, each
+  Home with a PR on its list is alerted once per error. Off by default: then nothing goes to GitHub.
 
 **Applying changes:** the config is read once at startup, so restart the bridge
 after editing — `herdr plugin action invoke y011d4.yoicks.stop`, then `…start`.
@@ -423,7 +430,8 @@ fresh session); the Home's warnings and Settings show the same steps.
   then your only line of defense. The token is 128-bit (not brute-forceable), but
   treat the connect URL as a secret: it also rides in the query string, so it can
   land in reverse-proxy access logs. A VPN transport avoids that exposure.
-- No telemetry, no external requests (unless you opt into `notify_url`).
+- No telemetry, no external requests (unless you opt into `notify_url`, or `pr_watch`: then your
+  `gh` asks GitHub for the state of the PRs on the headless orchestrators' to-do lists, nothing more).
 - Anyone with the token can read agent output and type into your panes — treat the
   URL like an SSH key. Rotate by deleting `token` in the state dir and restarting.
   Tokens are 32 hex chars (128-bit); tokens created by older versions were 64 and
@@ -565,7 +573,8 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   transitions, and `{"type":"orchestrator_alert","name","kind","message"}` for a headless
   orchestrator's new warning (once per session and kind; also to ntfy when `notify_url` is set; `name` `""`
   with `kind` `"canary"`: a failed Claude Code check, once; `kind` `"todo"`: to-do items come due, each
-  once, their text as `message`, one alert per Home). A
+  once, their text as `message`, one alert per Home; `kind` `"github"`: `pr_watch`'s gh failing, once per
+  error, to each Home with a PR on its list). A
   headless orchestrator's working → done and → blocked come as `agent_status` with `paneId: "hl:<name>"`
   and its label as `workspaceLabel`. `{"type":"watch_transcript","paneId":…}` starts a live tail that
   pushes `{"type":"transcript_items",…}` (`reset` rebuilds, else appends);

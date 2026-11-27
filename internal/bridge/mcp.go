@@ -740,6 +740,16 @@ func (r *headlessRunner) tell(w *hlWatch, line, status string, seq int64, end bo
 	return true
 }
 
+// notice queues line as a wake-up of the bridge's own (the PR watch's), saved like a worker's:
+// one queued while it is stopped is written at its next start.
+func (r *headlessRunner) notice(line string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.wakes = append(r.wakes, "[yoicks] "+line)
+	r.scheduleWakes()
+	r.persist()
+}
+
 // retryWatch: a broken wait is re-armed (herdr restarting, say) unless the watch ended or
 // its agent is gone.
 func (r *headlessRunner) retryWatch(ctx context.Context, w *hlWatch, err error) bool {
