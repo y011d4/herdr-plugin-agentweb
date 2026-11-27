@@ -180,5 +180,5 @@ export function TopbarIcon({ label, children, ...rest }: { label: string; childr
 
 /** A topbar's way back (to a Home, the list): the accent's text, 44px tall, flush with the bar's left edge. */
 export function BackButton({ label, children, onClick }: { label: string; children: string; onClick: () => void }) {
-  return <Button className="topbar-back -ml-2" variant="subtle" h={44} px={8} fz={16} fw={400} aria-label={label} onClick={onClick}>{children}</Button>;
+  return <Button className="topbar-back -ml-2 min-w-11 text-(--color-accent) hover:text-(--color-text)" variant="subtle" h={44} px={8} fz={16} fw={400} aria-label={label} onClick={onClick}>{children}</Button>;
 }
