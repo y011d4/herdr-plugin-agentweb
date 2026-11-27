@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { StrictMode, act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -16,7 +16,7 @@ import type { AppState, WsMessage } from '../src/types.ts';
 import { WIDE_QUERY } from '../src/theme.ts';
 import { App, start } from '../src/ui/App.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
-import { fakeMedia, mantine } from './render.ts'; // and the act environment
+import { fakeMedia, mantine, settle } from './render.ts'; // and the act environment (settle: on the fake timers)
 
 // The socket: the shell's message handler (the first to subscribe; pane views come later), and each
 // watch sent (the pane, its mode, hidden).
@@ -36,7 +36,6 @@ vi.stubGlobal('fetch', (url: string, init: RequestInit = {}) => new Promise((res
 }));
 // A phone's width until a test says otherwise: no PC sidebar.
 const setWide = fakeMedia(WIDE_QUERY, false);
-const settle = (ms = 20): Promise<void> => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
 /** Answers every open request `${method} ${url}` containing `match` (StrictMode starts a pane's view twice). */
 async function answer(match: string, body: unknown, status = 200): Promise<void> {
   const open = reqs.filter((q) => !q.answered && `${q.method} ${q.url}`.includes(match));
@@ -71,6 +70,7 @@ Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: s
 let hidden = false;
 Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
 
+beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); });
 afterEach(() => {
   vi.useRealTimers();
   clearToasts();
@@ -189,12 +189,10 @@ describe('App', () => {
     await go('#/home/personal');
     await click($('#btn-home-clear'));
     await click($('#modal-root #cf-ok'));
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const r = reqs.find((q) => !q.answered && q.method === 'POST' && q.url === '/api/agents/p4/clear')!;
     await act(async () => { r.answered = true; r.answer(200, { ok: true, paneId: 'p8' }); for (let i = 0; i < 20; i++) await Promise.resolve(); });
     await act(async () => { vi.advanceTimersByTime(8_000); }); // the old pane still listed all along
     assert.equal(store.view.activePaneId, 'p4');
-    vi.useRealTimers();
     const s = fresh();
     s.orchestrators[0].paneId = null; // it exits later (not a Clear)
     await act(async () => push!({ type: 'state', state: s }));
@@ -234,7 +232,6 @@ describe('App', () => {
     // a Clear whose replacement never shows: the stopped Home after 8s
     await click($('#btn-home-clear'));
     await click($('#modal-root #cf-ok'));
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     s.orchestrators[0].paneId = null;
     await act(async () => push!({ type: 'state', state: s }));
     await act(async () => { vi.advanceTimersByTime(7_999); });
@@ -242,7 +239,6 @@ describe('App', () => {
     assert.deepEqual(toastTitles().filter((t) => t === 'Orchestrator stopped'), []);
     await act(async () => { vi.advanceTimersByTime(1); });
     assert.ok(toastTitles().includes('Orchestrator stopped'));
-    vi.useRealTimers();
     await settle();
     assert.equal(location.hash, '#/home/personal');
     assert.ok($('#screen #screen-home-stopped'));
