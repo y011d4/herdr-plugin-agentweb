@@ -148,10 +148,27 @@ func TestTodoStore(t *testing.T) {
 	if changes != 3 {
 		t.Errorf("%d changes", changes)
 	}
-	// a broken file is an empty list
-	os.WriteFile(filepath.Join(state, "todos", "a.json"), []byte("{"), 0o600)
-	if items := open().Items("a"); len(items) != 0 {
-		t.Errorf("%v", items)
+	// a file that can't be parsed shows an empty list that takes no change: a write would replace it
+	broken := filepath.Join(state, "todos", "a.json")
+	os.WriteFile(broken, []byte("{"), 0o600)
+	s = open()
+	if items, _, err := s.Apply("a", []todoAdd{{Text: "new"}}, nil, now); len(s.Items("a")) != 0 || err == nil || !strings.Contains(err.Error(), "fix or remove it") {
+		t.Errorf("%v %v", items, err)
+	}
+	// a read or a done-only call names the file too, rather than "empty" or "already gone"
+	for _, done := range [][]string{nil, {"0a0b0c"}} {
+		if _, _, err := s.Apply("a", nil, done, now); err == nil || !strings.Contains(err.Error(), broken) {
+			t.Errorf("done %v: %v", done, err)
+		}
+	}
+	if found, err := s.Done("a", "0a0b0c"); found || err == nil {
+		t.Errorf("Done: %v %v", found, err)
+	}
+	if got, _ := os.ReadFile(broken); string(got) != "{" {
+		t.Errorf("written over: %s", got)
+	}
+	if _, _, err := s.Apply("b", []todoAdd{{Text: "new"}}, []string{s.Items("b")[0].ID}, now); err != nil {
+		t.Errorf("b: %v", err)
 	}
 }
 
