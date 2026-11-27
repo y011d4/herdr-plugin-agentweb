@@ -10,18 +10,13 @@ name: Screenshots
 # PNGs the manifest names, checks them, pushes them to refs/screenshots/pr-<n> (outside refs/heads: not in a
 # clone, not in the branch list; each run replaces the last) and points the comment at that commit through
 # raw.githubusercontent.com. Dependabot's PRs get the write token through the jobs' `permissions` too.
+#
+# Every PR push runs it, not only those a `paths` filter would match: that filter compares the whole PR with main,
+# so a push taking the PR's last web change back wouldn't run it, and the comment would go on showing the change.
+# render looks at the merge's diff itself and, when the web UI didn't change, shoots nothing (seconds).
 on:
   pull_request:
     branches: [main]
-    paths:
-      - web/**
-      - vite.config.ts
-      - package.json
-      - package-lock.json
-      - tsconfig*.json
-      - tools/webcheck.ts
-      - tools/shots-fixture.ts
-      - .github/workflows/screenshots.yml
 
 permissions: {}
 
@@ -45,7 +40,20 @@ jobs:
           fetch-depth: 2
           persist-credentials: false
 
+      # what the shots depend on; without a change there, an empty manifest: publish then only brings an earlier
+      # comment up to date
+      - name: Did the web UI change?
+        id: diff
+        run: |
+          if git diff --quiet HEAD^1 HEAD -- web vite.config.ts package.json package-lock.json 'tsconfig*.json' \
+            tools/webcheck.ts tools/shots-fixture.ts .github/workflows/screenshots.yml; then
+            mkdir -p "$RUNNER_TEMP/shots" && echo '{"shots": []}' > "$RUNNER_TEMP/shots/manifest.json"
+          else
+            echo "web=1" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Node.js
+        if: steps.diff.outputs.web
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json # its engines.node
@@ -53,9 +61,11 @@ jobs:
 
       # --ignore-scripts as in ci.yml. No tsc: ci.yml type-checks, the shots need the build only.
       - name: Build the web UI after the PR
+        if: steps.diff.outputs.web
         run: npm ci --ignore-scripts && npx vite build
 
       - name: Build the web UI before it
+        if: steps.diff.outputs.web
         run: |
           git worktree add "$RUNNER_TEMP/before" HEAD^1
           cd "$RUNNER_TEMP/before"
@@ -64,6 +74,7 @@ jobs:
 
       # the PR's harness and fixture shoot both builds: only the web build differs
       - name: Shoot
+        if: steps.diff.outputs.web
         run: node tools/webcheck.ts shots --before "$RUNNER_TEMP/before/web/dist" --after web/dist --out "$RUNNER_TEMP/shots"
 
       - name: Upload the shots
@@ -143,8 +154,10 @@ jobs:
                 cell() { if [[ -f $pub/$n.$1.png ]]; then echo "<img src=\"https://raw.githubusercontent.com/$REPO/$sha/$n.$1.png\" width=\"$w\">"; else echo "(none)"; fi; }
                 printf '\n<details open><summary><code>%s</code></summary>\n\n| before | after |\n| --- | --- |\n| %s | %s |\n\n</details>\n' "$n" "$(cell before)" "$(cell after)"
               done
-            else
+            elif (( total )); then
               echo "**UI screenshots**: no screen changed ($total shots, ${HEAD_SHA:0:7})."
+            else
+              echo "**UI screenshots**: the PR no longer changes the web UI (${HEAD_SHA:0:7})."
             fi
             if (( ${#notready[@]} )); then printf '\nNot ready within 10 s (shot anyway): %s\n' "${notready[*]}"; fi
             if (( ${#same[@]} )); then printf '\n<details><summary>Unchanged (%s)</summary>\n\n%s\n\n</details>\n' "${#same[@]}" "${same[*]}"; fi
