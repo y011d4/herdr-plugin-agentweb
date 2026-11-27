@@ -34,9 +34,11 @@ const at = (text: string, screen: string | null = '<span>screen</span>'): PanelP
 // pane-view.ts's side: what the panel tells it, and the prompt it shows.
 let answered: Array<{ id: string; chat: boolean }>;
 let rereads: number;
+let modes: string[];
 const view = {
   answered: (id: string, chat: boolean, post: Promise<unknown>) => { answered.push({ id, chat }); post.catch(() => {}); },
   reread: async () => { rereads++; },
+  setMode: (mode: 'terminal' | 'chat') => { modes.push(mode); },
 };
 let show: (p: PanelPrompt) => void;
 function Host({ initial }: { initial: PanelPrompt }) {
@@ -56,6 +58,7 @@ beforeEach(() => {
   reqs = [];
   answered = [];
   rereads = 0;
+  modes = [];
   unmount = async () => {};
   vi.stubGlobal('fetch', (url: string, init: RequestInit = {}) => new Promise((res) => {
     reqs.push({ method: init.method ?? 'GET', url, body: init.body === undefined ? undefined : JSON.parse(String(init.body)), answered: false,
@@ -157,10 +160,39 @@ describe('answer panel', () => {
     assert.ok(options().every((b, i) => b !== before[i]), 'new nodes');
   });
 
-  it('answers "Chat about this" without going Back after it', async () => {
+  it('answers "Chat about this" without closing after it, and opens the terminal to type in once it lands', async () => {
     const chat = ASK.replace('  3. cherry', '  3. cherry\n  4. Chat about this');
     await mount(at(chat));
     await tap(3);
     assert.deepEqual(answered, [{ id: promptIdentity(chat), chat: true }]);
+    assert.deepEqual(modes, [], 'not before the press lands');
+    await answerPost({});
+    assert.deepEqual(modes, ['terminal']);
+  });
+
+  it('"Type something." is no answer yet (nothing to confirm): the terminal opens to type it; a failed press stays', async () => {
+    const typed = ASK.replace('  3. cherry', '  3. cherry\n  4. Type something.');
+    await mount(at(typed));
+    await tap(3);
+    assert.deepEqual(answered, []);
+    await answerPost({ error: 'boom' }, 500);
+    assert.deepEqual(modes, [], 'a failed press: the panel stays');
+    await vi.waitFor(() => assert.ok(!$('.chat-prompt-sending')));
+    await tap(3);
+    await answerPost({});
+    assert.deepEqual(modes, ['terminal']);
+    assert.deepEqual(posts(), [{ press: '4', expect_prompt: promptIdentity(typed) }, { press: '4', expect_prompt: promptIdentity(typed) }]);
+  });
+
+  it("a multi-select's \"[ ] Type something\" too; the terminal opens even when the panel went before the press answered", async () => {
+    const multi = ASK.replace('  3. cherry', '  3. cherry\n  4. [ ] Type something');
+    await mount(at(multi));
+    assert.equal(options()[3].textContent, '4[ ] Type something');
+    await tap(3);
+    assert.deepEqual(answered, []);
+    await unmount(); // the pane left `blocked`: the panel is gone
+    unmount = async () => {};
+    await answerPost({});
+    assert.deepEqual(modes, ['terminal']);
   });
 });
