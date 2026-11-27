@@ -377,14 +377,21 @@ export function askAnswer(text: string): string | null {
   return pairs.length === 1 ? pairs[0][1] : pairs.map(([q, a]) => `${q}: ${a}`).join('\n');
 }
 
+// a question's result when the user chose Chat about this: Claude Code's words for it (the bridge's
+// /answer {chat}), recorded as a refused tool's are, the message alone as an error. It lists each
+// question, `- "<question>"`, then `  Answer: <answer>` or `  (No answer provided)`.
+const CHAT_ABOUT_IT = /^The user wants to clarify these questions\.\n/;
+const CHAT_ANSWER = /^([\s\S]*)"\n {2}Answer: ([\s\S]*)$/; // an entry after its `\n- "`: a question may span lines
+
 // a headless orchestrator's tool that starts a worker (its result says whether the first task reached it)
 const START_TOOL = 'mcp__yoicks__agent_start';
 
 /**
  * The home (orchestrator) chat shows only the dialogue: the user's and the
  * assistant's own words, and its questions (AskUserQuestion) with what the user
- * answered as their own bubble, and the workers it started (a headless one's
- * agent_start: what the bridge answered, as a [yoicks] notice). Other tool
+ * answered as their own bubble (Chat about this: a [yoicks] notice), and the
+ * workers it started (a headless one's agent_start: what the bridge answered,
+ * as a [yoicks] notice). Other tool
  * calls/results, thinking, subagent traffic and injected user turns are hidden.
  * `calls` (kept across appends: a call and its result arrive apart) maps those
  * calls' tool_use ids to their tool.
@@ -400,6 +407,11 @@ export function conversationItems(items: TimelineItem[], calls = new Map<string,
     } else if (it.kind === 'tool_use' && it.name === START_TOOL) calls.set(it.id, it.name);
     else if (it.kind === 'tool_result' && it.forId !== null && calls.get(it.forId) === START_TOOL) {
       out.push({ kind: 'user', text: `[yoicks] ${it.text.replace(/\s+/g, ' ').trim()}`, sidechain: false, ts: it.ts });
+    } else if (it.kind === 'tool_result' && it.forId !== null && calls.has(it.forId) && it.isError && CHAT_ABOUT_IT.test(it.text)) {
+      // the answers given before it stay in the chat, `question: answer` a line (cut short: the entries before the cut)
+      const given = it.text.split('\n- "').slice(1, it.truncated ? -1 : undefined).flatMap((e) => CHAT_ANSWER.exec(e)?.slice(1, 3).join(': ') ?? []).join('\n');
+      if (given) out.push({ kind: 'user', text: given, sidechain: false, ts: it.ts });
+      out.push({ kind: 'user', text: '[yoicks] Chat about this', sidechain: false, ts: it.ts });
     } else if (it.kind === 'tool_result' && it.forId !== null && calls.has(it.forId)) {
       const answer = it.truncated ? null : askAnswer(it.text); // cut short, it may name only some: shown as it is
       out.push(answer === null ? it : { kind: 'user', text: answer, sidechain: false, ts: it.ts });

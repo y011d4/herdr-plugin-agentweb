@@ -62,7 +62,13 @@ async function home(s: AppState, actions?: { clear: () => void; stop: () => void
   ({ container, unmount } = await render(<><div id="tb">{t.title}{t.right}</div><Pane paneId="hl:pilot" home={true} actions={actions} name="pilot" /><Modals /></>));
 }
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => container.querySelector<T>(sel)!;
-const opts = () => [...container.querySelectorAll<HTMLButtonElement>('#headless-prompt .ask-opt')];
+const opts = () => [...container.querySelectorAll<HTMLButtonElement>('#headless-prompt .ask-opt:not(.ask-extra)')];
+const extras = () => [...container.querySelectorAll<HTMLButtonElement>('#headless-prompt .ask-extra')];
+/** Types into a React-controlled field (the native setter, so React sees the change). */
+const type = (el: HTMLTextAreaElement, value: string): Promise<void> => fire(() => {
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')!.set!.call(el, value);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+});
 
 beforeEach(() => {
   reqs = [];
@@ -246,6 +252,67 @@ describe("a headless orchestrator's Home", () => {
     assert.equal($('#headless-prompt .chat-prompt-q').textContent, 'Size?');
     await fire(() => opts()[1].click());
     assert.deepEqual(posts('answer'), [{ id: '1a2b3c4d', answers: { 'Which fruit?': 'apple, cherry', 'Size?': 'L' } }]);
+  });
+
+  it("types a question's own answer under its options: that question's alone, a multiSelect's with its checks", async () => {
+    await home(withPilot((p) => {
+      const q = p.headless!.pending!.questions[0];
+      p.headless!.pending!.questions = [q, { question: 'Size?', header: 'Size', multiSelect: true, options: [{ label: 'S', description: '' }, { label: 'L', description: '' }] },
+        { question: 'When?', header: 'When', multiSelect: false, options: [{ label: 'now', description: '' }] }];
+    }));
+    // as Claude Code's TUI numbers them: the options, then Type something., then Chat about this
+    assert.deepEqual(extras().map((b) => b.textContent), ['3Type something.', '4Chat about thisAsk the orchestrator about it instead of answering']);
+    assert.equal(container.querySelector('#headless-prompt-next'), null, 'a single choice needs no Next until typing');
+    await fire(() => $('#headless-prompt-own').click());
+    assert.equal($<HTMLButtonElement>('#headless-prompt-next').disabled, true, 'nothing typed yet');
+    await type($<HTMLTextAreaElement>('#headless-prompt-text'), '  a ripe one  ');
+    await fire(() => $('#headless-prompt-next').click());
+    // the next question starts with its own empty field, closed
+    assert.equal($('#headless-prompt .chat-prompt-q').textContent, 'Size?');
+    assert.equal(container.querySelector('#headless-prompt-text'), null);
+    assert.equal($('#headless-prompt-own').textContent, 'Type something');
+    await fire(() => opts()[1].click());
+    await fire(() => $('#headless-prompt-own').click());
+    assert.equal($<HTMLTextAreaElement>('#headless-prompt-text').value, '');
+    await type($<HTMLTextAreaElement>('#headless-prompt-text'), 'XL');
+    await fire(() => $('#headless-prompt-next').click());
+    await fire(() => opts()[0].click());
+    assert.deepEqual(posts('answer'), [{ id: '1a2b3c4d', answers: { 'Which fruit?': 'a ripe one', 'Size?': 'L, XL', 'When?': 'now' } }]);
+  });
+
+  it('chats about the questions instead of answering, with the answers so far', async () => {
+    await home(withPilot((p) => {
+      const q = p.headless!.pending!.questions[0];
+      p.headless!.pending!.questions = [q, { question: 'Size?', header: 'Size', multiSelect: false, options: [{ label: 'S', description: '' }] }];
+    }));
+    await fire(() => opts()[0].click());
+    await fire(() => $('#headless-prompt-own').click());
+    await type($<HTMLTextAreaElement>('#headless-prompt-text'), 'not an answer yet');
+    await fire(() => $('#headless-prompt-chat').click());
+    await fire(() => $('#headless-prompt-chat').click());
+    assert.deepEqual(posts('answer'), [{ id: '1a2b3c4d', chat: true, answers: { 'Which fruit?': 'apple' } }]);
+    assert.match($('#headless-prompt .chat-prompt-hint').textContent!, /not an answer/);
+  });
+
+  it("sends a composer message with the panel's answers so far (the bridge's Chat about this), and none once it's gone", async () => {
+    await home(withPilot((p) => {
+      const q = p.headless!.pending!.questions[0];
+      p.headless!.pending!.questions = [q, { question: 'Size?', header: 'Size', multiSelect: false, options: [{ label: 'S', description: '' }] }];
+    }));
+    await fire(() => opts()[1].click());
+    await fire(() => { $<HTMLTextAreaElement>('#pane-input').value = 'why S?'; });
+    await fire(() => $('#btn-send-enter').click());
+    assert.deepEqual(posts('send'), [{ text: 'why S?', answers: { 'Which fruit?': 'cherry' } }]);
+    // a multiSelect's checks count as they stand (the TUI records them at each check)
+    await fire(() => setAppState(withPilot((p) => { p.headless!.pending!.id = 'm1'; p.headless!.pending!.questions[0].multiSelect = true; })));
+    await fire(() => opts()[0].click());
+    await fire(() => $('#headless-prompt-chat').click());
+    assert.deepEqual(posts('answer'), [{ id: 'm1', chat: true, answers: { 'Which fruit?': 'apple' } }]);
+    await answer('POST /api/orchestrators/pilot/send', { ok: true });
+    await fire(() => setAppState(withPilot(idle)));
+    await fire(() => { $<HTMLTextAreaElement>('#pane-input').value = 'thanks'; });
+    await fire(() => $('#btn-send-enter').click());
+    assert.deepEqual(posts('send')[1], { text: 'thanks' });
   });
 
   it('has ■ on its "doing now" line while it works', async () => {

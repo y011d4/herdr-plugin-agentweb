@@ -205,6 +205,26 @@ func TestTranscriptNormalize(t *testing.T) {
 			}
 		})
 
+		t.Run("shows a thinking block its signature tags as narration as the assistant's words", func(t *testing.T) {
+			// signatures shaped like the API's (field 2 → 1 → 8 the tag, a nonce, a trailing field)
+			const said, thought = "CAQSIQoRCBQYAjgBQgluYXJyYXRpb24SDAABAgMEBQYHCAkKCxoC//8=", "CAQSIAoQCBQYAjgBQgh0aGlua2luZxIMAAECAwQFBgcICQoLGgL//w=="
+			long := strings.Repeat("x", 20_000)
+			for sig, want := range map[string]string{
+				said:                         "assistant",
+				strings.TrimRight(said, "="): "assistant", // unpadded, as atob takes it
+				thought:                      "thinking",
+				"CAQSIQoRCBQYAjgBQgluYXJyYXRpb24SDAABAg==": "thinking", // cut short: doesn't parse whole
+				"not base64!": "thinking",
+				"":            "thinking",
+			} {
+				items := normalizeLine(jsonLine(obj{"type": "assistant", "message": obj{"role": "assistant", "content": []any{
+					obj{"type": "thinking", "thinking": long, "signature": sig}}}}))
+				if len(items) != 1 || items[0].Kind != want || want == "assistant" && (items[0].Text != long || items[0].Truncated) {
+					t.Errorf("%q: %s", sig, kindsOf(items))
+				}
+			}
+		})
+
 		t.Run("skips signature-only (empty-text) thinking blocks but keeps sibling text", func(t *testing.T) {
 			// Some sessions persist redacted thinking: a signature with no plaintext.
 			items := normalizeLine(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"redacted-sig"},{"type":"text","text":"answer"}]}}`)

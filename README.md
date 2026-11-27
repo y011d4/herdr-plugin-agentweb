@@ -515,16 +515,18 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   headless orchestrator: send a message (also while it works) and interrupt its turn, both 409 when it
   isn't running; clear starts it in a fresh session (returning `{"paneId", "name"}` like start), running
   or not; stop ends it, and succeeds when it is already stopped. A message sent while a question is
-  pending answers it, in the user's own words (the same text for each of its questions). A send may
+  pending is about it, not an answer: it is written, then the question is refused as `answer`'s `chat` refuses it, with the send's `"answers"` (the panel's so far), if any. A send may
   carry `"images": [{"mediaType": "image/jpeg", "data": "<base64>"}]` (JPEG, PNG or GIF that decode
   whole, at most 4, 2000 px a side and 1 MiB in all; `text` may then be empty), written as image
-  blocks before the text; 400 otherwise, 409 while a question is pending. The web UI's + and paste
+  blocks before the text; 400 otherwise. The web UI's + and paste
   attach them, scaled and recompressed to JPEG. A headless orchestrator has no herdr pane: `/api/panes/hl:<name>/…` and
   `/api/agents/hl:<name>/…` answer 404, except `GET /api/panes/hl:<name>/transcript`.
 - `POST /api/orchestrators/:name/answer` `{"id": "…", "answers": {"<question>": "<label>"}}` or
-  `{"id": "…", "deny": "<message>"}` — answer (or refuse) the headless orchestrator's pending question
-  (`headless.pending`, its AskUserQuestion): a multiSelect's labels joined by `", "`, free text allowed;
-  409 when that id isn't the one pending.
+  `{"id": "…", "deny": "<message>"}` or `{"id": "…", "chat": true, "answers"?: {…}}` — answer (or refuse) the
+  headless orchestrator's pending question (`headless.pending`, its AskUserQuestion): a multiSelect's labels
+  joined by `", "`, free text allowed (Claude Code's "Type something."); `chat` is Claude Code's "Chat about
+  this": refused with its words, which list the questions and the answers given so far; 409 when that id
+  isn't the one pending.
 - `POST /api/worktrees` `{"cwd": "/repo", "branch": "feat/x", "base": "origin/main"}` — create a git
   worktree next to the repo, as above (herdr `worktree.create`; `cwd` is any path in the source repo,
   `branch`/`base` optional) and return `{"workspaceId", "checkoutPath", "branch", "paneId"}`. Standalone (create a worktree

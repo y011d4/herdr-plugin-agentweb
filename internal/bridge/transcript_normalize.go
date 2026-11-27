@@ -13,6 +13,8 @@ package bridge
 // the TypeScript does at runtime (typeof, === true, truthiness).
 
 import (
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -32,6 +34,62 @@ const (
 	resultMax   = 4_000
 	summaryMax  = 200
 )
+
+// narration: whether a thinking block is the words the model says to the user between its tool
+// calls (an explanation before a question, say), which Claude Code shows as its reply. The API
+// tags it in the signature (base64 protobuf): the string at field 2 → 1 → 8 is "narration", where
+// thinking has "thinking" (Claude Code 2.1.322's classifier; the transcript has no other mark).
+func narration(signature string) bool {
+	b, err := base64.RawStdEncoding.DecodeString(strings.TrimRight(signature, "="))
+	for _, field := range []uint64{2, 1, 8} {
+		if err != nil || b == nil {
+			return false
+		}
+		b = protoBytes(b, field)
+	}
+	return string(b) == "narration"
+}
+
+// protoBytes is the last length-delimited value of field n in the protobuf message b; nil when it
+// has none or doesn't parse whole.
+func protoBytes(b []byte, n uint64) []byte {
+	var found []byte
+	for len(b) > 0 {
+		key, k := binary.Uvarint(b)
+		if k <= 0 {
+			return nil
+		}
+		b = b[k:]
+		size := 0
+		switch key & 7 {
+		case 0:
+			if _, k = binary.Uvarint(b); k <= 0 {
+				return nil
+			}
+			size = k
+		case 1:
+			size = 8
+		case 2:
+			l, k := binary.Uvarint(b)
+			if k <= 0 || l > uint64(len(b)-k) {
+				return nil
+			}
+			if key>>3 == n {
+				found = b[k : k+int(l)]
+			}
+			size = k + int(l)
+		case 5:
+			size = 4
+		default:
+			return nil
+		}
+		if size > len(b) {
+			return nil
+		}
+		b = b[size:]
+	}
+	return found
+}
 
 // ── JSON.parse, JavaScript-style ─────────────────────────────────────────────
 
@@ -398,7 +456,13 @@ func normalizeLine(rawLine string) []TimelineItem {
 		for _, b := range content {
 			switch jsGet(b, "type") {
 			case "thinking":
-				if t, ok := jsGet(b, "thinking").(string); ok && jsTrim(t) != "" {
+				t, ok := jsGet(b, "thinking").(string)
+				if !ok || jsTrim(t) == "" {
+					break
+				}
+				if narration(strOr(jsGet(b, "signature"), "")) { // said to the user: its reply, kept whole
+					out = append(out, TimelineItem{Kind: "assistant", Text: t, Sidechain: sidechain, TS: ts})
+				} else {
 					text, truncated := truncateUnits(t, thinkingMax)
 					out = append(out, TimelineItem{Kind: "thinking", Text: text, Truncated: truncated, Sidechain: sidechain, TS: ts})
 				}

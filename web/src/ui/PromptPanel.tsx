@@ -11,7 +11,7 @@
  * typing ("Type something.", "Chat about this") switches the view to the terminal once it lands: the
  * composer is there.
  */
-import { Button, Loader, Text, UnstyledButton } from '@mantine/core';
+import { Button, Loader, Text, Textarea, UnstyledButton } from '@mantine/core';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { apiPost, orchestratorPost } from '../api.ts';
 import { showToast } from '../notify.ts';
@@ -119,35 +119,57 @@ export function PromptPanel({ paneId, prompt, view }: { paneId: string; prompt: 
   );
 }
 
+/** The answers a headless orchestrator's open question has so far in its panel, by orchestrator:
+ *  a composer message sent meanwhile carries them (ui/Pane.tsx), as Chat about this does. */
+export const answersSoFar = new Map<string, Record<string, string>>();
+
 /**
  * A headless orchestrator's question (the State's headless.pending: its AskUserQuestion, which the
  * bridge holds open): the questions one at a time, a tap per option, a multiSelect one as checks and
  * Next/Send, then every answer in one POST …/answer with the question's id. A stale id answers 409
  * (stale_question: answered, declined or interrupted meanwhile). The parent keys it on that id, so a
- * new question gets a fresh panel; the sent one stays disabled until the State takes it away. The
- * composer stays: a message sent meanwhile is the answer in the user's own words (the bridge's /send).
+ * new question gets a fresh panel; the sent one stays disabled until the State takes it away.
+ * Under each question's options, as in Claude Code's TUI: "Type something." opens a field whose text
+ * is that question's answer (a multiSelect's: with the checked ones), and "Chat about this" answers
+ * none (POST …/answer {chat}: the bridge refuses the question with Claude Code's words for it, the
+ * answers so far in them), so the orchestrator asks what to clarify. A message sent from the
+ * composer meanwhile does the same, with the message (the bridge's /send, given answersSoFar).
  */
 export function HeadlessPrompt({ name, pending }: { name: string; pending: { id: string; questions: AskQuestion[] } }) {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [picked, setPicked] = useState<string[]>([]); // a multiSelect question's checked labels
+  const [typing, setTyping] = useState(false); // this question's "Type something." is open
+  const [own, setOwn] = useState(''); // and what is typed in it: this question's alone
   const [sending, setSending] = useState(false);
   const busy = useRef(false); // set at once, so a second tap before the re-render sends nothing
   const q = pending.questions[step];
+  // the checked ones in their order, then the typed answer (as the TUI joins them)
+  const chosen = (): string[] => (q ? [...q.options.filter((o) => q.multiSelect && picked.includes(o.label)).map((o) => o.label),
+    ...(typing && own.trim() ? [own.trim()] : [])] : []);
+  // answered so far, for Chat about this: the questions done, and a multiSelect's as it stands (the TUI records it at each check)
+  const soFar = q?.multiSelect && chosen().length ? { ...answers, [q.question]: chosen().join(', ') } : answers;
+  useEffect(() => {
+    if (Object.keys(soFar).length) answersSoFar.set(name, soFar);
+    return () => { answersSoFar.delete(name); };
+  }, [name, soFar]);
   if (!q) return null;
   const last = step + 1 === pending.questions.length;
+  const n = q.options.length;
 
-  async function submit(all: Record<string, string>): Promise<void> {
+  async function submit(body: Record<string, unknown>): Promise<void> {
     busy.current = true;
     setSending(true);
     try {
-      await orchestratorPost(name, 'answer', { id: pending.id, answers: all });
+      await orchestratorPost(name, 'answer', { id: pending.id, ...body });
     } catch (err) {
       busy.current = false;
       setSending(false);
       setStep(0);
       setAnswers({});
       setPicked([]);
+      setTyping(false);
+      setOwn('');
       const stale = (err as { code?: string }).code === 'stale_question';
       showToast(stale ? 'Question changed' : 'Answer failed', stale ? 'It was answered or withdrawn before yours arrived.' : (err as Error).message);
     }
@@ -156,10 +178,16 @@ export function HeadlessPrompt({ name, pending }: { name: string; pending: { id:
   function answer(label: string): void {
     if (busy.current) return;
     const all = { ...answers, [q.question]: label };
-    if (last) { void submit(all); return; }
+    if (last) { void submit({ answers: all }); return; }
     setAnswers(all);
     setStep(step + 1);
     setPicked([]);
+    setTyping(false);
+    setOwn('');
+  }
+
+  function chat(): void {
+    if (!busy.current) void submit({ chat: true, answers: soFar });
   }
 
   const toggle = (label: string): void => setPicked((p) => (p.includes(label) ? p.filter((l) => l !== label) : [...p, label]));
@@ -176,14 +204,25 @@ export function HeadlessPrompt({ name, pending }: { name: string; pending: { id:
               onClick={() => { if (q.multiSelect) toggle(o.label); else answer(o.label); }} />
           );
         })}
+        <Option id="headless-prompt-own" extra num={q.multiSelect ? (typing ? '✓' : '') : String(n + 1)} label={q.multiSelect ? 'Type something' : 'Type something.'}
+          description="" marked={q.multiSelect && typing} pressed={q.multiSelect ? typing : undefined} disabled={sending}
+          onClick={() => setTyping(q.multiSelect ? !typing : true)} />
+        {typing && (
+          <Textarea id="headless-prompt-text" aria-label={`Your answer to: ${q.question}`} placeholder="Your answer" autoFocus
+            rows={3} value={own} onChange={(e) => setOwn(e.currentTarget.value)} />
+        )}
       </Options>
-      {q.multiSelect && (
-        <Button id="headless-prompt-next" fullWidth mt={2} disabled={!picked.length || sending}
-          onClick={() => answer(q.options.filter((o) => picked.includes(o.label)).map((o) => o.label).join(', '))}>
+      {(q.multiSelect || typing) && (
+        <Button id="headless-prompt-next" fullWidth mt={2} disabled={!chosen().length || sending} onClick={() => answer(chosen().join(', '))}>
           {last ? 'Send' : 'Next'}
         </Button>
       )}
-      <Text fz={12} c="dimmed" mt={8}>Or type your own answer below and send it.</Text>
+      {/* not an answer: set apart from them, as the TUI rules it off */}
+      <div className="mt-3 flex flex-col">
+        <Option id="headless-prompt-chat" extra num={String(n + 2)} label="Chat about this" description="Ask the orchestrator about it instead of answering"
+          marked={false} disabled={sending} onClick={chat} />
+      </div>
+      <Text className="chat-prompt-hint" fz={12} c="dimmed" mt={8}>A message sent below is about these questions, not an answer: like Chat about this.</Text>
     </div>
   );
 }
@@ -201,12 +240,13 @@ const Question = ({ children }: { children: string }) => (
 const Options = ({ children }: { children: ReactNode }) => <div className="flex flex-col gap-1.5 not-empty:mb-2">{children}</div>;
 
 /** An answer: its number (or a multiSelect's ✓) on orange, its label, its description under it smaller and dimmer.
- *  `marked`: the one tapped, or a multiSelect's checked one. */
-function Option({ num, label, description, marked, pressed, disabled, onClick }:
-  { num: string; label: string; description: string; marked: boolean; pressed?: boolean; disabled: boolean; onClick: () => void }) {
+ *  `marked`: the one tapped, or a multiSelect's checked one. `extra`: not one of the question's own
+ *  (a headless question's Type something. and Chat about this: `ask-extra`). */
+function Option({ id, extra, num, label, description, marked, pressed, disabled, onClick }:
+  { id?: string; extra?: boolean; num: string; label: string; description: string; marked: boolean; pressed?: boolean; disabled: boolean; onClick: () => void }) {
   return (
-    <UnstyledButton disabled={disabled} aria-pressed={pressed} onClick={onClick}
-      className={`ask-opt${marked ? ' ask-opt-sent' : ''} flex min-h-11 items-baseline gap-2 rounded-lg border bg-(--color-surface-2) px-3 py-2.5 text-left text-[14px] text-(--color-text) active:bg-(--color-border) disabled:opacity-55 ${marked ? 'border-(--color-done) opacity-60' : 'border-(--color-border)'}`}>
+    <UnstyledButton id={id} disabled={disabled} aria-pressed={pressed} onClick={onClick}
+      className={`ask-opt${extra ? ' ask-extra' : ''}${marked ? ' ask-opt-sent' : ''} flex min-h-11 items-baseline gap-2 rounded-lg border bg-(--color-surface-2) px-3 py-2.5 text-left text-[14px] text-(--color-text) active:bg-(--color-border) disabled:opacity-55 ${marked ? 'border-(--color-done) opacity-60' : 'border-(--color-border)'}`}>
       <span className="ask-opt-num bg-(--color-blocked) text-white">{num}</span>
       <span className="ask-opt-text flex min-w-0 flex-col gap-0.5 wrap-anywhere">
         <span className="ask-opt-label">{label}</span>
