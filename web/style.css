@@ -99,17 +99,6 @@ body { font-size: 15px; }
   white-space: nowrap;
 }
 
-.topbar-back {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--touch-min);
-  min-height: var(--touch-min);
-  margin-left: -8px;
-  color: var(--color-accent);
-  font-size: 16px;
-}
-
 /* Right cluster holds one or more actions in a row (e.g. new-agent + settings,
    view-toggle + agent menu). Without flex the block-level buttons would stack
    vertically and overflow the 52px bar. */
@@ -118,11 +107,6 @@ body { font-size: 15px; }
   align-items: center;
   gap: 8px;
 }
-
-.topbar-back:hover {
-  color: var(--color-text);
-}
-
 
 /* Connection status dot */
 .conn-dot {

@@ -139,7 +139,7 @@ All in `internal/bridge/` (one package):
   class. `style.css` keeps the tokens, index.html's first paint (the topbar, the banner, `.loading-spinner`,
   which `terminal.ts` uses too), the engines' DOM (the terminal; the chat's `#chat-log` box, and `.chat-md`,
   which tunes Mantine's Typography for the chat's prose), the toasts' box, the drawer's and the PC grid's
-  layout, and Settings. The theme makes a button given no size, and an input at its default size (sm; every
+  layout, and the Settings sheet's. The theme makes a button given no size, and an input at its default size (sm; every
   Mantine input has one), 44px tall (`--touch-min`), an input's text 16px (below that iOS zooms in on focus;
   the composer keeps 14px); `theme.test.ts` checks it. Mantine's style props (`px`, `c`, `bg`…) are inline
   styles, so they beat any class, a Tailwind `lg:` one too: a value that changes with the width goes in
