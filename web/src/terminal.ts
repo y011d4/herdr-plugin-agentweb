@@ -412,7 +412,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
       renderPaneOutput(data.ansi ?? data.text ?? '');
     } catch (err) {
       const message = (err as Error).message;
-      if (message === '401' || destroyed || held) return;
+      if (message === '401' || destroyed || held || reqId !== refreshReqSeq) return; // a newer read (or a hold) since
       // transient failures (bridge restart, herdr reconnect) must not wipe the
       // terminal the user is reading — keep the last render and toast instead
       if (lastLiveAnsi) {

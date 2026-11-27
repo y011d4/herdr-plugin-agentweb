@@ -465,6 +465,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   });
 
   function startPaneRefresh(): void {
+    if (paneRefreshTimer) return; // one at a time
     paneRefreshTimer = setInterval(() => {
       if (document.hidden) return;
       // A claude pane's transcript may appear shortly after the pane opens (session
@@ -503,9 +504,11 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     startPaneRefresh();
     switchToChat(undefined, false);
   } else void (async () => {
+    const startEpoch = epoch;
     await term.refresh();
-    // Left while the first read was in flight: no history load against a gone view.
-    if (destroyed || suspended) return;
+    // Left (or suspended) while the first read was in flight: no history load against a gone view; a resume
+    // looks at the terminal itself.
+    if (destroyed || suspended || startEpoch !== epoch) return;
     historyLoaded = true;
     void term.loadHistory();
     startPaneRefresh();
@@ -536,7 +539,10 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       opts.modeChanged();
       startPaneRefresh();
       updatePromptPanel();
-      if (mode === 'terminal') lookAtTerminal();
+      if (mode === 'terminal') {
+        historyLoaded = false; // a scrollback read held under the drawer never applied: read it again
+        lookAtTerminal();
+      }
     },
     onState() {
       if (destroyed || suspended) return;
