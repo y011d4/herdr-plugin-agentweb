@@ -2,8 +2,10 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 )
@@ -154,4 +156,40 @@ func TestHeadlessPRWatch(t *testing.T) {
 
 func sameSet(a, b []string) bool {
 	return slices.Equal(slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b)))
+}
+
+// gh's failure is told each Home once: one that adds its first PR while gh already fails is told
+// too (a bare server: two Homes, the PC's notifications recorded).
+func TestPRWatchAlertsEachHome(t *testing.T) {
+	var mu sync.Mutex
+	var shown []string
+	s := &server{
+		headless: map[string]*headlessRunner{"a": {def: OrchestratorDef{Name: "a", Label: "A", PRWatch: true}}, "b": {def: OrchestratorDef{Name: "b", Label: "B", PRWatch: true}}},
+		todos:    newTodoStore(t.TempDir(), []string{"a", "b"}),
+		prErr:    map[string]string{},
+		prUnread: map[string]bool{},
+		prStates: func(context.Context, []string) (map[string]string, error) {
+			return nil, errors.New("gh failed: HTTP 502")
+		},
+		rpc: func(method string, params map[string]any) (json.RawMessage, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			shown = append(shown, params["title"].(string))
+			return nil, nil
+		},
+	}
+	look := func() []string {
+		s.watchPRs()
+		s.bg.Wait()
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(shown)
+	}
+	s.todos.Apply("a", []todoAdd{{Text: "merge PR #1", URL: "https://github.com/o/r/pull/1"}}, nil, nowMs())
+	look()
+	s.todos.Apply("b", []todoAdd{{Text: "merge PR #2", URL: "https://github.com/o/r/pull/2"}}, nil, nowMs())
+	look()
+	if got := look(); !slices.Equal(got, []string{"A: github", "B: github"}) {
+		t.Errorf("%q", got)
+	}
 }
