@@ -140,6 +140,7 @@ const items = (scope: string) => `document.querySelectorAll(${JSON.stringify(`${
 /** Each one is shot on a phone and on a PC. */
 export const scenes: Scene[] = [
   { name: 'agents', hash: '#/agents', ready: "!!document.querySelector('#screen-agents[data-ready]')" },
+  { name: 'agents-home', hash: '#/agents/personal', ready: "!!document.querySelector('#screen-agents[data-ready]')" },
   { name: 'home', hash: '#/home/personal', ready: items('') },
   { name: 'home-headless', hash: '#/home/pfn', ready: `${items('')} && !!document.querySelector('.ask-opt')` },
   { name: 'home-stopped', hash: '#/home/kenri', ready: "!!document.querySelector('#screen-home-stopped')" },

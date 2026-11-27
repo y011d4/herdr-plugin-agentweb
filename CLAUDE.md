@@ -190,7 +190,7 @@ All in `internal/bridge/` (one package):
   Home's counts (its status bar's: an outlined pill with a ›) open `#/agents/<name>`: only the panes in its state `agents` (its Claude
   account's, via `paneAccount`, cached per agent pane and re-checked every 60s by `paneAccountCache`;
   `null` = unknown → every agent),
-  with Back to the Home; a pane opened from there opens over that list. Any route to
+  with `← <its Home>` (`Back to …`; at every width) to that Home; a pane opened from there opens over that list. Any route to
   its pane (`#/pane/<id>`: notification clicks, stale links) is replaced by its Home. herdr's
   `pane.agent_detected` (fires on detect *and* release) is rebuild-triggering, so agent presence and
   `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `yoicks agent …`, waking on background

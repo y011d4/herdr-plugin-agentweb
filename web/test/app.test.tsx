@@ -137,7 +137,8 @@ describe('App', () => {
     await go('#/agents/personal');
     const ids = [...document.querySelectorAll<HTMLElement>('#screen-agents .agent-card')].map((c) => c.dataset.paneId).sort();
     assert.deepEqual(ids, ['p1', 'p3'], 'its account, never the orchestrator');
-    assert.match($('#topbar-title')!.textContent!, /Agents.*Personal/);
+    assert.equal($('#topbar-title')!.textContent, 'Agents');
+    assert.equal($('#topbar-left')!.textContent, '← Personal', 'the way back names its Home');
     const list = $('#screen #screen-agents');
     const before = history.length;
     await click($('.agent-card[data-pane-id="p1"]'));

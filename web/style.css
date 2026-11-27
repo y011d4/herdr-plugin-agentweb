@@ -426,7 +426,8 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
     background: var(--color-surface);
     border-right: 1px solid var(--color-border);
   }
-  /* what the sidebar does instead: the Home switcher, the list's ← Home */
+  /* what the sidebar does instead: the Home switcher, the full list's ← Home (a Home's own list keeps
+     its ← <Home>, aria-label "Back to …": the way back where the list is) */
   #app:has(> #sidebar) :is(.home-switch, #topbar-left .topbar-back[aria-label='Home']) {
     display: none;
   }
