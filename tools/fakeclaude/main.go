@@ -15,7 +15,7 @@
 // is a script by its text:
 //
 //	slow N    work N s, a tool_progress heartbeat each second
-//	hang N    work N s without a single event
+//	hang      work without a single event until a SIGUSR1 (a test's say-so, not a clock)
 //	crash     exit 1 mid-turn
 //	garbage N N lines (default 1) that aren't JSON, then the reply
 //	unknown   an event of a type Claude Code doesn't have, then the reply
@@ -26,7 +26,7 @@
 //	deaf      stop reading stdin (what's written to it backs up)
 //	other     the reply "echo: <text>"
 //
-//	hold      wait 2 s before its turn begins (then the reply)
+//	hold      its turn begins only at a SIGUSR1 (then the reply)
 //	replyhold send the reply, then hold its result until an interrupt
 //
 // A control_request interrupt ends the turn running, or with none running the one message it
@@ -44,6 +44,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -63,6 +64,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "fakeclaude: exec", real+":", err)
 		os.Exit(1)
 	}
+	// before the first log line: a test that has seen it may signal (the default action would end it)
+	signal.Notify(release, syscall.SIGUSR1)
 	args := os.Args[1:]
 	logLine(map[string]any{"pid": os.Getpid(), "argv": args, "env": envKeys()})
 	switch {
@@ -97,6 +100,9 @@ func envKeys() []string {
 	slices.Sort(keys)
 	return keys
 }
+
+// release: a SIGUSR1, on which a held turn goes on (hang, hold)
+var release = make(chan os.Signal, 1)
 
 var logMu sync.Mutex
 
@@ -294,7 +300,7 @@ func (f *fake) record(v map[string]any) {
 func (f *fake) turn(q queued) {
 	text := q.text
 	if text == "hold" {
-		time.Sleep(2 * time.Second)
+		<-release
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -351,6 +357,14 @@ func (f *fake) turn(q queued) {
 		f.toolResult("toolu_lost_call", "<tool_use_error>Error calling tool (overview): fake transport failure\nmore detail</tool_use_error>", true)
 	case "slow", "hang":
 		f.emit(assistant([]any{map[string]any{"type": "tool_use", "id": "toolu_slow", "name": "Bash", "input": map[string]any{"command": "sleep " + arg}}}))
+		if word == "hang" {
+			select {
+			case <-ctx.Done():
+				f.finish(ctx, aborted("aborted_tools"))
+				return
+			case <-release:
+			}
+		}
 		for i := 1; i <= seconds; i++ {
 			select {
 			case <-ctx.Done():
@@ -358,9 +372,7 @@ func (f *fake) turn(q queued) {
 				return
 			case <-time.After(time.Second):
 			}
-			if word == "slow" {
-				f.emit(map[string]any{"type": "tool_progress", "tool_name": "Bash", "tool_use_id": "toolu_slow", "elapsed_time_seconds": i, "heartbeat": true, "session_id": f.id})
-			}
+			f.emit(map[string]any{"type": "tool_progress", "tool_name": "Bash", "tool_use_id": "toolu_slow", "elapsed_time_seconds": i, "heartbeat": true, "session_id": f.id})
 		}
 		f.emit(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "toolu_slow", "content": "finished"}}}})
 	}

@@ -113,18 +113,8 @@ jobs:
       - name: Vet the claudelive test
         run: go vet -tags claudelive ./internal/bridge
 
-      # The time is in waiting, not CPU: internal/bridge's headless wake-up tests run on real
-      # timers (Linux only), TestHeadlessWakeUps ~100 s of them. They can't be t.Parallel (the
-      # fake claude's HOME etc. are t.Setenv), so that test runs in a go test of its own
-      # beside the rest: ~215 s → ~120 s on Linux, the same tests.
       - name: Test (race detector)
-        run: |
-          go test -race -run '^TestHeadlessWakeUps$' ./internal/bridge &
-          wake=$!
-          status=0
-          go test -race -skip '^TestHeadlessWakeUps$' ./... || status=1
-          wait "$wake" || status=1
-          exit "$status"
+        run: go test -race ./...
 
       # Known vulnerabilities in the module and its dependencies, pinned version.
       - name: govulncheck

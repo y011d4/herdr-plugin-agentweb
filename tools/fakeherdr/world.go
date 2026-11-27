@@ -40,6 +40,7 @@ type World struct {
 	prompts       []Prompt
 	notifications []map[string]any
 	watchers      map[*watcher]struct{} // the held waits
+	clock         Clock                 // the waits' deadlines (nil: the real time)
 }
 
 // NewWorld starts with three panes in one workspace: p1 (claude, idle), p2
@@ -114,6 +115,21 @@ func (w *World) StallAfter(d time.Duration) {
 	w.mu.Unlock()
 }
 
+// SetClock puts the waits' deadlines (the stall, timeout_ms) on c.
+func (w *World) SetClock(c Clock) {
+	w.mu.Lock()
+	w.clock = c
+	w.mu.Unlock()
+}
+
+// time is the waits' clock; w.mu held.
+func (w *World) time() Clock {
+	if w.clock == nil {
+		return realClock{}
+	}
+	return w.clock
+}
+
 // SetReady sets whether agent.prompt finds a pane's agent ready.
 func (w *World) SetReady(paneID string, ready bool) {
 	w.mu.Lock()
@@ -169,7 +185,7 @@ type watcher struct {
 
 // tell gives every held wait the change, stamped now; w.mu held.
 func (w *World) tell(c change) {
-	c.at = time.Now()
+	c.at = w.time().Now()
 	for x := range w.watchers {
 		x.changes = append(x.changes, c)
 		select {
@@ -191,6 +207,7 @@ func (w *World) await(pane string, deadline time.Time, onDeadline func() (Reply,
 		w.watchers = map[*watcher]struct{}{}
 	}
 	w.watchers[x] = struct{}{}
+	clock := w.time()
 	return Reply{Wait: func(gone <-chan struct{}) Reply {
 		defer func() {
 			w.mu.Lock()
@@ -200,9 +217,7 @@ func (w *World) await(pane string, deadline time.Time, onDeadline func() (Reply,
 		timing := !deadline.IsZero()
 		var timer <-chan time.Time
 		if timing {
-			t := time.NewTimer(time.Until(deadline))
-			defer t.Stop()
-			timer = t.C
+			timer = clock.After(deadline.Sub(clock.Now()))
 		}
 		due := func() (Reply, bool) { // the deadline's turn: once
 			timing = false
@@ -212,7 +227,7 @@ func (w *World) await(pane string, deadline time.Time, onDeadline func() (Reply,
 			w.mu.Lock() // what came so far, and whether the deadline is past, as of one moment
 			cs := x.changes
 			x.changes = nil
-			past := timing && !time.Now().Before(deadline)
+			past := timing && !clock.Now().Before(deadline)
 			w.mu.Unlock()
 			for _, c := range cs {
 				if c.pane != pane {
@@ -289,7 +304,7 @@ func (w *World) agentCall(method string, raw json.RawMessage) Reply {
 		}
 		var deadline time.Time
 		if params.TimeoutMs > 0 {
-			deadline = time.Now().Add(time.Duration(params.TimeoutMs) * time.Millisecond)
+			deadline = w.time().Now().Add(time.Duration(params.TimeoutMs) * time.Millisecond)
 		}
 		return w.await(p.ID, deadline, func() (Reply, bool) { return Reply{Code: "timeout", Message: "agent.wait timed out"}, true },
 			func(c change) (Reply, bool) { return info("agent_info", c.agent), has(params.Until, c.to) })
@@ -314,7 +329,7 @@ func (w *World) agentCall(method string, raw json.RawMessage) Reply {
 		stall = 5 * time.Second
 	}
 	seen := p.Status == "working" || p.Status == "blocked" // the prompt was taken up
-	return w.await(p.ID, time.Now().Add(stall),
+	return w.await(p.ID, w.time().Now().Add(stall),
 		func() (Reply, bool) {
 			return Reply{Code: "agent_prompt_stalled", Message: "no working or blocked state within the stall time"}, !seen
 		},
