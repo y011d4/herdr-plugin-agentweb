@@ -24,7 +24,7 @@ import { findPane, store } from './store.ts';
 import { createTerminal } from './terminal.ts';
 import { conversationItems, latestActivity } from './transcript.ts';
 import { createChatLog } from './ui/ChatLog.tsx';
-import type { TimelineItem } from './transcript.ts';
+import type { TimelineItem, ToolUse } from './transcript.ts';
 import type { ReadResponse, TranscriptResponse, WsMessage, WsTranscriptItemsMessage } from './types.ts';
 import { onWsMessage, wsSendWatch } from './ws.ts';
 
@@ -137,7 +137,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   let chatCursor = 0; // byte offset into the transcript for incremental fetches
   let chatProbing = false; // an availability probe is in flight — prevents overlap
   let activity: string | null = null; // Home: latest tool call since the orchestrator last spoke
-  let calls = new Map<string, string>(); // Home: its questions' and worker starts' tool_use ids, so their results show (conversationItems)
+  let calls = new Map<string, ToolUse>(); // Home: its questions' and yoicks tool calls, by tool_use id, so their results show (conversationItems)
 
   // Pending-prompt panel: when a claude pane is blocked (waiting for input), the
   // chat surfaces an answer UI — tappable options for a pending AskUserQuestion,

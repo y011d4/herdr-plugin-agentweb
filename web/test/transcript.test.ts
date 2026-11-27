@@ -229,7 +229,7 @@ describe('conversationItems / latestActivity (home chat)', () => {
     const ask: TimelineItem = { kind: 'tool_use', id: 'q1', name: 'AskUserQuestion', summary: '', todos: null,
       ask: [{ question: '好きな果物は？', header: '果物', multiSelect: false, options: [{ label: 'りんご', description: '' }] }], sidechain: false, ts: null };
     const answered = (forId: string, text: string, isError = false): TimelineItem => ({ kind: 'tool_result', forId, text, truncated: false, isError, sidechain: false, ts: 5 });
-    const asks = new Map<string, string>();
+    const asks = new Map();
     assert.deepEqual(conversationItems([u('聞いて'), ask], asks).map((i) => i.kind), ['user', 'tool_use']);
     // the answer arrives in a later append (Claude Code's wording, as on 2.1.322)
     const later = conversationItems([answered('q1', 'Your questions have been answered: "好きな果物は？"="ばなな \\"完熟\\"". You can now continue with these answers in mind.'), result], asks);
@@ -260,7 +260,7 @@ describe('conversationItems / latestActivity (home chat)', () => {
   it("shows a worker the headless orchestrator started as a [yoicks] notice of the bridge's answer, across appends", () => {
     const start: TimelineItem = { kind: 'tool_use', id: 's1', name: 'mcp__yoicks__agent_start', summary: '', todos: null, ask: null, sidechain: false, ts: null };
     const res = (forId: string, text: string, isError = false): TimelineItem => ({ kind: 'tool_result', forId, text, truncated: false, isError, sidechain: false, ts: 7 });
-    const calls = new Map<string, string>();
+    const calls = new Map();
     assert.deepEqual(conversationItems([u('頼んで'), start], calls).map((i) => i.kind), ['user']);
     // the bridge's answer, as on 11-26's personal session: one line, a dim notice
     const shown = conversationItems([res('s1', 'started w-a (pane w8H:p1) in /r; delivered to w-a: you are woken when it finishes or stops for an answer'), result], calls);
@@ -270,7 +270,35 @@ describe('conversationItems / latestActivity (home chat)', () => {
     assert.deepEqual(conversationItems([res('s1', 'started w-a (pane p) in /r; not delivered to w-a:\nagent_pane_busy', true)], calls).map((i) => (i as { text: string }).text),
       ['[yoicks] started w-a (pane p) in /r; not delivered to w-a: agent_pane_busy']);
     // another tool's result stays hidden
-    assert.deepEqual(conversationItems([tool('mcp__yoicks__agent_prompt', ''), res('mcp__yoicks__agent_prompt', 'delivered')], calls), []);
+    assert.deepEqual(conversationItems([tool('mcp__yoicks__agent_read', 'w-a'), res('mcp__yoicks__agent_read', 'screen')], calls), []);
+  });
+
+  it('shows a task sent to a worker (agent_prompt) and a removed worktree as [yoicks] notices', () => {
+    const res = (forId: string, text: string, isError = false): TimelineItem => ({ kind: 'tool_result', forId, text, truncated: false, isError, sidechain: false, ts: 8 });
+    const call = (id: string, name: string, summary: string): TimelineItem => ({ ...tool(name, summary), id } as TimelineItem);
+    const prompt = (id: string, summary: string): TimelineItem => call(id, 'mcp__yoicks__agent_prompt', summary);
+    const calls = new Map();
+    const texts = (items: TimelineItem[]): string[] => conversationItems(items, calls).map((i) => (i as { text: string }).text);
+    // its summary is `<name>: <the text's first line>` (transcript_normalize.go); the call alone shows nothing
+    assert.deepEqual(texts([prompt('p1', 'w-a: Also add a test for the redirect'), prompt('p2', 'w-a: /exit'), prompt('p3', 'w-a: ' + 'あ'.repeat(60))]), []);
+    const delivered = 'delivered to w-a: you are woken when it finishes or stops for an answer';
+    // delivered: the task's first line, cut short; /exit is just such a task
+    assert.deepEqual(texts([res('p1', delivered), res('p2', delivered), res('p3', delivered)]),
+      ['[yoicks] sent to w-a: Also add a test for the redirect', '[yoicks] sent to w-a: /exit', `[yoicks] sent to w-a: ${'あ'.repeat(50)}…`]);
+    // not delivered: the bridge's reason, without its own "not delivered to <name>:" / "task not sent:"
+    assert.deepEqual(texts([
+      prompt('f1', 'w-a: go'), res('f1', 'not delivered to w-a:\nagent_not_found', true),
+      prompt('f2', 'w-a: go'), res('f2', 'task not sent: w-a waits on a question in its pane; you are woken when it is ready'),
+      prompt('f3', 'w-b: go'), res('f3', 'refused: w-b is not an agent of this Claude account', true),
+    ]), ['[yoicks] not sent to w-a: agent_not_found', '[yoicks] not sent to w-a: w-a waits on a question in its pane; you are woken when it is ready',
+      '[yoicks] not sent to w-b: refused: w-b is not an agent of this Claude account']);
+    // the worker's name is a button, as in the other notices
+    assert.match(noticeHtml('[yoicks] sent to w-a: /exit'), /^\[yoicks\] sent to <button[^>]*data-agent="w-a">w-a<\/button>: \/exit$/);
+    assert.match(noticeHtml('[yoicks] not sent to w-a: x'), /^\[yoicks\] not sent to <button[^>]*data-agent="w-a"/);
+    // a removed worktree: the bridge's answer, as agent_start's
+    assert.deepEqual(texts([call('r1', 'mcp__yoicks__worktree_remove', '/r-wt-x'), res('r1', 'removed /r-wt-x and branch x'),
+      call('r2', 'mcp__yoicks__worktree_remove', '/r-wt-y'), res('r2', 'refused: an agent still runs in it (end it with /exit first); /r-wt-y was left as it is', true)]),
+    ['[yoicks] removed /r-wt-x and branch x', '[yoicks] refused: an agent still runs in it (end it with /exit first); /r-wt-y was left as it is']);
   });
 
   it('hides only Claude Code\'s injected tags, not user text that starts with "<"', () => {
