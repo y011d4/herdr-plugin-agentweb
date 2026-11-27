@@ -679,6 +679,17 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 			}
 			continue
 		}
+		if slices.Equal(until, untilResumed) { // a turn of its own that ended unseen (a restart, a broken wait)
+			// ponytail: done only; ended and then looked at (idle) it passes for a look, untold
+			if raw, err := r.rpc("agent.get", map[string]any{"target": w.Pane}); err == nil {
+				if status, seq, _ := agentState(raw); status == "done" && seq != w.Seq {
+					if !r.tell(w, "", "working", w.Seq, false) { // its end, told next from working
+						return
+					}
+					until, resumed = untilSettled, true
+				}
+			}
+		}
 		raw, err := r.waitRPC(ctx, "agent.wait", map[string]any{"target": w.Pane, "until": until})
 		if err != nil {
 			if !r.retryWatch(ctx, w, err) {
@@ -704,8 +715,11 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 			continue
 		}
 		if resumed {
-			if raw = r.quiet(ctx, w, raw); ctx.Err() != nil {
-				return
+			if raw, err = r.quiet(ctx, w, raw); err != nil { // broken: looked at again
+				if !r.retryWatch(ctx, w, err) {
+					return
+				}
+				continue
 			}
 		}
 		if !r.settle(w, raw, &until) {
@@ -717,24 +731,26 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 // quiet holds the end (or question) of a turn the worker took up on its own until it has
 // stayed so for resumeQuiet; what it moves to meanwhile takes its place. So a worker flapping
 // between done and working wakes the orchestrator once, as it settles. raw is what the wait
-// answered; the result is the state to tell.
-func (r *headlessRunner) quiet(ctx context.Context, w *hlWatch, raw json.RawMessage) json.RawMessage {
-	for ctx.Err() == nil {
+// answered; the result is the state to tell, or the error of a wait that broke.
+func (r *headlessRunner) quiet(ctx context.Context, w *hlWatch, raw json.RawMessage) (json.RawMessage, error) {
+	for {
 		status, _, _ := agentState(raw)
 		if status == "working" {
-			return raw
+			return raw, nil
 		}
 		next := untilResumed
 		if status == "blocked" {
 			next = untilMoved
 		}
 		moved, err := r.waitRPC(ctx, "agent.wait", map[string]any{"target": w.Pane, "until": next, "timeout_ms": resumeQuiet.Milliseconds()})
-		if err != nil { // it held (herdr's timeout), or the wait broke: told as it was
-			return raw
+		if herdrCode(err) == "timeout" { // it held
+			return raw, nil
+		}
+		if err != nil {
+			return nil, err
 		}
 		raw = moved
 	}
-	return raw
 }
 
 // settle tells a change the wait answered; false once the watch is over (ended meanwhile).
