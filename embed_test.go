@@ -31,7 +31,8 @@ func TestWebBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"index.html", "sw.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"} {
+	for _, name := range []string{"index.html", "sw.js", "manifest.webmanifest", "favicon.ico", "favicon.svg",
+		"icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon.png", "icons/lockup.svg"} {
 		if _, err := fs.Stat(web, name); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}

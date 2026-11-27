@@ -10,8 +10,7 @@ export function Token({ message, onToken }: { message?: string; onToken: (token:
   };
   return (
     <div id="screen-login" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 24, padding: '32px 24px', height: '100%', overflowY: 'auto' }}>
-      <div className="login-logo">&#128241;</div>
-      <div className="login-title">Yoicks</div>
+      <img className="login-logo" src="/icons/lockup.svg" alt="Yoicks" />
       <div className="login-subtitle">{message || 'Enter the access token shown when the bridge server started.'}</div>
       <form className="login-form" id="token-form" style={{ width: '100%', maxWidth: 360, display: 'flex', flexDirection: 'column', gap: 12 }} onSubmit={submit}>
         <input type="password" id="token-input" ref={input} placeholder="Paste access token…" autoComplete="off" autoCorrect="off" spellCheck={false} />
