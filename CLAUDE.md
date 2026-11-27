@@ -94,9 +94,10 @@ All in `internal/bridge/` (one package):
   (manifest, icons) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one
   JS and one CSS file under `assets/`, named by content hash (no code splitting: an open PWA would
   ask for a deleted chunk after a deploy). The bridge serves `assets/*` as `immutable`,
-  `index.html` and `sw.js` as `no-cache`, and the text files gzipped to a client that accepts it
-  (each encoding its own ETag); `embed_test.go` checks the build and its size budgets (a cold open
-  gzipped, the JS raw)
+  `index.html` and `sw.js` as `no-cache`, and a text file as the best of its brotli and gzip
+  copies the client accepts (`vite.config.ts`'s `precompress()` writes them next to it, after
+  `sw()`; each encoding its own ETag); `embed_test.go` checks the build, the copies and the size
+  budgets (a cold open as sent, brotli; the JS raw)
 - **Styles: Mantine and Tailwind v4 next to the hand-written CSS.** `web/app.css` (index.html's one
   stylesheet) sets the cascade layers, lowest first: `theme` (Tailwind's variables), `base`
   (`reset.css`: the element resets, which over Mantine would strip its buttons), `mantine`
