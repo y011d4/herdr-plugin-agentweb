@@ -59,13 +59,14 @@ func checkPurpose(p string) (string, error) {
 	return p, nil
 }
 
-// Set makes purpose (checkPurpose's) the agent in paneID's; "" removes it.
-func (s *purposeStore) Set(paneID, purpose string) {
+// Set makes purpose (checkPurpose's) the agent in paneID's; "" removes it. seen: the agent has
+// been there a while (a re-task), so the State has it; false for one just started.
+func (s *purposeStore) Set(paneID, purpose string, seen bool) {
 	s.mu.Lock()
 	if purpose == "" {
 		delete(s.m, paneID)
 	} else {
-		s.m[paneID] = purposeEntry{Purpose: purpose}
+		s.m[paneID] = purposeEntry{Purpose: purpose, Seen: seen}
 	}
 	s.persist()
 	s.mu.Unlock()
