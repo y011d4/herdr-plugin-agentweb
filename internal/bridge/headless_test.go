@@ -119,6 +119,8 @@ type hlBridge struct {
 	log  string // FAKECLAUDE_LOG
 	home string
 	name string // its orchestrator
+	// the runner's timers and its herdr's waits: time moves only when the test moves it
+	clock *fakeherdr.FakeClock
 }
 
 // fakeClaudeEnv builds tools/fakeclaude as `claude` (the orphan scan looks for that name)
@@ -163,15 +165,46 @@ func startHeadless(t *testing.T, stateDir string, env map[string]string, tweak f
 	}
 	name := firstNonEmpty(os.Getenv("HLNAME"), "h1")
 	def := OrchestratorDef{Name: name, Label: "H1", Dir: filepath.Join(home, "orchestrators", name), Env: env, Managed: true, Mode: "headless"}
+	clock := fakeherdr.NewFakeClock()
 	b := startBridge(t, Config{StateDir: stateDir, Orchestrators: []OrchestratorDef{def}}, nil, func(s *server) {
 		h := s.headless[name]
+		h.clock = clock
 		h.restartDelays = []time.Duration{50 * time.Millisecond, 50 * time.Millisecond, 50 * time.Millisecond}
 		if tweak != nil {
 			tweak(h)
 		}
 	})
+	b.world.SetClock(clock)
 	t.Cleanup(b.srv.shutdownHeadless) // before the bridge's own cleanup (LIFO)
-	return &hlBridge{b, log, home, name}
+	return &hlBridge{b, log, home, name, clock}
+}
+
+// waiting waits until something waits d from now on the clock (what names it).
+func (b *hlBridge) waiting(t *testing.T, what string, d time.Duration) {
+	t.Helper()
+	waitUntil(t, 10*time.Second, what+" waits "+d.String(), func() bool { return b.clock.Pending(d) })
+}
+
+// pass moves the clock d on once something waits d from now.
+func (b *hlBridge) pass(t *testing.T, what string, d time.Duration) {
+	t.Helper()
+	b.waiting(t, what, d)
+	b.clock.Advance(d)
+}
+
+// restartDue moves the clock past a restart's delay when one is due after a crash (false: none is).
+func (b *hlBridge) restartDue() bool {
+	h := b.srv.headless[b.name]
+	h.mu.Lock()
+	var d time.Duration
+	if h.restartTimer != nil {
+		d = h.restartDelays[len(h.crashes)-1]
+	}
+	h.mu.Unlock()
+	if d > 0 {
+		b.clock.Advance(d)
+	}
+	return d > 0
 }
 
 func (b *hlBridge) post(t *testing.T, action, body string) (int, string) {
@@ -251,6 +284,27 @@ func (b *hlBridge) waitStdin(t *testing.T, substr string) {
 	})
 }
 
+// release lets the running child's held turn (hang, hold) go on.
+func (b *hlBridge) release(t *testing.T) {
+	t.Helper()
+	h := b.srv.headless[b.name]
+	h.mu.Lock()
+	c := h.child
+	h.mu.Unlock()
+	if c == nil {
+		t.Fatal("no child to release")
+	}
+	// it catches the signal from its first log line on
+	pid := c.cmd.Process.Pid
+	waitUntil(t, 10*time.Second, "the child's first log line", func() bool {
+		runs, _ := b.runs(t)
+		return slices.ContainsFunc(runs, func(r procArgs) bool { return r.pid == pid })
+	})
+	if err := c.cmd.Process.Signal(syscall.SIGUSR1); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
 
 func hasWarning(v OrchestratorView, kind string) bool {
@@ -268,10 +322,11 @@ func TestHeadlessTurn(t *testing.T) {
 	if v.PaneID == nil || *v.PaneID != "hl:h1" || v.Headless.CompletionSeq != 0 || v.Headless.Pending != nil {
 		t.Fatalf("started: %+v", v)
 	}
-	b.send(t, "slow 1")
+	b.send(t, "hang")
 	if v := b.view(t); v.Headless.Status != "working" {
 		t.Errorf("after the send: %s", v.Headless.Status)
 	}
+	b.release(t)
 	v = b.waitStatus(t, "done")
 	if v.Headless.CompletionSeq != 1 || v.Headless.Usage == nil || v.Headless.Usage.FiveHour.Utilization != 0.25 ||
 		v.Headless.Usage.ContextPct == nil || *v.Headless.Usage.ContextPct != 1 || len(v.Headless.Warnings) != 0 {
@@ -281,14 +336,15 @@ func TestHeadlessTurn(t *testing.T) {
 	// the chat: the transcript fakeclaude wrote, through the pane transcript route
 	waitUntil(t, 5*time.Second, "the transcript", func() bool {
 		_, body, _ := b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
-		return strings.Contains(body, `"available":true`) && strings.Contains(body, `"text":"echo: slow 1"`)
+		return strings.Contains(body, `"available":true`) && strings.Contains(body, `"text":"echo: hang"`)
 	})
 
 	// a message sent mid-turn is written at once, and answered
-	b.send(t, "slow 2")
+	b.send(t, "hang")
 	b.waitStatus(t, "working")
 	b.send(t, "while working")
 	b.waitStdin(t, "while working")
+	b.release(t)
 	v = b.waitFor(t, "both turns", func(v OrchestratorView) bool { return v.Headless.CompletionSeq == 3 })
 	if v.Headless.Status != "done" {
 		t.Errorf("status %s", v.Headless.Status)
@@ -350,6 +406,7 @@ func TestHeadlessCrashes(t *testing.T) {
 		b.send(t, "crash")
 		if i < 4 { // restarted, and its notice answered
 			b.waitFor(t, "a restart", func(v OrchestratorView) bool {
+				b.restartDue()
 				runs, _ := b.runs(t)
 				return len(runs) == i+1 && v.Headless.Status == "done"
 			})
@@ -481,9 +538,9 @@ func TestHeadlessDetectors(t *testing.T) {
 	var mu sync.Mutex
 	var logged []string
 	b := startHeadless(t, t.TempDir(), nil, func(h *headlessRunner) {
-		h.silence = 600 * time.Millisecond
 		h.log = func(f string, a ...any) { mu.Lock(); logged = append(logged, f); mu.Unlock() }
 	})
+	h := b.srv.headless["h1"]
 	c, _, err := b.dial(t, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -499,13 +556,19 @@ func TestHeadlessDetectors(t *testing.T) {
 		}
 		b.waitFor(t, script+" answered", func(v OrchestratorView) bool { return v.Headless.Status == "done" })
 	}
-	b.send(t, "hang 2")
-	v := b.waitFor(t, "the silence warning", func(v OrchestratorView) bool { return hasWarning(v, "silent") })
+	b.send(t, "hang")
+	v := b.waitFor(t, "the silence warning", func(v OrchestratorView) bool {
+		if b.clock.Pending(h.silence / 6) { // the silence watch's next look
+			b.clock.Advance(h.silence / 6)
+		}
+		return hasWarning(v, "silent")
+	})
 	for _, w := range v.Headless.Warnings {
 		if w.Kind == "silent" && !slices.Equal(w.Actions, []string{"interrupt", "clear"}) {
 			t.Errorf("actions %v", w.Actions)
 		}
 	}
+	b.release(t)
 	v = b.waitStatus(t, "done")
 	for _, kind := range []string{"unknown_event", "unreadable", "permission_route"} {
 		if !hasWarning(v, kind) {
@@ -517,18 +580,24 @@ func TestHeadlessDetectors(t *testing.T) {
 	}
 	b.waitStdin(t, `"message":"not now"`) // the stdio permission request was answered
 
-	// each kind was alerted once over WS
+	// each kind was alerted once over WS: read up to the agent_status of one more turn's end,
+	// queued to the client after every alert before it
+	b.send(t, "hello")
 	alerts := map[string]int{}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	for {
+	for dones := 0; dones < 5; { // unknown, garbage, askstdio, hang, hello
 		_, data, err := c.Read(ctx)
 		if err != nil {
-			break
+			t.Fatalf("after %d done: %v", dones, err)
 		}
-		var m WsOrchestratorAlertMessage
-		if json.Unmarshal(data, &m) == nil && m.Type == "orchestrator_alert" && m.Name == "h1" {
+		var m struct{ Type, Name, Kind, PaneID, To string }
+		json.Unmarshal(data, &m)
+		if m.Type == "orchestrator_alert" && m.Name == "h1" {
 			alerts[m.Kind]++
+		}
+		if m.Type == "agent_status" && m.PaneID == "hl:h1" && m.To == "done" {
+			dones++
 		}
 	}
 	for _, kind := range []string{"unknown_event", "unreadable", "permission_route", "silent"} {
@@ -553,9 +622,8 @@ func TestHeadlessRefusesBilling(t *testing.T) {
 		if status, body := b.post(t, "start", ""); status != 409 || !strings.Contains(body, "billing_refused") {
 			t.Errorf("start: %d %s", status, body)
 		}
-		b.srv.startHeadless()
-		time.Sleep(200 * time.Millisecond)
-		if runs, _ := b.runs(t); len(runs) != 0 {
+		b.srv.startHeadless()()
+		if runs, _ := b.runs(t); len(runs) != 0 || b.view(t).PaneID != nil {
 			t.Errorf("runs %v", runs)
 		}
 	})
@@ -621,9 +689,13 @@ func TestHeadlessRefusesBilling(t *testing.T) {
 		if !hasWarning(v, "init") {
 			t.Errorf("%+v", v.Headless)
 		}
-		time.Sleep(300 * time.Millisecond) // no restart
-		if runs, _ := b.runs(t); len(runs) != 1 || alive(runs[0].pid) {
-			t.Errorf("runs %v", runs)
+		h := b.srv.headless["h1"]
+		waitUntil(t, 5*time.Second, "the child's end", func() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.child == nil })
+		h.mu.Lock() // its end and any restart are decided together: none
+		restart := h.restartTimer != nil
+		h.mu.Unlock()
+		if runs, _ := b.runs(t); len(runs) != 1 || alive(runs[0].pid) || restart {
+			t.Errorf("runs %v, a restart: %v", runs, restart)
 		}
 	})
 }
@@ -631,8 +703,20 @@ func TestHeadlessRefusesBilling(t *testing.T) {
 // The child is the running one before its first line or its exit: an init at once is
 // checked, an exit at once is a crash.
 func TestHeadlessChildAtOnce(t *testing.T) {
-	// spawn goes on late: its first line, or its end, comes before that
-	late := func(h *headlessRunner) { h.startedHook = func() { time.Sleep(300 * time.Millisecond) } }
+	// spawn goes on late: its first line (the refused init ends it), or its end, comes before that
+	late := func(h *headlessRunner) {
+		h.startedHook = func() { // (on the start's goroutine: no t.Fatal here)
+			for end := time.Now().Add(10 * time.Second); time.Now().Before(end); time.Sleep(time.Millisecond) {
+				h.mu.Lock()
+				gone := h.child == nil
+				h.mu.Unlock()
+				if gone {
+					return
+				}
+			}
+			t.Error("the child never ended")
+		}
+	}
 	t.Run("an init at once is checked", func(t *testing.T) {
 		fakeClaudeEnv(t)
 		t.Setenv("FAKECLAUDE_START", "init")
@@ -649,7 +733,7 @@ func TestHeadlessChildAtOnce(t *testing.T) {
 		t.Setenv("FAKECLAUDE_START", "exit")
 		b := startHeadless(t, t.TempDir(), nil, late)
 		b.start(t)
-		v := b.waitFor(t, "the restart limit", func(v OrchestratorView) bool { return v.Headless.Status == "error" })
+		v := b.waitFor(t, "the restart limit", func(v OrchestratorView) bool { b.restartDue(); return v.Headless.Status == "error" })
 		if !hasWarning(v, "restart_limit") || v.PaneID != nil {
 			t.Errorf("%+v %v", v.Headless, v.PaneID)
 		}
@@ -677,15 +761,32 @@ func TestHeadlessShutdownPastAStuckWrite(t *testing.T) {
 	b.start(t)
 	b.waitStatus(t, "idle")
 	b.send(t, "deaf")
-	big, _ := json.Marshal(map[string]string{"text": strings.Repeat("x", 60000)})
+	b.waitStdin(t, `"content":"deaf"`) // read: it reads nothing more
+	h := b.srv.headless["h1"]
+	h.mu.Lock()
+	c := h.child
+	h.mu.Unlock()
+	// its stdin pipe filled (the fd is non-blocking, for the poller: a write that can't go in
+	// whole answers EAGAIN), so no send's write can end
+	raw, err := c.stdin.SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw.Write(func(fd uintptr) bool {
+		for chunk := make([]byte, 4096); ; {
+			if _, err := syscall.Write(int(fd), chunk); err != nil {
+				return true
+			}
+		}
+	})
 	sent := make(chan struct{})
 	go func() {
 		defer close(sent)
-		for range 4 { // more than the pipe holds
-			b.do(t, "POST", "/api/orchestrators/h1/send", b.token, big)
+		for range 2 { // one stuck in its write, one waiting for the write lock
+			b.do(t, "POST", "/api/orchestrators/h1/send", b.token, []byte(`{"text":"x"}`))
 		}
 	}()
-	time.Sleep(1500 * time.Millisecond) // a send is stuck by now
+	waitUntil(t, 10*time.Second, "a send stuck in its write", func() bool { return len(c.wlock) == 1 })
 	runs, _ := b.runs(t)
 	began := time.Now()
 	b.srv.shutdownHeadless()
@@ -784,10 +885,33 @@ func TestHeadlessHasNoPane(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.CloseNow()
-	if err := c.Write(context.Background(), websocket.MessageText, []byte(`{"type":"watch_pane","paneId":"hl:h1"}`)); err != nil {
-		t.Fatal(err)
+	for _, m := range []string{`{"type":"watch_pane","paneId":"hl:h1"}`, `{"type":"ping"}`} {
+		if err := c.Write(context.Background(), websocket.MessageText, []byte(m)); err != nil {
+			t.Fatal(err)
+		}
 	}
-	time.Sleep(1500 * time.Millisecond)
+	// a client's messages are handled in order: by the pong, the watch_pane was, and no watch
+	// (whose first poll reads herdr) was started
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for {
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), `"type":"pong"`) {
+			break
+		}
+	}
+	b.srv.bmu.Lock()
+	for cl := range b.srv.clients {
+		cl.mu.Lock()
+		if cl.paneStop != nil {
+			t.Error("a pane watch for hl:h1")
+		}
+		cl.mu.Unlock()
+	}
+	b.srv.bmu.Unlock()
 	if got := b.sent(n); len(got) != 0 {
 		t.Errorf("herdr got %v for hl:h1", got)
 	}
@@ -803,7 +927,6 @@ func TestNoHeadlessWithoutAHeadlessEntry(t *testing.T) {
 	if len(b.srv.headless) != 0 {
 		t.Errorf("runners %v", b.srv.headless)
 	}
-	time.Sleep(200 * time.Millisecond)
 	if _, err := os.Stat(log); err == nil {
 		t.Error("fakeclaude ran")
 	}
@@ -878,11 +1001,12 @@ func TestHeadlessInterruptKeepsQueuedMessages(t *testing.T) {
 		b := startHeadless(t, t.TempDir(), nil, nil)
 		b.start(t)
 		b.waitStatus(t, "idle")
-		b.send(t, "hold") // its turn begins only 2 s later
+		b.send(t, "hold") // its turn begins only once released
 		if status, body := b.post(t, "interrupt", ""); status != 200 {
 			t.Fatalf("interrupt: %d %s", status, body)
 		}
 		b.send(t, "after")
+		b.release(t)
 		b.waitFor(t, "after answered", func(v OrchestratorView) bool { return v.Headless.CompletionSeq == 1 && v.Headless.Status == "done" })
 		if tr := transcript(b); !strings.Contains(tr, "echo: after") || strings.Contains(tr, "echo: hold") {
 			t.Errorf("transcript %s", tr)
@@ -951,6 +1075,7 @@ func TestHeadlessClaudeCheck(t *testing.T) {
 	}
 	first := time.Date(2026, 11, 26, 9, 0, 0, 0, time.Local)
 	write(first, false, `"resume"`)
+	clock := fakeherdr.NewFakeClock()
 	var shown sync.Mutex
 	var alerts []string
 	def := OrchestratorDef{Name: "h1", Dir: filepath.Join(home, "orchestrators", "h1"), Managed: true, Mode: "headless",
@@ -962,9 +1087,9 @@ func TestHeadlessClaudeCheck(t *testing.T) {
 			shown.Unlock()
 		}
 		return fakeherdr.Reply{}, false
-	}, nil)
+	}, func(s *server) { s.headless["h1"].clock = clock })
 	t.Cleanup(tb.srv.shutdownHeadless)
-	b := &hlBridge{tb, log, home, "h1"}
+	b := &hlBridge{tb, log, home, "h1", clock}
 	nAlerts := func() int { shown.Lock(); defer shown.Unlock(); return len(alerts) }
 	warning := func(v OrchestratorView, kind string) string {
 		for _, w := range v.Headless.Warnings {

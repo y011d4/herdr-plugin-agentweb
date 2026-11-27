@@ -247,6 +247,50 @@ func TestHerdrClientIgnoresAnAgentListFromBeforeADrop(t *testing.T) {
 	}
 }
 
+// herdr's waits have no deadline of their own, so HerdrClient.Wait gives its answer none: a
+// wait outlasts a request sent after it whose deadline has passed. (The request timeout is
+// shortened; a socket deadline runs on the real time, so this is the one wait on it.)
+func TestHerdrWaitHasNoDeadline(t *testing.T) {
+	old := requestTimeoutNs.Load()
+	requestTimeoutNs.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { requestTimeoutNs.Store(old) })
+	dir, _ := os.MkdirTemp("", "fh")
+	defer os.RemoveAll(dir)
+	release := make(chan struct{})
+	srv, err := fakeherdr.Start(filepath.Join(dir, "h.sock"), func(string, json.RawMessage) fakeherdr.Reply {
+		return fakeherdr.Reply{Wait: func(gone <-chan struct{}) fakeherdr.Reply {
+			select {
+			case <-release:
+				return fakeherdr.Reply{Result: map[string]any{"type": "agent_info"}}
+			case <-gone:
+				return fakeherdr.Reply{Close: true}
+			}
+		}}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	waited := make(chan error, 1)
+	go func() {
+		_, err := NewHerdrClient(srv.Path, HerdrClientCallbacks{}).Wait(context.Background(), "agent.wait", map[string]any{"target": "w1"})
+		waited <- err
+	}()
+	waitUntil(t, 5*time.Second, "the wait at herdr", func() bool { return len(srv.Requests()) == 1 })
+	if _, err := herdrRPC(srv.Path, "agent.wait", map[string]any{"target": "w1"}); err == nil || !strings.Contains(err.Error(), "RPC timeout") {
+		t.Fatalf("a request with the deadline: %v", err)
+	}
+	select {
+	case err := <-waited:
+		t.Fatalf("the wait ended with the request's deadline: %v", err)
+	default:
+	}
+	close(release)
+	if err := <-waited; err != nil {
+		t.Errorf("the wait: %v", err)
+	}
+}
+
 // A no-deadline call (herdr's waits) is given up by its context: one cancelled already sends
 // nothing (not even a connection), one cancelled while herdr says nothing returns at once.
 func TestHerdrCallCancellation(t *testing.T) {
