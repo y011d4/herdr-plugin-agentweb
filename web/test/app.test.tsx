@@ -156,6 +156,15 @@ describe('App', () => {
     assert.equal(history.length, before + 1, 'the close went back: no entry left over');
   });
 
+  it("titles a drawer by herdr's name for its agent, else by the agent kind, with the location beside", async () => {
+    await go('#/agents');
+    await go('#/pane/p3');
+    assert.equal($('.agent-drawer-head .topbar-title')!.textContent, 'w-review· repo-wt-feat / feat');
+    await go('#/agents');
+    await go('#/pane/p7');
+    assert.equal($('.agent-drawer-head .topbar-title')!.textContent, 'codex· repo / 2');
+  });
+
   it("a pane gone under an image preview closes both: the preview's entry, then the drawer's", async () => {
     await go('#/agents');
     await go('#/pane/p1');

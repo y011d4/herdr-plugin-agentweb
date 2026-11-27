@@ -15,7 +15,7 @@ import { homeGroups, orchestratorStatus, shownStatus, type DashboardCard, type H
 import { openAgent } from '../nav.ts';
 import { homeHash } from '../routes.ts';
 import { findPane, store } from '../store.ts';
-import { TopbarIcon, agentCards, cardTitle, orchestratorLabel, useHeldState } from './Dashboard.tsx';
+import { TopbarIcon, agentCards, cardLocation, cardTitle, orchestratorLabel, useHeldState } from './Dashboard.tsx';
 import { openNewAgent } from './Modals.tsx';
 import { StatusBadge, StatusDot } from './Status.tsx';
 
@@ -75,14 +75,14 @@ function Group({ group: { home, cards }, hash }: { group: HomeGroup; hash: strin
   );
 }
 
-// An agent as its card in the list has it: the title and (dim) the branch, the workspace below, its status.
+// An agent as its card in the list has it: the title and (dim) the branch, the location below, its status.
 function Agent({ card, on }: { card: DashboardCard; on: boolean }) {
   const { paneId } = card.pane;
   const st = shownStatus(card.pane, store.seenDone) || 'unknown';
   return (
     <NavLink component="button" className="rounded-lg" data-sidebar-pane={paneId} noWrap pl={28}
       label={<>{cardTitle(card)}{card.branch ? <Text span className="card-branch" fz={13} c="dimmed">{` ${card.branch}`}</Text> : null}</>}
-      description={card.workspaceLabel}
+      description={cardLocation(card)}
       rightSection={<StatusBadge status={st} small />} active={on} aria-current={current(on)}
       onClick={() => openAgent(paneId)} />
   );
