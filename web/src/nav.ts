@@ -29,6 +29,9 @@ const moved = (): void => { closing = null; traversing = false; };
 addEventListener('hashchange', moved);
 addEventListener('popstate', moved); // first: before a close waiting on the same popstate
 
+/** Whether a close of the drawer on show is under way (its Back not landed yet). */
+export const closingDrawer = (): boolean => closing === location.href;
+
 /** The app's every history.back(): one close waits for it to land. */
 export function back(): void {
   traversing = true;

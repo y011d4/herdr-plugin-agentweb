@@ -15,15 +15,15 @@
  * --sidebar-w (a wide screen's sidebar stays usable).
  */
 import { Drawer } from '@mantine/core';
-import { useFocusReturn, useMediaQuery } from '@mantine/hooks';
-import { useCallback, useEffect, type ReactNode } from 'react';
+import { useMediaQuery } from '@mantine/hooks';
+import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { closeAgent } from '../nav.ts';
 import { WIDE_QUERY } from '../theme.ts';
 import { AgentMenu, Pane, PaneTitle, ViewToggle, type AgentActions } from './Pane.tsx';
 
 /** The pane on show (ui/App.tsx): `key` is new for each pane route (a fresh view); a closing drawer
- *  keeps its last pane, its view stopped, until it is gone. */
-export interface Sheet { paneId: string; key: number; open: boolean }
+ *  keeps its last pane, its view stopped, until it is gone. `opener`: what had the focus as it opened. */
+export interface Sheet { paneId: string; key: number; open: boolean; opener: HTMLElement | null }
 
 // Another layer over the drawer: a dialog of Modals.tsx (Mantine's confirm too) or ⋮'s menu.
 const OTHER_LAYER = '.modal-overlay, [data-modal-backdrop], [data-menu-dropdown]';
@@ -36,8 +36,15 @@ export function AgentDrawer({ sheet, actions }: { sheet: Sheet | null; actions: 
   const open = sheet?.open ?? false;
   // each pane's header as it mounts (keyed): stable, so a re-render doesn't take the focus back
   const focusHead = useCallback((el: HTMLDivElement | null) => { el?.focus({ preventScroll: true }); }, []);
-  // a phone's sheet traps the focus and gives it back on close (Mantine); a wide screen's drawer, untrapped, gives it back here
-  useFocusReturn({ opened: open, shouldReturnFocus: wide });
+  // A phone's sheet traps the focus and gives it back on close (Mantine). A wide screen's, untrapped, gives
+  // it back here: only when it was in the drawer or lost, not when the user took it to the sidebar.
+  const content = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const a = document.activeElement;
+    const opener = sheet?.opener;
+    if (open || !wide || !opener?.isConnected || (a && a !== document.body && !content.current?.contains(a))) return;
+    opener.focus({ preventScroll: true });
+  }, [open]); // on a close only
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent): void => {
@@ -55,7 +62,7 @@ export function AgentDrawer({ sheet, actions }: { sheet: Sheet | null; actions: 
       classNames={{ root: 'agent-drawer', inner: 'agent-drawer-inner', content: 'agent-drawer-content' }}>
       <Drawer.Overlay color="#000" backgroundOpacity={0.55} className="agent-drawer-overlay" />
       {/* non-modal on a wide screen (the sidebar beside it is usable): Mantine sets aria-modal="true" whatever */}
-      <Drawer.Content aria-label="Agent" ref={(el: HTMLElement | null) => el?.setAttribute('aria-modal', String(!wide))}>
+      <Drawer.Content aria-label="Agent" ref={(el: HTMLElement | null) => { if (el) { content.current = el; el.setAttribute('aria-modal', String(!wide)); } }}>
         {/* the focus starts here, not on ✕: opened by no tap (a notification), ✕ would show its focus ring */}
         <div className="agent-drawer-head" key={sheet.key} ref={focusHead} tabIndex={-1} data-autofocus>
           <button className="topbar-action agent-drawer-close" id="btn-drawer-close" aria-label="Close" onClick={closeAgent}>&#10005;</button>
