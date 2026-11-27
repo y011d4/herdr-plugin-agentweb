@@ -11,6 +11,7 @@
  * State pushes re-render it constantly. The composer's textarea is uncontrolled (React never sets its
  * value), so a push never resets what is being typed, an IME composition included.
  */
+import { Menu } from '@mantine/core';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
@@ -450,9 +451,26 @@ function ViewToggle({ home }: { home: boolean }) {
 
 const settingsButton = <button className="topbar-action" id="btn-settings" aria-label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</button>;
 
-/** The topbar: a pane's Back (to `back`); the view toggle; a pane's agent-actions kebab (`menu`:
+export interface AgentActions { rename: () => void; clear: () => void; stop: () => void }
+
+/** A pane's ⋮: Mantine's menu under it (closes on a pick, a tap outside or Escape). Each item
+ *  44px tall, the app's touch target. */
+function AgentMenu({ actions }: { actions: AgentActions }) {
+  return (
+    <Menu id="btn-agent-menu" position="bottom-end" width={220} radius="md">
+      <Menu.Target><button className="topbar-action" aria-label="Agent actions">&#8942;</button></Menu.Target>
+      <Menu.Dropdown>
+        <Menu.Item id="am-rename" className="min-h-11" fz="md" onClick={actions.rename}>Rename…</Menu.Item>
+        <Menu.Item id="am-clear" className="min-h-11" fz="md" onClick={actions.clear}>Clear (fresh session)…</Menu.Item>
+        <Menu.Item id="am-stop" className="min-h-11" fz="md" color="var(--color-blocked)" onClick={actions.stop}>Stop agent…</Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
+  );
+}
+
+/** The topbar: a pane's Back (to `back`); the view toggle; a pane's agent-actions ⋮ (`actions`:
  *  rename, clear, stop), a Home's Settings (its Agents ›, Clear and Stop are on its status bar). */
-export const paneTopbar = (paneId: string, home: boolean, back: string, menu: () => void): Topbar => ({
+export const paneTopbar = (paneId: string, home: boolean, back: string, actions: AgentActions): Topbar => ({
   title: <Title paneId={paneId} home={home} />,
   left: home ? undefined : (
     <button className="topbar-back" aria-label="Back" onClick={() => { location.hash = back; }}>{`← ${back.startsWith('#/home/') ? 'Home' : 'Agents'}`}</button>
@@ -460,7 +478,7 @@ export const paneTopbar = (paneId: string, home: boolean, back: string, menu: ()
   right: (
     <>
       <ViewToggle home={home} />
-      {home ? settingsButton : <button className="topbar-action" id="btn-agent-menu" aria-label="Agent actions" onClick={menu}>&#8942;</button>}
+      {home ? settingsButton : <AgentMenu actions={actions} />}
     </>
   ),
 });

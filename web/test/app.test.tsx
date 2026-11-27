@@ -251,7 +251,7 @@ describe('App', () => {
     await go('#/agents/personal');
     await go('#/pane/p3');
     await click($('#btn-agent-menu'));
-    await click($('#modal-root #am-stop'));
+    await click($('#am-stop'));
     await click($('#modal-root #cf-ok'));
     await answer('DELETE /api/panes/p3', { ok: true });
     assert.deepEqual(toastTitles(), ['Stopped']);
@@ -259,7 +259,7 @@ describe('App', () => {
 
     await go('#/pane/p1');
     await click($('#btn-agent-menu'));
-    await click($('#modal-root #am-clear'));
+    await click($('#am-clear'));
     await click($('#modal-root #cf-ok'));
     await answer('POST /api/agents/p1/clear', { ok: true, paneId: 'p8' });
     assert.equal(location.hash, '#/pane/p8');
