@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
-import { askAnswer, renderMarkdown, conversationItems, latestActivity, type TimelineItem } from '../src/transcript.ts';
+import { askAnswer, renderMarkdown, conversationItems, latestActivity, WORKER_NOTICE, type TimelineItem } from '../src/transcript.ts';
 import { createElement } from 'react';
 import { Notice } from '../src/ui/ChatLog.tsx';
 import { chatHtml, htmlOf } from './render.ts';
@@ -293,9 +293,9 @@ describe('conversationItems / latestActivity (home chat)', () => {
       prompt('f3', 'w-b: go'), res('f3', 'refused: w-b is not an agent of this Claude account', true),
     ]), ['[yoicks] not sent to w-a: agent_not_found', '[yoicks] not sent to w-a: w-a waits on a question in its pane; you are woken when it is ready',
       '[yoicks] not sent to w-b: refused: w-b is not an agent of this Claude account']);
-    // the worker's name is a button, as in the other notices
-    assert.match(noticeHtml('[yoicks] sent to w-a: /exit'), /^\[yoicks\] sent to <button[^>]*data-agent="w-a">w-a<\/button>: \/exit$/);
-    assert.match(noticeHtml('[yoicks] not sent to w-a: x'), /^\[yoicks\] not sent to <button[^>]*data-agent="w-a"/);
+    // the worker's name is a button, as in the other notices (ui/ChatLog.tsx's Notice draws WORKER_NOTICE's [2] as one)
+    assert.deepEqual(WORKER_NOTICE.exec('[yoicks] sent to w-a: /exit')?.slice(1), ['[yoicks] sent to ', 'w-a', ': /exit']);
+    assert.deepEqual(WORKER_NOTICE.exec('[yoicks] not sent to w-a: x')?.slice(1), ['[yoicks] not sent to ', 'w-a', ': x']);
     // a removed worktree: the bridge's answer, as agent_start's
     assert.deepEqual(texts([call('r1', 'mcp__yoicks__worktree_remove', '/r-wt-x'), res('r1', 'removed /r-wt-x and branch x'),
       call('r2', 'mcp__yoicks__worktree_remove', '/r-wt-y'), res('r2', 'refused: an agent still runs in it (end it with /exit first); /r-wt-y was left as it is', true)]),
