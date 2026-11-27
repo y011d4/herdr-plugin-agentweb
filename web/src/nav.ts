@@ -1,19 +1,18 @@
 /**
- * nav.ts — the moves more than one screen makes: opening an agent and closing it. An agent (#/pane/<id>)
- * opens in a drawer over the screen it was opened from (ui/AgentDrawer.tsx; that screen is
- * store.view.paneBackRoute). Going from one agent's drawer to another's replaces the history entry,
- * so the phone's Back still closes the drawer; a close goes back to the entry under it when the
- * drawer was opened on top of it here, else replaces itself with that screen.
+ * nav.ts — the moves more than one screen makes: opening an overlay and closing it. An agent (#/pane/<id>)
+ * opens in a drawer (ui/AgentDrawer.tsx), Settings (#/settings) in a sheet (ui/SettingsSheet.tsx), in
+ * front of the screen they were opened from (store.view.paneBackRoute), one at a time. Going from one
+ * overlay to another replaces the history entry, so the phone's Back still closes it; a close goes back
+ * to the entry under it when the overlay was opened on top of it here, else replaces itself with that
+ * screen.
  */
 import { showToast } from './notify.ts';
-import { paneRoute } from './routes.ts';
+import { isOverlay, paneRoute } from './routes.ts';
 import { store } from './store.ts';
 
-const inDrawer = (hash: string): boolean => hash.startsWith('#/pane/');
-
-/** To `hash`: from a drawer to a drawer in place, else as a new history entry. */
+/** To `hash`: from an overlay to an overlay in place, else as a new history entry. */
 export function go(hash: string): void {
-  if (inDrawer(hash) && inDrawer(location.hash)) location.replace(hash);
+  if (isOverlay(hash) && isOverlay(location.hash)) location.replace(hash);
   else location.hash = hash;
 }
 
@@ -40,7 +39,7 @@ const moved = (): void => { closing = null; traversing = false; };
 addEventListener('hashchange', moved);
 addEventListener('popstate', moved); // first: before a close waiting on the same popstate
 
-/** Whether a close of the drawer on show is under way (its Back not landed yet). */
+/** Whether a close of the overlay on show is under way (its Back not landed yet). */
 export const closingDrawer = (): boolean => closing === location.href;
 
 /** The app's every history.back(): one close waits for it to land. */
@@ -49,13 +48,13 @@ export function back(): void {
   history.back();
 }
 
-/** Closes the drawer on show: back to the screen under it. An image preview open over it (Modals.tsx)
- *  has an entry of its own at the same URL on top of the drawer's: Back takes it off (closing the
- *  preview), then the drawer closes; so with the preview's own Back under way. */
-export function closeAgent(): void {
-  if (!inDrawer(location.hash) || closing === location.href) return;
+/** Closes the overlay on show (a drawer, Settings): back to the screen under it. An image preview open
+ *  over a drawer (Modals.tsx) has an entry of its own at the same URL on top of the drawer's: Back takes
+ *  it off (closing the preview), then the drawer closes; so with the preview's own Back under way. */
+export function closeOverlay(): void {
+  if (!isOverlay(location.hash) || closing === location.href) return;
   if (traversing || history.state?.imagePreview != null) {
-    addEventListener('popstate', closeAgent, { once: true });
+    addEventListener('popstate', closeOverlay, { once: true });
     if (!traversing) back();
     return;
   }
@@ -63,3 +62,6 @@ export function closeAgent(): void {
   if (store.view.paneOverBase) back();
   else location.replace(store.view.paneBackRoute);
 }
+
+/** The drawer's word for closeOverlay. */
+export const closeAgent = closeOverlay;

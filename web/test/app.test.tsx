@@ -291,7 +291,7 @@ describe('App', () => {
     assert.equal(location.hash, '#/agents');
     assert.ok(!$('.agent-drawer #screen-pane'));
 
-    await go('#/settings');
+    await go('#/');
     await go('#/pane/p2'); // not from a list or a Home: the list goes under it
     assert.ok($('#screen #screen-agents') && $('.agent-drawer #screen-pane'));
     replace.mockClear();
@@ -516,14 +516,71 @@ describe('App', () => {
     assert.ok($('#screen #screen-home-stopped #btn-home-start'));
   });
 
-  it("a Home's Settings button opens the settings, whose Back returns to that Home", async () => {
+  it("Settings opens in front of a Home, which runs on under it; ✕ closes it back to the Home as it is", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/home/personal');
+    const home = $('#screen #screen-pane.screen-home');
+    const before = history.length;
     await click($('#btn-settings'));
     assert.equal(location.hash, '#/settings');
-    await settle();
-    await click($('.topbar-back'));
+    assert.ok($('#modal-root .settings-sheet #screen-settings'), 'Settings, in its sheet');
+    assert.ok($('#screen #screen-pane.screen-home') === home, 'the Home under it, the same');
+    assert.equal(store.view.activePaneId, 'p4', 'running on');
+    assert.ok($('#screen')!.hasAttribute('inert') && $('#topbar')!.hasAttribute('inert'));
+    const homeReads = reads('p4');
+    await click($('#btn-settings-close'));
     assert.equal(location.hash, '#/home/personal');
+    assert.ok(!$('#screen-settings'));
+    assert.ok($('#screen #screen-pane.screen-home') === home, 'not drawn afresh');
+    assert.equal(reads('p4'), homeReads, 'no new view');
+    assert.ok(!$('#screen')!.hasAttribute('inert'));
+    assert.equal(history.length, before + 1, 'the close went back');
+  });
+
+  it('Escape closes Settings; opened afresh (no list or Home before it) it is in front of the list and closes in its place', async () => {
+    await go('#/agents');
+    const list = $('#screen #screen-agents');
+    await go('#/settings');
+    assert.ok($('#screen #screen-agents') === list);
+    await act(async () => { (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    await settle();
+    assert.equal(location.hash, '#/agents');
+    assert.ok(!$('#screen-settings') && $('#screen #screen-agents') === list);
+
+    await go('#/');
+    const replace = vi.spyOn(location, 'replace');
+    await go('#/settings');
+    assert.ok($('#screen #screen-agents') && $('#screen-settings'));
+    await click($('#btn-settings-close'));
+    assert.deepEqual(replace.mock.calls.map((c) => c[0]), ['#/agents']);
+    replace.mockRestore();
+    await settle();
+    assert.equal(location.hash, '#/agents');
+  });
+
+  it("Settings from a pane's drawer (the sidebar's ⚙, a notification) takes the drawer's place; a pane from Settings takes its", async () => {
+    const replace = vi.spyOn(location, 'replace').mockImplementation((url: string | URL) => { // as a browser's
+      const oldURL = location.href;
+      history.replaceState(history.state, '', String(url));
+      dispatchEvent(new HashChangeEvent('hashchange', { oldURL, newURL: location.href }));
+    });
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/home/personal');
+    await go('#/pane/p1');
+    const len = history.length;
+    await act(async () => { sw.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: '#/settings' } })); });
+    await settle();
+    assert.equal(location.hash, '#/settings');
+    assert.equal(history.length, len, "in the drawer's entry");
+    assert.ok(!$('.agent-drawer #screen-pane') && $('#screen-settings') && $('#screen #screen-pane.screen-home'), 'over the Home the drawer was over');
+    await act(async () => { sw.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: '#/pane/p3' } })); });
+    await settle();
+    assert.equal(location.hash, '#/pane/p3');
+    assert.ok(!$('#screen-settings') && $('.agent-drawer #screen-pane'));
+    await click($('#btn-drawer-close'));
+    await settle();
+    assert.equal(location.hash, '#/home/personal', 'back to the Home, past neither');
+    replace.mockRestore();
   });
 
   it("routes the SW's navigate message; an orchestrator's pane lands on its Home, drawn afresh", async () => {

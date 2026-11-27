@@ -3,7 +3,7 @@
  *   #/agents         the list; #/agents/<name> one orchestrator's account's agents
  *   #/home/<name>    an orchestrator's Home, running or stopped (Start); #/home opens the default one
  *   #/pane/<id>      a pane, in a drawer over the screen it came from (an orchestrator's pane opens as its Home)
- *   #/settings
+ *   #/settings       Settings, in front of the screen it came from
  * An empty hash (a fresh open) goes to the default Home once a State exists.
  */
 import type { AppState, OrchestratorView } from './types.ts';
@@ -56,25 +56,21 @@ export function paneRoute(state: AppState | null, paneId: string): string {
   return o ? homeHash(o.name) : `#/pane/${encodeURIComponent(paneId)}`;
 }
 
-/** The screen under a pane's drawer after arriving from `fromHash`: a Home or an account's list it came
- *  from; pane → pane keeps it; else (a fresh open, Settings) the list. */
-export function nextPaneBackRoute(fromHash: string | null, prev: string): string {
+/** The routes shown in front of another screen: a pane's drawer, Settings. */
+export const isOverlay = (hash: string): boolean => hash.startsWith('#/pane/') || hash === '#/settings';
+
+/** The screen under an overlay after arriving from `fromHash`: a Home or an account's list it came from;
+ *  from another overlay (which it replaced) the same; else (a fresh open, a reload) the list. */
+export function nextOverlayBase(fromHash: string | null, prev: string): string {
   if (fromHash?.startsWith('#/home/') || fromHash?.startsWith('#/agents/')) return fromHash;
-  return fromHash?.startsWith('#/pane/') ? prev : '#/agents';
+  return fromHash && isOverlay(fromHash) ? prev : '#/agents';
 }
 
-/** Whether the drawer's history entry sits right on its screen's (`base`), so a close can go back to it:
- *  opened from that screen; pane → pane (a replace) keeps it; else (a fresh open, a reload) not. */
-export function nextPaneOverBase(fromHash: string | null, base: string, prev: boolean): boolean {
+/** Whether the overlay's history entry sits right on its screen's (`base`), so a close can go back to it:
+ *  opened from that screen; from another overlay (a replace) the same; else (a fresh open, a reload) not. */
+export function nextOverlayOverBase(fromHash: string | null, base: string, prev: boolean): boolean {
   if (fromHash === base) return true;
-  return fromHash?.startsWith('#/pane/') ? prev : false;
-}
-
-/** Settings' Back after arriving from `fromHash`: the Home or list it was opened from, else the list.
- *  No hash change (a re-render, a reload on #/settings) keeps `prev`. */
-export function nextSettingsBackRoute(fromHash: string | null, prev: string): string {
-  if (fromHash === null) return prev;
-  return fromHash.startsWith('#/home/') || fromHash.startsWith('#/agents') ? fromHash : '#/agents';
+  return fromHash && isOverlay(fromHash) ? prev : false;
 }
 
 export function resolveRoute(hash: string, state: AppState | null, lastHome: string | null): Route {

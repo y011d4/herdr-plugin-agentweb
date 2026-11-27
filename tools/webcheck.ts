@@ -987,6 +987,8 @@ async function p13(c: Ctx) {
   result(c, !bad.timeout, 'P13.bad-token', `message=${bad.v || 'none'}`, 'an invalid token shows the token screen with a message');
 
   await loadApp(c, '#/settings');
+  await pg.until(`!!document.getElementById('btn-clear-token')`, 5000);
+  await sleep(400); // Settings' sheet slides up (200 ms): a tap computed before it settles lands elsewhere
   const t0 = await pg.tapEl(`document.getElementById('btn-clear-token')`);
   const gone = await pg.until(`localStorage.getItem('herdr_token') === null`, 1000);
   await sleep(5000);
@@ -1275,6 +1277,62 @@ async function m2(c: Ctx) {
     await click(side + 100, 400);
     const outside = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
     result(c, !outside.timeout, 'M2.outside', `closed=${ms(outside)}`, 'a click on the dimmed screen left of it (right of the sidebar) closes it back to #/agents within 3s');
+  } finally {
+    await mobile(pg, true);
+  }
+}
+
+/** S1: Settings in front of the screen it came from. Phone (390x844): the topbar's ⚙ on the list (scrolled) opens it over
+ *  the whole screen; ✕ and Back close it back to the same list node at its scrollTop, the history as it was. PC (1280,
+ *  the sidebar's ⚙): a centered 760px dialog; Escape closes it, and so does a click outside it. */
+async function s1(c: Ctx) {
+  const { pg } = c;
+  const SC = `document.getElementById('screen-agents')`;
+  const SHEET = `document.querySelector('.settings-sheet')`;
+  await pg.goto('#/agents');
+  await pg.until(`!!${SC}?.dataset.ready`, 5000);
+  await pg.ev(`(() => { const s = ${SC}; s.style.paddingBottom = '1500px'; s.scrollTop = 60; window.__wcSc = s; })()`);
+  const cycle = async (close: () => Promise<unknown>) => {
+    await pg.tapEl(`document.getElementById('btn-settings')`);
+    const open = await pg.until(`location.hash === '#/settings' && !!${SHEET}`, 3000);
+    await sleep(400); // its slide-up
+    const [top, bottom, width] = await pg.ev(`(() => { const r = ${SHEET}.getBoundingClientRect(); return [Math.round(r.top), Math.round(r.bottom), Math.round(r.width)]; })()`);
+    await close();
+    const closed = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
+    const [st, same, len] = await pg.ev(`[${SC}.scrollTop, ${SC} === window.__wcSc, history.length]`);
+    return { open, closed, top, bottom, width, st, same, len };
+  };
+  const a = await cycle(() => pg.tapEl(`document.getElementById('btn-settings-close')`));
+  const b = await cycle(() => pg.ev('history.back()'));
+  result(c, !a.open.timeout && a.top === 0 && a.bottom === 844 && a.width === 390 && !a.closed.timeout && a.same && Math.abs(a.st - 60) <= 1,
+    'S1.phone', `open=${ms(a.open)},sheet=${a.top}..${a.bottom}x${a.width},closed=${ms(a.closed)},sameNode=${a.same},scrollTop=${a.st}`,
+    "the list scrolled 60px: its ⚙ opens #/settings over the whole screen (0..844, 390 wide); ✕ closes it within 3s back to the same #screen-agents at 60px");
+  result(c, !b.open.timeout && !b.closed.timeout && b.same && Math.abs(b.st - 60) <= 1 && b.len === a.len, 'S1.back', `closed=${ms(b.closed)},sameNode=${b.same},history=${a.len}->${b.len}`,
+    'Back closes it too, the list as it was; opening and closing again leaves history.length as it was');
+  const click = async (x: number, y: number) => {
+    for (const type of ['mousePressed', 'mouseReleased']) await pg.S('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
+  };
+  const esc = async () => { for (const type of ['keyDown', 'keyUp']) await pg.S('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); };
+  await mobile(pg, false);
+  try {
+    await pg.goto('#/agents');
+    const gear = `document.querySelector('#sidebar [data-action="settings"]')`;
+    await pg.until(`!!${gear}`, 3000);
+    const g = await pg.at(gear);
+    await click(g.x, g.y);
+    const open = await pg.until(`location.hash === '#/settings' && !!${SHEET}`, 3000);
+    await sleep(400);
+    const [left, width] = await pg.ev(`(() => { const r = ${SHEET}.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.width)]; })()`);
+    await esc();
+    const escaped = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
+    await click(g.x, g.y);
+    await pg.until(`!!${SHEET}`, 3000);
+    await sleep(400);
+    await click(100, 800); // outside it (over the sidebar: a modal's backdrop covers it)
+    const outside = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
+    result(c, !open.timeout && width === 760 && Math.abs(left - (1280 - 760) / 2) <= 1 && !escaped.timeout && !outside.timeout, 'S1.wide',
+      `open=${ms(open)},x=${left}+${width},escape=${ms(escaped)},outside=${ms(outside)}`,
+      "1280px: the sidebar's ⚙ opens a centered 760px dialog; Escape closes it, and so does a click outside it, within 3s each");
   } finally {
     await mobile(pg, true);
   }
@@ -1965,6 +2023,7 @@ const ITEMS: Item[] = [
   { id: 'W1', tier: 1, needs: ['less'], run: w1 },
   { id: 'M1', tier: 1, needs: ['less'], run: m1 },
   { id: 'M2', tier: 1, needs: ['less'], run: m2 },
+  { id: 'S1', tier: 1, run: s1 },
   { id: 'P3', tier: 1, needs: ['less'], run: p3 },
   { id: 'P4-T1', tier: 1, needs: ['less'], run: p4t1 },
   { id: 'P15', tier: 1, needs: ['stop'], run: p15 },

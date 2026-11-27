@@ -19,24 +19,23 @@ export const keptTasks = new KeptTasks();
 
 export interface View {
   /** what #screen shows */
-  screen: 'loading' | 'token' | 'agents' | 'pane' | 'settings';
+  screen: 'loading' | 'token' | 'agents' | 'pane';
   /** the pane on screen (a pane view or a Home), else null */
   activePaneId: string | null;
   /** the pane on screen is an orchestrator's Home (#/home/<name>) */
   homeMode: boolean;
   paneViewMode: 'terminal' | 'chat';
-  /** the screen under a pane's drawer: Home or an account's list when it was opened from there, else the list */
+  /** the screen under an overlay (a pane's drawer, Settings): Home or an account's list when it was
+   *  opened from there, else the list */
   paneBackRoute: string;
-  /** the drawer was opened on top of that screen's history entry here (its close goes back to it) */
+  /** the overlay was opened on top of that screen's history entry here (its close goes back to it) */
   paneOverBase: boolean;
-  /** where Settings' Back goes: the Home or list that opened it, else the list */
-  settingsBackRoute: string;
 }
 
 export const store: { appState: AppState | null; wsConnected: boolean; view: View; seenDone: SeenDone } = {
   appState: null,
   wsConnected: false,
-  view: { screen: 'loading', activePaneId: null, homeMode: false, paneViewMode: 'terminal', paneBackRoute: '#/agents', paneOverBase: false, settingsBackRoute: '#/agents' },
+  view: { screen: 'loading', activePaneId: null, homeMode: false, paneViewMode: 'terminal', paneBackRoute: '#/agents', paneOverBase: false },
   seenDone: (() => {
     try { return JSON.parse(localStorage.getItem(STORAGE_SEEN) ?? '{}') ?? {}; } catch { return {}; }
   })(),
