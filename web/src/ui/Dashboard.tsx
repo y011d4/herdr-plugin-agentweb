@@ -16,7 +16,6 @@ import { agentsScope, defaultHome, homeHash } from '../routes.ts';
 import { findPane, lastHome, store, subscribe } from '../store.ts';
 import type { AppState, OrchestratorView } from '../types.ts';
 import type { Topbar } from './App.tsx';
-import { openNewAgent } from './Modals.tsx';
 import { StatusBadge } from './Status.tsx';
 
 /** A card's tab: its name (the agent kind if a tab somehow has no label), with a per-tab index for
@@ -174,15 +173,10 @@ function HomeButton({ hash }: { hash: string }) {
 export const dashboardTopbar = (hash: string): Topbar => ({
   title: <Title hash={hash} />,
   left: <HomeButton hash={hash} />,
-  right: (
-    <>
-      <TopbarIcon id="btn-new-agent" label="New agent" onClick={() => { void openNewAgent(); }}>+</TopbarIcon>
-      <TopbarIcon id="btn-settings" label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</TopbarIcon>
-    </>
-  ),
+  right: <TopbarIcon id="btn-settings" label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</TopbarIcon>,
 });
 
-/** A topbar's (or the sidebar's head's, or a drawer's) icon button: 44px, dim, the text's color under the
+/** A topbar's (or a drawer's) icon button: 44px, dim, the text's color under the
  *  pointer. A button's props pass on (a menu's target gets its handlers and ref). */
 export function TopbarIcon({ label, children, ...rest }: { label: string; children: string; 'data-action'?: string } & Omit<ComponentPropsWithRef<'button'>, 'children'>) {
   return <ActionIcon variant="subtle" color="gray" size="xl" fz={20} className="text-(--color-text-dim) hover:text-(--color-text)" aria-label={label} {...rest}>{children}</ActionIcon>;

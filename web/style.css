@@ -103,8 +103,7 @@ body { font-size: 15px; }
   white-space: nowrap;
 }
 
-/* Right cluster holds one or more actions in a row (e.g. new-agent + settings,
-   view-toggle + agent menu). Without flex the block-level buttons would stack
+/* Right cluster holds one or more actions in a row (e.g. the view toggle + settings). Without flex the block-level buttons would stack
    vertically and overflow the 52px bar. */
 #topbar-right {
   display: flex;
@@ -427,8 +426,8 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
     background: var(--color-surface);
     border-right: 1px solid var(--color-border);
   }
-  /* what the sidebar does instead: the Home switcher, the list's ← Home, the topbar's New agent and Settings */
-  #app:has(> #sidebar) :is(.home-switch, #topbar-left .topbar-back[aria-label='Home'], #topbar #btn-new-agent, #topbar #btn-settings) {
+  /* what the sidebar does instead: the Home switcher, the list's ← Home */
+  #app:has(> #sidebar) :is(.home-switch, #topbar-left .topbar-back[aria-label='Home']) {
     display: none;
   }
   /* an agent's drawer from the right, over the main column (right of the sidebar, if any) */

@@ -140,7 +140,7 @@ func ensureOrchestratorDir(def OrchestratorDef, rules string) error {
 }
 
 // Always plain claude, whatever config does to the `claude` launch profile.
-var orchestratorProfile = map[string]LaunchProfile{"claude": {Argv: []string{"claude"}, Label: "Claude Code"}}
+var orchestratorProfile = map[string]LaunchProfile{"claude": {Argv: []string{"claude"}}}
 
 // expectedAccount is the Claude account an orchestrator runs under: the one its env sets,
 // else what its dir sets (direnv; up to 15 s), else the default. startOrchestrator checks

@@ -37,9 +37,9 @@ import (
 )
 
 var defaultLaunchProfiles = map[string]LaunchProfile{
-	"claude":   {Argv: []string{"claude"}, Label: "Claude Code"},
-	"codex":    {Argv: []string{"codex"}, Label: "Codex"},
-	"opencode": {Argv: []string{"opencode"}, Label: "opencode"},
+	"claude":   {Argv: []string{"claude"}},
+	"codex":    {Argv: []string{"codex"}},
+	"opencode": {Argv: []string{"opencode"}},
 }
 
 // the order of defaultLaunchProfiles in the TypeScript object
@@ -233,7 +233,7 @@ func deliverTask(rpc Rpc, paneID, text string) bool {
 // ── launch profiles ──────────────────────────────────────────────────────────
 
 // normalizeProfile validates one config launch-profile entry.
-func normalizeProfile(key string, raw any) (LaunchProfile, bool) {
+func normalizeProfile(raw any) (LaunchProfile, bool) {
 	entry, ok := raw.(map[string]any)
 	if !ok {
 		return LaunchProfile{}, false
@@ -248,11 +248,7 @@ func normalizeProfile(key string, raw any) (LaunchProfile, bool) {
 			return LaunchProfile{}, false
 		}
 	}
-	label := key
-	if s, ok := entry["label"].(string); ok && jsTrim(s) != "" {
-		label = s
-	}
-	return LaunchProfile{Argv: argv, Label: label}, true
+	return LaunchProfile{Argv: argv}, true
 }
 
 // parseLaunchProfiles merges config.json `launch_profiles` over the built-in
@@ -270,7 +266,7 @@ func parseLaunchProfiles(raw any) map[string]LaunchProfile {
 		if key == "__proto__" || key == "constructor" || key == "prototype" {
 			continue
 		}
-		if profile, ok := normalizeProfile(key, value); ok {
+		if profile, ok := normalizeProfile(value); ok {
 			merged[key] = profile
 		}
 	}

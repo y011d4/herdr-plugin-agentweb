@@ -857,8 +857,8 @@ async function p7(c: Ctx) {
   const less = c.rec.names.less;
   await c.pg.tapEl(`document.querySelector('.agent-card[data-pane-id=${js(less)}]')`);
   const nav = await c.pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)}`, 2000);
-  result(c, ok && btns === 2 && !nav.timeout, 'P7', `cards(dom/state):${counts.join(',')},topbarButtons=${btns},tap=${nav.timeout ? 'timeout' : `${nav.ms}ms`}`,
-    '.agent-card count = /api/state (#/agents, #/agents/wc-o1); 2 topbar buttons; tapping wc-less opens #/pane/<it> within 2s');
+  result(c, ok && btns === 1 && !nav.timeout, 'P7', `cards(dom/state):${counts.join(',')},topbarButtons=${btns},tap=${nav.timeout ? 'timeout' : `${nav.ms}ms`}`,
+    '.agent-card count = /api/state (#/agents, #/agents/wc-o1); 1 topbar button (Settings); tapping wc-less opens #/pane/<it> within 2s');
 }
 
 /** Without a running orchestrator, a fresh open (/) and #/home land on #/agents by location.replace. */
@@ -1426,9 +1426,10 @@ async function m2(c: Ctx) {
   }
 }
 
-/** S1: Settings in front of the screen it came from. Phone (390x844): the topbar's ⚙ on the list (scrolled) opens it over
- *  the whole screen; ✕ and Back close it back to the same list node at its scrollTop, the history as it was. PC (1280,
- *  the sidebar's ⚙): a centered 760px dialog; Escape closes it, and so does a click outside it. */
+/** S1: Settings in front of the screen it came from, from the topbar's ⚙ at the screen's top right. Phone (390x844): on
+ *  the list (scrolled) it opens over the whole screen; ✕ and Back close it back to the same list node at its scrollTop,
+ *  the history as it was. PC (1280, the sidebar beside it): a centered 760px dialog; Escape closes it, and so does a click
+ *  outside it. */
 async function s1(c: Ctx) {
   const { pg } = c;
   const SC = `document.getElementById('screen-agents')`;
@@ -1436,6 +1437,8 @@ async function s1(c: Ctx) {
   await pg.goto('#/agents');
   await pg.until(`!!${SC}?.dataset.ready`, 5000);
   await pg.ev(`(() => { const s = ${SC}; s.firstElementChild.style.paddingBottom = '1500px'; s.scrollTop = 60; window.__wcSc = s; })()`);
+  const corner = (p: { x: number; y: number }, w: number) => p.x >= w - 60 && p.y <= 52; // its center: the topbar's last 44px button
+  const gp = await pg.at(`document.getElementById('btn-settings')`);
   const cycle = async (close: () => Promise<unknown>) => {
     await pg.tapEl(`document.getElementById('btn-settings')`);
     const open = await pg.until(`location.hash === '#/settings' && !!${SHEET}`, 3000);
@@ -1448,9 +1451,9 @@ async function s1(c: Ctx) {
   };
   const a = await cycle(() => pg.tapEl(`document.getElementById('btn-settings-close')`));
   const b = await cycle(() => pg.ev('history.back()'));
-  result(c, !a.open.timeout && a.top === 0 && a.bottom === 844 && a.width === 390 && !a.closed.timeout && a.same && Math.abs(a.st - 60) <= 1,
-    'S1.phone', `open=${ms(a.open)},sheet=${a.top}..${a.bottom}x${a.width},closed=${ms(a.closed)},sameNode=${a.same},scrollTop=${a.st}`,
-    "the list scrolled 60px: its ⚙ opens #/settings over the whole screen (0..844, 390 wide); ✕ closes it within 3s back to the same #screen-agents at 60px");
+  result(c, corner(gp, 390) && !a.open.timeout && a.top === 0 && a.bottom === 844 && a.width === 390 && !a.closed.timeout && a.same && Math.abs(a.st - 60) <= 1,
+    'S1.phone', `gear=${Math.round(gp.x)},${Math.round(gp.y)},open=${ms(a.open)},sheet=${a.top}..${a.bottom}x${a.width},closed=${ms(a.closed)},sameNode=${a.same},scrollTop=${a.st}`,
+    "the list scrolled 60px: its ⚙ (top right: x>=330, y<=52) opens #/settings over the whole screen (0..844, 390 wide); ✕ closes it within 3s back to the same #screen-agents at 60px");
   result(c, !b.open.timeout && !b.closed.timeout && b.same && Math.abs(b.st - 60) <= 1 && b.len === a.len, 'S1.back', `closed=${ms(b.closed)},sameNode=${b.same},history=${a.len}->${b.len}`,
     'Back closes it too, the list as it was; opening and closing again leaves history.length as it was');
   const click = async (x: number, y: number) => {
@@ -1460,7 +1463,7 @@ async function s1(c: Ctx) {
   await mobile(pg, false);
   try {
     await pg.goto('#/agents');
-    const gear = `document.querySelector('#sidebar [data-action="settings"]')`;
+    const gear = `document.querySelector('#topbar #btn-settings')`;
     await pg.until(`!!${gear}`, 3000);
     const g = await pg.at(gear);
     await click(g.x, g.y);
@@ -1474,9 +1477,9 @@ async function s1(c: Ctx) {
     await sleep(400);
     await click(100, 800); // outside it (over the sidebar: a modal's backdrop covers it)
     const outside = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
-    result(c, !open.timeout && width === 760 && Math.abs(left - (1280 - 760) / 2) <= 1 && !escaped.timeout && !outside.timeout, 'S1.wide',
-      `open=${ms(open)},x=${left}+${width},escape=${ms(escaped)},outside=${ms(outside)}`,
-      "1280px: the sidebar's ⚙ opens a centered 760px dialog; Escape closes it, and so does a click outside it, within 3s each");
+    result(c, corner(g, 1280) && !open.timeout && width === 760 && Math.abs(left - (1280 - 760) / 2) <= 1 && !escaped.timeout && !outside.timeout, 'S1.wide',
+      `gear=${Math.round(g.x)},${Math.round(g.y)},open=${ms(open)},x=${left}+${width},escape=${ms(escaped)},outside=${ms(outside)}`,
+      "1280px: the topbar's ⚙ (top right: x>=1220, y<=52) opens a centered 760px dialog; Escape closes it, and so does a click outside it, within 3s each");
   } finally {
     await mobile(pg, true);
   }
@@ -2346,7 +2349,6 @@ async function fixtureServer(): Promise<{ url: string; use: (dist: string) => vo
     const p = u.pathname;
     let m: RegExpMatchArray | null;
     if (p === '/api/state') return json(res, f.state);
-    if (p === '/api/profiles') return json(res, f.profiles);
     if ((m = p.match(/^\/api\/panes\/([^/]+)\/read$/))) {
       const ansi = f.screen(decodeURIComponent(m[1]));
       return json(res, { ansi, text: ansi.replace(/\u001b\[[0-9;]*m/g, ''), appScroll: false });
