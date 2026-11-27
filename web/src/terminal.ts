@@ -233,7 +233,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
   // ── Wheel forwarding (app-scroll panes) ─────────────────────────────────────
 
   function queuePaneWheel(up: boolean): void {
-    if (!appScrollPane) return; // app-scroll off — never queue SGR wheels for a normal pane
+    if (!appScrollPane || held) return; // app-scroll off — never queue SGR wheels for a normal pane; held: none
     wheelQueue += up ? 1 : -1;
     if (!wheelFlushTimer) {
       wheelFlushTimer = setTimeout(() => { void flushWheelQueue(); }, 70);
@@ -245,7 +245,8 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
     // app-scroll may have turned off (pane left full-screen) since these were
     // queued — drop them so we don't inject SGR wheel bytes into a normal pane.
     if (!appScrollPane) { wheelQueue = 0; stopFling(); return; }
-    if (destroyed || held || wheelQueue === 0) return;
+    if (held) { wheelQueue = 0; return; }
+    if (destroyed || wheelQueue === 0) return;
     const direction = wheelQueue > 0 ? 'up' : 'down';
     const steps = Math.min(30, Math.abs(wheelQueue));
     wheelQueue -= (direction === 'up' ? steps : -steps);
@@ -271,6 +272,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
   }
 
   function startFling(velocityPxMs: number): void {
+    if (held) return; // a gesture ending under a drawer: no fling
     stopFling();
     let v = Math.max(-3, Math.min(3, velocityPxMs));
     if (Math.abs(v) < 0.4) return;

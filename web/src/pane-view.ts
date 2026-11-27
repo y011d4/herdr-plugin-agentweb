@@ -575,6 +575,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       });
     },
     async reread(current) {
+      if (suspended) return; // under a drawer: the resume polls the prompt anew
       const reqEpoch = epoch;
       const live = await readPromptScreen();
       if (current() && !destroyed && !suspended && reqEpoch === epoch) renderPromptPanel(live?.parsed ?? null, live?.id ?? '');
