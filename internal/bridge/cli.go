@@ -234,13 +234,33 @@ func baseURL(cfg map[string]any) string {
 	return "http://" + firstNonEmpty(os.Getenv("HERDR_YOICKS_HOST"), host, "127.0.0.1") + ":" + port(cfg) + "/"
 }
 
+// connectHint is where the user gets the tokenized link: qr is the only command that
+// prints it.
+const connectHint = `the "Connect phone" pane: herdr plugin pane open --plugin y011d4.yoicks --entrypoint connect`
+
 // printConnectInfo never prints the token: herdr captures action stdout into its
-// plugin logs. The tokenized link is printed by the bridge itself (the run pane and
-// <state dir>/bridge.log) and by qr.
+// plugin logs.
 func printConnectInfo() {
 	fmt.Println("url: " + baseURL(readConfig()))
 	fmt.Println("token file: " + filepath.Join(stateDir(), "token"))
-	fmt.Println("full connect link: see the Yoicks bridge pane or " + filepath.Join(stateDir(), "bridge.log"))
+	fmt.Println("full connect link: " + connectHint)
+}
+
+// scrubTokenFromLog takes the token out of logPath: bridges before this one wrote it
+// in their connect line, and workers read the log. Only with no bridge writing to it.
+func scrubTokenFromLog(logPath string) error {
+	b, err := os.ReadFile(filepath.Join(stateDir(), "token"))
+	token := jsTrim(string(b))
+	if err != nil || !tokenFormat.MatchString(token) {
+		return nil // no token yet, so none in the log
+	}
+	text, err := os.ReadFile(logPath)
+	if errors.Is(err, fs.ErrNotExist) || err == nil && !bytes.Contains(text, []byte(token)) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return writeFile0600(logPath, bytes.ReplaceAll(text, []byte(token), []byte("<redacted>")))
 }
 
 func notify(title, body string) {
@@ -290,13 +310,17 @@ func (c cli) start() int {
 		return 0
 	}
 	logPath := filepath.Join(stateDir(), "bridge.log")
+	if err := scrubTokenFromLog(logPath); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	log, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	// the mode applies only when the file is created; the bridge writes the tokenized
-	// connect URL to this log, so tighten an existing log too, or don't start
+	// the mode applies only when the file is created; the log has the user's paths,
+	// agents and errors, so tighten an existing log too, or don't start
 	if err := os.Chmod(logPath, 0o600); err != nil {
 		log.Close()
 		fmt.Fprintln(os.Stderr, err)

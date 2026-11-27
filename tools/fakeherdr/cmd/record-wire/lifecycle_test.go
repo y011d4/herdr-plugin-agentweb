@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"net/http"
 	"os"
@@ -18,8 +19,9 @@ import (
 )
 
 // The commands herdr's actions and panes run (start, status, stop, run), on the Go
-// binary with throwaway dirs and a free port: they work, their output never carries
-// the token (herdr keeps action output in its plugin logs), and a pidfile
+// binary with throwaway dirs and a free port: they work, neither their output (herdr
+// keeps action output in its plugin logs) nor the bridge's (its pane, bridge.log:
+// workers read them) ever carries the token, and a pidfile
 // whose PID now belongs to another process never gets it signalled.
 func TestGoLifecycleCommands(t *testing.T) {
 	if testing.Short() {
@@ -112,6 +114,17 @@ func TestGoLifecycleCommands(t *testing.T) {
 		}
 	}
 	waitFor("the bridge answers", healthy)
+	tok, err := os.ReadFile(filepath.Join(state, "token"))
+	token := strings.TrimSpace(string(tok))
+	if err != nil || len(token) < 32 {
+		t.Fatalf("token: %v", err)
+	}
+	// the token in query strings, as the phone's first load and its /ws carry it, right or wrong
+	for _, p := range []string{"/?token=", "/ws?token=", "/api/state?token=", "/api/nope?token=", "/api/state?x=y&token=x"} {
+		if res, err := http.Get("http://127.0.0.1:" + port + p + token); err == nil {
+			res.Body.Close()
+		}
+	}
 	expect([]string{"start"}, 0, "bridge already running (pid "+pid+")")
 	expect([]string{"status"}, 0, "bridge running (pid "+pid+")")
 	expect([]string{"run"}, 1, "bridge already running (pid "+pid+"); stop it first")
@@ -124,18 +137,32 @@ func TestGoLifecycleCommands(t *testing.T) {
 	}
 	expect([]string{"stop"}, 0, "bridge is not running")
 
-	// the token is only in its file and in the 0600 log, never in what the commands print
-	token, err := os.ReadFile(filepath.Join(state, "token"))
-	if err != nil || len(strings.TrimSpace(string(token))) < 32 {
-		t.Fatalf("token: %q %v", token, err)
-	}
+	// the token is only in its file: never in what the commands print, nor in the log
 	for _, out := range printed {
-		if strings.Contains(out, strings.TrimSpace(string(token))) {
+		if strings.Contains(out, token) {
 			t.Errorf("an action printed the token: %q", out)
 		}
 	}
-	if st, err := os.Stat(filepath.Join(state, "bridge.log")); err != nil || st.Mode().Perm() != 0o600 {
+	logPath := filepath.Join(state, "bridge.log")
+	if st, err := os.Stat(logPath); err != nil || st.Mode().Perm() != 0o600 {
 		t.Errorf("bridge.log: %v %v, want mode 0600", st, err)
+	}
+	if b, _ := os.ReadFile(logPath); strings.Contains(string(b), token) || !strings.Contains(string(b), "connect: http://127.0.0.1:"+port+" (") {
+		t.Errorf("bridge.log: %q, want its connect line, without the token", b)
+	}
+	// a log an older bridge wrote the token to: start takes it out
+	f, _ := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0)
+	f.WriteString("connect: http://127.0.0.1:" + port + "?token=" + token + "\n")
+	f.Close()
+	if code, out := ctl("start"); code != 0 {
+		t.Fatalf("start over an old log: exit %d, %q", code, out)
+	}
+	waitFor("the bridge answers", healthy)
+	if code, out := ctl("stop"); code != 0 {
+		t.Fatalf("stop: exit %d, %q", code, out)
+	}
+	if b, _ := os.ReadFile(logPath); strings.Contains(string(b), token) || !strings.Contains(string(b), "?token=<redacted>\n") {
+		t.Errorf("bridge.log after a start: %q, want the old line's token redacted", b)
 	}
 
 	// a pidfile whose PID was reused by an unrelated process
@@ -158,6 +185,8 @@ func TestGoLifecycleCommands(t *testing.T) {
 	// run: the bridge in the foreground, in the same process
 	fg := exec.Command(bin, "run")
 	fg.Env = env
+	var pane bytes.Buffer // what herdr's server pane shows
+	fg.Stdout, fg.Stderr = &pane, &pane
 	if err := fg.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -184,10 +213,12 @@ func TestGoLifecycleCommands(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(state, "bridge-run.pid")); err == nil {
 		t.Error("run left bridge-run.pid")
 	}
+	if out := pane.String(); strings.Contains(out, token) || !strings.Contains(out, "connect: ") {
+		t.Errorf("run printed %q, want its connect line, without the token", out)
+	}
 
 	// start refuses when it can't make the log, which gets the token, private: here a
 	// log that is a symlink to /dev/null, whose mode we can't change (as root we could)
-	logPath := filepath.Join(state, "bridge.log")
 	if os.Geteuid() != 0 {
 		os.Rename(logPath, logPath+".kept")
 		os.Symlink("/dev/null", logPath)
