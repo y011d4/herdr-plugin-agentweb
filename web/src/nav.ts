@@ -20,11 +20,12 @@ export function go(hash: string): void {
 /** Opens a pane: its drawer, or for an orchestrator's pane its Home. */
 export const openAgent = (paneId: string): void => go(paneRoute(store.appState, paneId));
 
-/** Opens the agent herdr names `name` (a [yoicks] notice's worker), or says it is gone. */
+/** Opens the agent herdr names `name` (a [yoicks] notice's worker), or says none is: it may be gone,
+ *  or so new the bridge hasn't its name yet (agent.list, a moment after it shows). */
 export function openAgentNamed(name: string): void {
   const pane = (store.appState?.workspaces ?? []).flatMap((w) => w.tabs.flatMap((t) => t.panes)).find((p) => p.agent?.herdrName === name);
   if (pane) openAgent(pane.paneId);
-  else showToast('Not running', `${name} is no longer running.`);
+  else showToast('Agent not found', `No running agent is named ${name} now.`);
 }
 
 // The URL a close is under way from: a second close before the history moves (a tap on ✕ as an

@@ -164,6 +164,7 @@ type HerdrClient struct {
 	rebuildT      debounce
 	broadcastT    debounce
 	completionT   debounce
+	listAt        int64 // requestedAt of the agent.list answer applied last: an older one is dropped
 	coverageEpoch int // bumped whenever live event coverage is lost
 	// pane IDs covered by the currently acknowledged subscription; snapshot status
 	// replays skip these (live events deliver their changes) and cover the rest
@@ -747,9 +748,12 @@ func (c *HerdrClient) refreshCompletionSeqsSoon() {
 				var r struct {
 					Agents []RawAgentSeqs `json:"agents"`
 				}
-				if json.Unmarshal(res, &r) != nil {
+				// answers can land out of order: an older one would put back what the newer one
+				// replaced (a renamed agent's old name)
+				if json.Unmarshal(res, &r) != nil || requestedAt < c.listAt {
 					return
 				}
+				c.listAt = requestedAt
 				next := applyCompletionSeqs(c.cur, r.Agents, requestedAt)
 				if next == c.cur {
 					return

@@ -191,7 +191,7 @@ describe("a headless orchestrator's Home", () => {
     location.hash = '#/home/pilot';
     await fire(() => names[1].click());
     assert.equal(location.hash, '#/home/pilot');
-    assert.deepEqual(getToasts().map((t) => t.body), ['w-gone is no longer running.']);
+    assert.deepEqual(getToasts().map((t) => t.body), ['No running agent is named w-gone now.']);
   });
 
   it('sends nothing while an image is still being scaled', async () => {
