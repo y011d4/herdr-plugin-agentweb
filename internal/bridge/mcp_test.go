@@ -527,6 +527,65 @@ func TestHeadlessWakeUps(t *testing.T) {
 		waitUntil(t, 10*time.Second, "the watch ended", func() bool { return b.watches() == 0 })
 		b.waitWakes(t, "[yoicks] w1: working → done", "[yoicks] w1: working → done")
 	})
+	t.Run("after its end, a turn between a look and its wait, or seen by a look after a failed one, is told", func(t *testing.T) {
+		var mu sync.Mutex
+		var atLook func() error // runs once, at the next agent.get, after herdr has answered it
+		b := startHeadless(t, t.TempDir(), nil, func(h *headlessRunner) {
+			rpc := h.rpc
+			h.rpc = func(method string, params map[string]any) (json.RawMessage, error) {
+				raw, err := rpc(method, params)
+				mu.Lock()
+				f := atLook
+				if method == "agent.get" {
+					atLook = nil
+				}
+				mu.Unlock()
+				if method == "agent.get" && f != nil && err == nil {
+					err = f()
+				}
+				return raw, err
+			}
+		})
+		w := worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
+			w.Set(pane, "working")
+			w.Set(pane, "done")
+		})
+		b.start(t)
+		b.waitStatus(t, "idle")
+		b.prompt(t)
+		b.waitWakes(t, "[yoicks] w1: working → done")
+		h := b.srv.headless["h1"]
+		h.mu.Lock()
+		epoch := h.epoch
+		h.mu.Unlock()
+		rearm := func(f func() error) { // a watch saved at its end (seq), its next look running f
+			raw, _ := b.srv.rpc("agent.get", map[string]any{"target": "w1p"})
+			_, seq, _ := agentState(raw)
+			mu.Lock()
+			atLook = f
+			mu.Unlock()
+			if !h.watch(&hlWatch{Pane: "w1p", Name: "w1", Status: "done", Seq: seq}, "", nil, epoch) {
+				t.Fatal("not watched")
+			}
+		}
+		rearm(func() error { // a whole turn of its own between the look's answer and the wait
+			w.Set("w1p", "working")
+			w.Set("w1p", "done")
+			return nil
+		})
+		b.pass(t, "the look again", resumeRecheck)
+		b.pass(t, "the quiet time", resumeQuiet)
+		b.waitWakes(t, "[yoicks] w1: working → done", "[yoicks] w1: working → done")
+
+		rearm(func() error { // a turn, then a look that fails (herdr restarting)
+			w.Set("w1p", "working")
+			w.Set("w1p", "done")
+			return fmt.Errorf("connection refused")
+		})
+		b.pass(t, "the retry", time.Second)
+		b.pass(t, "the quiet time", resumeQuiet)
+		b.waitWakes(t, "[yoicks] w1: working → done", "[yoicks] w1: working → done", "[yoicks] w1: working → done")
+	})
 	t.Run("a stalled prompt goes on with the level wait", func(t *testing.T) {
 		b := startHeadless(t, t.TempDir(), nil, nil)
 		w := worker(t, b, "idle", nil)
