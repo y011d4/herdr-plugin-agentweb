@@ -254,17 +254,19 @@ func TestRemoveOwnWorktree(t *testing.T) {
 		gitT(t, "-C", repo, "branch", "-q", "-D", "old")
 		out, err := removeOwnWorktree(rpc, slow, own, wt)
 		eq(t, err, nil)
-		eq(t, out, "removed "+wt+" (no local branch both is named after it and was checked out in it, per its reflog)")
+		eq(t, out, "removed "+wt+" (no branch deleted: its reflog and name show no local branch it was made for)")
 		eq(t, gone(wt), true)
 	})
-	t.Run("detached, its branch feat/x gone: a merged feat-x, named alike but never checked out in it, stays", func(t *testing.T) {
+	t.Run("detached, made for feat/x, now gone: a merged feat-x, named alike and checked out in it later, stays", func(t *testing.T) {
 		repo, wt, rpc, slow := setup(t, "feat/x")
 		mergeAndDetach(t, repo, wt, "feat/x")
-		gitT(t, "-C", repo, "branch", "-q", "-D", "feat/x")
 		gitT(t, "-C", repo, "branch", "-q", "feat-x", "origin/main")
+		gitT(t, "-C", wt, "checkout", "-q", "feat-x")
+		gitT(t, "-C", wt, "checkout", "-q", "--detach")
+		gitT(t, "-C", repo, "branch", "-q", "-D", "feat/x")
 		out, err := removeOwnWorktree(rpc, slow, own, wt)
 		eq(t, err, nil)
-		eq(t, out, "removed "+wt+" (no local branch both is named after it and was checked out in it, per its reflog)")
+		eq(t, out, "removed "+wt+" (no branch deleted: its reflog and name show no local branch it was made for)")
 		eq(t, hasBranch(repo, "feat-x"), true)
 	})
 	t.Run("detached at a commit not in origin/main: refused", func(t *testing.T) {
