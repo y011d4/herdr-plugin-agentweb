@@ -17,9 +17,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -294,9 +292,8 @@ type headlessRunner struct {
 	mu           sync.Mutex
 	sessionID    string
 	wanted       bool
-	interrupted  bool   // the bridge stopped it mid-turn: tell it so when it resumes
-	rulesHash    string // of the rules its session began with
-	closed       bool   // the bridge is shutting down
+	interrupted  bool // the bridge stopped it mid-turn: tell it so when it resumes
+	closed       bool // the bridge is shutting down
 	child        *hlChild
 	model        hlModel
 	warnings     []HeadlessWarning
@@ -339,7 +336,6 @@ type headlessState struct {
 	SessionID   string    `json:"sessionId"`
 	Wanted      bool      `json:"wanted"`
 	Interrupted bool      `json:"interrupted,omitempty"`
-	RulesHash   string    `json:"rulesHash,omitempty"`
 	Watches     []hlWatch `json:"watches,omitempty"`
 	Wakes       []string  `json:"wakes,omitempty"` // wake-ups not written to it yet
 	// its completed turns so far, kept across bridge restarts: a phone's seen-done record is
@@ -363,7 +359,7 @@ func newHeadlessRunner(def OrchestratorDef, stateDir, rules string) *headlessRun
 	r.model.Status = "stopped"
 	var saved headlessState
 	if b, err := os.ReadFile(headlessPath(stateDir, def.Name, ".json")); err == nil && json.Unmarshal(b, &saved) == nil && (saved.SessionID == "" || sessionIDRe.MatchString(saved.SessionID)) {
-		r.sessionID, r.wanted, r.interrupted, r.rulesHash, r.saved, r.wakes = saved.SessionID, saved.Wanted, saved.Interrupted, saved.RulesHash, saved.Watches, saved.Wakes
+		r.sessionID, r.wanted, r.interrupted, r.saved, r.wakes = saved.SessionID, saved.Wanted, saved.Interrupted, saved.Watches, saved.Wakes
 		r.model.CompletionSeq = saved.CompletionSeq
 		if modelRe.MatchString(saved.Model) {
 			r.modelChoice = saved.Model
@@ -484,7 +480,7 @@ func (r *headlessRunner) persist() {
 		}
 	}
 	slices.SortFunc(watches, func(a, b hlWatch) int { return strings.Compare(a.Pane, b.Pane) })
-	b, _ := json.Marshal(headlessState{r.sessionID, r.wanted, r.interrupted, r.rulesHash, watches, r.wakes, r.model.CompletionSeq, r.modelChoice})
+	b, _ := json.Marshal(headlessState{r.sessionID, r.wanted, r.interrupted, watches, r.wakes, r.model.CompletionSeq, r.modelChoice})
 	if os.MkdirAll(filepath.Join(r.stateDir, "headless"), 0o700) == nil {
 		writeFile0600(headlessPath(r.stateDir, r.def.Name, ".json"), b)
 	}
@@ -678,16 +674,9 @@ func (r *headlessRunner) start(resume bool) error {
 	if err != nil {
 		return r.fail("start", &LifecycleError{Status: 500, Code: "error", Message: "could not write " + mcpConfig + ": " + err.Error()})
 	}
-	hash := sha256.Sum256([]byte(orchestratorFiles(r.def, r.rules, yoicksCommand())["rules.md"]))
 	r.mu.Lock()
 	if !resume {
 		r.sessionID = newUUID()
-	}
-	alert := func() {}
-	if !resume || begin || r.rulesHash == "" {
-		r.rulesHash = hex.EncodeToString(hash[:])
-	} else if r.rulesHash != hex.EncodeToString(hash[:]) { // its system prompt keeps the rules it began with
-		alert = r.warn("rules", "the orchestrator rules changed since this session began: Clear to apply them")
 	}
 	r.wanted, r.mcpBearer = true, bearer
 	r.epoch++ // a new child: what the one before asked registers nothing
@@ -699,7 +688,6 @@ func (r *headlessRunner) start(resume bool) error {
 		argv = append(argv, "--model", r.modelChoice)
 	}
 	r.mu.Unlock()
-	alert()
 	if err := r.spawn(append(argv, r.extraArgs...), env); err != nil {
 		return r.fail("start", &LifecycleError{Status: 500, Code: "claude_failed", Message: "could not start claude: " + err.Error()})
 	}
