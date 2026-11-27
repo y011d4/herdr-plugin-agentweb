@@ -1,4 +1,5 @@
 /** ui/Token.tsx — asks for the bridge's access token (none stored, a 401, or a failed sign-in). */
+import { Button, Image, PasswordInput, Stack, Text } from '@mantine/core';
 import { useRef, type FormEvent } from 'react';
 
 export function Token({ message, onToken }: { message?: string; onToken: (token: string) => void }) {
@@ -9,13 +10,17 @@ export function Token({ message, onToken }: { message?: string; onToken: (token:
     if (val) onToken(val);
   };
   return (
-    <div id="screen-login" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 24, padding: '32px 24px', height: '100%', overflowY: 'auto' }}>
-      <img className="login-logo" src="/icons/lockup.svg" alt="Yoicks" />
-      <div className="login-subtitle">{message || 'Enter the access token shown when the bridge server started.'}</div>
-      <form className="login-form" id="token-form" style={{ width: '100%', maxWidth: 360, display: 'flex', flexDirection: 'column', gap: 12 }} onSubmit={submit}>
-        <input type="password" id="token-input" ref={input} placeholder="Paste access token…" autoComplete="off" autoCorrect="off" spellCheck={false} />
-        <button type="submit" className="btn-primary">Connect</button>
+    <Stack id="screen-login" align="center" justify="center" gap={24} px={24} py={32} h="100%" style={{ overflowY: 'auto' }}>
+      <Image src="/icons/lockup.svg" alt="Yoicks" h={64} w="auto" />
+      <Text className="login-subtitle" size="sm" c="dimmed" ta="center" maw={320}>{message || 'Enter the access token shown when the bridge server started.'}</Text>
+      <form id="token-form" className="w-full max-w-[360px]" onSubmit={submit}>
+        <Stack gap={12}>
+          {/* the eye shows what was pasted; Tab reaches it (Mantine's default leaves it out) */}
+          <PasswordInput id="token-input" ref={input} aria-label="Access token" placeholder="Paste access token…"
+            autoComplete="off" autoCorrect="off" spellCheck={false} visibilityToggleFocusable />
+          <Button type="submit" fullWidth>Connect</Button>
+        </Stack>
       </form>
-    </div>
+    </Stack>
   );
 }
