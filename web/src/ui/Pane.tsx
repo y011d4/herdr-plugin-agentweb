@@ -439,7 +439,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
           })}
         </div>
       )}
-      <Group gap={6} wrap="nowrap" px={12} pt={8} pb={6} className="lg:px-(--wide-gutter)">
+      <Group gap={6} wrap="nowrap" pt={8} pb={6} className="px-3 lg:px-(--wide-gutter)">
         {hl && (
           // the picker's input is hidden; picking the same file again works (reset after each pick)
           <FileButton resetRef={resetPicker} accept="image/*" multiple inputProps={{ id: 'input-image-picker' }}
