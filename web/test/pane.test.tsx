@@ -435,7 +435,10 @@ describe('Home', () => {
     setAppState(s);
     location.hash = '#/home/personal';
     await show('p4', true);
+    await hashSettled(); // its hashchange, which would close a popover opened before it
   };
+  // happy-dom fires hashchange on a timer
+  const hashSettled = (): Promise<void> => act(() => new Promise<void>((r) => { setTimeout(r, 0); }));
 
   it('shows the counts of its account and goes to its list from them', async () => {
     await home(fresh());
@@ -444,38 +447,76 @@ describe('Home', () => {
     // two configured, one running: the switcher lists both, the stopped one dimmed
     const sw = [...container.querySelectorAll<HTMLElement>('.home-switch-btn')];
     assert.deepEqual(sw.map((b) => switcher(b, b.dataset.orch!)), ['on|personal|idle|Personal', 'stopped|work|stopped|work1']); // 1: p6 waits, and work's account is unknown (every agent)
-    assert.equal(container.querySelector('.home-attn'), null);
+    assert.equal(container.querySelector('[data-action="needs"]'), null, 'nothing waits on the user: no Needs you');
     await fire(() => $('.home-counts').click());
     assert.equal(location.hash, '#/agents/personal');
   });
 
-  it('lists the agents waiting on the user, and a switcher once two orchestrators run', async () => {
+  it('counts the agents waiting on the user on Needs you and lists them in its popover; a switcher once two orchestrators run', async () => {
     const s = fresh();
     s.orchestrators[0].agents!.push('p6'); // blocked
     s.orchestrators[1].paneId = 'p7';
     await home(s);
-    const chips = [...container.querySelectorAll<HTMLElement>('.home-chip')];
-    assert.deepEqual(chips.map((c) => `${c.dataset.paneId}:${c.textContent}`), ['p6:feat #2repo-wt-feat']);
+    const needs = $('[data-action="needs"]');
+    assert.equal(needs.textContent, 'Needs you · 1▾');
+    assert.equal(needs.dataset.blocked, '1');
+    assert.equal(container.querySelector('.home-chip'), null, 'closed until tapped');
     const sw = [...container.querySelectorAll<HTMLElement>('.home-switch-btn')];
     assert.deepEqual(sw.map((b) => switcher(b, b.dataset.paneId!)), ['on|p4|idle|Personal1', '|p7|unknown|repo1']); // the badges: p6 waits at both
-    await fire(() => sw[1].click());
-    assert.equal(location.hash, '#/home/work');
+    await fire(() => needs.click());
+    assert.equal(needs.getAttribute('aria-expanded'), 'true');
+    const chips = [...container.querySelectorAll<HTMLElement>('[data-needs-list] .home-chip')];
+    assert.deepEqual(chips.map((c) => `${c.dataset.paneId}:${c.textContent}`), ['p6:feat #2repo-wt-feat']);
     await fire(() => chips[0].click());
     assert.equal(location.hash, '#/pane/p6');
+    await hashSettled();
+    assert.equal(container.querySelector('[data-needs-list]'), null, 'leaving the screen (its drawer) closes it');
+    await fire(() => sw[1].click());
+    assert.equal(location.hash, '#/home/work');
   });
 
-  it('lists its to-do items under Needs you, with nothing blocked too, and counts them on the switcher', async () => {
+  it('closes Needs you on Escape, a tap outside and a tap on it again', async () => {
+    const s = fresh();
+    s.orchestrators[0].agents!.push('p6');
+    await home(s);
+    const needs = $('[data-action="needs"]');
+    const shown = (): boolean => container.querySelector('[data-needs-list]') !== null;
+    await fire(() => needs.click());
+    assert.ok(shown());
+    await fire(() => needs.click());
+    assert.ok(!shown(), 'a tap on it again');
+    await fire(() => needs.click());
+    // Mantine's Escape is the dropdown's own (the focus is trapped in it): sent from inside, never from document
+    await fire(() => $('[data-needs-list] .home-chip').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    assert.ok(!shown(), 'Escape');
+    await fire(() => needs.click());
+    await fire(() => $('.home-counts').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    assert.ok(!shown(), 'a tap outside');
+    await fire(() => needs.click());
+    await fire(() => $('[data-needs-list]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    assert.ok(shown(), 'a tap inside keeps it');
+  });
+
+  it('counts its to-do items due now on Needs you, with nothing blocked too, lists them in its popover, and counts them on the switcher', async () => {
     const s = fresh();
     const todo = (id: string, text: string, due: number | null = null) => ({ id, text, agent: null, url: null, due, createdAt: 0 });
     s.orchestrators[0].todos = [todo('a1b2c3', 'merge PR #119'), todo('d4e5f6', 'later on', Date.now() + 3_600_000)];
     s.orchestrators[1].agents = []; // so work's count is its own items only
     s.orchestrators[1].todos = [todo('0a0b0c', 'log in')];
     await home(s);
-    assert.equal($('.home-attn').textContent, 'Needs you', 'no chip: only the label, over the items');
-    assert.deepEqual([...container.querySelectorAll<HTMLElement>('.home-todo')].map((r) => r.dataset.todo), ['a1b2c3']);
-    assert.equal($('[data-action="todo-later"]').textContent, 'Later (1) ›');
+    assert.equal($('[data-action="needs"]').textContent, 'Needs you · 1▾', 'the item due now');
+    assert.equal(container.querySelector('.home-todo'), null, 'closed until tapped');
     const sw = [...container.querySelectorAll<HTMLElement>('.home-switch-btn')];
     assert.deepEqual(sw.map((b) => b.querySelector('.home-needs')?.textContent ?? ''), ['1', '1'], 'due now only');
+    await fire(() => $('[data-action="needs"]').click());
+    assert.equal(container.querySelector('.home-chip'), null, 'nothing blocked: no chip');
+    assert.deepEqual([...container.querySelectorAll<HTMLElement>('[data-needs-list] .home-todo')].map((r) => r.dataset.todo), ['a1b2c3']);
+    assert.equal($('[data-action="todo-later"]').textContent, 'Later (1) ›');
+    // only an item due later: a dim To-do, no count of its own
+    s.orchestrators[0].todos = [todo('d4e5f6', 'later on', Date.now() + 3_600_000)];
+    await fire(() => setAppState(structuredClone(s)));
+    assert.equal($('[data-action="needs"]').textContent, 'To-do · 1▾');
+    assert.equal(sw[0].querySelector('.home-needs'), null);
   });
 
   it("hides the terminal keys until the view is on the terminal; its toggle doesn't change the preferred view", async () => {
