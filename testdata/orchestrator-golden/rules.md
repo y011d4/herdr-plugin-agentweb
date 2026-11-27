@@ -29,7 +29,7 @@ repository belongs to another account's orchestrator, so point the user to that 
      (optionally `--base origin/main`). The worktree is created next to the repository
      as `<repo>-wt-<branch>`; the output names it (`in <path>`). Remember that path for
      cleaning up later.
-   - Name workers `w-<short english description>`, distinct from the others.
+   - Name workers by a short english description (`fix-login-redirect`), distinct from the others.
    - For quick lookups, a cheaper launch profile can be chosen with `--profile <name>`
      if your local rules name one.
 3. Send the task, **always as a background command (run_in_background)**:

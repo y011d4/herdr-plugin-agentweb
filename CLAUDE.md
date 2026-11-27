@@ -356,9 +356,10 @@ Verified live against herdr 0.7.3 / protocol 16:
   herdr's authoritative identity — so a wandering pane can't repoint or clear the repo; an
   untagged checkout has no herdr identity, so it derives its full worktree info from the
   pane cwd (and clears when that stops resolving). `repo_key` uses git's
-  shared `--git-common-dir`, matching herdr's own repoKey. In the UI each card shows its
-  tab name and (dim, beside it) its git branch. The dashboard is one flat list of every
-  agent, most recent status change first, so each card names its own workspace; a linked
+  shared `--git-common-dir`, matching herdr's own repoKey. In the UI each card (and sidebar
+  row, and drawer title) shows the agent's herdr name (`herdrName`, else its tab name) and
+  (dim, beside it) its git branch. The dashboard is one flat list of every agent, most
+  recent status change first, so each card names its own location (`cardLocation`); a linked
   worktree's card adds a `worktree` chip. The order is herdr's `stateChangeSeq` (a change
   not fetched yet counts as newest), then `sinceUnixMs`: that one lives only in bridge memory,
   so a bridge restart resets every card to "just now" — ordering by it alone sank agents
