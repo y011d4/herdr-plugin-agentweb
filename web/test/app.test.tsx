@@ -589,6 +589,31 @@ describe('App', () => {
     await settle();
   });
 
+  it("a Home's Clear under Settings holds through the gap: closing Settings then shows no Start, and the replacement comes in", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/home/personal');
+    await click($('#btn-home-clear'));
+    await click($('#modal-root #cf-ok'));
+    await click($('#btn-settings'));
+    await answer('POST /api/agents/p4/clear', { ok: true, paneId: 'p9' });
+    const gap = fresh();
+    gap.orchestrators[0].paneId = null; // the old pane gone, the replacement not detected yet
+    await act(async () => push!({ type: 'state', state: gap }));
+    await settle();
+    assert.ok(!$('#screen #screen-home-stopped'), 'held, not stopped');
+    await click($('#btn-settings-close'));
+    assert.equal(location.hash, '#/home/personal');
+    assert.ok(!$('#screen #screen-home-stopped') && $('#screen #screen-pane.screen-home'), 'still held: no Start');
+    const next = fresh();
+    next.orchestrators[0].paneId = 'p1'; // the replacement
+    await act(async () => push!({ type: 'state', state: next }));
+    await settle();
+    assert.equal(store.view.activePaneId, 'p1');
+    clearToasts();
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await settle();
+  });
+
   it('Escape closes Settings; opened afresh (no list or Home before it) it is in front of the list and closes in its place', async () => {
     await go('#/agents');
     const list = $('#screen #screen-agents');
