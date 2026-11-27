@@ -100,6 +100,13 @@ describe('terminal', () => {
     reads()[1].answer(200, read[1]);
     await again;
     assert.match(live().textContent!, /hello 日本語/, 'released: it reads and draws');
+
+    const history = term.loadHistory(); // a scrollback read in flight across a hold
+    term.setHeld(true);
+    term.setHeld(false);
+    reqs.find((r) => r.url.includes('source=recent'))!.answer(200, { ansi: 'old-1\nold-2\nhello 日本語' });
+    await history;
+    assert.equal(el.querySelector('#term-history')!.textContent, '', 'not applied');
   });
 
   it('renders a read that lands while it lives', async () => {

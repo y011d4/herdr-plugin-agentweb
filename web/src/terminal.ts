@@ -62,6 +62,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
   const { signal } = listeners;
   let destroyed = false;
   let held = false; // setHeld
+  let holds = 0; // each hold: a scrollback read from before it never applies
 
   // each pane opens fitted to width, scrolled to the bottom
   // null = auto-fit the pane width; a number = font px set by the pinch gesture
@@ -299,12 +300,13 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
     // stays 0 so the next above-bottom scroll retries once live output exists.)
     if (destroyed || held || historyRefreshing || terminalTouchActive || !lastLiveAnsi) return;
     historyRefreshing = true;
+    const reqHolds = holds;
     try {
       const data = await apiGet<ReadResponse>(
         `/api/panes/${encodeURIComponent(paneId)}/read?source=recent&lines=${HISTORY_LINES}&format=ansi`
       );
       if (destroyed) return; // navigated away
-      if (held) { historyFetchedAt = 0; return; } // under a drawer: read again once back
+      if (held || reqHolds !== holds) { historyFetchedAt = 0; return; } // under a drawer since: read again once back
       // A gesture may have started while the fetch was in flight; replacing the
       // history DOM / adjusting scrollTop now would cancel or jump it. Bail and
       // leave the cache dirty so the next above-bottom scroll refetches.
@@ -438,7 +440,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
     setAppScroll(on) { appScrollPane = on; },
     setHeld(on) {
       held = on;
-      if (on) refreshReqSeq++; // a read in flight now never applies, also once released
+      if (on) { refreshReqSeq++; holds++; } // a read in flight now never applies, also once released
     },
     destroy() {
       destroyed = true;
