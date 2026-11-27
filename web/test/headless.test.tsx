@@ -12,7 +12,7 @@ import { findPane, markPaneSeen, setAppState, store } from '../src/store.ts';
 import { renderItem } from '../src/transcript.ts';
 import type { AppState, OrchestratorView, WsMessage, WsStateMessage } from '../src/types.ts';
 import { Modals } from '../src/ui/Modals.tsx';
-import { Pane, paneTopbar, usageParts } from '../src/ui/Pane.tsx';
+import { homeTopbar, Pane, usageParts } from '../src/ui/Pane.tsx';
 import { claudeCheckText } from '../src/ui/Settings.tsx';
 import { watchMessages } from '../src/watch.ts';
 import { messages, state as recorded, transcript } from './contract.gen.ts';
@@ -58,7 +58,7 @@ async function home(s: AppState, actions?: { clear: () => void; stop: () => void
   location.hash = '#/home/pilot';
   store.view.activePaneId = 'hl:pilot';
   store.view.homeMode = true;
-  const t = paneTopbar('hl:pilot', true, '#/agents', () => {});
+  const t = homeTopbar('hl:pilot');
   ({ container, unmount } = await render(<><div id="tb">{t.title}{t.right}</div><Pane paneId="hl:pilot" home={true} actions={actions} name="pilot" /><Modals /></>));
 }
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => container.querySelector<T>(sel)!;

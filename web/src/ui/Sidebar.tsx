@@ -2,7 +2,7 @@
  * ui/Sidebar.tsx — the PC sidebar, beside every screen but the token one on a wide screen
  * (WIDE_QUERY: ui/App.tsx draws it only then). Each orchestrator's Home is a heading over its
  * account's agents (homeGroups), then Other; above them All agents (#/agents), New agent and
- * Settings. A heading opens its Home, an agent its pane the list's way (openPane). The Home or the
+ * Settings. A heading opens its Home, an agent its pane the list's way (nav.ts's openAgent: its drawer). The Home or the
  * agent on show, from the hash, is marked (aria-current).
  *
  * Like the agents list it gets every State push: it holds still while a finger is down
@@ -12,9 +12,10 @@
 import { NavLink } from '@mantine/core';
 import { useSyncExternalStore } from 'react';
 import { homeGroups, orchestratorStatus, shownStatus, type DashboardCard, type HomeGroup } from '../dashboard-group.ts';
+import { openAgent } from '../nav.ts';
 import { homeHash } from '../routes.ts';
 import { findPane, store } from '../store.ts';
-import { agentCards, cardTitle, openPane, orchestratorLabel, useHeldState } from './Dashboard.tsx';
+import { agentCards, cardTitle, orchestratorLabel, useHeldState } from './Dashboard.tsx';
 import { openNewAgent } from './Modals.tsx';
 
 const subscribeHash = (fn: () => void): (() => void) => {
@@ -81,6 +82,6 @@ function Agent({ card, on }: { card: DashboardCard; on: boolean }) {
       label={<>{cardTitle(card)}{card.branch ? <span className="card-branch">{` ${card.branch}`}</span> : null}</>}
       description={card.workspaceLabel}
       rightSection={<span className={`status-badge ${st}`}>{st}</span>} active={on} aria-current={current(on)}
-      onClick={() => openPane(paneId)} />
+      onClick={() => openAgent(paneId)} />
   );
 }

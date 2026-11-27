@@ -1,5 +1,6 @@
 /**
- * ui/Pane.tsx — an opened pane (#/pane/<id>) or an orchestrator's Home (#/home/<name>): the topbar,
+ * ui/Pane.tsx — an opened pane (#/pane/<id>, in ui/AgentDrawer.tsx's drawer, with the header pieces
+ * here: PaneTitle, ViewToggle, AgentMenu) or an orchestrator's Home (#/home/<name>): Home's topbar,
  * Home's status bar (the switcher between running orchestrators, the agents waiting on the user,
  * the counts, Clear and Stop) and "doing now" line, the composer and the quick keys, around the pane's body. The
  * body (terminal, chat) is pane-view.ts, imperative, in #pane-view: created on mount, destroyed on
@@ -20,7 +21,8 @@ import { homeSummary, orchestratorStatus } from '../dashboard-group.ts';
 import { fitImages, MAX_IMAGES, toAttachment, type ImageAttachment } from '../image.ts';
 import { showToast } from '../notify.ts';
 import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
-import { homeAgentsHash, homeHash, orchestratorOfPane, paneRoute } from '../routes.ts';
+import { openAgent } from '../nav.ts';
+import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
 import { emit, findPane, keptTasks, store, subscribe } from '../store.ts';
 import type { AppState, HeadlessUsage, OrchestratorView } from '../types.ts';
 import { agentCards, cardTitle, orchestratorLabel, relativeTime } from './Dashboard.tsx';
@@ -31,13 +33,22 @@ import { TuiSteps } from './Settings.tsx';
 
 type Mode = 'terminal' | 'chat';
 
-// The open pane's view, and what it last reported, which its topbar shows too: whether the pane has a
-// transcript (the terminal ⇄ chat toggle shows) and its mode (null: not reported yet).
+// The open pane's view, and what it last reported for its pane, which its header shows too: whether the
+// pane has a transcript (the terminal ⇄ chat toggle shows) and its mode (null: not reported yet). Keyed
+// on the pane: a closing drawer's late unmount can't reset the next screen's.
 let paneView: PaneView | null = null;
-const NO_TOGGLE: { shown: boolean; mode: Mode | null } = { shown: false, mode: null };
+interface Toggle { paneId: string | null; shown: boolean; mode: Mode | null }
+const NO_TOGGLE: Toggle = { paneId: null, shown: false, mode: null };
 let toggle = NO_TOGGLE;
-const setToggle = (t: Partial<typeof toggle>): void => { toggle = { ...toggle, ...t }; emit(); };
-const useToggle = () => useSyncExternalStore(subscribe, () => toggle);
+const setToggle = (paneId: string, t: Partial<Toggle>): void => {
+  toggle = { ...(toggle.paneId === paneId ? toggle : { ...NO_TOGGLE, paneId }), ...t };
+  emit();
+};
+/** What `paneId`'s view last reported (nothing while another pane's is on show). */
+const useToggle = (paneId: string): Toggle => {
+  const t = useSyncExternalStore(subscribe, () => toggle);
+  return t.paneId === paneId ? t : NO_TOGGLE;
+};
 const useAppState = (): AppState | null => useSyncExternalStore(subscribe, () => store.appState);
 let shownInput: HTMLTextAreaElement | null = null; // the composer on screen
 let shownKey = ''; // and its draft's key (drafts.ts)
@@ -98,15 +109,15 @@ export type HomeActions = { clear: () => void; stop: () => void };
 /** A pane, or (with `home`: the orchestrator `name`) a running orchestrator's Home. */
 export function Pane({ paneId, home, actions, name = '' }: { paneId: string; home: boolean; actions?: HomeActions; name?: string }) {
   const state = useAppState();
-  const { mode } = useToggle();
+  const { mode } = useToggle(paneId);
   const [activity, setActivity] = useState<string | null>(null); // Home: the latest tool call since it last spoke
   const [prompt, setPrompt] = useState<PanelPrompt | null>(null); // the answer panel's, while blocked in chat
   const body = useRef<HTMLDivElement>(null);
   // Reads the screen first, then the scrollback, then polls and probes for a transcript.
   useEffect(() => {
     const view = createPaneView(body.current!, paneId, {
-      showToggle: (shown) => setToggle({ shown }),
-      modeChanged: () => setToggle({ mode: store.view.paneViewMode }),
+      showToggle: (shown) => setToggle(paneId, { shown }),
+      modeChanged: () => setToggle(paneId, { mode: store.view.paneViewMode }),
       activity: setActivity,
       prompt: setPrompt,
     });
@@ -114,7 +125,7 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
     return () => {
       view.destroy();
       if (paneView === view) paneView = null;
-      toggle = NO_TOGGLE;
+      if (toggle.paneId === paneId) toggle = NO_TOGGLE;
       setPrompt(null);
     };
   }, [paneId]);
@@ -161,7 +172,7 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
   const all = state.orchestrators ?? [];
   const self = all.find((o) => o.name === name);
   const s = homeSummary(agentCards(state, self), store.seenDone);
-  const open = (id: string): void => { location.hash = paneRoute(store.appState, id); };
+  const open = (id: string): void => openAgent(id);
   return (
     <div className="home-status" id="home-status">
       {all.length >= 2 && (
@@ -419,7 +430,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
 
 // The title: the pane's agent and where it is, or for a Home the orchestrator and what it's up to.
 // A pane gone from the State keeps its last title (a Home holds through its orchestrator's replacement).
-function Title({ paneId, home }: { paneId: string; home: boolean }) {
+export function PaneTitle({ paneId, home }: { paneId: string; home: boolean }) {
   const state = useAppState();
   const last = useRef<ReactNode>(null);
   const found = findPane(paneId);
@@ -438,8 +449,8 @@ function Title({ paneId, home }: { paneId: string; home: boolean }) {
 }
 
 // terminal ⇄ chat, hidden until the pane has a transcript (on a Home: Esc / Ctrl+C / arrows live in the terminal's keys)
-function ViewToggle({ home }: { home: boolean }) {
-  const { shown, mode } = useToggle();
+export function ViewToggle({ paneId, home }: { paneId: string; home: boolean }) {
+  const { shown, mode } = useToggle(paneId);
   const label = home ? (mode === 'terminal' ? 'Chat' : '>_') : (mode === 'chat' ? 'Terminal' : 'Chat');
   return (
     <button className={`topbar-action view-toggle${home ? ' home-view-toggle' : ''}`} id="btn-view-toggle" style={shown ? undefined : { display: 'none' }}
@@ -455,7 +466,7 @@ export interface AgentActions { rename: () => void; clear: () => void; stop: () 
 
 /** A pane's ⋮: Mantine's menu under it (closes on a pick, a tap outside or Escape). Each item
  *  44px tall, the app's touch target. */
-function AgentMenu({ actions }: { actions: AgentActions }) {
+export function AgentMenu({ actions }: { actions: AgentActions }) {
   return (
     <Menu id="btn-agent-menu" position="bottom-end" width={220} radius="md">
       <Menu.Target><button className="topbar-action" aria-label="Agent actions">&#8942;</button></Menu.Target>
@@ -468,17 +479,14 @@ function AgentMenu({ actions }: { actions: AgentActions }) {
   );
 }
 
-/** The topbar: a pane's Back (to `back`); the view toggle; a pane's agent-actions ⋮ (`actions`:
- *  rename, clear, stop), a Home's Settings (its Agents ›, Clear and Stop are on its status bar). */
-export const paneTopbar = (paneId: string, home: boolean, back: string, actions: AgentActions): Topbar => ({
-  title: <Title paneId={paneId} home={home} />,
-  left: home ? undefined : (
-    <button className="topbar-back" aria-label="Back" onClick={() => { location.hash = back; }}>{`← ${back.startsWith('#/home/') ? 'Home' : 'Agents'}`}</button>
-  ),
+/** A running Home's topbar: the orchestrator, the view toggle and Settings (its Agents ›, Clear and
+ *  Stop are on its status bar). A pane's header is its drawer's (ui/AgentDrawer.tsx). */
+export const homeTopbar = (paneId: string): Topbar => ({
+  title: <PaneTitle paneId={paneId} home />,
   right: (
     <>
-      <ViewToggle home={home} />
-      {home ? settingsButton : <AgentMenu actions={actions} />}
+      <ViewToggle paneId={paneId} home />
+      {settingsButton}
     </>
   ),
 });
