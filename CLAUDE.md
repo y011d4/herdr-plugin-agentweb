@@ -74,8 +74,10 @@ All in `internal/bridge/` (one package):
   (socket, ping, backoff, state polling, watches) and `notify.ts` (the toast store: short-lived
   results of the user's actions, and the OS notifications; a status push or an alert never
   toasts). The screens are in `web/src/ui/`: Settings, Token, the agents list `Dashboard.tsx`,
-  `Pane.tsx` and `PromptPanel.tsx`, and on a PC the sidebar `Sidebar.tsx` beside them; `Toasts.tsx` draws into `#toast-container` and `Modals.tsx`
-  (Confirm, on Mantine's Modal; Rename, New agent, the image preview) is portalled into `#modal-root`;
+  `Pane.tsx` and `PromptPanel.tsx`, and on a PC the sidebar `Sidebar.tsx` beside them; `Status.tsx` is an agent's
+  status as they show it (`StatusBadge`, `StatusDot`); `Toasts.tsx` draws into `#toast-container` (each toast
+  Mantine's Notification; only the toasts take taps, the box too while the stack overflows) and `Modals.tsx`
+  (Confirm, Rename, New agent and the image preview, all on Mantine's Modal) is portalled into `#modal-root`;
   a pane's ⋮ is a Mantine Menu (`Pane.tsx`'s `AgentMenu`, in its drawer's header, its dropdown in `#modal-root`
   too, over the drawer). An opened
   pane's body is `pane-view.ts` (`createPaneView` → setMode/onState/echo/destroy, one per opened
@@ -108,7 +110,7 @@ All in `internal/bridge/` (one package):
   bridge jobs have no Node): such a binary has no UI and `Serve` refuses to start (so a start,
   and a redeploy, fails), `embed_test.go` skips (CI's web job runs it with `YOICKS_REQUIRE_WEB=1`)
   and `scripts/release.sh` checks for `web/dist/index.html`
-- **Styles: Mantine and Tailwind v4 next to the hand-written CSS.** `web/app.css` (index.html's one
+- **Styles: Mantine's components, Tailwind for layout, little hand-written CSS.** `web/app.css` (index.html's one
   stylesheet) sets the cascade layers, lowest first: `theme` (Tailwind's variables), `base`
   (`reset.css`: the element resets, which over Mantine would strip its buttons), `mantine`
   (`@mantine/core/styles.layer.css`, all of it), `app` (`style.css`, over Mantine's baseline body
@@ -120,7 +122,21 @@ All in `internal/bridge/` (one package):
   breakpoints (xs 36em, sm 40em, md 48em, lg 64em = the PC layout's 1024px, xl 80em), in `theme.ts`
   and app.css's `@theme`; `web/test/theme.test.ts` checks them and the colors against the CSS.
   Mantine's portals go into `#modal-root` (the theme's Portal default). Tests render under
-  `render.ts`'s `mantine()` (`env="test"`: no transitions, a portal stays in place)
+  `render.ts`'s `mantine()` (`env="test"`: no transitions, a portal stays in place).
+  What is drawn is Mantine's components (Button, ActionIcon, CloseButton, the inputs, Card, Badge, Text,
+  Group/Stack, Modal, Menu, NavLink, SegmentedControl, Notification…); where a thing sits (flex, gaps,
+  overflow, a width's breakpoints) is Tailwind classes; colors are Mantine props with the theme's names
+  (`dark.N`, `accent`, the statuses `idle`/`working`/`blocked`/`done`/`unknown`) or `var(--color-*)` in a
+  class. `style.css` keeps the tokens, index.html's first paint (the topbar, the banner, `.loading-spinner`,
+  which `terminal.ts` uses too), the engines' DOM (the terminal, the chat), the toasts' box, the drawer's and the PC grid's
+  layout, and Settings. The theme makes a button given no size, and an input at its default size (sm; every
+  Mantine input has one), 44px tall (`--touch-min`), an input's text 16px (below that iOS zooms in on focus;
+  the composer keeps 14px); `theme.test.ts` checks it. Mantine's style props (`px`, `c`, `bg`…) are inline
+  styles, so they beat any class, a Tailwind `lg:` one too: a value that changes with the width goes in
+  classes only. A class (Tailwind's layer, or `app`) beats Mantine's own CSS. Ids stay; the class names the
+  tests and webcheck select on stay on their elements as hooks without CSS (`agent-card`, `home-chip`,
+  `qkey`, `toast`, `ask-opt`…); a new hook is a `data-*` attribute. Mantine's focus trap focuses in a
+  `setTimeout`: `autoFocus` where the focus must be there as it mounts
 - **Orchestrator homes**: config `orchestrators: [{name,label,env}]`, each in its own dir:
   `orchestrator.go` writes `<data>/orchestrators/<name>/` (data = `$XDG_DATA_HOME` or
   `~/.local/share`, + `herdr-yoicks`: `dataDir`) at bridge start and before each start: CLAUDE.md
@@ -439,7 +455,8 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   view. Within a pane, reads also drop a response a newer read or WS push superseded. A drawer
   opened over a Home stops the Home's view and leaves its DOM: the pane ids (`#pane-view`,
   `#chat-log`, `#terminal-output`, `#screen-pane`…) then exist twice, so select inside `.agent-drawer`.
-- **`ui/Pane.tsx`: the composer is uncontrolled.** The textarea has no `value` prop, so a state
+- **`ui/Pane.tsx`: the composer is uncontrolled.** The textarea (Mantine's Textarea, without `autosize`, which
+  would fight the value the code sets: `autoGrow` sizes it) has no `value` prop, so a state
   push never resets what is being typed, an IME composition included. Enter sends only on a PC
   (Shift+Enter: a newline), never the Enter that confirms an IME conversion (`isComposing`, or
   keyCode 229), and once per held key (`composer-keys.ts`); on a touch device only Send sends.
@@ -451,7 +468,8 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   `sinceUnixMs` carries over across re-snapshots so rebuilds don't defeat it.
 - **Wide screens (a PC)**: the PC layout is `web/style.css`'s last block, `@media (min-width:
   1024px)` (the `lg` breakpoint); none of it applies below 1024px (every phone, landscape too), so the phone layout stays
-  as it is. It keeps the scroll containers full width and makes the readable column with their padding.
+  as it is. It keeps the scroll containers full width and makes the readable column with their padding
+  (`--wide-gutter`; the bars and the composer around the chat take it as a `lg:px-(--wide-gutter)` class).
   At that width (`WIDE_QUERY`, `theme.ts`; theme.test checks it against style.css and `lg`) the shell
   also draws the sidebar (`ui/Sidebar.tsx`) on every screen but the token one: each orchestrator's
   Home a heading over its account's agents (`homeGroups`), then Other. It comes first in `#app`, in a
