@@ -367,16 +367,14 @@ describe('pane header', () => {
     await pick('terminal');
     assert.equal(shownMode(), 'terminal');
     await unmount();
-    await show('p1');
-    assert.equal(shownMode(), 'terminal', 'reopened: on its terminal still');
-    await unmount();
     await show('p6');
     assert.equal(store.view.paneViewMode, 'chat', 'another pane: on its chat');
     await unmount();
     for (const q of reqs) q.answered = true; // the views before: gone
-    await show('p1');
+    await show('p1'); // reopened: its screen first, then the transcript shows the toggle
     await answer('/api/panes/p1/read?source=visible', read[1]);
     await answer('/api/panes/p1/transcript', transcript[0]);
+    assert.equal(shownMode(), 'terminal', 'reopened: on its terminal still');
     await pick('chat'); // back to its chat, for the tests after this one
     assert.equal(store.view.paneViewMode, 'chat');
     assert.equal(localStorage.getItem('herdr_pane_view'), null, 'nothing stored');
@@ -401,7 +399,7 @@ describe('read-only chat', () => {
     assert.equal(bar().style.display, 'none');
     await pick('terminal');
     assert.equal(ta().value, 'typed in the terminal', 'hidden, not dropped');
-    await fire(() => $('#btn-view-toggle').click()); // back to its chat, for the tests after this one
+    await pick('chat'); // back to its chat, for the tests after this one
   });
 
   it('■ only while it works', async () => {
