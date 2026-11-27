@@ -840,7 +840,9 @@ func startOwnAgent(rpc Rpc, profiles func() map[string]LaunchProfile, own, name 
 // worktree.remove, which itself refuses uncommitted or untracked files) and its
 // branch, only for a linked worktree of the caller's account with no agent left in
 // it, whose branch is merged upstream (an ancestor of origin's default branch, or the
-// head of a merged PR, for squash merges). Anything else is refused and left as is.
+// head of a merged PR, for squash merges). A detached HEAD's checkout goes when its
+// commit is upstream, the branch named in its dir only when merged. Anything else is
+// refused and left as is.
 func (c cli) worktree() int {
 	if c.arg(0) != "remove" || c.arg(1) == "" {
 		fmt.Fprintln(os.Stderr, "usage: yoicks worktree remove <checkout path>")
@@ -895,32 +897,78 @@ func removeOwnWorktree(rpc, slow Rpc, own, path string) (string, error) {
 	}
 	head, _ := git("symbolic-ref", "--short", "HEAD")
 	branch := jsTrim(head)
-	if branch == "" {
-		return refuse("its HEAD is not on a branch")
-	}
 	tipOut, _ := git("rev-parse", "HEAD")
 	tip := jsTrim(tipOut)
 	git("fetch", "--quiet", "origin") // best effort: judge against what's upstream now
 	up, _ := git("rev-parse", "--abbrev-ref", "origin/HEAD")
 	upstream := firstNonEmpty(jsTrim(up), "origin/main")
-	_, merged := git("merge-base", "--is-ancestor", tip, upstream)
-	if !merged {
+	inUpstream := func(rev string) bool {
+		_, ok := git("merge-base", "--is-ancestor", rev, upstream)
+		return ok
+	}
+	// branch at rev is merged: rev is upstream, or the head of a merged PR (a squash merge)
+	merged := func(branch, rev string) bool {
+		if inUpstream(rev) {
+			return true
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
 		gh := exec.CommandContext(ctx, "gh", "pr", "list", "--head", branch, "--state", "merged", "--json", "headRefOid", "--jq", ".[].headRefOid")
 		gh.Dir = dir
 		out, _ := gh.Output()
-		cancel()
-		merged = slices.Contains(strings.Split(string(out), "\n"), tip)
+		return rev != "" && slices.Contains(strings.Split(string(out), "\n"), rev)
 	}
-	if !merged {
-		return refuse(branch + " has commits not merged into " + upstream + " (nor the head of a merged PR)")
+	kept := "" // why a detached HEAD's branch stays
+	if branch != "" {
+		if !merged(branch, tip) {
+			return refuse(branch + " has commits not merged into " + upstream + " (nor the head of a merged PR)")
+		}
+	} else {
+		// detached (a worker that deployed checks out the commit it deployed): the checkout
+		// goes once that commit is upstream, the branch it was made for only when that is
+		// merged too. That branch is the one its first checkout moved away from, per its
+		// HEAD's reflog (git's own record of this worktree), and its dir (<repo>-wt-<branch>)
+		// must be named after it (the name alone can't tell feat/x from feat-x)
+		if !inUpstream(tip) {
+			return refuse("its HEAD is detached at a commit not in " + upstream)
+		}
+		lp, _ := git("rev-parse", "--path-format=absolute", "--git-path", "logs/HEAD")
+		log, _ := os.ReadFile(jsTrim(lp))
+		lines := strings.Split(string(log), "\n") // oldest first: "<old id> <new id> <who> <when>\t<message>"
+		first := ""
+		// only a reflog from HEAD's creation (`git worktree add`'s entry, from the null id):
+		// with older entries expired (gc keeps the ids), the oldest checkout left needn't be the first
+		if old, _, _ := strings.Cut(lines[0], " "); old != "" && strings.Trim(old, "0") == "" {
+			for _, l := range lines {
+				_, msg, _ := strings.Cut(l, "\t")
+				if from, ok := strings.CutPrefix(msg, "checkout: moving from "); ok {
+					first, _, _ = strings.Cut(from, " ")
+					break
+				}
+			}
+		}
+		name, named := strings.CutPrefix(filepath.Base(dir), filepath.Base(ws.Worktree.RepoRoot)+"-wt-")
+		btip, isBranch := git("rev-parse", "-q", "--verify", "refs/heads/"+first)
+		switch {
+		case first == "" || !isBranch || !named || unsafePathChars.ReplaceAllString(first, "-") != name:
+			kept = "no branch deleted: its reflog and name show no local branch it was made for"
+		case !merged(first, jsTrim(btip)):
+			kept = "branch " + first + " kept: git can't tell it is merged into " + upstream + " (nor gh that it is a merged PR's head)"
+		default:
+			branch = first
+		}
 	}
 
+	// herdr closes the worktree's workspace with it, so a shell left there (a worker's pane
+	// after /exit) goes too; a shell elsewhere in the dir only loses its cwd
 	if _, err := slow("worktree.remove", map[string]any{"workspace_id": ws.WorkspaceID}); err != nil {
 		if herdrCode(err) == "dirty_worktree_requires_force" {
 			return refuse("it has uncommitted or untracked files")
 		}
 		return refuse(err.Error())
+	}
+	if kept != "" {
+		return fmt.Sprintf("removed %s (%s)", dir, kept), nil
 	}
 	// merge verified above (a squash merge isn't an ancestor, so -d would balk)
 	del := exec.Command("git", "-C", ws.Worktree.RepoRoot, "branch", "-D", branch)
