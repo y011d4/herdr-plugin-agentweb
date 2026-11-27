@@ -483,6 +483,10 @@ func TestHeadlessNotifications(t *testing.T) {
 	for _, name := range []string{"h1", "wc-h1"} {
 		t.Setenv("HLNAME", name)
 		b := startHeadless(t, t.TempDir(), nil, nil)
+		// the server's own callback, then a word that it has returned (any notification begun)
+		h := b.srv.headless[name]
+		told, onStatus := make(chan string, 4), h.onStatus
+		h.onStatus = func(from, to string) { onStatus(from, to); told <- from + " → " + to }
 		c, _, err := b.dial(t, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -492,22 +496,23 @@ func TestHeadlessNotifications(t *testing.T) {
 		b.send(t, "hello")
 		b.waitStatus(t, "done")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		got, after := false, false
-		for !after { // its agent_status, then the state push its runner sends once that is told
+		got := false
+		for !got {
 			_, data, err := c.Read(ctx)
 			if err != nil {
 				break
 			}
 			var m WsAgentStatusMessage
-			json.Unmarshal(data, &m)
-			after = got && m.Type == "state"
-			got = got || m.Type == "agent_status" && m.PaneID == "hl:"+name && m.From == "working" && m.To == "done" &&
+			got = json.Unmarshal(data, &m) == nil && m.Type == "agent_status" && m.PaneID == "hl:"+name && m.From == "working" && m.To == "done" &&
 				m.WorkspaceLabel != nil && *m.WorkspaceLabel == "H1"
 		}
 		cancel()
 		c.Close(websocket.StatusNormalClosure, "")
-		if !got || !after {
-			t.Errorf("%s: agent_status %v, a state after it %v", name, got, after)
+		if !got {
+			t.Errorf("%s: no agent_status", name)
+		}
+		if s := <-told; s != "working → done" {
+			t.Errorf("%s: told %q", name, s)
 		}
 		b.srv.bg.Wait() // the PC notifications it began, shown
 		if shown := len(b.world.Notifications()); (shown > 0) != (name == "h1") {
