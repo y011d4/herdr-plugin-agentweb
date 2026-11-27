@@ -787,7 +787,9 @@ func TestHeadlessClearForgetsWorkers(t *testing.T) {
 	if v := b.view(t); v.Headless.Status != "idle" {
 		t.Errorf("status %s: something was written to the fresh child", v.Headless.Status)
 	}
-	runs, _ := b.runs(t)
+	// idle comes at the spawn, before the child has logged its argv
+	var runs []procArgs
+	waitUntil(t, 5*time.Second, "the second run", func() bool { runs, _ = b.runs(t); return len(runs) == 2 })
 	if last := runs[len(runs)-1].argv; last[6] != "--session-id" || last[7] == runs[0].argv[7] {
 		t.Errorf("not a fresh session: %v", last)
 	}
@@ -1014,6 +1016,39 @@ func TestHeadlessQuestionFromAReplacedChild(t *testing.T) {
 	}
 	if v := b.view(t); v.Headless.Pending == nil || v.Headless.Pending.ID != p.ID || v.Headless.Status != "blocked" {
 		t.Fatalf("the pending question touched: %+v", v.Headless)
+	}
+	if status, body := b.post(t, "answer", `{"id":"`+p.ID+`","answers":{"Which fruit?":"apple"}}`); status != 200 {
+		t.Fatalf("answer: %d %s", status, body)
+	}
+	b.waitFor(t, "the turn's end", func(v OrchestratorView) bool { return v.Headless.Status == "done" && v.Headless.Pending == nil })
+}
+
+// A turn's question (an MCP call) can be handled before its system/init (a stdout line) is
+// read: the late init leaves the orchestrator blocked on that question, not working.
+func TestHeadlessQuestionBeforeItsInit(t *testing.T) {
+	var hold atomic.Bool
+	release, applied := make(chan struct{}), make(chan struct{})
+	b := startHeadless(t, t.TempDir(), nil, func(h *headlessRunner) {
+		h.lineHook = func(line []byte) {
+			switch {
+			case !hold.Load():
+			case strings.Contains(string(line), `"subtype":"init"`):
+				<-release // read only once the question is pending
+			case strings.Contains(string(line), `"AskUserQuestion"`):
+				hold.Store(false)
+				close(applied) // the line after it: the init is applied
+			}
+		}
+	})
+	b.start(t)
+	b.waitStatus(t, "idle")
+	hold.Store(true)
+	b.send(t, "ask")
+	p := b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil }).Headless.Pending
+	close(release)
+	<-applied
+	if v := b.view(t); v.Headless.Pending == nil || v.Headless.Pending.ID != p.ID || v.Headless.Status != "blocked" {
+		t.Fatalf("after the late init: %+v", v.Headless)
 	}
 	if status, body := b.post(t, "answer", `{"id":"`+p.ID+`","answers":{"Which fruit?":"apple"}}`); status != 200 {
 		t.Fatalf("answer: %d %s", status, body)
