@@ -5,7 +5,8 @@
 //	claude --version                 FAKECLAUDE_VERSION (default 2.1.322)
 //	claude auth status --json        FAKECLAUDE_AUTH = <authMethod>/<subscriptionType> (default claude.ai/max)
 //	claude -p … stream-json …        a session over stdin/stdout, as Claude Code 2.1.322 does it
-//	                                 (--resume of a session with no transcript yet: exit 1, as it does)
+//	                                 (--resume of a session with no transcript yet: exit 1, as it does;
+//	                                 one in another project dir of the account resumes there)
 //
 // In -p mode it connects to the --mcp-config server (its yoicks tools join --tools's, the
 // --permission-prompt-tool one hidden). Each turn starts with system/init (apiKeySource from
@@ -166,8 +167,19 @@ func session(args []string) {
 		return r
 	}, f.cwd)
 	f.transcript = filepath.Join(root, "projects", slug, f.id+".jsonl")
-	// as Claude Code 2.1.322 does: a session with no transcript yet (no message) can't be resumed
+	// as Claude Code 2.1.322 does: a session with no transcript yet (no message) can't be resumed,
+	// and one in another project dir of the account is resumed there
 	if id := argAfter(args, "--resume"); id != "" {
+		if _, err := os.Stat(f.transcript); err != nil {
+			entries, _ := os.ReadDir(filepath.Join(root, "projects")) // not a glob: root may hold glob characters
+			for _, e := range entries {
+				p := filepath.Join(root, "projects", e.Name(), id+".jsonl")
+				if _, err := os.Stat(p); err == nil {
+					f.transcript = p
+					break
+				}
+			}
+		}
 		if _, err := os.Stat(f.transcript); err != nil {
 			fmt.Fprintln(os.Stderr, "No conversation found with session ID: "+id)
 			os.Exit(1)
