@@ -80,7 +80,10 @@ jobs:
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
-          cache: false # the test needs no module: nothing worth restoring
+          # its own cache (the build cache of the stdlib this test compiles), keyed apart from
+          # the bridge jobs' (go.sum): sharing the key, whichever job saved first would leave
+          # the other a cache without its packages
+          cache-dependency-path: go.mod
 
       - name: Check the embedded web build (TestWebBuild)
         env:
@@ -91,8 +94,10 @@ jobs:
   # On each released OS/CPU family: linux/amd64 and linux/arm64
   # (supported), macOS on arm64 (experimental: unit tests; the /proc-based parts are refused
   # there). No Node: the Go code compiles without the web build (embed.go's placeholder),
-  # and TestWebBuild, which needs it, runs in the web job. Same hardening as above: pinned
-  # SHAs, no persisted token, read-only permissions.
+  # and TestWebBuild, which needs it, runs in the web job. So the web build (its platform
+  # packages: esbuild, rollup, Tailwind's oxide) is checked on linux/amd64 only, where the
+  # releases are built; a source build elsewhere (plugin-build.sh) isn't. Same hardening as
+  # above: pinned SHAs, no persisted token, read-only permissions.
   bridge:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
