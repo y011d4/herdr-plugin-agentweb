@@ -32,9 +32,9 @@ processes standing in for agents of two Claude accounts, and fakes first on PATH
 with the dir's `.envrc` loaded (no allow list), and `tailscale` and `qrencode` act as
 absent, so nothing depends on this machine's own setup. Each CLI command runs under
 `setsid -f`, detached from any `claude` process, since the CLI takes its nearest
-claude ancestor's account as its own. It records the current build
-(`./cmd/yoicks`; build the web UI first), so re-record only for an intended change
-of behavior, and review the diff. From the repo root:
+claude ancestor's account as its own. It records the current build (`./cmd/yoicks`),
+so re-record only for an intended change of behavior, and review the diff. From the
+repo root:
 
     go build -o /tmp/record-wire ./tools/fakeherdr/cmd/record-wire && /tmp/record-wire
 
@@ -42,9 +42,8 @@ It writes `wire/DONE` (or `wire/FAILED`) when finished. Two runs give the same f
 except the order of a fan-out sent concurrently (`cli-overview`'s account lookups).
 
 `TestGoMatchesWireRecordings` (`tools/fakeherdr/cmd/record-wire/main_test.go`, part of
-`go test ./...`; build the web UI first) builds the Go `yoicks`, records it
-(`yoicks serve` and its CLI commands) through every operation on a free port, and
-compares:
+`go test ./...`) builds the Go `yoicks`, records it (`yoicks serve` and its CLI
+commands) through every operation on a free port, and compares:
 
 - the HTTP exchange and WS messages as JSON values (key order doesn't count; WS
   messages received as a set);

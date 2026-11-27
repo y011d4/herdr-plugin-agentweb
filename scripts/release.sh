@@ -19,6 +19,11 @@ work=$(mktemp -d)
 trap 'git worktree remove --force "$work/src" >/dev/null 2>&1; rm -rf "$work"' EXIT
 git worktree add --detach "$work/src" HEAD
 (cd "$work/src" && npm ci --ignore-scripts && npm run build:web)
+# without web/dist the Go build still succeeds, on embed.go's placeholder: never release that
+if [ ! -f "$work/src/web/dist/index.html" ]; then
+	echo "release: the web build left no web/dist/index.html; the binaries would have no web UI" >&2
+	exit 1
+fi
 
 out=$root/dist/release
 rm -rf "$out"

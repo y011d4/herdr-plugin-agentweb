@@ -85,7 +85,7 @@ func buildYoicks(t *testing.T) string {
 	build := exec.Command("go", "build", "-o", bin, "./cmd/yoicks")
 	build.Dir = repoRoot
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("building yoicks (needs `npm run build:web` first): %v\n%s", err, out)
+		t.Fatalf("building yoicks: %v\n%s", err, out)
 	}
 	return bin
 }

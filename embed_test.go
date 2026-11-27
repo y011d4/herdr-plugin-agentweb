@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"io"
 	"io/fs"
+	"os"
 	"strings"
 	"testing"
 )
@@ -25,8 +26,15 @@ const (
 // TestWebBuild checks the embedded web/dist (npm run build:web): the files the app
 // and its SW name, one JS and one CSS file (no chunks, vite.config.ts), a filled-in
 // sw.js, each text file's .br and .gz copy (vite.config.ts's precompress), and the size
-// budgets.
+// budgets. Without a web build (only embed.go's placeholder) it skips: CI's web job
+// builds the web UI and runs it with YOICKS_REQUIRE_WEB=1, which makes that a failure.
 func TestWebBuild(t *testing.T) {
+	if _, err := fs.Stat(Web, "web/dist"); err != nil {
+		if os.Getenv("YOICKS_REQUIRE_WEB") != "" {
+			t.Fatalf("YOICKS_REQUIRE_WEB is set, but web/dist isn't built: %v", err)
+		}
+		t.Skip("web/dist isn't built (npm run build:web); CI's web job runs this test")
+	}
 	web, err := fs.Sub(Web, "web/dist")
 	if err != nil {
 		t.Fatal(err)
