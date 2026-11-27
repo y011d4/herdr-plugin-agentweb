@@ -290,7 +290,7 @@ func TestHerdrClientDropsAnOlderAgentList(t *testing.T) {
 }
 
 // A failed agent.list is asked again once, without waiting for another status change; a later
-// trigger gets its own retry.
+// trigger gets its own retry, also merged with a retry.
 func TestHerdrClientRetriesAFailedAgentList(t *testing.T) {
 	dir, _ := os.MkdirTemp("", "fh")
 	defer os.RemoveAll(dir)
@@ -325,7 +325,9 @@ func TestHerdrClientRetriesAFailedAgentList(t *testing.T) {
 		t.Errorf("agent.list asked %d times: want the one retry only", n)
 	}
 	env.WaitSubscribed(1, 5*time.Second)
-	env.Status("p1", "working") // a trigger: asked again (fails), and its own retry answers
+	// a trigger merged in one debounce with a retry (the retry last) keeps its own retry: the
+	// request fails, and its retry answers
+	actorValue(c, func() bool { c.refreshAgentList(false); c.refreshAgentList(true); return true })
 	env.WaitCount("agent.list", 4, 6*time.Second)
 	time.Sleep(300 * time.Millisecond)
 	if s := c.State(); s == nil || s.Pane("p1").Agent.HerdrName == nil || *s.Pane("p1").Agent.HerdrName != "w-x" {

@@ -167,6 +167,7 @@ type HerdrClient struct {
 	completionT   debounce
 	listSent      int64 // agent.list requests sent, and the number of the one whose answer was applied last:
 	listApplied   int64 // an older answer is dropped (a count, not the clock, which can step back)
+	listTriggered bool  // a status change or a snapshot asked for the agent.list now debounced (not only a retry)
 	coverageEpoch int // bumped whenever live event coverage is lost
 	// pane IDs covered by the currently acknowledged subscription; snapshot status
 	// replays skip these (live events deliver their changes) and cover the rest
@@ -736,12 +737,17 @@ func (c *HerdrClient) scheduleBroadcast() {
 func (c *HerdrClient) refreshCompletionSeqsSoon() { c.refreshAgentList(false) }
 
 // refreshAgentList is refreshCompletionSeqsSoon's; `retry`: this is a failed one's second try, which
-// isn't tried again (each trigger gets one retry; the debounce merges a retry into a trigger's).
+// isn't tried again. Each trigger gets one retry, also when the debounce merges it with a retry.
 func (c *HerdrClient) refreshAgentList(retry bool) {
 	if c.destroyed {
 		return
 	}
+	if !retry {
+		c.listTriggered = true
+	}
 	c.schedule(&c.completionT, completionSeqDebounce, func() {
+		retry := !c.listTriggered
+		c.listTriggered = false
 		requestedAt := nowMs()
 		epoch := c.coverageEpoch
 		c.listSent++
