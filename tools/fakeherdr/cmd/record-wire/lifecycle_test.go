@@ -150,10 +150,12 @@ func TestGoLifecycleCommands(t *testing.T) {
 	if b, _ := os.ReadFile(logPath); strings.Contains(string(b), token) || !strings.Contains(string(b), "connect: http://127.0.0.1:"+port+" (") {
 		t.Errorf("bridge.log: %q, want its connect line, without the token", b)
 	}
-	// a log an older bridge wrote the token to: start takes it out
+	// a log an older bridge wrote the token to: start takes it out, in the same file (a
+	// `tail -f` of it goes on)
 	f, _ := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0)
 	f.WriteString("connect: http://127.0.0.1:" + port + "?token=" + token + "\n")
 	f.Close()
+	before, _ := os.Stat(logPath)
 	if code, out := ctl("start"); code != 0 {
 		t.Fatalf("start over an old log: exit %d, %q", code, out)
 	}
@@ -163,6 +165,9 @@ func TestGoLifecycleCommands(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(logPath); strings.Contains(string(b), token) || !strings.Contains(string(b), "?token=<redacted>\n") {
 		t.Errorf("bridge.log after a start: %q, want the old line's token redacted", b)
+	}
+	if after, _ := os.Stat(logPath); before == nil || after == nil || !os.SameFile(before, after) {
+		t.Error("start replaced bridge.log instead of redacting it in place")
 	}
 
 	// a pidfile whose PID was reused by an unrelated process
