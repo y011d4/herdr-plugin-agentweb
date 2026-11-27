@@ -28,7 +28,7 @@ import { onWsMessage, wsConnect, wsSendWatch } from '../ws.ts';
 import { AgentDrawer, type Sheet } from './AgentDrawer.tsx';
 import { Dashboard, dashboardTopbar } from './Dashboard.tsx';
 import { Modals, confirmModal, openRename } from './Modals.tsx';
-import { closePaneView, homeTopbar, Pane, paneViewOnState, StoppedHome, stoppedHomeTopbar, type AgentActions } from './Pane.tsx';
+import { closePaneView, homeTopbar, Pane, paneViewOnState, resumePaneView, StoppedHome, stoppedHomeTopbar, suspendPaneView, type AgentActions } from './Pane.tsx';
 import { Settings, settingsTopbar } from './Settings.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { Toasts } from './Toasts.tsx';
@@ -47,6 +47,8 @@ interface Shown { kind: View['screen']; node: ReactNode; topbar?: Topbar; key: n
 let shown: Shown = { kind: 'loading', node: null, topbar: BARE, key: 0, hash: null };
 // The agent drawer: the pane on show over #screen (ui/AgentDrawer.tsx), null before the first
 let sheet: Sheet | null = null;
+// The Home under the drawer, its view waiting (Pane.tsx's suspendPaneView): its hash and its pane then.
+let coveredHome: { hash: string; paneId: string | null } | null = null;
 // End-to-end connectivity, updated on every store change (null: none yet, so a fresh open's
 // first connect shows no banner)
 let linkUp: boolean | null = null;
@@ -263,12 +265,32 @@ function handleRoute(e?: Event): void {
   if (goHomeToOrchestrator()) return; // the hashchange re-enters handleRoute
   routeRendered = true;
   const from = e instanceof HashChangeEvent ? new URL(e.oldURL).hash : null;
+  const route = resolveRoute(location.hash, store.appState, lastHome());
 
-  closePaneView(); // the drawer's pane, or a Home's (left, or frozen under the drawer)
+  // Back from a drawer onto the Home under it, its orchestrator's pane the same: its view goes on as it
+  // was, nothing drawn afresh (a new view would empty its chat until the transcript came again).
+  if (route.kind === 'home' && sheet?.open && coveredHome?.hash === location.hash && coveredHome.paneId === route.paneId && shown.hash === location.hash) {
+    closePaneView(); // the drawer's
+    closeSheet();
+    coveredHome = null;
+    view.homeMode = true;
+    view.activePaneId = route.paneId;
+    resumePaneView();
+    if (route.paneId) dismissNotificationsForPane(route.paneId);
+    markActivePaneSeen();
+    wsSendWatch();
+    return;
+  }
+  // A drawer opening over the Home on screen: the Home's view waits under it, not ended.
+  if (route.kind === 'pane' && view.homeMode && !sheet?.open && shown.hash) {
+    coveredHome = { hash: shown.hash, paneId: view.activePaneId };
+    suspendPaneView();
+  } else if (route.kind !== 'pane') coveredHome = null;
+
+  closePaneView(); // the drawer's pane, or a Home's (left)
   view.activePaneId = null;
   view.homeMode = false;
 
-  const route = resolveRoute(location.hash, store.appState, lastHome());
   if (route.kind === 'pane') {
     openPaneRoute(route.paneId, from);
     wsSendWatch();

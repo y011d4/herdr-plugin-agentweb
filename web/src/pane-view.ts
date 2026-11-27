@@ -7,7 +7,8 @@
  * prompt off the screen (opts.prompt: ui/PromptPanel.tsx draws it and sends the answers) and
  * closes its drawer once a tapped answer lands. ui/Pane.tsx draws the rest (header, toggle button,
  * composer, Home's status bar and "doing now" line) and hears back through opts.
- * store.view.paneViewMode is its mode (wsSendWatch reads it). One per opened pane:
+ * store.view.paneViewMode is the mode of the view on show (wsSendWatch reads it). One per opened pane (a
+ * Home under a drawer waits suspended, resumed as the drawer closes):
  * destroy() stops every timer and listener, and its late responses do nothing.
  * A headless orchestrator (hl:<name>) has no terminal: its view is the chat alone, empty until its
  * session's transcript has a line, and its question comes from the State (ui/Pane.tsx), not the screen.
@@ -26,7 +27,6 @@ import type { TimelineItem } from './transcript.ts';
 import type { ReadResponse, TranscriptResponse, WsMessage, WsTranscriptItemsMessage } from './types.ts';
 import { onWsMessage, wsSendWatch } from './ws.ts';
 
-const STORAGE_VIEW = 'herdr_pane_view'; // preferred pane view: 'terminal' | 'chat'
 const PANE_REFRESH_INTERVAL_MS = 3_000; // polling while pane detail is visible
 const PROMPT_SCREEN_INTERVAL_MS = 1200;
 const ANSWER_CONFIRM_MS = 10_000; // still on the same prompt this long after the press → say so
@@ -53,8 +53,12 @@ export interface PanelPrompt {
 }
 
 export interface PaneView {
-  /** the toggle: chat or terminal; persist = remember it as the preferred view */
+  /** the toggle: chat or terminal; persist = remember it as the pane's view (for the app's life) */
   setMode(mode: 'terminal' | 'chat', persist: boolean): void;
+  /** under a drawer (a Home's): it stops (no timers, no messages, no reads) and keeps its DOM as it is */
+  suspend(): void;
+  /** back on show: it goes on where it was (its mode, its chat and scroll), the shell re-sends its watch */
+  resume(): void;
   /** a new State: the answer panel follows the pane's status */
   onState(): void;
   /** after input: re-read the terminal at once (terminal.ts echo) */
@@ -67,10 +71,10 @@ export interface PaneView {
   destroy(): void;
 }
 
-// Chat is the default view; the terminal is only preferred if explicitly chosen.
-function preferredView(): 'terminal' | 'chat' {
-  return localStorage.getItem(STORAGE_VIEW) === 'terminal' ? 'terminal' : 'chat';
-}
+// The view a pane was switched to here, for the app's life (not stored): a pane opens on its chat, but for
+// one whose terminal was chosen. (One terminal choice once made every pane open on its terminal.)
+const chosenView = new Map<string, 'terminal' | 'chat'>();
+const preferredView = (paneId: string): 'terminal' | 'chat' => chosenView.get(paneId) ?? 'chat';
 
 // Whether the state currently reports this pane as running Claude — the only
 // kind that can ever have a transcript, so the only kind worth re-probing.
@@ -112,6 +116,9 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   // terminal (view.paneViewMode). Availability is probed per pane; the terminal stays the fallback.
   // chat view starts closed; availability is probed after the terminal loads
   view.paneViewMode = 'terminal';
+  let mode: 'terminal' | 'chat' = 'terminal'; // this view's (view.paneViewMode is the one on show's)
+  let suspended = false; // under a drawer (suspend/resume)
+  let historyLoaded = false; // the terminal's scrollback (read with its first look)
   let chatAvailable = false;
   let chatSessionId: string | null = null;
   let chatCursor = 0; // byte offset into the transcript for incremental fetches
@@ -136,11 +143,11 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     chatProbing = true;
     try {
       const data = await apiGet<TranscriptResponse>(`/api/panes/${encodeURIComponent(paneId)}/transcript`);
-      if (destroyed) return;
+      if (destroyed || suspended) return;
       chatAvailable = data.available;
       opts.showToggle(chatAvailable);
       // the orchestrator is someone to talk to: always open it as chat
-      if (chatAvailable && (preferredView() === 'chat' || orchestratorOfPane(store.appState, paneId))) switchToChat(data, false);
+      if (chatAvailable && (preferredView(paneId) === 'chat' || orchestratorOfPane(store.appState, paneId))) switchToChat(data, false);
       else opts.modeChanged(); // staying on the terminal: Home reveals its keys
     } catch {
       // leave the terminal view; toggle stays hidden (Home reveals the keys)
@@ -154,9 +161,9 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   // existing preference, or falling back on a transient transcript miss) must not
   // rewrite the stored preference.
   function switchToChat(initial?: TranscriptResponse, persist = true): void {
-    if (!chatAvailable || destroyed) return;
-    view.paneViewMode = 'chat';
-    if (persist) localStorage.setItem(STORAGE_VIEW, 'chat');
+    if (!chatAvailable || destroyed || suspended) return;
+    view.paneViewMode = mode = 'chat';
+    if (persist) chosenView.set(paneId, 'chat');
     terminalEl.style.setProperty('display', 'none');
     chatEl.style.setProperty('display', '');
     opts.modeChanged();
@@ -172,14 +179,19 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   }
 
   function switchToTerminal(persist = true): void {
-    view.paneViewMode = 'terminal';
-    if (persist) localStorage.setItem(STORAGE_VIEW, 'terminal');
+    if (destroyed || suspended) return;
+    view.paneViewMode = mode = 'terminal';
+    if (persist) chosenView.set(paneId, 'terminal');
     chatEl.style.setProperty('display', 'none');
     terminalEl.style.setProperty('display', '');
     opts.modeChanged();
     updatePromptPanel(); // hide the answer panel (chat-only)
     wsSendWatch(); // server: stop transcript watch, resume pane watch
-    void term.refresh(); // repaint the live screen the user returns to
+    void term.refresh().then(() => { // repaint the live screen the user returns to
+      if (destroyed || historyLoaded) return;
+      historyLoaded = true; // opened on its chat: the scrollback with the terminal's first look
+      void term.loadHistory();
+    });
   }
 
   async function loadChatInitial(): Promise<void> {
@@ -191,9 +203,10 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     const reqCursor = chatCursor;
     try {
       const data = await apiGet<TranscriptResponse>(`/api/panes/${encodeURIComponent(paneId)}/transcript`);
-      if (destroyed || view.paneViewMode !== 'chat') return;
+      if (destroyed || suspended || mode !== 'chat') return;
       if (chatSessionId !== reqSession || chatCursor !== reqCursor) return; // superseded in flight
       if (!data.available) { noTranscript(); return; }
+      opts.showToggle(!headless); // opened on its chat: the toggle once a transcript is there (the socket may be down)
       chatSessionId = data.sessionId ?? null;
       chatCursor = data.cursor ?? 0;
       renderChatReset(data.items ?? []);
@@ -249,7 +262,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     }
     chatAvailable = false;
     opts.showToggle(false);
-    if (view.paneViewMode === 'chat') switchToTerminal(false);
+    if (mode === 'chat') switchToTerminal(false);
   }
 
   function onTranscriptItems(msg: WsTranscriptItemsMessage): void {
@@ -259,7 +272,9 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     }
     chatAvailable = true;
     opts.showToggle(!headless); // a headless orchestrator has no terminal to toggle to
-    if (view.paneViewMode !== 'chat') return; // availability noted; content applies only in chat mode
+    if (mode !== 'chat') return; // availability noted; content applies only in chat mode
+    // a re-watch (a reconnect, a resume) resending what is on show: nothing to redraw
+    if (msg.reset && msg.sessionId != null && msg.sessionId === chatSessionId && msg.cursor === chatCursor) return;
     if (msg.reset || msg.sessionId !== chatSessionId) {
       // Same session (a reconnect re-watch) → keep scroll; a new session → bottom.
       const sameSession = msg.sessionId != null && msg.sessionId === chatSessionId;
@@ -275,7 +290,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   // HTTP fallback while the WS is down: fetch items past the cursor for the same
   // session (mirrors the transcript watch).
   async function pollChatFallback(): Promise<void> {
-    if (destroyed || view.paneViewMode !== 'chat') return;
+    if (destroyed || mode !== 'chat') return;
     // The response is only valid against the state this request started from. If
     // anything (a WS reset/push, or a newer poll) advances the session or cursor
     // while the request is in flight, applying it — append OR reset — would
@@ -285,7 +300,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     const q = chatSessionId ? `?session=${encodeURIComponent(chatSessionId)}&after=${reqCursor}` : '';
     try {
       const data = await apiGet<TranscriptResponse>(`/api/panes/${encodeURIComponent(paneId)}/transcript${q}`);
-      if (destroyed || view.paneViewMode !== 'chat') return;
+      if (destroyed || mode !== 'chat') return;
       // Drop any response whose request start no longer matches the current state
       // BEFORE acting on it — a stale available:false must not force the terminal
       // after a WS push/reset already advanced the chat.
@@ -319,7 +334,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
 
   function updatePromptPanel(): void {
     const status = findPane(paneId)?.pane?.agent?.status;
-    const blocked = !headless && view.paneViewMode === 'chat' && status === 'blocked';
+    const blocked = !headless && mode === 'chat' && status === 'blocked';
     if (!blocked) {
       // Pane is no longer waiting: the answer (if one was just sent) has landed. The
       // panel goes, and with it the post-send cooldown that was suppressing re-taps.
@@ -353,7 +368,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     if (promptScreenTimer) return;
     const tick = async (): Promise<void> => {
       if (promptPollActive) return; // a poll is in flight — don't overlap (so slow reads aren't all discarded)
-      if (view.paneViewMode !== 'chat' || destroyed) { stopPromptScreenPoll(); return; }
+      if (mode !== 'chat' || destroyed) { stopPromptScreenPoll(); return; }
       if (document.hidden) return; // a full screen read every 1.2s — skip while nobody can see it
       if (findPane(paneId)?.pane?.agent?.status !== 'blocked') { updatePromptPanel(); return; }
       const reqId = ++promptPollSeq;
@@ -362,7 +377,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
         const data = await apiGet<ReadResponse>(`/api/panes/${encodeURIComponent(paneId)}/read?source=visible&format=ansi`);
         // stopPromptScreenPoll bumps promptPollSeq to invalidate a poll from a prior
         // session; the in-flight guard means no concurrent tick supersedes this one.
-        if (reqId !== promptPollSeq || destroyed || view.paneViewMode !== 'chat') return;
+        if (reqId !== promptPollSeq || destroyed || mode !== 'chat') return;
         const ansi = data.ansi ?? data.text ?? '';
         const stripped = stripAnsi(ansi);
         const parsed = parsePrompt(stripped);
@@ -418,6 +433,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   // ── Server messages, polling, visibility ────────────────────────────────────
 
   const unsubscribe = onWsMessage((msg: WsMessage) => {
+    if (suspended) return; // its watch is the drawer's now: what comes is late
     if (msg.type === 'pane_output' && msg.paneId === paneId) {
       term.setAppScroll(msg.appScroll); // server decides from fresh scroll metadata
       term.render(msg.ansi);
@@ -441,13 +457,13 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       // A claude pane's transcript may appear shortly after the pane opens (session
       // just started, JSONL not written yet). Re-probe until chat is found so the
       // view upgrades without a manual reload; non-claude panes are never probed.
-      if (!chatAvailable && view.paneViewMode === 'terminal' && paneIsClaude(paneId)) {
+      if (!chatAvailable && mode === 'terminal' && paneIsClaude(paneId)) {
         void initChatAvailability();
       }
       // While the WS watch is pushing, client polling is redundant — poll only as
       // a fallback when the socket is down, for whichever view is active.
       if (!store.wsConnected) {
-        if (view.paneViewMode === 'chat') void pollChatFallback();
+        if (mode === 'chat') void pollChatFallback();
         else void term.refresh();
       }
     }, PANE_REFRESH_INTERVAL_MS);
@@ -458,8 +474,8 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   // down — otherwise a fallback response racing a WS push duplicates items and rewinds
   // chatCursor. (The shell's own listener resumes the watch and clears notifications.)
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) return;
-    if (view.paneViewMode === 'chat') { if (!store.wsConnected) void pollChatFallback(); }
+    if (document.hidden || suspended) return;
+    if (mode === 'chat') { if (!store.wsConnected) void pollChatFallback(); }
     else void term.refresh();
   }, { signal });
 
@@ -467,15 +483,17 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   // view is continuously scrollable from the very first swipe; then polling, and
   // the probe for a Claude transcript (it reveals the toggle and switches to chat
   // when that's the preferred view).
-  if (headless) {
-    // no terminal to read first: straight to the chat
+  if (headless || (paneIsClaude(paneId) && (preferredView(paneId) === 'chat' || orchestratorOfPane(store.appState, paneId)))) {
+    // straight to the chat: a headless orchestrator has no terminal; a Claude pane opens on its chat, not
+    // its terminal first (its transcript's GET and watch tell; none: the terminal, then its first look)
     chatAvailable = true;
     startPaneRefresh();
     switchToChat(undefined, false);
   } else void (async () => {
     await term.refresh();
     // Left while the first read was in flight: no history load against a gone view.
-    if (destroyed) return;
+    if (destroyed || suspended) return;
+    historyLoaded = true;
     void term.loadHistory();
     startPaneRefresh();
     void initChatAvailability();
@@ -486,8 +504,26 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       if (destroyed) return; // a late caller (an answer landing after the pane was left)
       if (mode === 'chat') switchToChat(undefined, persist); else switchToTerminal(persist);
     },
-    onState() {
+    suspend() {
       if (destroyed) return;
+      suspended = true;
+      if (paneRefreshTimer) clearInterval(paneRefreshTimer);
+      paneRefreshTimer = null;
+      stopPromptScreenPoll();
+      dropPendingAnswer();
+    },
+    resume() {
+      if (destroyed || !suspended) return;
+      suspended = false;
+      view.paneViewMode = mode;
+      opts.showToggle(chatAvailable && !headless);
+      opts.modeChanged();
+      startPaneRefresh();
+      updatePromptPanel();
+      if (mode === 'terminal') void term.refresh();
+    },
+    onState() {
+      if (destroyed || suspended) return;
       updatePromptPanel(); // agent may have just become (un)blocked
       settlePendingAnswer(); // ...because a tapped answer landed
     },
