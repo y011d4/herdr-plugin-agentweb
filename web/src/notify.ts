@@ -123,7 +123,7 @@ function showSystemNotification(title: string, body: string, paneId: string): vo
         // dismiss can run too early and miss it. Once it provably exists, dismiss it
         // if the user is now looking at this very pane.
         return reg.showNotification(title, notificationOptions(body, paneId)).then(() => {
-          if (!document.hidden && store.view.activePaneId === paneId) dismissNotificationsForPane(paneId);
+          if (!document.hidden && store.view.activePaneId === paneId && !store.view.settingsOpen) dismissNotificationsForPane(paneId);
         });
       })
       .catch(() => { if (document.hidden) pageNotification(title, body, paneId); });

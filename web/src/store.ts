@@ -30,12 +30,14 @@ export interface View {
   paneBackRoute: string;
   /** the overlay was opened on top of that screen's history entry here (its close goes back to it) */
   paneOverBase: boolean;
+  /** Settings is open: the pane on show (a Home's) is out of sight under it */
+  settingsOpen: boolean;
 }
 
 export const store: { appState: AppState | null; wsConnected: boolean; view: View; seenDone: SeenDone } = {
   appState: null,
   wsConnected: false,
-  view: { screen: 'loading', activePaneId: null, homeMode: false, paneViewMode: 'terminal', paneBackRoute: '#/agents', paneOverBase: false },
+  view: { screen: 'loading', activePaneId: null, homeMode: false, paneViewMode: 'terminal', paneBackRoute: '#/agents', paneOverBase: false, settingsOpen: false },
   seenDone: (() => {
     try { return JSON.parse(localStorage.getItem(STORAGE_SEEN) ?? '{}') ?? {}; } catch { return {}; }
   })(),

@@ -98,6 +98,23 @@ describe('notify', () => {
     assert.deepEqual(getToasts(), []);
   });
 
+  it('a notification registered as the page shows its pane is closed at once; not while Settings covers that pane', async () => {
+    const reg = { showNotification: async () => { hidden = false; }, getNotifications: async ({ tag }: { tag: string }) => [{ close: () => closed.push(tag) }] };
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { getRegistration: async () => reg } });
+    store.view.activePaneId = 'p3';
+    store.view.settingsOpen = true;
+    notifyAgentStatus(done);
+    await settle();
+    await settle();
+    assert.deepEqual(closed, [], 'out of sight under Settings');
+    hidden = true;
+    store.view.settingsOpen = false;
+    notifyAgentStatus(done);
+    await settle();
+    await settle();
+    assert.deepEqual(closed, ['p3']);
+  });
+
   it("opening a pane closes its OS notifications", async () => {
     dismissNotificationsForPane('p3');
     await settle();
