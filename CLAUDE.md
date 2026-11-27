@@ -31,9 +31,9 @@ All in `internal/bridge/` (one package):
   `tab.create`/`pane.split`/`agent.start`/`agent.prompt`/`pane.close`/`agent.rename`/`agent.get`/`worktree.create`;
   agents launch only from a
   fixed `launch_profiles` allowlist (never a caller-supplied command). http.go wires the routes
-  (`POST /api/agents`, `DELETE /api/panes/:id`, `POST /api/panes/:id/rename`, `POST /api/agents/:target/clear`,
-  `POST /api/worktrees`). The New agent UI's "Create a new worktree" toggle creates a worktree, then starts
-  the agent in its checkout. Every new worktree (phone, API, `yoicks agent start --worktree`) goes
+  (`POST /api/agents`, `DELETE /api/panes/:id`, `POST /api/panes/:id/rename`, `POST /api/agents/:target/clear`).
+  The web UI starts no agents (orchestrators do); `POST /api/agents` stays for scripts and webcheck's
+  Tier 2 setup. Every new worktree (API, `yoicks agent start --worktree`) goes
   next to its repo as `<repo>-wt-<branch>` (`placeWorktreeNextToRepo` in worktree_resolve.go), so a
   parent-dir `.envrc` (e.g. the Claude account per org dir) covers it; herdr's own default dir wouldn't.
 - `auth.go` / `notify.go` / `config.go` — token, agent-status fanout + optional ntfy, config
@@ -85,7 +85,7 @@ All in `internal/bridge/` (one package):
   `Pane.tsx` and `PromptPanel.tsx`, and on a PC the sidebar `Sidebar.tsx` beside them; `Status.tsx` is an agent's
   status as they show it (`StatusBadge`, `StatusDot`); `Toasts.tsx` draws into `#toast-container` (each toast
   Mantine's Notification; only the toasts take taps, the box too while the stack overflows) and `Modals.tsx`
-  (Confirm, Rename, New agent and the image preview, all on Mantine's Modal) is portalled into `#modal-root`;
+  (Confirm, Rename and the image preview, all on Mantine's Modal) is portalled into `#modal-root`;
   a pane's ⋮ is a Mantine Menu (`Pane.tsx`'s `AgentMenu`, in its drawer's header, its dropdown in `#modal-root`
   too, over the drawer). An opened
   pane's body is `pane-view.ts` (`createPaneView` → setMode/onState/echo/destroy, one per opened
@@ -97,8 +97,8 @@ All in `internal/bridge/` (one package):
   bits, the composer (an uncontrolled textarea) and the quick keys around `#pane-view`, and
   `ui/PromptPanel.tsx` the answer panel pane-view reports (`opts.prompt`: taps, in-flight guard, cooldown, 409). A headless
   orchestrator's Home (`hl:<name>`) is the same screen: `findPane`/`markPaneSeen` (`store.ts`) make it
-  a pane from its `OrchestratorView` (never in `appState.workspaces`: New agent's dirs and "No workspaces
-  found" go by those), `api.ts`'s `orchestratorPost` sends its composer, Clear, Stop, ■ and answers to
+  a pane from its `OrchestratorView` (never in `appState.workspaces`: "No workspaces
+  found" goes by those), `api.ts`'s `orchestratorPost` sends its composer, Clear, Stop, ■ and answers to
   `/api/orchestrators/:name/*`, `watch.ts` watches only its transcript, pane-view has no terminal for
   it (the chat, empty until its session's first line) and `PromptPanel.tsx`'s `HeadlessPrompt` answers
   `headless.pending`; its usage and warnings (■, Clear, the steps back to the TUI) sit on the status
@@ -190,7 +190,7 @@ All in `internal/bridge/` (one package):
   Home's counts (its status bar's: an outlined pill with a ›) open `#/agents/<name>`: only the panes in its state `agents` (its Claude
   account's, via `paneAccount`, cached per agent pane and re-checked every 60s by `paneAccountCache`;
   `null` = unknown → every agent),
-  with Back to the Home; a pane opened from there opens over that list. Any route to
+  with `← <its Home>` (`Back to …`; at every width) to that Home; a pane opened from there opens over that list. Any route to
   its pane (`#/pane/<id>`: notification clicks, stale links) is replaced by its Home. herdr's
   `pane.agent_detected` (fires on detect *and* release) is rebuild-triggering, so agent presence and
   `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `yoicks agent …`, waking on background
@@ -515,7 +515,8 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   (`--wide-gutter`; the bars and the composer around the chat take it as a `lg:px-(--wide-gutter)` class).
   At that width (`WIDE_QUERY`, `theme.ts`; theme.test checks it against style.css and `lg`) the shell
   also draws the sidebar (`ui/Sidebar.tsx`) on every screen but the token one: each orchestrator's
-  Home a heading over its account's agents (`homeGroups`), then Other. It comes first in `#app`, in a
+  Home a heading over its account's agents (`homeGroups`), then Other (Settings stays the topbar's ⚙, at
+  the screen's top right, as on a phone). It comes first in `#app`, in a
   slot of its own, so `#topbar`/`#reconnect-banner`/`#screen` stay the same elements as it comes and
   goes; while it is there `#app` is a two-column grid (`#app:has(> #sidebar)`) and `--sidebar-w` is its
   width, for an overlay that should leave it usable. Like the list it holds still while a finger is

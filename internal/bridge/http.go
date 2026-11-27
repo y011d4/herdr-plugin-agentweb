@@ -25,13 +25,11 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode"
 	"unicode/utf8"
 )
 
@@ -510,56 +508,10 @@ func (s *server) route(w http.ResponseWriter, r *http.Request, pathname string) 
 		return
 	}
 
-	// The configured launch profiles (name + label only, never the argv), for the
-	// "new agent" picker.
-	if pathname == "/api/profiles" && method == "GET" {
-		type entry struct {
-			Name  string `json:"name"`
-			Label string `json:"label"`
-		}
-		profiles := []entry{}
-		for name, p := range s.cfg.LaunchProfiles {
-			profiles = append(profiles, entry{name, p.Label})
-		}
-		// the picker preselects the first one, so the order must be the TS's
-		sort.Slice(profiles, func(i, j int) bool { return localeLess(profiles[i].Name, profiles[j].Name) })
-		jsonOK(w, struct {
-			Profiles []entry `json:"profiles"`
-		}{profiles})
-		return
-	}
-
 	// Start a new agent from a named launch profile (fixed argv allowlist: a caller
 	// never supplies a raw command). Optional cwd/name/workspace/task.
 	if pathname == "/api/agents" && method == "POST" {
 		s.startAgentRoute(w, r)
-		return
-	}
-
-	// Create a git worktree (herdr worktree.create) and return the new checkout path +
-	// workspace, so a caller can then start an agent in it.
-	if pathname == "/api/worktrees" && method == "POST" {
-		body := readBody(w, r)
-		if body == nil {
-			return
-		}
-		spec := map[string]any{}
-		for from, to := range map[string]string{"cwd": "repo", "workspace": "workspace", "branch": "branch", "base": "base"} {
-			if v, ok := body[from]; ok {
-				spec[to] = v
-			}
-		}
-		placed, err := placeWorktreeNextToRepo(spec, s.workspaces(), nil)
-		if err != nil {
-			sendError(w, err)
-			return
-		}
-		out, err := createWorktree(s.rpc, worktreeInput(placed))
-		if err != nil {
-			sendError(w, err)
-			return
-		}
-		jsonOK(w, okWith(out))
 		return
 	}
 
@@ -831,39 +783,6 @@ func (s *server) shutdownHeadless() {
 		wg.Go(h.Shutdown)
 	}
 	wg.Wait()
-}
-
-// icuASCIIOrder is printable ASCII in the order of ICU's root collation, which the
-// TS's localeCompare uses: punctuation, digits, then letters, case-blind at first.
-const icuASCIIOrder = " _-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$0123456789aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ"
-
-// localeLess is a.localeCompare(b) < 0 for ASCII names: the letters compared without
-// case first, then lowercase before uppercase at the first difference. Other
-// characters come after ASCII in code point order (ICU differs).
-func localeLess(a, b string) bool {
-	rank := func(r rune) int {
-		if r < 0x80 {
-			if i := strings.IndexRune(icuASCIIOrder, unicode.ToLower(r)); i >= 0 {
-				return i
-			}
-		}
-		return 0x80 + int(r)
-	}
-	ra, rb := []rune(a), []rune(b)
-	for i := 0; i < len(ra) && i < len(rb); i++ {
-		if x, y := rank(ra[i]), rank(rb[i]); x != y {
-			return x < y
-		}
-	}
-	if len(ra) != len(rb) {
-		return len(ra) < len(rb)
-	}
-	for i := range ra { // same letters: lowercase first
-		if ra[i] != rb[i] {
-			return unicode.IsLower(ra[i])
-		}
-	}
-	return false
 }
 
 // worktreeInput is a placed worktree spec (decoded JSON) as createWorktree's input.

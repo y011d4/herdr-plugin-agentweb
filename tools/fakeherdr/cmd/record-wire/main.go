@@ -692,9 +692,6 @@ func recordAll(r *recorder, pick func(op string) bool) error {
 		{"agent-start-unknown-profile", func(rec *record) error {
 			return r.http(rec, "POST", "/api/agents", map[string]any{"profile": "bash"})
 		}},
-		{"worktree-create", func(rec *record) error {
-			return r.http(rec, "POST", "/api/worktrees", map[string]any{"cwd": r.s.repo(), "branch": "feat-y", "base": "main"})
-		}},
 		{"stop", func(rec *record) error { return r.http(rec, "DELETE", "/api/panes/p2", nil) }},
 		{"rename", func(rec *record) error {
 			return r.http(rec, "POST", "/api/panes/p1/rename", map[string]any{"name": "Renamed One"})
@@ -706,7 +703,6 @@ func recordAll(r *recorder, pick func(op string) bool) error {
 			r.s.mu.Unlock()
 			return r.http(rec, "POST", "/api/orchestrators/test/start", nil)
 		}},
-		{"profiles", func(rec *record) error { return r.http(rec, "GET", "/api/profiles", nil) }},
 		{"unauthorized", func(rec *record) error {
 			res, err := http.Get("http://127.0.0.1:" + r.port + "/api/state")
 			if err != nil {

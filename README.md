@@ -20,11 +20,10 @@ mobile-first PWA:
   a done agent you open on the phone reads as idle there (herdr's own state is left as is);
   each card shows its git branch, and a linked worktree's agents appear inside their
   main checkout, chipped as a worktree
-- Start, rename, clear, and stop agents from the phone: **+** on the dashboard launches an
-  agent from a named launch profile — in an existing workspace/worktree you pick, or in a
-  **fresh worktree** it creates for you — and each pane's **⋮** menu renames, clears
+- Rename, clear, and stop agents from the phone: each pane's **⋮** menu renames, clears
   (fresh session), or stops it (an orchestrator's Home has **Clear** and **Stop** buttons
-  instead, and **⚙** for the settings)
+  instead). Agents are started by the orchestrators, not by hand. **⚙** at the top right
+  opens the settings
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
   scrollback by swiping down, multiline input, and quick keys
   (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …). On a PC's browser, Enter sends and
@@ -284,9 +283,9 @@ with defaults, is:
     { "name": "default", "label": "", "env": {} }
   ],
   "launch_profiles": {
-    "claude": { "argv": ["claude"], "label": "Claude Code" },
-    "codex": { "argv": ["codex"], "label": "Codex" },
-    "opencode": { "argv": ["opencode"], "label": "opencode" }
+    "claude": { "argv": ["claude"] },
+    "codex": { "argv": ["codex"] },
+    "opencode": { "argv": ["opencode"] }
   }
 }
 ```
@@ -303,13 +302,13 @@ with defaults, is:
   auto-detecting Tailscale (serve HTTPS address, else tailnet IP), then to
   `http://127.0.0.1:<port>` — so set it for any transport other than Tailscale. See
   [Exposing the bridge to your phone](#exposing-the-bridge-to-your-phone).
-- `launch_profiles` — named agent launch profiles for `POST /api/agents`. Each entry is
-  `{ "argv": [...], "label": "…" }`; `argv[0]` is an agent kind herdr knows (`claude`, `codex`,
+- `launch_profiles` — named agent launch profiles, for an orchestrator's `agent start --profile`,
+  Clear and `POST /api/agents`. Each entry is `{ "argv": [...] }`; `argv[0]` is an agent kind herdr knows (`claude`, `codex`,
   `opencode`, …; herdr picks the executable for it) and the rest are fixed flags (the whole
-  point of the allowlist is that a phone/script picks a *profile name*, never a raw command). Your
+  point of the allowlist is that a caller picks a *profile name*, never a raw command). Your
   entries merge over the built-in defaults shown above (same name overrides its `argv`; a new name is
   added; a malformed entry is ignored). Use it to add variants, e.g.
-  `"claude-yolo": { "argv": ["claude", "--dangerously-skip-permissions"], "label": "Claude (yolo)" }`.
+  `"claude-yolo": { "argv": ["claude", "--dangerously-skip-permissions"] }`.
 - `orchestrators` — your **orchestrators**: Claude Code agents you talk to, which hand the work to
   other agents and report back. Each entry is `{ "name", "label", "env" }`: `label` is its title on
   the phone, `env` the environment it starts with — typically `CLAUDE_CONFIG_DIR` to pick its Claude
@@ -521,8 +520,6 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   to a draft already typed straight into the pane
 - `POST /api/panes/:paneId/focus`
 - `POST /api/panes/:paneId/scroll` `{"direction": "up", "steps": 3}` — SGR wheel events for full-screen apps
-- `GET /api/profiles` — the configured launch profiles as `{"profiles": [{"name", "label"}]}`
-  (names + labels only, never the argv), for the new-agent picker
 - `POST /api/agents` `{"profile": "claude", "cwd": "/path", "name": "review", "task": "…", "workspace": "w7"}`
   — start a new agent from a named [launch profile](#configuration) (fixed argv allowlist; a caller
   never supplies a raw command). Only `profile` is required; returns `{"paneId", "name", "agent"}`
@@ -561,11 +558,6 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   isn't the one pending.
 - `DELETE /api/orchestrators/:name/todos/:id` — tick an item of that Home's to-do list off; 404 when
   there is no such item (already ticked off, or done by its orchestrator).
-- `POST /api/worktrees` `{"cwd": "/repo", "branch": "feat/x", "base": "origin/main"}` — create a git
-  worktree next to the repo, as above (herdr `worktree.create`; `cwd` is any path in the source repo,
-  `branch`/`base` optional) and return `{"workspaceId", "checkoutPath", "branch", "paneId"}`. Standalone (create a worktree
-  without an agent); the New agent form's "Create a new worktree" toggle instead uses the atomic
-  `worktree` spec on `POST /api/agents` above.
 - `DELETE /api/panes/:paneId` — stop an agent by closing its pane
 - `POST /api/panes/:paneId/rename` `{"name": "worker-2"}` — rename the agent running in the pane
 - `POST /api/agents/:target/clear` — start a fresh replacement agent (same profile + cwd) and close

@@ -214,8 +214,7 @@ type HeadlessWarning struct {
 // LaunchProfile is a named, fixed way to start an agent.
 type LaunchProfile struct {
 	// the agent kind + fixed flags, e.g. ["claude", "--dangerously-skip-permissions"]
-	Argv  []string `json:"argv"`
-	Label string   `json:"label"`
+	Argv []string `json:"argv"`
 }
 
 // Config is the bridge's configuration.

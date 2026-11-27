@@ -5,7 +5,7 @@
  * counts, Clear and Stop) and "doing now" line, the composer and the quick keys, around the pane's body. The
  * body (terminal, chat) is pane-view.ts, imperative, in #pane-view: created on mount, destroyed on
  * unmount, one at a time. Below it, while the view reports a prompt, the answer panel (PromptPanel.tsx).
- * A pane's chat is read-only: its composer and keys show with its terminal (or for a kept first task),
+ * A pane's chat is read-only: its composer and keys show with its terminal,
  * and while it works ■ Interrupt sends Esc.
  * A headless orchestrator's Home (hl:<name>: no herdr pane) sends through /api/orchestrators/:name/*,
  * has ■ on its "doing now" line, its usage, model and warnings on the status bar and its question (the
@@ -24,7 +24,7 @@ import { fitImages, MAX_IMAGES, toAttachment, type ImageAttachment } from '../im
 import { showToast } from '../notify.ts';
 import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
 import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
-import { emit, findPane, keptTasks, store, subscribe } from '../store.ts';
+import { emit, findPane, store, subscribe } from '../store.ts';
 import type { AppState, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
 import { TopbarIcon, agentCards, orchestratorLabel, relativeTime } from './Dashboard.tsx';
 import { StatusDot } from './Status.tsx';
@@ -157,11 +157,10 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
   }, [paneId]);
   // "doing now": only while the orchestrator works — its latest tool call, or "thinking…" between them
   const working = findPane(paneId)?.pane?.agent?.status === 'working';
-  // A pane's chat is for reading: typing and keys are its terminal's (one tap away), but for a first
-  // task New agent couldn't deliver (decided as it opens). Shown until the view is in chat: a bar
-  // showing up later would shrink a terminal already scrolled to its bottom (hiding one grows the chat).
-  const [kept] = useState(() => keptTasks.draft(paneId) !== null);
-  const readOnly = !home && mode === 'chat' && !kept;
+  // A pane's chat is for reading: typing and keys are its terminal's (one tap away). Shown until the
+  // view is in chat: a bar showing up later would shrink a terminal already scrolled to its bottom
+  // (hiding one grows the chat).
+  const readOnly = !home && mode === 'chat';
   const hl = headlessName(paneId);
   const pending = hl ? state?.orchestrators?.find((o) => o.name === hl)?.headless?.pending : null;
   return (
@@ -389,20 +388,16 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
     if (next.length < shown.current.length + added.length) showToast('Not every image was added', `At most ${MAX_IMAGES}, 1 MB in all, per message`);
     setImages(next);
   };
-  // A new agent's first task the bridge couldn't deliver lands here, ready to send, and stays (with
-  // the user's edits) until sent, so leaving the pane doesn't lose it. While its send is in flight the
-  // composer is locked, here and in a view reopened meanwhile.
   useLayoutEffect(() => {
     const t = input.current!;
     shownInput = t;
     shownKey = key;
     const stored = getDraft(key);
-    const draft = keptTasks.draft(paneId) ?? (sendingDrafts.get(key) === stored ? '' : stored);
+    const draft = sendingDrafts.get(key) === stored ? '' : stored;
     if (draft) {
       t.value = draft;
       autoGrow(t);
     }
-    t.disabled = keptTasks.sending(paneId);
     return () => { if (shownInput === t) shownInput = null; };
   }, [paneId, key]);
 
@@ -410,12 +405,9 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
     const t = input.current!;
     const text = t.value;
     const sent = shown.current;
-    if ((!text && !sent.length) || keptTasks.sending(paneId) || sendingImages.current || preparing) return;
+    if ((!text && !sent.length) || sendingImages.current || preparing) return;
     sendingImages.current = sent.length > 0; // an upload takes a while: a second tap mustn't send them twice
-    const kept = keptTasks.beginSend(paneId, text); // false unless the pane has a kept task
-    if (kept) t.disabled = true;
     if (text) sendingDrafts.set(key, text);
-    let restored: string | null = null;
     try {
       // clear:true wipes the pane's composer first so this message submits on its own — never
       // merged with a half-typed draft the user left in the pane that yoicks can't see. Scope it
@@ -424,7 +416,6 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
       // text+enter. enter:true then submits in the same request.
       const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
       await (hl ? orchestratorPost(hl, 'send', { text, ...(sent.length ? { images: sent } : {}), ...(answersSoFar.has(hl) ? { answers: answersSoFar.get(hl) } : {}) }) : apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) }));
-      if (kept) keptTasks.finishSend(paneId, true);
       if (t.value === text) { // clear on success, but keep text typed mid-send
         t.value = '';
         autoGrow(t);
@@ -433,7 +424,6 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
       if (sent.length) setImages((cur) => cur.filter((i) => !sent.includes(i))); // and images added mid-send
       paneView?.echo();
     } catch (err) {
-      if (kept) restored = keptTasks.finishSend(paneId, false);
       // the draft again, unless a newer one is stored (a later send's success left none); a composer
       // empty under its key (reopened, a Home's after a Clear's new pane too) shows it
       if (text && !getDraft(key)) {
@@ -449,19 +439,6 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
     } finally {
       sendingImages.current = false;
       if (sendingDrafts.get(key) === text) sendingDrafts.delete(key);
-      if (kept) {
-        // Unlock the pane's composer as displayed now — this one, or one reopened during the send
-        // (this textarea is then detached) — and on failure show the task in it again.
-        t.disabled = false;
-        const live = store.view.activePaneId === paneId ? shownInput : null;
-        if (live) {
-          live.disabled = false;
-          if (restored !== null) {
-            live.value = restored;
-            autoGrow(live);
-          }
-        }
-      }
     }
   };
 
@@ -509,7 +486,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
         {/* Mantine's look, the composer's own text: 14px (iOS zooms in on focus, as before), at most 120px tall (autoGrow) */}
         <Textarea id="pane-input" ref={input} rows={1} placeholder={placeholder} autoCorrect="off" autoCapitalize="off" spellCheck={false}
           className="flex-1" styles={{ input: { fontSize: 14, lineHeight: 1.4, maxHeight: 120, background: 'var(--color-bg)', paddingTop: 10, paddingBottom: 10 } }}
-          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); keptTasks.edit(paneId, e.currentTarget.value); setDraft(key, e.currentTarget.value); }} />
+          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); setDraft(key, e.currentTarget.value); }} />
         <Button id="btn-send-enter" miw={64} px={12} fz={13} disabled={preparing > 0} onClick={() => { void send(); }}>Send</Button>
       </Group>
     </>
