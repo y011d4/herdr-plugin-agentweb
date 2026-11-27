@@ -1120,6 +1120,7 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
+.agent-drawer-head:focus { outline: none; } /* the start of the focus (ui/AgentDrawer.tsx), not a control */
 .agent-drawer-head .topbar-action:not(:last-child) { margin-right: 0; }
 .agent-drawer-close { margin-right: 0; font-size: 18px; }
 

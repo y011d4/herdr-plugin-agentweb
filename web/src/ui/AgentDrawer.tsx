@@ -47,7 +47,8 @@ export function AgentDrawer({ sheet, actions }: { sheet: Sheet | null; actions: 
       classNames={{ root: 'agent-drawer', inner: 'agent-drawer-inner', content: 'agent-drawer-content' }}>
       <Drawer.Overlay color="#000" backgroundOpacity={0.55} className="agent-drawer-overlay" />
       <Drawer.Content aria-label="Agent">
-        <div className="agent-drawer-head" key={sheet.key}>
+        {/* the focus starts here, not on ✕: opened by no tap (a notification), ✕ would show its focus ring */}
+        <div className="agent-drawer-head" key={sheet.key} tabIndex={-1} data-autofocus>
           <button className="topbar-action agent-drawer-close" id="btn-drawer-close" aria-label="Close" onClick={closeAgent}>&#10005;</button>
           <div className="topbar-title"><PaneTitle paneId={sheet.paneId} home={false} /></div>
           <ViewToggle paneId={sheet.paneId} home={false} />
