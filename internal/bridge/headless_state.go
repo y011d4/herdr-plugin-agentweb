@@ -245,13 +245,24 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 		}
 		if list, ok := inner["models"].([]any); ok && st.Acked == initRequest {
 			m.models = nil
+			var def *HeadlessModel
 			for _, it := range list {
 				it, _ := it.(map[string]any)
 				str := func(k string) string { s, _ := it[k].(string); return s }
-				// not Claude Code's "default": the Home offers the models themselves
-				if modelRe.MatchString(str("value")) && str("value") != "default" {
-					m.models = append(m.models, HeadlessModel{str("value"), str("displayName"), str("description"), str("resolvedModel")})
+				model := HeadlessModel{str("value"), str("displayName"), str("description"), str("resolvedModel")}
+				switch {
+				case model.Value == "default": // not offered as such: the Home offers the models themselves
+					def = &model
+				case modelRe.MatchString(model.Value):
+					m.models = append(m.models, model)
 				}
+			}
+			// the default's model stays pickable when no other entry stands for it: as its own id,
+			// named by its description's head ("Opus 5.5 · Best for …")
+			if def != nil && modelRe.MatchString(def.ResolvedModel) &&
+				!slices.ContainsFunc(m.models, func(x HeadlessModel) bool { return x.ResolvedModel == def.ResolvedModel }) {
+				name, _, _ := strings.Cut(def.Description, " · ")
+				m.models = append([]HeadlessModel{{def.ResolvedModel, firstNonEmpty(name, def.ResolvedModel), def.Description, def.ResolvedModel}}, m.models...)
 			}
 		}
 	}
