@@ -73,6 +73,7 @@ var (
 	paneIDRoute = regexp.MustCompile(`^/api/panes/([^/]+)$`) // DELETE = stop the agent
 	agentRoute  = regexp.MustCompile(`^/api/agents/([^/]+)/(\w+)$`)
 	orchRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/(start|send|answer|interrupt|clear|stop|model)$`)
+	todoRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/todos/([^/]+)$`) // DELETE = the user did it
 )
 
 // server is the HTTP + WS server over one herdr client.
@@ -90,6 +91,8 @@ type server struct {
 	// the headless orchestrators' runners, by name (none without a headless entry)
 	headless map[string]*headlessRunner
 	mcp      *mcpHost // their MCP listener (nil: none)
+	// every Home's to-do list for the user (todo.go)
+	todos *todoStore
 	// the last claude check (<state>/canary.json; nil: none), read at the start and each minute
 	claudeCheck atomic.Pointer[ClaudeCheck]
 	stop        chan struct{}
@@ -117,12 +120,18 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 		clients:  map[*wsClient]struct{}{},
 		headless: map[string]*headlessRunner{},
 	}
+	var names []string
+	for _, d := range cfg.Orchestrators {
+		names = append(names, d.Name)
+	}
+	s.todos = newTodoStore(cfg.StateDir, names)
+	s.todos.onChange = s.broadcastState
 	for _, d := range cfg.Orchestrators {
 		if d.Mode != "headless" {
 			continue
 		}
 		h := newHeadlessRunner(d, cfg.StateDir, rules)
-		h.rpc, h.waitRPC, h.profiles = s.rpc, client.Wait, cfg.LaunchProfiles
+		h.rpc, h.waitRPC, h.profiles, h.todos = s.rpc, client.Wait, cfg.LaunchProfiles, s.todos
 		h.slowRPC = func(method string, params map[string]any) (json.RawMessage, error) {
 			return herdrCall(context.Background(), cfg.SocketPath, method, params, 60*time.Second)
 		}
@@ -173,6 +182,7 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 			select {
 			case <-t.C:
 				s.checkClaude()
+				s.remindTodos(nowMs())
 				s.broadcastState()
 			case <-s.stop:
 				return
@@ -213,6 +223,7 @@ func (s *server) clientState(st *State) ClientState {
 	accounts := s.accounts.Accounts()
 	views := findOrchestrators(st, s.cfg.Orchestrators, accounts)
 	for i := range views {
+		views[i].Todos = s.todos.Items(views[i].Name)
 		if r := s.headless[views[i].Name]; r != nil {
 			v, running := r.view()
 			views[i].Headless = &v
@@ -416,6 +427,27 @@ func (s *server) route(w http.ResponseWriter, r *http.Request, pathname string) 
 			return
 		}
 		jsonOK(w, s.clientState(st))
+		return
+	}
+
+	// The user ticked an item of a Home's to-do list off.
+	if m := todoRoute.FindStringSubmatch(pathname); m != nil && method == "DELETE" {
+		name, ok := decodePathSegment(m[1])
+		id, idOK := decodePathSegment(m[2])
+		if !ok || !idOK || !slices.ContainsFunc(s.cfg.Orchestrators, func(d OrchestratorDef) bool { return d.Name == name }) {
+			jsonError(w, http.StatusNotFound, "not_found", "no such orchestrator")
+			return
+		}
+		found, err := s.todos.Done(name, id)
+		if err != nil {
+			jsonError(w, http.StatusInternalServerError, "error", err.Error())
+			return
+		}
+		if !found {
+			jsonError(w, http.StatusNotFound, "not_found", "no item "+id+" on "+name+"'s list")
+			return
+		}
+		jsonOK(w, okWith(struct{}{}))
 		return
 	}
 
@@ -675,6 +707,24 @@ func (s *server) broadcastAlert(def OrchestratorDef, kind, message string) {
 		go postNtfy(*s.cfg.NotifyURL, "yoicks "+def.Name+": "+kind, message)
 	}
 	s.showOnPC(def, firstNonEmpty(def.Label, def.Name)+": "+kind, message, "request")
+}
+
+// remindTodos reminds the user once of each to-do item that has come due (checked each minute): to
+// every client (orchestrator_alert, kind todo), ntfy and the PC. One alert per Home, naming every
+// item come due: a phone's notifications are tagged by Home, so a second would replace the first.
+func (s *server) remindTodos(now int64) {
+	for name, items := range s.todos.TakeDue(now) {
+		i := slices.IndexFunc(s.cfg.Orchestrators, func(d OrchestratorDef) bool { return d.Name == name })
+		message := items[0].Text
+		if len(items) > 1 {
+			var texts []string
+			for _, it := range items {
+				texts = append(texts, it.Text)
+			}
+			message = fmt.Sprintf("%d items: %s", len(items), strings.Join(texts, " · "))
+		}
+		s.broadcastAlert(s.cfg.Orchestrators[i], "todo", message)
+	}
 }
 
 // checkClaude reads the last claude check (scripts/claude-canary.sh's <state>/canary.json):
