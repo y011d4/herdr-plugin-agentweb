@@ -1,10 +1,10 @@
 /**
- * ui/Modals.tsx — the modal dialogs, one at a time, drawn into #modal-root: Confirm (on Mantine's
- * Modal), Rename, New agent and the image preview. A modal closes on a backdrop tap, Escape or its
+ * ui/Modals.tsx — the modal dialogs, one at a time, on Mantine's Modal in #modal-root: Confirm, Rename,
+ * New agent and the image preview (full screen). A modal closes on a backdrop tap, Escape or its
  * buttons; its close() is idempotent and fires the opener's onClose exactly once (so a
  * confirm resolves on dismiss). Opening one closes the one before.
  */
-import { Modal } from '@mantine/core';
+import { Button, CloseButton, Group, Modal, NativeSelect, Stack, Switch, Text, TextInput, Textarea } from '@mantine/core';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { apiGet, apiPost } from '../api.ts';
 import { taskToKeep } from '../kept-tasks.ts';
@@ -13,9 +13,8 @@ import { showToast } from '../notify.ts';
 import { keptTasks, store } from '../store.ts';
 import type { AgentStartResponse, ProfilesResponse, RenameResponse } from '../types.ts';
 
-// mantine: drawn by Mantine's Modal (the confirm), else by Overlay below. opener: where the focus goes
-// back on close.
-interface Open { id: number; render: (close: () => void) => ReactNode; close: () => void; className: string; mantine: boolean; opener: HTMLElement | null }
+// preview: the image preview's full-screen look. opener: where the focus goes back on close.
+interface Open { id: number; render: (close: () => void) => ReactNode; close: () => void; preview: boolean; opener: HTMLElement | null }
 
 let current: Open | null = null;
 let seq = 0;
@@ -33,7 +32,7 @@ function focused(): HTMLElement | null {
 /** Shows a modal (closing the one on show); returns its close(). On close the focus goes back to what
  *  had it on open; a modal that takes another's place takes over that one's opener instead (the one
  *  before gives it back first, and the new one takes it as it mounts). */
-function showModal(render: (close: () => void) => ReactNode, onClose?: () => void, className = 'modal', mantine = false): () => void {
+function showModal(render: (close: () => void) => ReactNode, onClose?: () => void, preview = false): () => void {
   const opener = current ? current.opener : focused();
   current?.close();
   const id = ++seq;
@@ -45,7 +44,7 @@ function showModal(render: (close: () => void) => ReactNode, onClose?: () => voi
     onClose?.();
     if (opener?.isConnected) opener.focus({ preventScroll: true });
   };
-  current = { id, render, close, className, mantine, opener };
+  current = { id, render, close, preview, opener };
   changed();
   return close;
 }
@@ -53,34 +52,22 @@ function showModal(render: (close: () => void) => ReactNode, onClose?: () => voi
 export function Modals() {
   const open = useSyncExternalStore(subscribe, () => current);
   if (!open) return null;
-  if (open.mantine) return <MantineDialog key={open.id} close={open.close} className={open.className}>{open.render(open.close)}</MantineDialog>;
-  return <Overlay key={open.id} close={open.close} className={open.className}>{open.render(open.close)}</Overlay>;
+  return <Dialog key={open.id} close={open.close} preview={open.preview}>{open.render(open.close)}</Dialog>;
 }
 
-// Overlay's look on Mantine's Modal: the same backdrop, fade and width, and above the toasts (z 1000).
-// Mantine closes it on Escape and a backdrop tap and traps the focus. (Its own focus return needs
-// `opened` to turn false; this one unmounts, and showModal gives the focus back.)
-function MantineDialog({ close, className, children }: { close: () => void; className: string; children: ReactNode }) {
+// Mantine's Modal, above the toasts (z 1000): a dialog 420px wide at most, or the image preview over
+// the whole screen. Mantine closes it on Escape and a backdrop tap and traps the focus. (Its own focus
+// return needs `opened` to turn false; this one unmounts, and showModal gives the focus back.)
+function Dialog({ close, preview, children }: { close: () => void; preview: boolean; children: ReactNode }) {
   return (
-    <Modal.Root opened onClose={close} centered zIndex={2000} size="min(92vw, 420px)" xOffset={16} yOffset={16}
-      transitionProps={{ transition: 'fade', duration: 150 }} classNames={{ content: className }}>
-      <Modal.Overlay color="#000" backgroundOpacity={0.55} data-modal-backdrop />
-      <Modal.Content>{children}</Modal.Content>
+    <Modal.Root opened onClose={close} centered zIndex={2000} xOffset={16} yOffset={16} radius={14}
+      transitionProps={{ transition: 'fade', duration: 150 }} {...(preview
+        ? { fullScreen: true, classNames: { content: 'image-preview bg-transparent' } }
+        : { size: 'min(92vw, 420px)', classNames: { content: 'border border-(--color-border)' } })}>
+      <Modal.Overlay color="#000" backgroundOpacity={preview ? 0.9 : 0.55} data-modal-backdrop />
+      {/* the preview: a tap anywhere closes it */}
+      <Modal.Content onClick={preview ? close : undefined}>{preview ? children : <Modal.Body p={18}>{children}</Modal.Body>}</Modal.Content>
     </Modal.Root>
-  );
-}
-
-// Above everything (toasts are z 1000, modals sit higher: style.css).
-function Overlay({ close, className, children }: { close: () => void; className: string; children: ReactNode }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') close(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [close]);
-  return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
-      <div className={className} role="dialog" aria-modal="true">{children}</div>
-    </div>
   );
 }
 
@@ -104,13 +91,14 @@ export function previewImage(src: string, alt: string): void {
 function showPreview(src: string, alt: string, mark: number): void {
   const close = showModal((close) => (
     <>
-      <img src={src} alt={alt} onClick={close} />
-      <button className="image-preview-close" aria-label="Close" autoFocus onClick={close}>&times;</button>
+      <img className="block size-full object-contain" src={src} alt={alt} />
+      <CloseButton className="image-preview-close fixed top-[calc(var(--safe-top)+8px)] right-3" size={40} radius="xl" iconSize={22}
+        variant="filled" bg="rgba(0, 0, 0, 0.6)" c="white" aria-label="Close" autoFocus data-autofocus />
     </>
   ), () => {
     removeEventListener('popstate', close);
     if (history.state?.imagePreview === mark) back();
-  }, 'image-preview');
+  }, true);
   addEventListener('popstate', close);
 }
 // Forward onto a closed preview's entry, or Back onto one a hash change left behind, shows it again:
@@ -122,7 +110,22 @@ addEventListener('popstate', () => {
   if (p) showPreview(p.src, p.alt, mark as number);
 });
 
-const textInput = { type: 'text', autoCapitalize: 'off', autoCorrect: 'off', spellCheck: false } as const;
+const textInput = { autoCapitalize: 'off', autoCorrect: 'off', spellCheck: false } as const;
+
+const Title = ({ children }: { children: string }) => <Text fz={16} fw={600} mb={14}>{children}</Text>;
+const Optional = ({ children }: { children: string }) => <>{children} <Text span c="dimmed" inherit>(optional)</Text></>;
+// a dialog's error (none: no line)
+const ErrorLine = ({ id, children }: { id: string; children: string }) => <Text id={id} c="blocked" fz={13} mb={children ? 10 : 0}>{children}</Text>;
+
+/** A dialog's Cancel (`<ids[0]>`) and its action (`<ids[1]>`), at the right; `danger`: a destructive one. */
+function Actions({ ids, label, onAction, busy = false, danger = false, close }: { ids: [string, string]; label: string; onAction: () => void; busy?: boolean; danger?: boolean; close: () => void }) {
+  return (
+    <Group justify="flex-end" gap={10} mt={8}>
+      <Button variant="default" id={ids[0]} px={20} onClick={close}>Cancel</Button>
+      <Button id={ids[1]} px={20} color={danger ? 'blocked' : undefined} disabled={busy} onClick={onAction}>{label}</Button>
+    </Group>
+  );
+}
 
 // ── Confirm ───────────────────────────────────────────────────────────────────
 
@@ -132,14 +135,11 @@ export function confirmModal(title: string, message: string, confirmLabel: strin
     let result = false;
     showModal((close) => (
       <>
-        <div className="modal-title">{title}</div>
-        <div className="modal-message">{message}</div>
-        <div className="modal-actions">
-          <button className="btn-secondary" id="cf-cancel" onClick={close}>Cancel</button>
-          <button className={`btn-primary${danger ? ' danger' : ''}`} id="cf-ok" style={{ width: 'auto' }} onClick={() => { result = true; close(); }}>{confirmLabel}</button>
-        </div>
+        <Title>{title}</Title>
+        <Text fz={14} c="dimmed" mb={18}>{message}</Text>
+        <Actions ids={['cf-cancel', 'cf-ok']} label={confirmLabel} danger={danger} close={close} onAction={() => { result = true; close(); }} />
       </>
-    ), () => resolve(result), 'modal', true);
+    ), () => resolve(result));
   });
 }
 
@@ -171,13 +171,10 @@ function Rename({ paneId, current, close }: { paneId: string; current: string; c
   };
   return (
     <>
-      <div className="modal-title">Rename agent</div>
-      <label className="modal-field"><span>Name</span><input id="rn-name" ref={input} defaultValue={current} {...textInput} /></label>
-      <div className="modal-error" id="rn-error">{error}</div>
-      <div className="modal-actions">
-        <button className="btn-secondary" id="rn-cancel" onClick={close}>Cancel</button>
-        <button className="btn-primary" id="rn-save" style={{ width: 'auto' }} disabled={busy} onClick={() => { void save(); }}>Save</button>
-      </div>
+      <Title>Rename agent</Title>
+      <TextInput label="Name" id="rn-name" ref={input} defaultValue={current} mb={14} {...textInput} />
+      <ErrorLine id="rn-error">{error}</ErrorLine>
+      <Actions ids={['rn-cancel', 'rn-save']} label="Save" busy={busy} close={close} onAction={() => { void save(); }} />
     </>
   );
 }
@@ -233,6 +230,7 @@ function NewAgent({ profiles, dirs, initialDir, close }: { profiles: ProfilesRes
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const field = (k: 'profile' | 'dir' | 'cwd' | 'branch' | 'base' | 'name' | 'task') => ({
+    id: `na-${{ profile: 'profile', dir: 'dir', cwd: 'cwd', branch: 'wt-branch', base: 'wt-base', name: 'name', task: 'task' }[k]}`,
     value: f[k],
     onChange: (e: { target: { value: string } }) => { const v = e.target.value; setF((p) => ({ ...p, [k]: v })); },
   });
@@ -287,33 +285,26 @@ function NewAgent({ profiles, dirs, initialDir, close }: { profiles: ProfilesRes
 
   return (
     <>
-      <div className="modal-title">New agent</div>
-      <label className="modal-field"><span>Profile</span><select id="na-profile" {...field('profile')}>
-        {profiles.map((p) => <option key={p.name} value={p.name}>{p.label}</option>)}
-      </select></label>
-      <label className="modal-field"><span>Working directory</span><select id="na-dir" {...field('dir')}>
-        {dirs.map((d) => <option key={d.path} value={d.path}>{d.label}</option>)}
-        <option value={CUSTOM}>Custom path…</option>
-      </select></label>
-      <label className="modal-field" id="na-cwd-wrap" style={f.dir === CUSTOM ? undefined : { display: 'none' }}>
-        <span>Custom path</span><input id="na-cwd" placeholder="/path/to/repo" {...textInput} {...field('cwd')} />
-      </label>
-      <div className="modal-field modal-toggle-row">
-        <span>Create a new worktree</span>
-        <label className="toggle"><input type="checkbox" id="na-wt-toggle" checked={f.worktree} onChange={(e) => { const v = e.target.checked; setF((p) => ({ ...p, worktree: v })); }} /><span className="toggle-track"></span></label>
-      </div>
-      <div id="na-wt-wrap" style={f.worktree ? undefined : { display: 'none' }}>
-        <div className="modal-hint">A new branch is checked out from the working directory above, and the agent runs there.</div>
-        <label className="modal-field"><span>New branch <em>(optional)</em></span><input id="na-wt-branch" placeholder="auto (worktree/…)" {...textInput} {...field('branch')} /></label>
-        <label className="modal-field"><span>Base <em>(optional)</em></span><input id="na-wt-base" placeholder="e.g. origin/main" {...textInput} {...field('base')} /></label>
-      </div>
-      <label className="modal-field"><span>Name <em>(optional)</em></span><input id="na-name" placeholder="auto" {...textInput} {...field('name')} /></label>
-      <label className="modal-field"><span>First task <em>(optional)</em></span><textarea id="na-task" rows={2} placeholder="e.g. review the diff" {...field('task')}></textarea></label>
-      <div className="modal-error" id="na-error">{error}</div>
-      <div className="modal-actions">
-        <button className="btn-secondary" id="na-cancel" onClick={close}>Cancel</button>
-        <button className="btn-primary" id="na-start" style={{ width: 'auto' }} disabled={busy} onClick={() => { void start(); }}>Start</button>
-      </div>
+      <Title>New agent</Title>
+      <Stack gap={14} mb={14}>
+        <NativeSelect label="Profile" {...field('profile')} data={profiles.map((p) => ({ value: p.name, label: p.label }))} />
+        <NativeSelect label="Working directory" {...field('dir')}
+          data={[...dirs.map((d) => ({ value: d.path, label: d.label })), { value: CUSTOM, label: 'Custom path…' }]} />
+        <div id="na-cwd-wrap" style={f.dir === CUSTOM ? undefined : { display: 'none' }}>
+          <TextInput label="Custom path" placeholder="/path/to/repo" {...textInput} {...field('cwd')} />
+        </div>
+        <Switch id="na-wt-toggle" label="Create a new worktree" labelPosition="left" size="md" checked={f.worktree}
+          styles={{ body: { justifyContent: 'space-between' } }} onChange={(e) => { const v = e.currentTarget.checked; setF((p) => ({ ...p, worktree: v })); }} />
+        <Stack id="na-wt-wrap" gap={14} style={f.worktree ? undefined : { display: 'none' }}>
+          <Text fz={12} c="dimmed">A new branch is checked out from the working directory above, and the agent runs there.</Text>
+          <TextInput label={<Optional>New branch</Optional>} placeholder="auto (worktree/…)" {...textInput} {...field('branch')} />
+          <TextInput label={<Optional>Base</Optional>} placeholder="e.g. origin/main" {...textInput} {...field('base')} />
+        </Stack>
+        <TextInput label={<Optional>Name</Optional>} placeholder="auto" {...textInput} {...field('name')} />
+        <Textarea label={<Optional>First task</Optional>} rows={2} resize="vertical" placeholder="e.g. review the diff" {...field('task')} />
+      </Stack>
+      <ErrorLine id="na-error">{error}</ErrorLine>
+      <Actions ids={['na-cancel', 'na-start']} label="Start" busy={busy} close={close} onAction={() => { void start(); }} />
     </>
   );
 }
