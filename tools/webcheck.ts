@@ -205,7 +205,8 @@ async function lock(): Promise<() => void> {
 
 // ── preview bridge ───────────────────────────────────────────────────────────
 
-interface Preview { bin: string; port: string; webDir?: string; fakeClaude?: string }
+/** herdr: the private herdr's socket it was started on (absent: the desktop's); a run refuses a preview on the other one */
+interface Preview { bin: string; port: string; webDir?: string; fakeClaude?: string; herdr?: string }
 const previewDir = (port: string) => path.join(WC_ROOT, `preview-${port}`);
 
 function previewEnv(p: Preview): NodeJS.ProcessEnv {
@@ -281,8 +282,13 @@ async function previewCmd(sub: string, o: Record<string, any>): Promise<number> 
   try {
     const old = readPreview(port);
     if (old) await previewCtl(old, 'stop').catch((e) => console.log(`WARN ${e.message}`));
-    if (sub === 'stop') { console.log(`preview ${port} stopped`); return 0; }
-    const p: Preview = { bin: path.resolve(o.bin), port, webDir: o['web-dir'] && path.resolve(o['web-dir']), fakeClaude: o['fake-claude'] && path.resolve(o['fake-claude']) };
+    if (sub === 'stop') {
+      fs.rmSync(path.join(previewDir(port), 'preview.json'), { force: true }); // no record: not running (herdr start/stop look)
+      console.log(`preview ${port} stopped`);
+      return 0;
+    }
+    const p: Preview = { bin: path.resolve(o.bin), port, webDir: o['web-dir'] && path.resolve(o['web-dir']), fakeClaude: o['fake-claude'] && path.resolve(o['fake-claude']),
+      herdr: fs.existsSync(PRIV) ? PRIV_SOCK : undefined };
     if (p.fakeClaude && path.basename(p.fakeClaude) !== 'claude') throw env('--fake-claude must be named claude (go build -o DIR/claude ./tools/fakeclaude)');
     if (p.fakeClaude) fs.mkdirSync(path.join(WC_ROOT, 'fake-claude'), { recursive: true });
     // the orchestrators start with Tier 2's account (the bridge checks the started agent against it)
@@ -306,17 +312,35 @@ async function previewCmd(sub: string, o: Record<string, any>): Promise<number> 
 async function herdrCmd(sub: string): Promise<number> {
   if (sub !== 'start' && sub !== 'stop') throw new Error('usage: herdr start|stop');
   if (PRIV_SOCK.length > 100) throw env(`${PRIV_SOCK} is too long for a unix socket: set a shorter WEBCHECK_ROOT`);
-  const running = () => fs.existsSync(PRIV_SOCK) && /status: running/.test(spawnSync('herdr', ['status', 'server'], { encoding: 'utf8', env: privCliEnv() }).stdout ?? '');
+  // what herdr says, never a guess: a failed status call must not read as stopped (stop would drop a live server's dir)
+  const running = (): boolean => {
+    const r = spawnSync('herdr', ['status', 'server'], { encoding: 'utf8', env: privCliEnv() });
+    const st = /^status: (running|not running)$/m.exec(r.stdout ?? '')?.[1];
+    if (!st) throw env(`herdr status server: ${r.error?.message ?? ((r.stderr || r.stdout || '').trim() || `exit ${r.status}`)}`);
+    return st === 'running';
+  };
+  // the default root is the desktop herdr's, shared by every worker: a private herdr there would switch their runs too
+  if (!process.env.WEBCHECK_ROOT) throw env('a private herdr needs a WEBCHECK_ROOT of its own (export WEBCHECK_ROOT=$(mktemp -d /tmp/wc-XXXX))');
   const unlock = await lock();
   try {
+    // a preview, and an unfinished run's record, stay on the herdr they began on: switching under them would guard ids
+    // in one herdr and act on the other's
+    const previews = fs.readdirSync(WC_ROOT).filter((d) => /^preview-\d+$/.test(d) && fs.existsSync(path.join(WC_ROOT, d, 'preview.json')));
+    if (previews.length) throw env(`stop this root's previews first (${previews.map((d) => `preview stop --port ${d.slice(8)}`).join(', ')})`);
+    const live = fs.existsSync(PRIV) && running();
+    const runs = path.join(WC_ROOT, 'run');
+    const unfinished = () => fs.existsSync(runs) && fs.readdirSync(runs).length > 0;
+    if (fs.existsSync(PRIV) && !live) fs.rmSync(runs, { recursive: true, force: true }); // a gone private herdr's: nothing left to close
+    if (unfinished()) teardownAll();
+    if (unfinished()) throw env(`unfinished runs left in ${runs}: teardown first`);
     if (sub === 'stop') {
-      if (running()) spawnSync('herdr', ['server', 'stop'], { env: privCliEnv(), stdio: 'ignore' });
+      if (live) spawnSync('herdr', ['server', 'stop'], { env: privCliEnv(), stdio: 'ignore' });
       if ((await waitFn(() => !running(), 10_000, 200)).timeout) throw env(`the private herdr (${PRIV_SOCK}) did not stop`);
       fs.rmSync(PRIV, { recursive: true, force: true });
       console.log('private herdr stopped');
       return 0;
     }
-    if (running()) { console.log(`private herdr already running: ${PRIV_SOCK}`); return 0; }
+    if (live) { console.log(`private herdr already running: ${PRIV_SOCK}`); return 0; }
     fs.mkdirSync(PRIV, { recursive: true });
     const e: NodeJS.ProcessEnv = { ...privCliEnv(), HOME: PRIV, XDG_CONFIG_HOME: path.join(PRIV, '.config'), XDG_STATE_HOME: path.join(PRIV, '.local/state'),
       XDG_DATA_HOME: path.join(PRIV, '.local/share'), XDG_CACHE_HOME: path.join(PRIV, '.cache'), SHELL: '/bin/sh' };
@@ -2160,6 +2184,10 @@ async function locked(base: string, body: (c: Ctx) => Promise<void>, needs: Set<
   const tokenFile = path.join(previewDir(port), 'state', 'token');
   if (!fs.existsSync(tokenFile)) throw env(`no token at ${tokenFile} (start the preview with \`preview start\`)`);
   if (!(await fetch(`${base}/healthz`).then((r) => r.ok, () => false))) throw env(`no preview answering at ${base}`);
+  const pv = readPreview(port);
+  if (pv?.herdr !== (fs.existsSync(PRIV) ? PRIV_SOCK : undefined)) {
+    throw env(`the preview on ${port} runs on ${pv ? (pv.herdr ? 'the private herdr' : 'the desktop herdr') : 'no record'} and this root on the other: start it again (preview start)`);
+  }
   const unlock = await lock();
   teardownAll();
   const dir = path.join(WC_ROOT, 'run', String(Date.now()));
