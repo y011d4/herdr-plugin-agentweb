@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { StrictMode, act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { openAgent, openAgentNamed } from '../src/nav.ts';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { emit, setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
@@ -262,6 +263,38 @@ describe('App', () => {
     assert.ok(!$('#screen #chat-log'));
     assert.ok(!watches.at(-1)!.startsWith('p4:'), 'no watch for the gone pane');
     assert.equal(transcripts('p4') + reads('p4'), looks, 'the old view reads nothing');
+  });
+
+  it("agents opened one after another from a list card, the sidebar, a [yoicks] notice and a notification: one drawer, its header the latest's; one Back closes it", async () => {
+    // happy-dom's replace() adds an entry, as assign() does: a browser's, in place
+    const replace = vi.spyOn(location, 'replace').mockImplementation((url: string | URL) => {
+      const oldURL = location.href;
+      history.replaceState(history.state, '', String(url));
+      dispatchEvent(new HashChangeEvent('hashchange', { oldURL, newURL: location.href }));
+    });
+    await go('#/agents');
+    await click($('#screen [data-pane-id="p1"]')); // the list's card
+    await settle();
+    const before = history.length;
+    await act(async () => openAgent('p2')); // the sidebar's (and New agent's, Clear's)
+    await settle();
+    await act(async () => openAgentNamed('w-review')); // a [yoicks] notice's worker: p3
+    await settle();
+    await act(async () => { sw.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: '#/pane/p1' } })); }); // a notification
+    await settle();
+    await act(async () => openAgent('p3'));
+    await settle();
+    assert.equal(location.hash, '#/pane/p3');
+    const heads = document.querySelectorAll('.agent-drawer .agent-drawer-head');
+    assert.equal(heads.length, 1, 'one header: none left over from the agents before');
+    assert.equal(heads[0].querySelector('.topbar-title')!.textContent, 'w-review· repo-wt-feat / feat');
+    assert.equal(document.querySelectorAll('.agent-drawer #screen-pane').length, 1, 'one body');
+    assert.equal(history.length, before, 'one entry: switched in place');
+    history.back(); // the phone's Back: closes it
+    await settle();
+    assert.equal(location.hash, '#/agents');
+    assert.ok(!$('.agent-drawer #screen-pane') && !$('.agent-drawer .agent-drawer-head'));
+    replace.mockRestore();
   });
 
   it('pane to pane replaces the entry (Back still closes the drawer); a pane opened afresh closes to the list in its place', async () => {

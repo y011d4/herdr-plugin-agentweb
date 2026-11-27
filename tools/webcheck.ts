@@ -1234,6 +1234,33 @@ async function m1(c: Ctx) {
     'Back closes it too (the same list, its scrollTop); opening and closing again leaves history.length as it was');
 }
 
+/** M3: agents opened one after another (the user's path: a list card, then a notification's navigate, as a sidebar tap
+ *  or a [yoicks] notice switches it) keep one drawer: one header, the latest's, in one history entry; one Back closes it. */
+async function m3(c: Ctx) {
+  const { pg, rec } = c;
+  const { less, shell } = rec.names;
+  const SHEET = `document.querySelector('.agent-drawer-content')`;
+  const HEADS = `document.querySelectorAll('.agent-drawer .agent-drawer-head')`;
+  const to = (id: string) => `navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: ${js(`#/pane/${enc(id)}`)} } }))`;
+  await pg.goto('#/agents');
+  await pg.until(`!!document.querySelector('.agent-card[data-pane-id=${js(less)}]')`, 5000);
+  await pg.tapEl(`document.querySelector('.agent-card[data-pane-id=${js(less)}]')`);
+  const open = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)} && !!${SHEET}`, 3000);
+  const len = await pg.ev('history.length');
+  for (const id of [shell, less, shell, less]) {
+    await pg.ev(to(id));
+    await pg.until(`location.hash === ${js(`#/pane/${enc(id)}`)}`, 3000);
+    await sleep(300);
+  }
+  const [heads, title, sheets, len1] = await pg.ev(`[${HEADS}.length, ${HEADS}[0]?.querySelector('.topbar-title')?.textContent ?? '',
+    document.querySelectorAll('.agent-drawer-content').length, history.length]`);
+  await pg.ev('history.back()');
+  const closed = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
+  result(c, !open.timeout && heads === 1 && sheets === 1 && len1 === len && !closed.timeout, 'M3.switch',
+    `open=${ms(open)},heads=${heads},sheets=${sheets},title=${JSON.stringify(title)},history=${len}->${len1},closed=${ms(closed)}`,
+    "from wc-less's card, 4 switches (wc-shell, wc-less, …) by a notification's navigate leave one drawer with one header and history.length as it was; one Back closes it to #/agents");
+}
+
 /** M2: on a PC (1280x844) the drawer comes from the right, min(900px, 65% of the width right of the sidebar) wide, its
  *  dimmed part right of the sidebar; Escape closes the ⋮ menu over it first, then the drawer; a click on the dimmed screen
  *  closes it too. */
@@ -2023,6 +2050,7 @@ const ITEMS: Item[] = [
   { id: 'W1', tier: 1, needs: ['less'], run: w1 },
   { id: 'M1', tier: 1, needs: ['less'], run: m1 },
   { id: 'M2', tier: 1, needs: ['less'], run: m2 },
+  { id: 'M3', tier: 1, needs: ['shell', 'less'], run: m3 },
   { id: 'S1', tier: 1, run: s1 },
   { id: 'P3', tier: 1, needs: ['less'], run: p3 },
   { id: 'P4-T1', tier: 1, needs: ['less'], run: p4t1 },
