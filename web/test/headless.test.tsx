@@ -321,34 +321,50 @@ describe("a headless orchestrator's Home", () => {
     assert.deepEqual(posts('interrupt'), [{}]);
   });
 
-  it('shows its model (default named by what it stands for) and switches it, but not mid-turn; none without a list', async () => {
+  it('shows its model and switches it, but not mid-turn; none without a list', async () => {
     await home(withPilot()); // blocked: its turn runs
     const select = () => $<HTMLSelectElement>('#home-model');
-    assert.deepEqual([...select().options].map((o) => `${o.value}:${o.text}`), ['default:Default (Opus 5.5 · Best for everyday, complex tasks)', 'sonnet:Sonnet 5.5']);
+    assert.deepEqual([...select().options].map((o) => `${o.value}:${o.text}`), ['opus:Opus 5.5', 'sonnet:Sonnet 5.5']);
     assert.equal(select().value, 'sonnet');
     assert.equal(select().disabled, true);
     await unmount();
-    await home(withPilot((p) => {
-      idle(p);
-      p.headless!.models.push({ value: 'opus', displayName: 'Opus 5.5', description: 'For complex work', resolvedModel: 'claude-opus-5-5' });
-    }));
-    assert.equal(select().options[0].text, 'Default (Opus 5.5)');
+    await home(withPilot(idle));
     assert.equal(select().disabled, false);
     const change = (v: string) => fire(() => { select().value = v; select().dispatchEvent(new Event('change', { bubbles: true })); });
-    await change('default');
-    assert.deepEqual(posts('model'), [{ model: 'default' }]);
+    await change('opus');
+    assert.deepEqual(posts('model'), [{ model: 'opus' }]);
     await answer('POST /api/orchestrators/pilot/model', { error: { code: 'busy', message: 'it is working: change the model once its turn has ended' } }, 409);
     assert.deepEqual(getToasts().map((t) => `${t.title}: ${t.body}`), ['Model not changed: it is working: change the model once its turn has ended']);
     await change('opus');
     await answer('POST /api/orchestrators/pilot/model', { error: { code: 'model_pending', message: "Claude Code hasn't answered within 10s" } }, 504);
     assert.equal(getToasts().at(-1)!.title, 'Model change pending');
     await unmount();
-    await home(withPilot((p) => { idle(p); p.headless!.model = 'claude-gone-1'; })); // saved, no longer listed
-    assert.deepEqual([...select().options].map((o) => o.value), ['claude-gone-1', 'default', 'sonnet']);
+    await home(withPilot((p) => { idle(p); p.headless!.model = p.headless!.activeModel = 'claude-gone-1'; })); // saved, no longer listed
+    assert.deepEqual([...select().options].map((o) => o.value), ['claude-gone-1', 'opus', 'sonnet']);
     assert.equal(select().value, 'claude-gone-1');
     await unmount();
     await home(withPilot((p) => { idle(p); p.headless!.models = []; }));
     assert.ok(container.querySelector('#home-model') === null);
+  });
+
+  it('shows the model in effect: with none chosen, a session resumed on Fable shows Fable; not said yet, the choice or …', async () => {
+    const select = () => $<HTMLSelectElement>('#home-model');
+    await home(withPilot((p) => {
+      idle(p);
+      p.headless!.model = '';
+      p.headless!.activeModel = 'claude-fable-5-2';
+      p.headless!.models.push({ value: 'claude-fable-5-2[1m]', displayName: 'Fable', description: 'Fable 5.2 · Most capable', resolvedModel: 'claude-fable-5-2' },
+        { value: 'fable', displayName: 'Fable 5.2', description: 'For your toughest challenges', resolvedModel: 'claude-fable-5-2' });
+    }));
+    assert.equal(`${select().value}:${select().selectedOptions[0].text}`, 'claude-fable-5-2[1m]:Fable');
+    await fire(() => { select().value = 'opus'; select().dispatchEvent(new Event('change', { bubbles: true })); });
+    assert.deepEqual(posts('model'), [{ model: 'opus' }]);
+    await unmount();
+    await home(withPilot((p) => { idle(p); p.headless!.activeModel = ''; }));
+    assert.equal(select().value, 'sonnet');
+    await unmount();
+    await home(withPilot((p) => { idle(p); p.headless!.model = p.headless!.activeModel = ''; }));
+    assert.equal(`${select().value}:${select().selectedOptions[0].text}:${select().selectedOptions[0].disabled}`, ':…:true');
   });
 
   it('shows its usage (old limits dimmed, the missing left out) and its warnings with what they offer', async () => {

@@ -36,8 +36,8 @@
 // then is answered; messages queued behind it stay and run next (as S0 measured). An initialize
 // control_request is answered with fakeModels (as Claude Code lists its /model choices), a
 // set_model one switches to one of them (no model: the default; another: an error; fake-held: its
-// answer waits for a SIGUSR1); the init and
-// the assistant messages report the model, --model's at first.
+// answer waits for a SIGUSR1), a get_settings one says it (applied.model); the init and the
+// assistant messages report it: --model's at first, else FAKECLAUDE_MODEL (a resumed session's), else fake.
 // Stdin's end while idle exits 0; while working, after the turn. FAKECLAUDE_START=init sends
 // an init at once, before any message; =exit exits 1 at once. FAKECLAUDE_LOG, when set, gets
 // a JSON line for the argv (and env keys) and each stdin line. FAKECLAUDE_REAL=<path> execs that
@@ -159,7 +159,11 @@ type queued struct {
 }
 
 func session(args []string) {
-	setModel(argAfter(args, "--model"))
+	if m := argAfter(args, "--model"); m != "" {
+		setModel(m)
+	} else if m := os.Getenv("FAKECLAUDE_MODEL"); m != "" { // what a resumed session last ran on
+		current.Store(&m)
+	}
 	f := &fake{id: firstNonEmpty(argAfter(args, "--session-id"), argAfter(args, "--resume")), answers: map[string]chan map[string]any{}, skip: map[int]bool{}}
 	if t := argAfter(args, "--tools"); t != "" {
 		f.tools = strings.Split(t, ",")
@@ -496,6 +500,8 @@ func control(req map[string]any) map[string]any {
 	case "initialize":
 		return map[string]any{"subtype": "success", "response": map[string]any{"models": fakeModels,
 			"account": map[string]any{"email": "someone@example.com"}}}
+	case "get_settings": // only what yoicks reads
+		return map[string]any{"subtype": "success", "response": map[string]any{"effective": map[string]any{}, "applied": map[string]any{"model": model()}}}
 	case "set_model":
 		value, _ := req["model"].(string)
 		if !setModel(value) {

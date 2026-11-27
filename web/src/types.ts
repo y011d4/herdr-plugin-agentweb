@@ -115,14 +115,17 @@ export interface HeadlessView {
   usage: HeadlessUsage | null;
   /** what went wrong, kept until the next start or clear */
   warnings: HeadlessWarning[];
-  /** the model it runs on: one of models' values ('default': Claude Code's own); POST /api/orchestrators/:name/model sets it */
+  /** the model chosen here: one of models' values, '' for none; POST /api/orchestrators/:name/model sets it */
   model: string;
-  /** the models Claude Code offers the account, as its /model lists them; [] until a child of this bridge has said */
+  /** the model in effect, Claude Code's id ('' until its child has said): a resumed session keeps the model it last
+   *  ran on, so with none chosen it is that one */
+  activeModel: string;
+  /** the models Claude Code offers the account, as its /model lists them (but its 'default'); [] until a child of this bridge has said */
   models: HeadlessModel[];
 }
 
 export interface HeadlessModel {
-  /** an alias (opus, default) or a model id */
+  /** an alias (opus) or a model id */
   value: string;
   displayName: string;
   description: string;
