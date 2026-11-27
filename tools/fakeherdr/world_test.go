@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -151,8 +152,11 @@ func TestWorldPromptWithoutWaitOutlivesItsPane(t *testing.T) {
 }
 
 // The deadline takes its place among the changes by time, however late the wait looks: a
-// working before the stall time counts, one after it doesn't.
-func TestWorldWaitSettlesChangesAgainstTheDeadline(t *testing.T) {
+// working before the stall time counts, one after it doesn't. (In a synctest bubble: its
+// sleeps pass at once, on the bubble's clock.)
+func TestWorldWaitSettlesChangesAgainstTheDeadline(t *testing.T) { synctest.Test(t, testWorldDeadline) }
+
+func testWorldDeadline(t *testing.T) {
 	w := NewWorld()
 	w.Add(Pane{ID: "w1", Tab: "t9", Workspace: "w1", Agent: "claude", Status: "idle", Name: "w1"})
 	w.StallAfter(50 * time.Millisecond)
