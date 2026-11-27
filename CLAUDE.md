@@ -97,13 +97,17 @@ All in `internal/bridge/` (one package):
   takes images (+ or paste; `image.ts` scales them to JPEG, the bridge's `imageBlocks` checks them); a tap on one, attached or sent, opens it full screen (`previewImage`: its own history entry, so Back closes it). `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
-  (manifest, icons: `scripts/icons.mjs` draws them from one mark, by hand, outputs committed) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one
+  (manifest, icons: `scripts/icons.mjs` draws them from one mark, by hand, outputs committed) is copied as is, and `web/dist` (`//go:embed all:web/dist*`) is the output: one
   JS and one CSS file under `assets/`, named by content hash (no code splitting: an open PWA would
   ask for a deleted chunk after a deploy). The bridge serves `assets/*` as `immutable`,
   `index.html` and `sw.js` as `no-cache`, and a text file as the best of its brotli and gzip
   copies the client accepts (`vite.config.ts`'s `precompress()` writes them next to it, after
   `sw()`; each encoding its own ETag); `embed_test.go` checks the build, the copies and the size
-  budgets (a cold open as sent, brotli; the JS raw)
+  budgets (a cold open as sent, brotli; the JS raw). The pattern also matches the committed
+  `web/dist-placeholder.txt`, so the Go code builds, vets and tests without a web build (CI's
+  bridge jobs have no Node): such a binary has no UI and `Serve` refuses to start (so a start,
+  and a redeploy, fails), `embed_test.go` skips (CI's web job runs it with `YOICKS_REQUIRE_WEB=1`)
+  and `scripts/release.sh` checks for `web/dist/index.html`
 - **Styles: Mantine and Tailwind v4 next to the hand-written CSS.** `web/app.css` (index.html's one
   stylesheet) sets the cascade layers, lowest first: `theme` (Tailwind's variables), `base`
   (`reset.css`: the element resets, which over Mantine would strip its buttons), `mantine`
@@ -212,8 +216,8 @@ and the TypeScript web share only this contract — change both sides together
 ```bash
 npm ci && npm run build:web   # tsc type checks (web, sw), then vite build → web/dist (embedded)
 npm test                      # web tests (Vitest; Node per package.json engines)
-go test ./...                 # bridge + CLI (CI: go test -race ./...); needs web/dist
-go build -o bin/yoicks ./cmd/yoicks
+go test ./...                 # bridge + CLI (CI: go test -race ./...); no web build needed
+go build -o bin/yoicks ./cmd/yoicks   # after build:web: without it, the bridge refuses to start
 HERDR_PLUGIN_STATE_DIR=$(mktemp -d) HERDR_YOICKS_PORT=8392 ./bin/yoicks run   # dev run
 ```
 

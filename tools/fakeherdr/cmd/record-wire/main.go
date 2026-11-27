@@ -14,8 +14,8 @@
 // so the recordings don't depend on this machine's setup.
 //
 // Each CLI call runs detached (setsid -f), as the CLI takes its nearest claude
-// ancestor's account as its own. From the repo root, with the web UI built (it builds
-// ./cmd/yoicks; needs setsid):
+// ancestor's account as its own. The bridge serves a stand-in web UI (YOICKS_WEB_DIR),
+// so no web build is needed. From the repo root (it builds ./cmd/yoicks; needs setsid):
 //
 //	go build -o /tmp/record-wire ./tools/fakeherdr/cmd/record-wire && /tmp/record-wire
 //
@@ -235,10 +235,14 @@ func sh(dir string, env []string, name string, args ...string) error {
 }
 
 func setup(tmp string) error {
-	for _, d := range []string{"state", "config", "data", "home", "bin", "other", "claude-b"} {
+	for _, d := range []string{"state", "config", "data", "home", "bin", "other", "claude-b", "web"} {
 		if err := os.MkdirAll(filepath.Join(tmp, d), 0o755); err != nil {
 			return err
 		}
+	}
+	// the bridge's web UI (YOICKS_WEB_DIR): it starts only with an index.html
+	if err := os.WriteFile(filepath.Join(tmp, "web", "index.html"), nil, 0o644); err != nil {
+		return err
 	}
 	gitEnv := []string{"HOME=" + filepath.Join(tmp, "home"), "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.invalid"}
@@ -449,7 +453,7 @@ func run() error {
 		"HERDR_PLUGIN_STATE_DIR=" + filepath.Join(tmp, "state"),
 		"HERDR_PLUGIN_CONFIG_DIR=" + filepath.Join(tmp, "config"),
 		"XDG_DATA_HOME=" + filepath.Join(tmp, "data"),
-		"HERDR_YOICKS_PORT=" + port,
+		"HERDR_YOICKS_PORT=" + port, "YOICKS_WEB_DIR=" + filepath.Join(tmp, "web"),
 	}
 	// something else on the port would answer the health check in our bridge's place
 	if ln, err := net.Listen("tcp", "127.0.0.1:"+port); err != nil {
