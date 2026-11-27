@@ -1,0 +1,23 @@
+/* The app's stylesheet (index.html). The layer order comes first, so it holds whatever order
+   the rules below arrive in. Lowest first: Tailwind's theme variables; the element resets
+   (reset.css), under Mantine so they can't strip its components; Mantine; the app's own styles
+   (style.css), over Mantine's baseline (its body rules); Tailwind's utilities, over everything.
+   No Tailwind preflight: Mantine's advice, as it breaks Mantine's components. */
+@layer theme, base, mantine, app, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import './reset.css' layer(base);
+@import '@mantine/core/styles.layer.css';
+@import './style.css' layer(app);
+@import 'tailwindcss/utilities.css' layer(utilities) source('./src');
+
+/* The same breakpoints as Mantine's theme (src/theme.ts; theme.test.ts checks they agree), in em
+   as Mantine wants them: lg is the PC layout's 1024px. */
+@theme {
+  --breakpoint-*: initial;
+  --breakpoint-xs: 36em;
+  --breakpoint-sm: 40em;
+  --breakpoint-md: 48em;
+  --breakpoint-lg: 64em;
+  --breakpoint-xl: 80em;
+}
