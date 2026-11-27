@@ -48,32 +48,52 @@ func TestAgentsGone(t *testing.T) {
 
 func TestCloseFinishedWorker(t *testing.T) {
 	st := workerSnap()
+	idle, busy := `{"shell_pid":10,"foreground_process_group_id":10}`, `{"shell_pid":10,"foreground_process_group_id":11}`
 	for _, c := range []struct {
-		name, pane, info string
-		marked, closed   bool
+		name, pane string
+		infos      []string // pane.process_info's answers in turn, the last one repeated
+		panes      int      // the workspace's pane count, as workspace.get says
+		marked     bool
+		closed     bool
 	}{
-		{"a worker's idle shell", "p1", `{"shell_pid":10,"foreground_process_group_id":10}`, true, true},
-		{"one of two in a worktree", "p4", `{"shell_pid":10,"foreground_process_group_id":10}`, true, true},
-		{"not a worker's", "p1", `{"shell_pid":10,"foreground_process_group_id":10}`, false, false},
-		{"something runs in the shell", "p1", `{"shell_pid":10,"foreground_process_group_id":11}`, true, false},
-		{"no shell pid", "p1", `{"foreground_process_group_id":10}`, true, false},
-		{"alone in a worktree's workspace", "p3", `{"shell_pid":10,"foreground_process_group_id":10}`, true, false},
+		{"a worker's idle shell", "p1", []string{idle}, 2, true, true},
+		{"its process ends after its hooks said so", "p1", []string{busy, busy, idle}, 2, true, true},
+		{"something else goes on in the shell", "p1", []string{busy}, 2, true, false},
+		{"not a worker's", "p1", []string{idle}, 2, false, false},
+		{"no shell pid", "p1", []string{`{"foreground_process_group_id":10}`}, 2, true, false},
+		{"one of two in a worktree", "p4", []string{idle}, 2, true, true},
+		{"the last in a worktree's workspace", "p4", []string{idle}, 1, true, false},
+		{"gone from the state", "p9", []string{idle}, 2, true, false},
 	} {
 		var closes []any
+		infos, waits := c.infos, 0
 		rpc := func(method string, params map[string]any) (json.RawMessage, error) {
 			switch method {
 			case "pane.process_info":
-				return json.RawMessage(`{"process_info":` + c.info + `}`), nil
+				info := infos[0]
+				if len(infos) > 1 {
+					infos = infos[1:]
+				}
+				return json.RawMessage(`{"process_info":` + info + `}`), nil
+			case "workspace.get":
+				linked := params["workspace_id"] != "w1"
+				return json.RawMessage(fmt.Sprintf(`{"workspace":{"pane_count":%d,"worktree":{"is_linked_worktree":%v}}}`, c.panes, linked)), nil
 			case "pane.close":
 				closes = append(closes, params["pane_id"])
 				return json.RawMessage(`{}`), nil
 			}
 			return nil, fmt.Errorf("unexpected %s", method)
 		}
-		closed, err := closeFinishedWorker(rpc, st, c.pane, func(pid int) bool { return c.marked && pid == 10 })
-		if err != nil || closed != c.closed || len(closes) != map[bool]int{true: 1}[c.closed] {
-			t.Errorf("%s: closed %v, %v, pane.close %v", c.name, closed, err, closes)
+		closed, err := closeFinishedWorker(rpc, st, c.pane, func(pid int) bool { return c.marked && pid == 10 }, func() { waits++ })
+		if err != nil || closed != c.closed || len(closes) != map[bool]int{true: 1}[c.closed] || waits >= exitChecks {
+			t.Errorf("%s: closed %v, %v, pane.close %v, %d waits", c.name, closed, err, closes, waits)
 		}
+	}
+	// a pane closed meanwhile ends the looks
+	waits := 0
+	rpc := func(string, map[string]any) (json.RawMessage, error) { return nil, &HerdrError{Code: "pane_not_found"} }
+	if closed, _ := closeFinishedWorker(rpc, st, "p1", func(int) bool { return true }, func() { waits++ }); closed || waits != 0 {
+		t.Errorf("pane_not_found: closed %v, %d waits", closed, waits)
 	}
 }
 

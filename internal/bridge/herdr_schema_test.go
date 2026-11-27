@@ -215,9 +215,10 @@ func TestHerdrSchemaEventFields(t *testing.T) {
 	}
 }
 
-// The requests a headless orchestrator's tools and wake-ups send (mcp.go, http.go), which no
-// wire recording has: each method takes each parameter, agent.prompt's wait its until, and
-// the statuses they wait for are herdr's.
+// The requests a headless orchestrator's tools and wake-ups send (mcp.go, http.go), and the
+// bridge closing a finished worker's pane (worker_exit.go), which no wire recording has: each
+// method takes each parameter, agent.prompt's wait its until, and the statuses they wait for
+// are herdr's.
 func TestHerdrSchemaHeadlessRequests(t *testing.T) {
 	s := loadHerdrSchema(t)
 	request, _ := dig(s, "schemas", "request").(jsonSchema)
@@ -227,6 +228,7 @@ func TestHerdrSchemaHeadlessRequests(t *testing.T) {
 		"agent.prompt":      {"target", "text", "wait"},
 		"agent.wait":        {"target", "until", "timeout_ms"},
 		"notification.show": {"title", "body", "sound"},
+		"workspace.get":     {"workspace_id"},
 	} {
 		variant := oneOfByConst(request, "method", method)
 		if variant == nil {
@@ -251,4 +253,5 @@ func TestHerdrSchemaHeadlessRequests(t *testing.T) {
 	// the answers they read
 	checkFields(t, "agent.get/agent.wait agent", []string{"agent_status", "state_change_seq", "cwd", "pane_id"},
 		schemaDef(t, s, "success_response", "AgentInfo"))
+	checkFields(t, "workspace.get workspace", []string{"pane_count", "worktree"}, schemaDef(t, s, "success_response", "WorkspaceInfo"))
 }
