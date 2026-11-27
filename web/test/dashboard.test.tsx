@@ -74,7 +74,7 @@ describe('Dashboard list', () => {
   it('shows a spinner (no data-ready) until the first State', async () => {
     const c = await show('#/agents', null);
     assert.equal(c.querySelector<HTMLElement>('#screen-agents')!.dataset.ready, undefined);
-    assert.ok(c.querySelector('#screen-agents .loading-spinner'));
+    assert.ok(c.querySelector('#screen-agents .mantine-Loader-root'));
     await fire(() => setAppState(fresh()));
     assert.equal(c.querySelector<HTMLElement>('#screen-agents')!.dataset.ready, '1');
   });
@@ -180,8 +180,8 @@ describe('Dashboard topbar', () => {
   it('+ (New agent) and ⚙ (Settings)', async () => {
     const c = await bar('#/agents', fresh());
     const btns = [...c.querySelectorAll<HTMLElement>('#r button')];
-    assert.deepEqual(btns.map((b) => [b.id, b.className, b.getAttribute('aria-label'), b.textContent]),
-      [['btn-new-agent', 'topbar-action', 'New agent', '+'], ['btn-settings', 'topbar-action', 'Settings', '⚙']]);
+    assert.deepEqual(btns.map((b) => [b.id, b.classList.contains('mantine-ActionIcon-root'), b.getAttribute('aria-label'), b.textContent]),
+      [['btn-new-agent', true, 'New agent', '+'], ['btn-settings', true, 'Settings', '⚙']]);
     await fire(() => btns[1].click());
     assert.equal(location.hash, '#/settings');
   });

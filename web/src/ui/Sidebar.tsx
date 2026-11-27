@@ -9,14 +9,15 @@
  * (useHeldState), and its rows are keyed by orchestrator and pane, so #sidebar, the scroll container,
  * stays the same element.
  */
-import { NavLink } from '@mantine/core';
+import { NavLink, Text } from '@mantine/core';
 import { useSyncExternalStore } from 'react';
 import { homeGroups, orchestratorStatus, shownStatus, type DashboardCard, type HomeGroup } from '../dashboard-group.ts';
 import { openAgent } from '../nav.ts';
 import { homeHash } from '../routes.ts';
 import { findPane, store } from '../store.ts';
-import { agentCards, cardTitle, orchestratorLabel, useHeldState } from './Dashboard.tsx';
+import { TopbarIcon, agentCards, cardTitle, orchestratorLabel, useHeldState } from './Dashboard.tsx';
 import { openNewAgent } from './Modals.tsx';
+import { StatusBadge, StatusDot } from './Status.tsx';
 
 const subscribeHash = (fn: () => void): (() => void) => {
   addEventListener('hashchange', fn);
@@ -40,12 +41,13 @@ export function Sidebar() {
   const cards = agentCards(state);
   return (
     <aside id="sidebar" aria-label="Homes and agents" {...hold}>
-      <div className="sidebar-head">
-        <span className="sidebar-title">Yoicks</span>
-        <button className="topbar-action" data-action="new-agent" aria-label="New agent" onClick={() => { void openNewAgent(); }}>+</button>
-        <button className="topbar-action" data-action="settings" aria-label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</button>
+      {/* the topbar's height, kept in view over the list */}
+      <div className="sticky top-0 z-1 -mx-2 mb-2 flex h-[52px] items-center gap-1 border-b border-(--color-border) bg-(--color-surface) pr-2 pl-4">
+        <Text flex={1} fw={700} fz={16}>Yoicks</Text>
+        <TopbarIcon data-action="new-agent" label="New agent" onClick={() => { void openNewAgent(); }}>+</TopbarIcon>
+        <TopbarIcon data-action="settings" label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</TopbarIcon>
       </div>
-      <NavLink href="#/agents" className="sidebar-all" label="All agents" rightSection={cards.length}
+      <NavLink href="#/agents" className="sidebar-all rounded-lg" label="All agents" rightSection={cards.length}
         active={hash === '#/agents'} aria-current={current(hash === '#/agents')} />
       {homeGroups(cards, state?.orchestrators ?? []).map((g) => (
         <Group key={g.home ? `home:${g.home.name}` : 'other'} group={g} hash={hash} />
@@ -56,17 +58,17 @@ export function Sidebar() {
 
 function Group({ group: { home, cards }, hash }: { group: HomeGroup; hash: string }) {
   const pane = shownPane(hash);
-  let heading = <div className="sidebar-heading">Other</div>;
+  let heading = <Text className="sidebar-heading" px={12} py={4} fz={12} fw={700} c="dimmed" tt="uppercase" lts="0.06em">Other</Text>;
   if (home) {
     const on = hash === homeHash(home.name);
     const st = orchestratorStatus(home, home.paneId ? findPane(home.paneId)?.pane : undefined, store.seenDone);
     heading = (
-      <NavLink href={homeHash(home.name)} className={`sidebar-home${home.paneId ? '' : ' stopped'}`} data-home={home.name}
-        label={orchestratorLabel(home)} leftSection={<i className={`home-dot ${st}`}></i>} active={on} aria-current={current(on)} />
+      <NavLink href={homeHash(home.name)} className="rounded-lg" data-home={home.name} fw={700} c={home.paneId ? undefined : 'dimmed'}
+        label={orchestratorLabel(home)} leftSection={<StatusDot status={st} />} active={on} aria-current={current(on)} />
     );
   }
   return (
-    <section className="sidebar-group" data-home={home?.name ?? ''}>
+    <section className="sidebar-group mt-3.5" data-home={home?.name ?? ''}>
       {heading}
       {cards.map((c) => <Agent key={c.pane.paneId} card={c} on={c.pane.paneId === pane} />)}
     </section>
@@ -78,10 +80,10 @@ function Agent({ card, on }: { card: DashboardCard; on: boolean }) {
   const { paneId } = card.pane;
   const st = shownStatus(card.pane, store.seenDone) || 'unknown';
   return (
-    <NavLink component="button" className="sidebar-agent" data-sidebar-pane={paneId} noWrap
-      label={<>{cardTitle(card)}{card.branch ? <span className="card-branch">{` ${card.branch}`}</span> : null}</>}
+    <NavLink component="button" className="rounded-lg" data-sidebar-pane={paneId} noWrap pl={28}
+      label={<>{cardTitle(card)}{card.branch ? <Text span className="card-branch" fz={13} c="dimmed">{` ${card.branch}`}</Text> : null}</>}
       description={card.workspaceLabel}
-      rightSection={<span className={`status-badge ${st}`}>{st}</span>} active={on} aria-current={current(on)}
+      rightSection={<StatusBadge status={st} small />} active={on} aria-current={current(on)}
       onClick={() => openAgent(paneId)} />
   );
 }
