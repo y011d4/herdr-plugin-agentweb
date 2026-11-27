@@ -387,7 +387,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
   }
 
   function flushPendingOutput(): void {
-    if (pendingAnsi === null) return;
+    if (pendingAnsi === null || held) return; // held: drawn once released
     const ansi = pendingAnsi;
     pendingAnsi = null;
     renderPaneOutput(ansi); // re-queues itself if still unsafe
@@ -449,7 +449,13 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
         wheelQueue = 0;
         if (wheelFlushTimer) clearTimeout(wheelFlushTimer);
         wheelFlushTimer = null;
-      }
+        // a gesture going on is over: its touchend starts no fling, its tap counts for nothing
+        singleFingerGesture = false;
+        tapCandidate = false;
+        pinchStartDist = 0;
+        touchVelocity = 0;
+        wheelAccum = 0;
+      } else flushPendingOutput(); // what a gesture deferred, drawn now
     },
     destroy() {
       destroyed = true;
