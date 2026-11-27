@@ -44,7 +44,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
-const WC_ROOT = process.env.WEBCHECK_ROOT || path.join(os.homedir(), '.local/state/herdr-yoicks-webcheck');
+const DEFAULT_ROOT = path.join(os.homedir(), '.local/state/herdr-yoicks-webcheck');
+const WC_ROOT = process.env.WEBCHECK_ROOT || DEFAULT_ROOT;
 const LOCK = path.join(WC_ROOT, 'lock');
 const WORK = path.join(WC_ROOT, 'work');
 // A private herdr (`herdr start`): while $WC_ROOT/herdr exists, everything this root runs (its herdr calls, the preview
@@ -54,7 +55,8 @@ const PRIV_SOCK = path.join(PRIV, '.config', 'herdr', 'herdr.sock'); // where he
 /** The env for a herdr CLI call to the private server: none of the desktop herdr's pane variables. */
 const privCliEnv = (): NodeJS.ProcessEnv => ({
   ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('HERDR_'))), HERDR_SOCKET_PATH: PRIV_SOCK });
-if (fs.existsSync(PRIV)) {
+const PRIV_AT_START = fs.existsSync(PRIV);
+if (PRIV_AT_START) {
   for (const k of Object.keys(process.env)) if (k.startsWith('HERDR_')) delete process.env[k];
   process.env.HERDR_SOCKET_PATH = PRIV_SOCK;
 }
@@ -133,8 +135,7 @@ function record(rec: Rec, o: { workspace?: string; tab?: string; pane?: string }
 function teardown(dir: string): void {
   let rec: Rec | null = null;
   try { rec = JSON.parse(fs.readFileSync(path.join(dir, 'webcheck.json'), 'utf8')); } catch { /* nothing recorded */ }
-  const c = rec?.chrome;
-  try { if (c && fs.readFileSync(`/proc/${c.pid}/cmdline`, 'utf8').includes(c.dir)) process.kill(c.pid, 'SIGKILL'); } catch { /* gone */ }
+  killChrome(rec);
   // a just-killed Chrome's helpers may still write to its profile: retry, and never stop the closing for it
   const rm = (p: string) => { try { fs.rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) { console.log(`WARN ${(e as Error).message}`); } };
   // the headless orchestrators it started stop (best-effort: stopping the preview ends them too)
@@ -162,6 +163,12 @@ function teardown(dir: string): void {
     }
   }
   rm(dir);
+}
+
+/** The Chrome a run recorded, while its cmdline still names the run's profile (a reused pid is left alone). */
+function killChrome(rec: Rec | null): void {
+  const c = rec?.chrome;
+  try { if (c && fs.readFileSync(`/proc/${c.pid}/cmdline`, 'utf8').includes(c.dir)) process.kill(c.pid, 'SIGKILL'); } catch { /* gone */ }
 }
 
 /** POST …/stop for a headless orchestrator of the preview at `base`; synchronous, for teardown (a signal
@@ -200,6 +207,8 @@ async function lock(): Promise<() => void> {
   });
   if (!got) throw env('another webcheck run');
   if (spawnSync('flock', ['-n', LOCK, 'true']).status === 0) throw env('run without lock');
+  // this process chose its herdr (its env) at its start; a herdr start|stop since then would leave it on the other
+  if (fs.existsSync(PRIV) !== PRIV_AT_START) { p.stdin!.end(); throw env('the root switched herdr since this command started: run it again'); }
   return () => p.stdin!.end();
 }
 
@@ -281,7 +290,11 @@ async function previewCmd(sub: string, o: Record<string, any>): Promise<number> 
   const unlock = await lock(); // never under a run; the holder process keeps the lock from the bridge
   try {
     const old = readPreview(port);
-    if (old) await previewCtl(old, 'stop').catch((e) => console.log(`WARN ${e.message}`));
+    // a bridge still answering after a failed stop keeps its record: it is still on the herdr it began on
+    if (old) await previewCtl(old, 'stop').catch(async (e) => {
+      if (await fetch(`http://127.0.0.1:${port}/healthz`).then(() => true, () => false)) throw env(`preview ${port} did not stop (${e.message}): stop its bridge by hand`);
+      console.log(`WARN ${e.message} (nothing answers on ${port}: taken as stopped)`);
+    });
     if (sub === 'stop') {
       fs.rmSync(path.join(previewDir(port), 'preview.json'), { force: true }); // no record: not running (herdr start/stop look)
       console.log(`preview ${port} stopped`);
@@ -320,7 +333,8 @@ async function herdrCmd(sub: string): Promise<number> {
     return st === 'running';
   };
   // the default root is the desktop herdr's, shared by every worker: a private herdr there would switch their runs too
-  if (!process.env.WEBCHECK_ROOT) throw env('a private herdr needs a WEBCHECK_ROOT of its own (export WEBCHECK_ROOT=$(mktemp -d /tmp/wc-XXXX))');
+  const real = (d: string) => { try { return fs.realpathSync(d); } catch { return path.resolve(d); } };
+  if (!process.env.WEBCHECK_ROOT || real(WC_ROOT) === real(DEFAULT_ROOT)) throw env('a private herdr needs a WEBCHECK_ROOT of its own (export WEBCHECK_ROOT=$(mktemp -d /tmp/wc-XXXX))');
   const unlock = await lock();
   try {
     // a preview, and an unfinished run's record, stay on the herdr they began on: switching under them would guard ids
@@ -330,7 +344,12 @@ async function herdrCmd(sub: string): Promise<number> {
     const live = fs.existsSync(PRIV) && running();
     const runs = path.join(WC_ROOT, 'run');
     const unfinished = () => fs.existsSync(runs) && fs.readdirSync(runs).length > 0;
-    if (fs.existsSync(PRIV) && !live) fs.rmSync(runs, { recursive: true, force: true }); // a gone private herdr's: nothing left to close
+    if (fs.existsSync(PRIV) && !live) { // a gone private herdr took its panes: only the runs' Chrome is left to end
+      for (const d of fs.existsSync(runs) ? fs.readdirSync(runs) : []) {
+        try { killChrome(JSON.parse(fs.readFileSync(path.join(runs, d, 'webcheck.json'), 'utf8'))); } catch { /* no record */ }
+      }
+      fs.rmSync(runs, { recursive: true, force: true });
+    }
     if (unfinished()) teardownAll();
     if (unfinished()) throw env(`unfinished runs left in ${runs}: teardown first`);
     if (sub === 'stop') {
@@ -2184,11 +2203,12 @@ async function locked(base: string, body: (c: Ctx) => Promise<void>, needs: Set<
   const tokenFile = path.join(previewDir(port), 'state', 'token');
   if (!fs.existsSync(tokenFile)) throw env(`no token at ${tokenFile} (start the preview with \`preview start\`)`);
   if (!(await fetch(`${base}/healthz`).then((r) => r.ok, () => false))) throw env(`no preview answering at ${base}`);
+  const unlock = await lock();
   const pv = readPreview(port);
-  if (pv?.herdr !== (fs.existsSync(PRIV) ? PRIV_SOCK : undefined)) {
+  if (pv?.herdr !== (PRIV_AT_START ? PRIV_SOCK : undefined)) {
+    unlock();
     throw env(`the preview on ${port} runs on ${pv ? (pv.herdr ? 'the private herdr' : 'the desktop herdr') : 'no record'} and this root on the other: start it again (preview start)`);
   }
-  const unlock = await lock();
   teardownAll();
   const dir = path.join(WC_ROOT, 'run', String(Date.now()));
   fs.mkdirSync(dir, { recursive: true });
