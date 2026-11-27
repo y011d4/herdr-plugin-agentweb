@@ -345,9 +345,10 @@ func TestClaudeLive(t *testing.T) {
 	if late("model") {
 		return
 	}
-	// the model: Claude Code's list (its initialize answer) and a switch in place (set_model) that
-	// the next turn's init reports (to haiku again: no dearer turn)
-	models, haiku := b.view(t).Headless.Models, ""
+	// the model: Claude Code's list (its initialize answer), the one in effect (get_settings, here
+	// --model haiku's) and a switch in place (set_model) that the next turn's init reports (to haiku
+	// again: no dearer turn)
+	models, active, haiku := b.view(t).Headless.Models, b.view(t).Headless.ActiveModel, ""
 	for _, m := range models {
 		if m.Value == "haiku" {
 			haiku = m.ResolvedModel
@@ -366,7 +367,8 @@ func TestClaudeLive(t *testing.T) {
 		}
 	}
 	mu.Unlock()
-	item("model", haiku != "" && switched && on == haiku, "%d models, haiku = %q; set: %d %s; the next turn on %v", len(models), haiku, code, body, on)
+	item("model", haiku != "" && active == haiku && switched && on == haiku && b.view(t).Headless.ActiveModel == haiku,
+		"%d models, haiku = %q, in effect %q; set: %d %s; the next turn on %v", len(models), haiku, active, code, body, on)
 
 	if late("mcp_failure") {
 		return

@@ -689,6 +689,7 @@ export const messages: WsMessage[] = [
        }
       ],
       "model": "sonnet",
+      "activeModel": "claude-sonnet-5-5",
       "models": [
        {
         "value": "default",

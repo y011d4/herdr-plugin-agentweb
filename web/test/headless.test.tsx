@@ -343,12 +343,29 @@ describe("a headless orchestrator's Home", () => {
     await answer('POST /api/orchestrators/pilot/model', { error: { code: 'model_pending', message: "Claude Code hasn't answered within 10s" } }, 504);
     assert.equal(getToasts().at(-1)!.title, 'Model change pending');
     await unmount();
-    await home(withPilot((p) => { idle(p); p.headless!.model = 'claude-gone-1'; })); // saved, no longer listed
+    await home(withPilot((p) => { idle(p); p.headless!.model = p.headless!.activeModel = 'claude-gone-1'; })); // saved, no longer listed
     assert.deepEqual([...select().options].map((o) => o.value), ['claude-gone-1', 'default', 'sonnet']);
     assert.equal(select().value, 'claude-gone-1');
     await unmount();
     await home(withPilot((p) => { idle(p); p.headless!.models = []; }));
     assert.ok(container.querySelector('#home-model') === null);
+  });
+
+  it('shows the model in effect: a resumed session on Fable with none chosen is Fable, not Default, and Default is a pick', async () => {
+    await home(withPilot((p) => {
+      idle(p);
+      p.headless!.model = 'default';
+      p.headless!.activeModel = 'claude-fable-5-2';
+      p.headless!.models.push({ value: 'claude-fable-5-2[1m]', displayName: 'Fable', description: 'Fable 5.2 · Most capable', resolvedModel: 'claude-fable-5-2' },
+        { value: 'fable', displayName: 'Fable 5.2', description: 'For your toughest challenges', resolvedModel: 'claude-fable-5-2' });
+    }));
+    const select = $<HTMLSelectElement>('#home-model');
+    assert.equal(`${select.value}:${select.selectedOptions[0].text}`, 'claude-fable-5-2[1m]:Fable');
+    await fire(() => { select.value = 'default'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    assert.deepEqual(posts('model'), [{ model: 'default' }]);
+    await unmount();
+    await home(withPilot((p) => { idle(p); p.headless!.activeModel = ''; })); // not said yet: the choice
+    assert.equal($<HTMLSelectElement>('#home-model').value, 'sonnet');
   });
 
   it('shows its usage (old limits dimmed, the missing left out) and its warnings with what they offer', async () => {
