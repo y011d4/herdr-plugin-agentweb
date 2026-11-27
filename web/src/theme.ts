@@ -3,7 +3,11 @@
  *  against the CSS. Dark only: main.tsx's forceColorScheme, index.html's data-mantine-color-scheme.
  *  The root font size stays the browser's 16px (style.css sets 15px on the body, not on html), so
  *  Mantine's and Tailwind's rem sizes are their own, unscaled. */
-import { Portal, colorsTuple, createTheme, rem } from '@mantine/core';
+import { Button, Input, Portal, colorsTuple, createTheme, rem } from '@mantine/core';
+
+// style.css's --touch-min: a button given no size, or an input at its default size (sm), is this tall
+// (Mantine's 36px)
+const TOUCH = rem(44);
 
 export const theme = createTheme({
   breakpoints: { xs: '36em', sm: '40em', md: '48em', lg: '64em', xl: '80em' },
@@ -21,6 +25,11 @@ export const theme = createTheme({
   components: {
     // Mantine's portals (a modal, a menu's dropdown) go into #modal-root, above the app (index.html)
     Portal: Portal.extend({ defaultProps: { target: '#modal-root' } }),
+    // The app's touch target for a button given no size, and for an input at its default size (every
+    // Mantine input defaults to sm, so that's the one); any other size is Mantine's. The button's text is
+    // the app's 15px, the input's 16px: under that iOS zooms the page in on focus.
+    Button: Button.extend({ vars: (_theme, { size }) => ({ root: size ? {} : { '--button-height': TOUCH, '--button-fz': 'var(--mantine-font-size-md)' } }) }),
+    Input: Input.extend({ vars: (_theme, { size }) => ({ wrapper: size === 'sm' ? { '--input-height': TOUCH, '--input-fz': rem(16) } : {} }) }),
   },
 });
 
