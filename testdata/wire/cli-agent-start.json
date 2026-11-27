@@ -23,6 +23,9 @@
     "label": "w-cli",
     "focus": false,
     "cwd": "$TMP/repo",
+    "env": {
+     "YOICKS_WORKER": "1"
+    },
     "workspace_id": "w1"
    }
   },

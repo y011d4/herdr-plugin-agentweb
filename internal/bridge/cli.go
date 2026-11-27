@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"math"
 	"net"
 	"os"
@@ -773,8 +774,10 @@ func startOwnAgent(rpc Rpc, profiles func() map[string]LaunchProfile, own, name 
 	// A new tab/workspace starts with the caller's account (CLAUDE_CONFIG_DIR), so it
 	// needs no direnv; it is refused only where direnv says another account applies. A
 	// worktree gets no env from herdr, so its account must come from the dir itself.
+	// workerMark lets the bridge close the pane once the agent exits (worker_exit.go).
 	if in.Worktree == nil {
-		in.Env = accountEnv(own, "")
+		in.Env = map[string]string{workerMark: "1"}
+		maps.Copy(in.Env, accountEnv(own, ""))
 	}
 	for _, p := range places {
 		theirs := dirAccount(p)

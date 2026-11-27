@@ -44,7 +44,10 @@ All in `internal/bridge/` (one package):
   `overview.go`), `agent get|read|prompt|wait|start` and `worktree remove` (plus
   `orchestrator start <name>` for people; an orchestrator's allowlist doesn't include it). `agent
   start` gives the new tab the caller's account as env (`accountEnv`), so workers need no direnv;
-  it refuses only where direnv positively reports another account. All of them are
+  it refuses only where direnv positively reports another account. It also marks that tab's shell
+  `YOICKS_WORKER=1`: once a marked pane's agent exits and its shell is back in the foreground, the
+  bridge closes it (`worker_exit.go`, from `broadcastState`; never an unmarked pane, nor the only pane
+  of a linked worktree's workspace, which `worktree remove` closes with the worktree). All of them are
   confined to the caller's Claude account (`account.go`: an account = the agent process's
   `CLAUDE_CONFIG_DIR`/projects, read from /proc of the pane's foreground process group leader; the
   caller's = its nearest `claude` ancestor's; a dir's = `direnv exec` with our own account/direnv

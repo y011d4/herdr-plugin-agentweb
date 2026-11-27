@@ -111,6 +111,8 @@ type server struct {
 	bmu       sync.Mutex
 	clients   map[*wsClient]struct{}
 	lastState []byte
+	// the panes with an agent at the last push (agentsGone)
+	agentPanes map[string]bool
 }
 
 func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server {
