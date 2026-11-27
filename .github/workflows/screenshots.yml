@@ -102,6 +102,9 @@ jobs:
   # for what was shown and approved. Its verdict goes to publish as outputs, then fails this job when it isn't pass.
   screens:
     needs: render
+    # also when render failed: a job skipped for it would count as passed. A fork's PR (render skipped: nothing of
+    # it could be published) isn't gated: the user looks at one by hand.
+    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -113,6 +116,15 @@ jobs:
       approved: ${{ steps.decide.outputs.approved }}
       unlabel: ${{ steps.decide.outputs.unlabel }}
     steps:
+      # no verdict then, so publish leaves the comment as it was
+      - name: Did the shots render?
+        if: needs.render.result != 'success'
+        env:
+          RESULT: ${{ needs.render.result }}
+        run: |
+          echo "::error::the shots didn't render (render: $RESULT): see its log"
+          exit 1
+
       - name: Download the shots
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
