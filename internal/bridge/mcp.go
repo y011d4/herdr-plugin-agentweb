@@ -315,6 +315,9 @@ func (r *headlessRunner) approve(ctx context.Context, req *mcp.CallToolRequest, 
 		r.log("approve %s: denied", in.ToolName)
 		return textResult(`{"behavior":"deny","message":"yoicks allows no tool but its own"}`, false), nil, nil
 	}
+	if r.approveHook != nil {
+		r.approveHook()
+	}
 	p := r.ask(in.Input, epochOf(ctx))
 	if p == nil {
 		return textResult(`{"behavior":"deny","message":"this orchestrator's session has ended"}`, false), nil, nil
