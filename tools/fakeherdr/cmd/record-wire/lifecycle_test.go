@@ -163,7 +163,7 @@ func TestGoLifecycleCommands(t *testing.T) {
 	if code, out := ctl("stop"); code != 0 {
 		t.Fatalf("stop: exit %d, %q", code, out)
 	}
-	if b, _ := os.ReadFile(logPath); strings.Contains(string(b), token) || !strings.Contains(string(b), "?token=<redacted>\n") {
+	if b, _ := os.ReadFile(logPath); strings.Contains(string(b), token) || !strings.Contains(string(b), "?token="+strings.Repeat("*", len(token))+"\n") {
 		t.Errorf("bridge.log after a start: %q, want the old line's token redacted", b)
 	}
 	if after, _ := os.Stat(logPath); before == nil || after == nil || !os.SameFile(before, after) {
