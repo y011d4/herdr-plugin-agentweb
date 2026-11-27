@@ -562,6 +562,33 @@ describe('App', () => {
     await settle();
   });
 
+  it("a Home's done under Settings is seen as Settings closes, not before; a Home's Clear failing meanwhile leaves Settings over it", async () => {
+    store.seenDone = {};
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/home/personal');
+    await click($('#btn-home-clear'));
+    await click($('#modal-root #cf-ok')); // its POST waits
+    await click($('#btn-settings'));
+    await answer('POST /api/agents/p4/clear', { error: { code: 'boom', message: 'boom' } }, 500);
+    assert.equal(location.hash, '#/settings');
+    assert.ok($('#screen #screen-pane.screen-home') && $('#screen-settings'), 'still over the Home');
+    assert.equal(store.view.activePaneId, 'p4');
+    const s = fresh();
+    s.orchestrators[0].paneId = 'p4';
+    const p4 = s.workspaces.flatMap((w) => w.tabs.flatMap((t) => t.panes)).find((p) => p.paneId === 'p4')!;
+    p4.agent!.status = 'done';
+    p4.agent!.completionSeq = 11;
+    await act(async () => push!({ type: 'state', state: s }));
+    await settle();
+    assert.equal(store.seenDone.p4, undefined, 'out of sight');
+    await click($('#btn-settings-close'));
+    assert.equal(location.hash, '#/home/personal');
+    assert.equal(store.seenDone.p4, 11, 'seen as Settings closes');
+    clearToasts();
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await settle();
+  });
+
   it('Escape closes Settings; opened afresh (no list or Home before it) it is in front of the list and closes in its place', async () => {
     await go('#/agents');
     const list = $('#screen #screen-agents');
@@ -598,6 +625,8 @@ describe('App', () => {
     assert.equal(location.hash, '#/settings');
     assert.equal(history.length, len, "in the drawer's entry");
     assert.ok(!$('.agent-drawer #screen-pane') && $('#screen-settings') && $('#screen #screen-pane.screen-home'), 'over the Home the drawer was over');
+    assert.equal(store.view.activePaneId, 'p4', 'the Home running again under it');
+    assert.equal(watches.at(-1), 'p4:terminal');
     await act(async () => { sw.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: '#/pane/p3' } })); });
     await settle();
     assert.equal(location.hash, '#/pane/p3');
