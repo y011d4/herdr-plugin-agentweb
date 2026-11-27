@@ -106,7 +106,8 @@ fi
 # ignored files, so build output passes, but a changed or new .gitignore doesn't (nor one
 # that ignores itself, listed separately): the cleanup below goes by the .gitignore files,
 # and one of those could make it take someone's file for build output.
-changes=$(git status --porcelain && git ls-files --others -- ':(glob)**/.gitignore')
+dirty() { git status --porcelain && git ls-files --others -- ':(glob)**/.gitignore'; }
+changes=$(dirty)
 [ -z "$changes" ] || die "the checkout has uncommitted or untracked files (a .gitignore too): commit or remove them first
 $changes"
 # Then the build output goes: what the .gitignore files ignore among web/*.js (tsc's
@@ -184,7 +185,7 @@ say "switching to $ref ($(git rev-parse --short "$target"))"
 sh -c "$switch"
 # exactly the commit checked, clean: a main moved past it meanwhile would merge as "Already up
 # to date", and git switch carries an edit made since the clean-tree check along
-[ "$(git rev-parse HEAD)" = "$target" ] && [ -z "$(git status --porcelain)" ] ||
+[ "$(git rev-parse HEAD)" = "$target" ] && [ -z "$(dirty)" ] ||
 	die "the checkout isn't a clean $(git rev-parse --short "$target") (at $(git rev-parse --short HEAD)): something moved it"
 npm_config_prefer_offline=true sh scripts/plugin-build.sh source
 say "starting $id"
