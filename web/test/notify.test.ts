@@ -129,6 +129,27 @@ describe('notify', () => {
     store.view.settingsOpen = false;
   });
 
+  it("a registration failing as the page shows: the page notification for the pane Settings covers, none for one in sight", async () => {
+    const made: unknown[] = [];
+    vi.stubGlobal('Notification', Object.assign(function (this: { addEventListener: () => void; close: () => void }) {
+      this.addEventListener = () => {};
+      this.close = () => {};
+      made.push(this);
+    }, { permission: 'granted' }));
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { getRegistration: async () => { hidden = false; throw new Error('no worker'); } } });
+    store.view.activePaneId = 'p3';
+    store.view.settingsOpen = true;
+    notifyAgentStatus(done);
+    await settle();
+    assert.equal(made.length, 1, 'out of sight under Settings');
+    hidden = true;
+    store.view.settingsOpen = false;
+    notifyAgentStatus(done);
+    await settle();
+    assert.equal(made.length, 1, 'in sight once the page shows: none');
+    hidden = true;
+  });
+
   it("opening a pane closes its OS notifications", async () => {
     dismissNotificationsForPane('p3');
     await settle();
