@@ -1093,6 +1093,37 @@ body { font-size: 15px; }
   overflow: auto;
 }
 
+/* ── Agent drawer (ui/AgentDrawer.tsx: Mantine's Drawer; a pane over the screen it came from) ──
+   A phone's: a sheet from the bottom, the screen under it showing above (3rem of it, below the
+   notch). Its box is the visual viewport (--app-height), as #app's, so the soft keyboard never
+   covers its composer. The dimmed part starts at --sidebar-w (a wide screen's sidebar stays usable).
+   The toasts go below its header while it is open (they'd cover ✕ and ⋮). */
+.agent-drawer { --drawer-size: calc(var(--app-height, 100dvh) - var(--safe-top) - 3rem); }
+body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3rem + 56px); }
+.agent-drawer-inner { bottom: auto; height: var(--app-height, 100%); }
+.agent-drawer-overlay { left: var(--sidebar-w, 0px); }
+.agent-drawer-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-bg);
+  border-radius: 12px 12px 0 0;
+}
+.agent-drawer-fill { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.agent-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 0 8px;
+  height: 52px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.agent-drawer-head:focus { outline: none; } /* the start of the focus (ui/AgentDrawer.tsx), not a control */
+.agent-drawer-head .topbar-action:not(:last-child) { margin-right: 0; }
+.agent-drawer-close { margin-right: 0; font-size: 18px; }
+
 /* ── Modal (new agent, rename, confirm, agent-actions menu) ── */
 .modal-overlay {
   position: fixed;
@@ -1472,4 +1503,8 @@ body { font-size: 15px; }
   #app:has(> #sidebar) :is(.home-switch, #topbar-left .topbar-back[aria-label='Home'], #topbar #btn-new-agent, #topbar #btn-settings) {
     display: none;
   }
+  /* an agent's drawer from the right, over the main column (right of the sidebar, if any) */
+  .agent-drawer { --drawer-size: min(900px, calc((100vw - var(--sidebar-w, 0px)) * 0.65)); }
+  .agent-drawer-content { border-radius: 0; }
+  body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 56px); } /* below its header, at the top */
 }

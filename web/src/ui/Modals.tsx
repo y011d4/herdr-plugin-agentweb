@@ -8,6 +8,7 @@ import { Modal } from '@mantine/core';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { apiGet, apiPost } from '../api.ts';
 import { taskToKeep } from '../kept-tasks.ts';
+import { back, openAgent } from '../nav.ts';
 import { showToast } from '../notify.ts';
 import { keptTasks, store } from '../store.ts';
 import type { AgentStartResponse, ProfilesResponse, RenameResponse } from '../types.ts';
@@ -108,7 +109,7 @@ function showPreview(src: string, alt: string, mark: number): void {
     </>
   ), () => {
     removeEventListener('popstate', close);
-    if (history.state?.imagePreview === mark) history.back();
+    if (history.state?.imagePreview === mark) back();
   }, 'image-preview');
   addEventListener('popstate', close);
 }
@@ -277,7 +278,7 @@ function NewAgent({ profiles, dirs, initialDir, close }: { profiles: ProfilesRes
       const kept = taskToKeep(res, task);
       if (kept) keptTasks.keep(kept.paneId, kept.text);
       showToast('Agent started', kept ? `${started}. The task wasn't sent yet — it's in the composer, tap Send when the agent is ready` : started);
-      if (res.paneId) location.hash = `#/pane/${encodeURIComponent(res.paneId)}`;
+      if (res.paneId) openAgent(res.paneId);
     } catch (err) {
       setBusy(false);
       setError((err as Error).message);

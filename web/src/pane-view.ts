@@ -5,7 +5,7 @@
  * messages (pane_output, transcript_items, the pane's agent_status), the 3s refresh / fallback
  * polling and the pane's part of visibilitychange. For a blocked pane in chat it reads the
  * prompt off the screen (opts.prompt: ui/PromptPanel.tsx draws it and sends the answers) and
- * goes Back once a tapped answer lands. ui/Pane.tsx draws the rest (header, toggle button,
+ * closes its drawer once a tapped answer lands. ui/Pane.tsx draws the rest (header, toggle button,
  * composer, Home's status bar and "doing now" line) and hears back through opts.
  * store.view.paneViewMode is its mode (wsSendWatch reads it). One per opened pane:
  * destroy() stops every timer and listener, and its late responses do nothing.
@@ -14,6 +14,7 @@
  */
 import { ansiToHtml } from './ansi.ts';
 import { apiGet } from './api.ts';
+import { closeAgent } from './nav.ts';
 import { showToast } from './notify.ts';
 import { answerOutcome, parsePrompt, promptIdentity, stripAnsi } from './prompt.ts';
 import type { ParsedPrompt } from './prompt.ts';
@@ -59,7 +60,7 @@ export interface PaneView {
   /** after input: re-read the terminal at once (terminal.ts echo) */
   echo(): void;
   /** a tapped answer to the prompt `id` is sent (`post`): once it lands and the agent resumes
-   *  work, go Back to where the pane was opened from (not from Home, nor for "Chat about this": `chat`) */
+   *  work, close the drawer (not on a Home, nor for "Chat about this": `chat`) */
   answered(id: string, chat: boolean, post: Promise<unknown>): void;
   /** after a 409: read the prompt on screen now and show it, unless `current()` turned false */
   reread(current: () => boolean): Promise<void>;
@@ -78,10 +79,10 @@ function paneIsClaude(paneId: string): boolean {
   return (agent?.name ?? agent?.displayName ?? '').toLowerCase().includes('claude');
 }
 
-// A tapped answer until it is seen landing (settlePendingAnswer). `back`: where to go
-// once the agent resumes work ('' = stay); `prompt`: the identity of the prompt it answers.
+// A tapped answer until it is seen landing (settlePendingAnswer). `back`: close the drawer once
+// the agent resumes work (false = stay); `prompt`: the identity of the prompt it answers.
 interface PendingAnswer {
-  prompt: string; back: string;
+  prompt: string; back: boolean;
   sent: boolean; resumed: boolean; timer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -397,7 +398,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   }
 
   // After a tapped answer: the pane going `working` shows it reached the agent and the
-  // agent moved on, so the view goes Back to where the pane was opened from
+  // agent moved on, so its drawer closes, back to the screen it was opened from
   // (answerOutcome). Several questions only get there after the Submit tab: each earlier
   // answer leaves the pane blocked on the next prompt (renderPromptPanel drops the
   // pending answer). A permission prompt is treated the same: Yes resumes work, while No
@@ -411,7 +412,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     const outcome = answerOutcome(a.sent, a.resumed, status);
     if (outcome === 'wait') return;
     dropPendingAnswer();
-    if (outcome === 'back' && a.back) location.hash = a.back;
+    if (outcome === 'back' && a.back) closeAgent();
   }
 
   // ── Server messages, polling, visibility ────────────────────────────────────
@@ -494,7 +495,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       if (destroyed) return;
       // Tracked before the POST answers: the `working` push can beat its response.
       dropPendingAnswer();
-      const pending: PendingAnswer = { prompt: id, back: view.homeMode || chat ? '' : view.paneBackRoute, sent: false, resumed: false, timer: null };
+      const pending: PendingAnswer = { prompt: id, back: !view.homeMode && !chat, sent: false, resumed: false, timer: null };
       pendingAnswer = pending;
       post.then(() => {
         if (pendingAnswer !== pending) return; // left, or a newer answer took over

@@ -2,7 +2,7 @@
  * routes.ts — what a hash shows, decided from the State alone (pure; ui/App.tsx renders it):
  *   #/agents         the list; #/agents/<name> one orchestrator's account's agents
  *   #/home/<name>    an orchestrator's Home, running or stopped (Start); #/home opens the default one
- *   #/pane/<id>      a pane (an orchestrator's pane opens as its Home)
+ *   #/pane/<id>      a pane, in a drawer over the screen it came from (an orchestrator's pane opens as its Home)
  *   #/settings
  * An empty hash (a fresh open) goes to the default Home once a State exists.
  */
@@ -56,14 +56,18 @@ export function paneRoute(state: AppState | null, paneId: string): string {
   return o ? homeHash(o.name) : `#/pane/${encodeURIComponent(paneId)}`;
 }
 
-// Where to go when the open pane goes away: the list it came from (an account's included).
-export const paneGoneRoute = (view: { homeMode: boolean; paneBackRoute: string }): string =>
-  (!view.homeMode && view.paneBackRoute.startsWith('#/agents/') ? view.paneBackRoute : '#/agents');
-
-/** A pane's Back after arriving from `fromHash`: a Home or an account's list it came from; pane → pane keeps it. */
+/** The screen under a pane's drawer after arriving from `fromHash`: a Home or an account's list it came
+ *  from; pane → pane keeps it; else (a fresh open, Settings) the list. */
 export function nextPaneBackRoute(fromHash: string | null, prev: string): string {
   if (fromHash?.startsWith('#/home/') || fromHash?.startsWith('#/agents/')) return fromHash;
   return fromHash?.startsWith('#/pane/') ? prev : '#/agents';
+}
+
+/** Whether the drawer's history entry sits right on its screen's (`base`), so a close can go back to it:
+ *  opened from that screen; pane → pane (a replace) keeps it; else (a fresh open, a reload) not. */
+export function nextPaneOverBase(fromHash: string | null, base: string, prev: boolean): boolean {
+  if (fromHash === base) return true;
+  return fromHash?.startsWith('#/pane/') ? prev : false;
 }
 
 /** Settings' Back after arriving from `fromHash`: the Home or list it was opened from, else the list.

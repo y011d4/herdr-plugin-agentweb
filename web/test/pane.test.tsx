@@ -1,13 +1,15 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { draftKey, setDraft } from '../src/drafts.ts';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { keptTasks, setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
 import { orchestratorOfPane } from '../src/routes.ts';
-import { Pane, paneTopbar, paneViewOnState } from '../src/ui/Pane.tsx';
+import { WIDE_QUERY } from '../src/theme.ts';
+import { AgentDrawer, type Sheet } from '../src/ui/AgentDrawer.tsx';
+import { homeTopbar, Pane, paneViewOnState } from '../src/ui/Pane.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
 import { fire, render } from './render.ts';
 
@@ -34,12 +36,16 @@ let desktop: boolean;
 let unmount: () => Promise<void>;
 let container: HTMLElement;
 
-/** The pane screen as mounted: its topbar's slots, then the screen. */
+const noActions = () => ({ rename: () => {}, clear: () => {}, stop: () => {} });
+/** A pane as mounted, in its drawer over `back`; a Home with its topbar's slots, then the screen. */
 async function show(paneId: string, home = false, back = '#/agents', name = home ? orchestratorOfPane(store.appState, paneId)?.name : undefined): Promise<void> {
   store.view.activePaneId = paneId;
   store.view.homeMode = home;
-  const t = paneTopbar(paneId, home, back, () => {});
-  ({ container, unmount } = await render(<><div id="tb">{t.left}{t.title}{t.right}</div><Pane paneId={paneId} home={home} name={name} /></>));
+  store.view.paneBackRoute = back;
+  store.view.paneOverBase = false;
+  const t = homeTopbar(paneId);
+  ({ container, unmount } = await render(home ? <><div id="tb">{t.title}{t.right}</div><Pane paneId={paneId} home name={name} /></>
+    : <AgentDrawer sheet={{ paneId, key: 1, open: true, opener: null, openedPane: paneId }} actions={noActions} />));
 }
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => container.querySelector<T>(sel)!;
 const ta = () => $<HTMLTextAreaElement>('#pane-input');
@@ -289,15 +295,58 @@ describe('quick keys', () => {
   });
 });
 
-describe('pane topbar', () => {
-  it('names the agent and where it is, keeps that while the pane is gone, and goes Back', async () => {
+describe('pane header', () => {
+  it("is a modal sheet on a phone; on a wide screen no modal (the sidebar beside it is usable)", async () => {
+    await show('p2');
+    assert.equal($('[role="dialog"]').getAttribute('aria-modal'), 'true');
+    await unmount();
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === WIDE_QUERY, addEventListener() {}, removeEventListener() {} }));
+    await show('p2');
+    assert.equal($('[role="dialog"]').getAttribute('aria-modal'), 'false');
+  });
+
+  it("on a wide screen a close gives the focus back to its opener, else to the new screen's control for the pane, not from the sidebar", async () => {
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === WIDE_QUERY, addEventListener() {}, removeEventListener() {} }));
+    let set: (s: Sheet) => void = () => {};
+    let screen: (k: number) => void = () => {};
+    function Host({ opener }: { opener: HTMLElement | null }) {
+      const [s, setS] = useState<Sheet>({ paneId: 'p2', key: 1, open: true, opener, openedPane: 'p2' });
+      const [k, setK] = useState(0); // the screen under it drawn afresh (a Home): a new chip
+      set = setS;
+      screen = setK;
+      return <><aside id="sidebar"><button id="side">a</button></aside><main id="screen" key={k}><button data-pane-id="p2">chip</button></main><AgentDrawer sheet={s} actions={noActions} /></>;
+    }
+    const outside = document.body.appendChild(document.createElement('button'));
+    ({ container, unmount } = await render(<Host opener={outside} />));
+    // closed on p7, opened on p2 (pane to pane in between): the chip is p2's
+    const close = (opener: HTMLElement | null) => fire(() => set({ paneId: 'p7', key: 3, open: false, opener, openedPane: 'p2' }));
+    const reopen = (opener: HTMLElement | null) => fire(() => set({ paneId: 'p2', key: 2, open: true, opener, openedPane: 'p2' }));
+    assert.ok(document.activeElement === $('.agent-drawer-head'));
+    await close(outside);
+    assert.ok(document.activeElement === outside, 'back to its opener');
+    outside.remove();
+    await reopen(outside);
+    await fire(() => screen(1));
+    await close(outside);
+    assert.ok(document.activeElement === $('#screen [data-pane-id="p2"]'), "its opener gone: the new screen's chip");
+    await reopen(outside);
+    await fire(() => set({ paneId: 'p2', key: 4, open: false, opener: outside, openedPane: 'p9' })); // p9 cleared into p2: no p9 chip
+    assert.ok(document.activeElement === $('#screen [data-pane-id="p2"]'), "the pane it opened on gone too: the pane on show's");
+    await reopen(null);
+    $('#side').focus();
+    await close(null);
+    assert.ok(document.activeElement === $('#side'), 'moved to the sidebar: it stays');
+  });
+
+  it('names the agent and where it is, keeps that while the pane is gone, and ✕ closes it', async () => {
+    location.hash = '#/pane/p1'; // opened afresh: its close replaces it with the screen under it
     await show('p1', false, '#/agents/personal');
-    assert.equal($('#tb').textContent!.replace(/[⋮]/g, ''), '← Agentsclaude· repo / oneChat');
+    assert.equal($('.agent-drawer-head').textContent!.replace(/[⋮]/g, ''), '✕claude· repo / oneChat');
     const s = fresh();
     s.workspaces[0].tabs[0].panes.splice(0, 1);
     await fire(() => setAppState(s));
-    assert.match($('#tb').textContent!, /claude· repo \/ one/);
-    await fire(() => $('.topbar-back').click());
+    assert.match($('.agent-drawer-head').textContent!, /claude· repo \/ one/);
+    await fire(() => $('#btn-drawer-close').click());
     assert.equal(location.hash, '#/agents/personal');
   });
 
