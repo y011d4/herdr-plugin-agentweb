@@ -306,7 +306,7 @@ type headlessRunner struct {
 	acks         map[string]chan string // control requests awaiting their answer, by request_id: its error ("" = none); closed at the child's end
 	nRequest     int
 	switches     map[string]string // set_model requests awaiting their answer: request_id → the model
-	modelChoice  string            // the model it runs on ("" = Claude Code's default), passed as --model at each start
+	modelChoice  string            // chosen here, --model at each start ("default" too: it beats the model a resumed session keeps); "" = none, the session's own
 	lastEvent    time.Time
 	pending      *hlPending                // the question waiting for the user
 	asks         map[string]bool           // AskUserQuestion tool_use ids: did each reach approve?
@@ -345,7 +345,7 @@ type headlessState struct {
 	// its completed turns so far, kept across bridge restarts: a phone's seen-done record is
 	// keyed on it, so a count starting over would pass a new completion off as one seen
 	CompletionSeq int64  `json:"completionSeq,omitempty"`
-	Model         string `json:"model,omitempty"` // its model (SetModel); "" = Claude Code's default
+	Model         string `json:"model,omitempty"` // its model (SetModel); "" = none chosen
 }
 
 // newHeadlessRunner is def's runner; the server fills in its herdr calls, profiles and
@@ -1299,6 +1299,7 @@ func (r *headlessRunner) SetModel(value string) error {
 	c := r.child
 	if c == nil {
 		r.chooseModel(value)
+		r.model.active = "" // the next child says what it runs on
 		r.mu.Unlock()
 		r.onChange()
 		return nil
@@ -1344,9 +1345,6 @@ func (r *headlessRunner) SetModel(value string) error {
 // chooseModel keeps value as its model; r.mu held.
 func (r *headlessRunner) chooseModel(value string) {
 	r.modelChoice = value
-	if value == "default" {
-		r.modelChoice = ""
-	}
 	r.persist()
 	r.log("model %s", value)
 }

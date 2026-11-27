@@ -555,15 +555,17 @@ func TestHeadlessModel(t *testing.T) {
 	if status, body := b2.post(t, "stop", ""); status != 200 {
 		t.Fatalf("stop: %d %s", status, body)
 	}
-	// stopped: kept for its next start, where default means no --model
-	if status, body := b2.post(t, "model", `{"model":"default"}`); status != 200 {
-		t.Fatalf("stopped: %d %s", status, body)
+	// stopped: kept for its next start, Default too (--model default beats the model a resumed
+	// session keeps); the selector shows the pick until that child says
+	if status, body := b2.post(t, "model", `{"model":"default"}`); status != 200 || b2.view(t).Headless.ActiveModel != "" {
+		t.Fatalf("stopped: %d %s, %+v", status, body, b2.view(t).Headless)
 	}
 	b2.start(t)
 	waitUntil(t, 5*time.Second, "the run after", func() bool { runs, _ = b2.runs(t); return len(runs) == 4 })
-	if slices.Contains(runs[3].argv, "--model") || !slices.Contains(runs[2].argv, "fake-big") {
+	if !slices.Equal(runs[3].argv[len(runs[3].argv)-2:], []string{"--model", "default"}) || !slices.Contains(runs[2].argv, "fake-big") {
 		t.Errorf("runs %v", runs)
 	}
+	b2.waitFor(t, "the default in effect", func(v OrchestratorView) bool { return v.Headless.ActiveModel == "fake" })
 }
 
 // A resumed session keeps the model it last ran on (Claude Code 2.1.322), not the default: with none
