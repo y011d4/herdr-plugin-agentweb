@@ -60,6 +60,8 @@ describe('Confirm', () => {
     await settle();
     assert.equal(title(), 'Stop agent?');
     assert.match(fill($('#cf-ok')), /blocked/);
+    // kept clear of a notch and a home bar (the larger safe-area inset), as the old overlay's padding was
+    assert.equal($('.mantine-Modal-root').style.getPropertyValue('--modal-y-offset'), 'calc(max(var(--safe-top), var(--safe-bottom)) + 16px)');
     assert.equal($('#cf-ok').textContent, 'Stop');
     await fire(() => $('.mantine-Modal-body > p:nth-child(2)').click());
     assert.ok(open());
