@@ -115,6 +115,10 @@ func TestHeadlessPromptPurpose(t *testing.T) {
 	}
 	call(map[string]any{"name": "w1", "text": "do it", "purpose": "READMEを\n直す"})
 	call(map[string]any{"name": "w1", "text": "and this"}) // none: it keeps its purpose
+	b.world.Set("w1p", "blocked")
+	if res := call(map[string]any{"name": "w1", "text": "other work", "purpose": "別の仕事"}); !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "task not sent") {
+		t.Fatalf("a blocked worker: %+v", res)
+	} // not taken: it keeps the work it has
 	if got := b.srv.clientState(b.srv.client.State()).Purposes; !maps.Equal(got, map[string]string{"w1p": "READMEを 直す"}) {
 		t.Errorf("purposes %v", got)
 	}
