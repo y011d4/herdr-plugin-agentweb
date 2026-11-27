@@ -164,12 +164,11 @@ describe('Dashboard topbar', () => {
     return r.container;
   }
 
-  it("names the account's orchestrator, and ← Home goes to it", async () => {
+  it("a Home's list: its ← names that Home and goes to it", async () => {
     const c = await bar('#/agents/personal', fresh());
-    assert.equal(c.querySelector('#t')!.textContent, 'Agents· Personal');
-    assert.equal(c.querySelector('#t .topbar-subtitle')!.textContent, '· Personal');
+    assert.equal(c.querySelector('#t')!.textContent, 'Agents');
     const home = c.querySelector<HTMLElement>('#l .topbar-back')!;
-    assert.deepEqual([home.textContent, home.getAttribute('aria-label')], ['← Home', 'Home']);
+    assert.deepEqual([home.textContent, home.getAttribute('aria-label')], ['← Personal', 'Back to Personal']);
     await fire(() => home.click());
     assert.equal(location.hash, '#/home/personal');
   });
@@ -177,6 +176,7 @@ describe('Dashboard topbar', () => {
   it('the full list: ← Home to the one used last, running or not, else the first running, else the first', async () => {
     let c = await bar('#/agents', fresh());
     assert.equal(c.querySelector('#t')!.textContent, 'Agents');
+    assert.deepEqual([c.querySelector('#l .topbar-back')!.textContent, c.querySelector('#l .topbar-back')!.getAttribute('aria-label')], ['← Home', 'Home']);
     await fire(() => c.querySelector<HTMLElement>('#l .topbar-back')!.click());
     assert.equal(location.hash, '#/home/personal');
     localStorage.setItem('herdr_home', 'work'); // not running: its Home has Start

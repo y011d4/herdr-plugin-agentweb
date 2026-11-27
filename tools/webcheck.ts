@@ -859,6 +859,26 @@ async function p7(c: Ctx) {
   const nav = await c.pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)}`, 2000);
   result(c, ok && btns === 1 && !nav.timeout, 'P7', `cards(dom/state):${counts.join(',')},topbarButtons=${btns},tap=${nav.timeout ? 'timeout' : `${nav.ms}ms`}`,
     '.agent-card count = /api/state (#/agents, #/agents/wc-o1); 1 topbar button (Settings); tapping wc-less opens #/pane/<it> within 2s');
+  // a Home's own list: its ← names that Home and opens its Home, on a phone (a tap) and a PC (a click, the sidebar beside it)
+  const BACK = `document.querySelector('#topbar-left .topbar-back')`;
+  const back = async (phone: boolean) => {
+    await c.pg.goto('#/agents/wc-o1');
+    const shown = await c.pg.until(`(() => { const b = ${BACK}; return !!b && b.getBoundingClientRect().width > 0; })()`, 3000);
+    const [text, label] = shown.timeout ? ['', ''] : await c.pg.ev(`[${BACK}.textContent, ${BACK}.getAttribute('aria-label')]`);
+    if (shown.timeout) return { text, label, nav: shown };
+    const p = await c.pg.at(BACK);
+    if (phone) await c.pg.tap(p.x, p.y);
+    else for (const type of ['mousePressed', 'mouseReleased']) await c.pg.S('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', clickCount: 1 });
+    return { text, label, nav: await c.pg.until(`location.hash === '#/home/wc-o1'`, 2000) };
+  };
+  const named = (r: { text: string; label: string }) => /^\u2190 \S/.test(r.text) && r.text !== '\u2190 Home' && r.label === `Back to ${r.text.slice(2)}`;
+  const ph = await back(true);
+  await mobile(c.pg, false);
+  let pc: Awaited<ReturnType<typeof back>>;
+  try { pc = await back(false); } finally { await mobile(c.pg, true); }
+  result(c, named(ph) && !ph.nav.timeout && named(pc) && !pc.nav.timeout, 'P7.back',
+    `phone=${js(ph.text)}:${ph.nav.timeout ? 'timeout' : `${ph.nav.ms}ms`},pc=${js(pc.text)}:${pc.nav.timeout ? 'timeout' : `${pc.nav.ms}ms`}`,
+    "#/agents/wc-o1's topbar has '\u2190 <its Home>' (aria-label 'Back to <it>'), shown at 390px and at 1280px; it opens #/home/wc-o1 within 2s");
 }
 
 /** Without a running orchestrator, a fresh open (/) and #/home land on #/agents by location.replace. */

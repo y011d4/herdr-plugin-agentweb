@@ -158,20 +158,23 @@ const Tag = ({ c = 'dimmed', children }: { c?: string; children: string }) => (
 
 const useAppState = (): AppState | null => useSyncExternalStore(subscribe, () => store.appState);
 
-function Title({ hash }: { hash: string }) {
-  const scope = agentsScope(hash, useAppState());
-  return <>Agents{scope && <Text span className="topbar-subtitle" fz={12} fw={400} ml={6} c="dimmed">&#183; {orchestratorLabel(scope)}</Text>}</>;
-}
-
-// Orchestrators have no cards, so this is the way to a Home: its own, else the one used last
+// Orchestrators have no cards, so this is the way to a Home (its chat, as a new entry: the list may
+// have been opened from anywhere). A Home's own list (#/agents/<name>): back to that Home, by its
+// name, at every width. The full list: ← Home, to the one used last (on a PC the sidebar's headings
+// do that instead, style.css).
 function HomeButton({ hash }: { hash: string }) {
   const state = useAppState();
-  const home = agentsScope(hash, state) ?? defaultHome(state, lastHome());
-  return home ? <BackButton label="Home" onClick={() => { location.hash = homeHash(home.name); }}>&#8592; Home</BackButton> : null;
+  const scope = agentsScope(hash, state);
+  const home = scope ?? defaultHome(state, lastHome());
+  if (!home) return null;
+  const open = (): void => { location.hash = homeHash(home.name); };
+  const name = scope && orchestratorLabel(scope);
+  return name ? <BackButton label={`Back to ${name}`} onClick={open}>{`\u2190 ${name}`}</BackButton>
+    : <BackButton label="Home" onClick={open}>{'\u2190 Home'}</BackButton>;
 }
 
 export const dashboardTopbar = (hash: string): Topbar => ({
-  title: <Title hash={hash} />,
+  title: 'Agents', // a Home's list: its ← names the Home
   left: <HomeButton hash={hash} />,
   right: <TopbarIcon id="btn-settings" label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</TopbarIcon>,
 });
@@ -182,7 +185,11 @@ export function TopbarIcon({ label, children, ...rest }: { label: string; childr
   return <ActionIcon variant="subtle" color="gray" size="xl" fz={20} className="text-(--color-text-dim) hover:text-(--color-text)" aria-label={label} {...rest}>{children}</ActionIcon>;
 }
 
-/** A topbar's way back (to a Home, the list): the accent's text, 44px tall, flush with the bar's left edge. */
+/** A topbar's way back (to a Home): the accent's text, 44px tall, flush with the bar's left edge; a long
+ *  name is cut short (…), leaving the title room. */
 export function BackButton({ label, children, onClick }: { label: string; children: string; onClick: () => void }) {
-  return <Button className="topbar-back -ml-2 min-w-11 text-(--color-accent) hover:text-(--color-text)" variant="subtle" h={44} px={8} fz={16} fw={400} aria-label={label} onClick={onClick}>{children}</Button>;
+  return (
+    <Button className="topbar-back -ml-2 min-w-11 text-(--color-accent) hover:text-(--color-text)" variant="subtle" h={44} px={8} maw="40vw" fz={16} fw={400}
+      aria-label={label} onClick={onClick}><span className="truncate">{children}</span></Button>
+  );
 }
