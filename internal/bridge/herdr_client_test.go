@@ -371,22 +371,26 @@ func TestHerdrCallCancellation(t *testing.T) {
 	sentinel.Write([]byte("x"))
 	waitUntil(t, 5*time.Second, "the byte", func() bool { mu.Lock(); defer mu.Unlock(); return got > 0 })
 	mu.Lock()
-	if conns != 1 || got != 1 {
-		t.Errorf("cancelled before: %d connections, %d bytes besides the one", conns-1, got-1)
-	}
+	extraConns, extraBytes := conns-1, got-1
 	mu.Unlock()
+	if extraConns != 0 || extraBytes != 0 {
+		t.Fatalf("cancelled before: %d connections, %d bytes besides the one", extraConns, extraBytes)
+	}
 
 	ctx, cancel = context.WithCancel(context.Background())
 	cancelled := make(chan time.Time, 1)
 	go func() { // once herdr has the request, which it never answers
-		for {
+		for end := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
 			mu.Lock()
 			in := conns == 2 && got > 1
 			mu.Unlock()
 			if in {
 				break
 			}
-			time.Sleep(time.Millisecond)
+			if time.Now().After(end) {
+				t.Error("herdr never got the request")
+				break
+			}
 		}
 		cancelled <- time.Now()
 		cancel()
