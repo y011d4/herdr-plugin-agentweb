@@ -1,7 +1,7 @@
 /**
- * ui/App.tsx — the app shell, drawn into #app: the topbar (the screen on show fills its three
- * slots), the connection dot and the reconnect banner, #screen, the toasts, and the modals
- * (portalled into #modal-root). Hash routing:
+ * ui/App.tsx — the app shell, drawn into #app: on a wide screen the PC sidebar (ui/Sidebar.tsx),
+ * the topbar (the screen on show fills its three slots), the connection dot and the reconnect
+ * banner, #screen, the toasts, and the modals (portalled into #modal-root). Hash routing:
  *   #/agents        — the list (ui/Dashboard.tsx); #/agents/:name one orchestrator's account's agents
  *   #/home/:name    — an orchestrator's Home; #/home opens the last one used
  *   #/pane/:id      — a pane (ui/Pane.tsx; its body: pane-view.ts)
@@ -11,6 +11,7 @@
  * effects always start over. start() (main.tsx) loads the token, connects, fetches the first
  * State and listens: hashchange, the SW's navigate message, visibilitychange, the viewport.
  */
+import { useMediaQuery } from '@mantine/hooks';
 import { Fragment, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { apiDelete, apiGet, apiPost, getToken, headlessName, loadToken, onUnauthorized, orchestratorPost, setToken } from '../api.ts';
@@ -18,11 +19,13 @@ import { dismissNotificationsForPane, notifyAgentStatus, notifyOrchestratorAlert
 import { homeOf, nextPaneBackRoute, nextSettingsBackRoute, paneGoneRoute, paneRoute, resolveRoute } from '../routes.ts';
 import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, store, subscribe, type View } from '../store.ts';
 import type { AppState, ClearResponse, WsMessage } from '../types.ts';
+import { WIDE_QUERY } from '../theme.ts';
 import { onWsMessage, wsConnect, wsSendWatch } from '../ws.ts';
 import { Dashboard, dashboardTopbar } from './Dashboard.tsx';
 import { Modals, confirmModal, openRename } from './Modals.tsx';
 import { closePaneView, Pane, paneTopbar, paneViewOnState, StoppedHome, stoppedHomeTopbar, type AgentActions } from './Pane.tsx';
 import { Settings, settingsTopbar } from './Settings.tsx';
+import { Sidebar } from './Sidebar.tsx';
 import { Toasts } from './Toasts.tsx';
 import { Token } from './Token.tsx';
 
@@ -53,9 +56,13 @@ function show(kind: View['screen'], node: ReactNode, topbar?: Topbar): void {
 export function App() {
   const { kind, node, topbar, key } = useSyncExternalStore(subscribeShell, () => shown);
   const link = useSyncExternalStore(subscribeShell, () => linkUp);
+  const wide = useMediaQuery(WIDE_QUERY, false, { getInitialValueInEffect: false }); // read now: no first paint without it
   const slot = (content: ReactNode): ReactNode => <Fragment key={key}>{content}</Fragment>;
   return (
     <>
+      {/* a PC's: never over the token screen. Its slot stays when it isn't drawn, so the elements
+          after it (#topbar, #reconnect-banner, #screen) stay the same as it comes and goes. */}
+      {wide && kind !== 'token' && <Sidebar />}
       <header id="topbar" className="topbar" style={topbar ? undefined : { display: 'none' }}>
         <div id="topbar-left">{slot(topbar?.left)}</div>
         <div className="topbar-title" id="topbar-title">{slot(topbar?.title)}</div>

@@ -5,7 +5,7 @@
  * (sinceUnixMs) first. Each card carries its own workspace label and git context
  * since there are no per-workspace group headers.
  */
-import type { AgentStatus, PaneNode, WorkspaceNode } from './types.ts';
+import type { AgentStatus, OrchestratorView, PaneNode, WorkspaceNode } from './types.ts';
 
 export interface DashboardCard {
   /** always has an agent */
@@ -109,4 +109,27 @@ export function markSeen(seen: SeenDone, workspaces: WorkspaceNode[], paneId: st
 export function shownStatus(pane: PaneNode, seen: SeenDone): AgentStatus {
   const { status, completionSeq } = pane.agent!;
   return status === 'done' && completionSeq != null && seen[pane.paneId] === completionSeq ? 'idle' : status;
+}
+
+/** An orchestrator's agents in the PC sidebar: `home` null is Other. */
+export interface HomeGroup { home: OrchestratorView | null; cards: DashboardCard[] }
+
+/**
+ * The PC sidebar's groups (ui/Sidebar.tsx): each orchestrator, in config order, with its account's
+ * agents in `cards`' order, then Other: the agents no orchestrator's account lists (left out when
+ * empty). An agent is under every orchestrator of its account, as each Home counts it. One whose
+ * account isn't known (`agents` null) gets none: its Home counts every agent, and listing them all
+ * under it would repeat the other groups.
+ */
+export function homeGroups(cards: DashboardCard[], orchestrators: OrchestratorView[]): HomeGroup[] {
+  const groups: HomeGroup[] = orchestrators.map((o) => ({ home: o, cards: cards.filter((c) => o.agents?.includes(c.pane.paneId)) }));
+  const listed = new Set(groups.flatMap((g) => g.cards.map((c) => c.pane.paneId)));
+  const other = cards.filter((c) => !listed.has(c.pane.paneId));
+  return other.length ? [...groups, { home: null, cards: other }] : groups;
+}
+
+/** An orchestrator's dot (a Home's switcher, the sidebar): stopped without a pane, unknown while its
+ *  pane (`pane`: findPane's) has no agent yet, else its agent's shown status. */
+export function orchestratorStatus(o: OrchestratorView, pane: PaneNode | undefined, seen: SeenDone): AgentStatus | 'stopped' {
+  return !o.paneId ? 'stopped' : pane?.agent ? shownStatus(pane, seen) : 'unknown';
 }

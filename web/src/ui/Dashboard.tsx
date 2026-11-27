@@ -8,7 +8,7 @@
  * what changed: scrollTop and iOS momentum hold. While a finger is down the list doesn't change at all
  * (a rewrite mid-drag can cancel the scroll); the latest State shows once it lifts.
  */
-import { useEffect, useRef, useState, useSyncExternalStore, type TouchEvent } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type HTMLAttributes, type TouchEvent } from 'react';
 import { dashboardCards, shownStatus, type DashboardCard } from '../dashboard-group.ts';
 import { agentsScope, defaultHome, homeHash, paneRoute } from '../routes.ts';
 import { findPane, lastHome, store, subscribe } from '../store.ts';
@@ -43,10 +43,16 @@ export function relativeTime(ms: number): string {
   return `${Math.floor(diff / 3_600_000)}h ago`;
 }
 
-const openPane = (paneId: string): void => { location.hash = paneRoute(store.appState, paneId); };
+/** Opens an agent's pane: the list's cards and the PC sidebar's agents (ui/Sidebar.tsx). */
+export const openPane = (paneId: string): void => { location.hash = paneRoute(store.appState, paneId); };
 
-/** The list for `hash` (#/agents or #/agents/<name>). */
-export function Dashboard({ hash }: { hash: string }) {
+/**
+ * The State a list of agents draws (this list, the PC sidebar) and the touch handlers for its scroll
+ * container. While a finger is down the list doesn't change at all (a rewrite mid-drag can cancel the
+ * scroll); the latest State shows on the macrotask after the last finger lifts, so a still tap's
+ * click lands first, on the card it pressed.
+ */
+export function useHeldState(): [AppState | null, Pick<HTMLAttributes<HTMLElement>, 'onTouchStart' | 'onTouchEnd' | 'onTouchCancel'>] {
   const [state, setState] = useState(store.appState);
   const touching = useRef(false);
   useEffect(() => {
@@ -54,12 +60,17 @@ export function Dashboard({ hash }: { hash: string }) {
     apply();
     return subscribe(apply);
   }, []);
-  // On the macrotask after the last finger lifts: a still tap's click lands first, on the card it pressed.
   const lift = (e: TouchEvent): void => {
     if (e.touches.length > 0) return; // other fingers still down
     touching.current = false;
     setTimeout(() => { if (!touching.current) setState(store.appState); }, 0);
   };
+  return [state, { onTouchStart: () => { touching.current = true; }, onTouchEnd: lift, onTouchCancel: lift }];
+}
+
+/** The list for `hash` (#/agents or #/agents/<name>). */
+export function Dashboard({ hash }: { hash: string }) {
+  const [state, hold] = useHeldState();
 
   if (!state) {
     return <div id="screen-agents" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><span className="loading-spinner"></span></div>;
@@ -67,7 +78,7 @@ export function Dashboard({ hash }: { hash: string }) {
   const { workspaces = [] } = state;
   const cards = agentCards(state, agentsScope(hash, state));
   return (
-    <div id="screen-agents" data-ready="1" onTouchStart={() => { touching.current = true; }} onTouchEnd={lift} onTouchCancel={lift}>
+    <div id="screen-agents" data-ready="1" {...hold}>
       {workspaces.length === 0 ? <div className="empty-state">No workspaces found.</div>
         : cards.length === 0 ? <div className="empty-state">No active agents.</div>
         : <div className="agent-list">{cards.map((c) => <Card key={c.pane.paneId} card={c} />)}</div>}
