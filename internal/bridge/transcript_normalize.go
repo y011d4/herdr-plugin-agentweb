@@ -281,6 +281,9 @@ func summarizeToolInput(name string, input any) string {
 		s = firstNonEmpty(strOr(jsGet(q0, "question"), ""), strOr(jsGet(q0, "header"), ""))
 	case "WebFetch", "WebSearch":
 		s = firstNonEmpty(str("url"), str("query"))
+	case "mcp__yoicks__agent_prompt": // the Home's notice of it parses `<name>: ` (transcript.ts's conversationItems)
+		line, _, _ := strings.Cut(jsTrim(str("text")), "\n")
+		s = str("name") + ": " + line
 	default:
 		// generic: first string-valued field, else compact key list
 		keys, vals := jsEntries(input)

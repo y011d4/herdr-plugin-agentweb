@@ -261,10 +261,10 @@ export function renderMarkdown(src: string): string {
 
 // the bridge writes each of its lines at a line's start: an indented one is the user's (a list item's, a quote's)
 const YOICKS_NOTICE = /^\[yoicks\] /;
-// a notice about a worker, named as herdr names agents: its status change (`<name>: <from> → <to>`) or start
-// (`started <name> (pane …`); the name is a button that opens it (ui/ChatLog.tsx's Notice): [1] what comes before
-// it, [2] the name, [3] the rest
-export const WORKER_NOTICE = /^(\[yoicks\] (?:started )?)([a-z][a-z0-9_-]{0,31})((?:: | \(pane ).*)$/s;
+// a notice about a worker, named as herdr names agents: its status change (`<name>: <from> → <to>`), start
+// (`started <name> (pane …`) or task (`sent to <name>: …`, `not sent to <name>: …`); the name is a button that
+// opens it (ui/ChatLog.tsx's Notice): [1] what comes before it, [2] the name, [3] the rest
+export const WORKER_NOTICE = /^(\[yoicks\] (?:started |(?:not )?sent to )?)([a-z][a-z0-9_-]{0,31})((?:: | \(pane ).*)$/s;
 
 /**
  * A user turn's leading and trailing `[yoicks] …` lines (the bridge's own word to a headless
@@ -305,36 +305,55 @@ export function askAnswer(text: string): string | null {
 const CHAT_ABOUT_IT = /^The user wants to clarify these questions\.\n/;
 const CHAT_ANSWER = /^([\s\S]*)"\n {2}Answer: ([\s\S]*)$/; // an entry after its `\n- "`: a question may span lines
 
-// a headless orchestrator's tool that starts a worker (its result says whether the first task reached it)
-const START_TOOL = 'mcp__yoicks__agent_start';
+// a headless orchestrator's tools whose result shows as a [yoicks] notice: a worker started (its result says
+// whether the first task reached it), a task sent to one, a worktree removed
+const PROMPT_TOOL = 'mcp__yoicks__agent_prompt';
+const NOTICE_TOOLS = new Set(['mcp__yoicks__agent_start', PROMPT_TOOL, 'mcp__yoicks__worktree_remove']);
+const TASK_SHOWN = 50; // characters of a sent task's first line
+
+export type ToolUse = Extract<TimelineItem, { kind: 'tool_use' }>;
+
+/** The [yoicks] notice of a NOTICE_TOOLS call's result: the bridge's answer on one line, but for a task
+ *  sent (agent_prompt, whose summary is `<name>: <the task's first line>`) `sent to <name>: <that line,
+ *  cut short>`, or `not sent to <name>: <why>`. */
+function toolNotice(call: ToolUse, text: string): string {
+  const line = text.replace(/\s+/g, ' ').trim();
+  if (call.name !== PROMPT_TOOL) return `[yoicks] ${line}`;
+  const i = call.summary.indexOf(': ');
+  const [name, first] = i < 0 ? [call.summary, ''] : [call.summary.slice(0, i), call.summary.slice(i + 2)];
+  if (!/^delivered to /.test(line)) return `[yoicks] not sent to ${name}: ${line.replace(/^(?:not delivered to \S+|task not sent): /, '')}`;
+  const task = [...first];
+  return `[yoicks] sent to ${name}: ${task.length > TASK_SHOWN ? `${task.slice(0, TASK_SHOWN).join('').trimEnd()}…` : first}`;
+}
 
 /**
  * The home (orchestrator) chat shows only the dialogue: the user's and the
  * assistant's own words, and its questions (AskUserQuestion) with what the user
- * answered as their own bubble (Chat about this: a [yoicks] notice), and the
- * workers it started (a headless one's agent_start: what the bridge answered,
- * as a [yoicks] notice). Other tool
+ * answered as their own bubble (Chat about this: a [yoicks] notice), and what a
+ * headless one did to its workers (NOTICE_TOOLS: a start, a task, a worktree removed)
+ * as [yoicks] notices. Other tool
  * calls/results, thinking, subagent traffic and injected user turns are hidden.
  * `calls` (kept across appends: a call and its result arrive apart) maps those
- * calls' tool_use ids to their tool.
+ * calls' tool_use ids to their call.
  */
-export function conversationItems(items: TimelineItem[], calls = new Map<string, string>()): TimelineItem[] {
+export function conversationItems(items: TimelineItem[], calls = new Map<string, ToolUse>()): TimelineItem[] {
   const out: TimelineItem[] = [];
   for (const it of items) {
     if (it.sidechain) continue;
+    const call = it.kind === 'tool_result' && it.forId !== null ? calls.get(it.forId) : undefined;
     if (it.kind === 'assistant' || (it.kind === 'user' && !INJECTED_USER_TURN.test(it.text))) out.push(it);
     else if (it.kind === 'tool_use' && it.name === 'AskUserQuestion' && it.ask?.length) {
-      calls.set(it.id, it.name);
+      calls.set(it.id, it);
       out.push(it);
-    } else if (it.kind === 'tool_use' && it.name === START_TOOL) calls.set(it.id, it.name);
-    else if (it.kind === 'tool_result' && it.forId !== null && calls.get(it.forId) === START_TOOL) {
-      out.push({ kind: 'user', text: `[yoicks] ${it.text.replace(/\s+/g, ' ').trim()}`, sidechain: false, ts: it.ts });
-    } else if (it.kind === 'tool_result' && it.forId !== null && calls.has(it.forId) && it.isError && CHAT_ABOUT_IT.test(it.text)) {
+    } else if (it.kind === 'tool_use' && NOTICE_TOOLS.has(it.name)) calls.set(it.id, it);
+    else if (it.kind === 'tool_result' && call && NOTICE_TOOLS.has(call.name)) {
+      out.push({ kind: 'user', text: toolNotice(call, it.text), sidechain: false, ts: it.ts });
+    } else if (it.kind === 'tool_result' && call && it.isError && CHAT_ABOUT_IT.test(it.text)) {
       // the answers given before it stay in the chat, `question: answer` a line (cut short: the entries before the cut)
       const given = it.text.split('\n- "').slice(1, it.truncated ? -1 : undefined).flatMap((e) => CHAT_ANSWER.exec(e)?.slice(1, 3).join(': ') ?? []).join('\n');
       if (given) out.push({ kind: 'user', text: given, sidechain: false, ts: it.ts });
       out.push({ kind: 'user', text: '[yoicks] Chat about this', sidechain: false, ts: it.ts });
-    } else if (it.kind === 'tool_result' && it.forId !== null && calls.has(it.forId)) {
+    } else if (it.kind === 'tool_result' && call) {
       const answer = it.truncated ? null : askAnswer(it.text); // cut short, it may name only some: shown as it is
       out.push(answer === null ? it : { kind: 'user', text: answer, sidechain: false, ts: it.ts });
     }
