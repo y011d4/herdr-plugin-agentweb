@@ -115,8 +115,8 @@ function showSystemNotification(title: string, body: string, paneId: string): vo
         // The app may have become visible while getRegistration() resolved; a
         // return-to-visible dismiss would then run before this notification exists.
         // Re-check the same document.hidden gate so a now-visible pane is never
-        // left with a stale OS notification.
-        if (!document.hidden) return;
+        // left with a stale OS notification (one Settings covers isn't seen: kept).
+        if (!document.hidden && !(store.view.settingsOpen && store.view.activePaneId === paneId)) return;
         if (!reg) { pageNotification(title, body, paneId); return; }
         // showNotification() is itself async: the app can become visible between the
         // check above and when the notification is registered, so a visibilitychange

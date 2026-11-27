@@ -614,6 +614,28 @@ describe('App', () => {
     await settle();
   });
 
+  it("a Home's Clear under Settings whose replacement never shows: the toast after 8s, and the stopped Home under it", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/home/personal');
+    await click($('#btn-home-clear'));
+    await click($('#modal-root #cf-ok'));
+    await click($('#btn-settings'));
+    await answer('POST /api/agents/p4/clear', { ok: true, paneId: 'p9' });
+    const gap = fresh();
+    gap.orchestrators[0].paneId = null;
+    await act(async () => push!({ type: 'state', state: gap }));
+    await act(async () => { vi.advanceTimersByTime(8_000); });
+    await settle();
+    assert.ok(toastTitles().includes('Orchestrator stopped'));
+    assert.equal(location.hash, '#/settings', 'Settings stays');
+    assert.ok($('#screen #screen-home-stopped'), 'the stopped Home under it');
+    await click($('#btn-settings-close'));
+    assert.ok($('#screen #screen-home-stopped'));
+    clearToasts();
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await settle();
+  });
+
   it('Escape closes Settings; opened afresh (no list or Home before it) it is in front of the list and closes in its place', async () => {
     await go('#/agents');
     const list = $('#screen #screen-agents');

@@ -270,9 +270,12 @@ function holdHomeForReplacement(): void {
   homeLostTimer = setTimeout(() => {
     homeLostTimer = null;
     homeClearing = false;
-    if (!location.hash.startsWith('#/home/') || homeOf(location.hash, store.appState)?.paneId) return; // left, or onStateUpdate re-resolved
+    const covered = location.hash === '#/settings' && view.homeMode; // a Home running on under Settings
+    const hash = covered ? view.paneBackRoute : location.hash;
+    if (!hash.startsWith('#/home/') || homeOf(hash, store.appState)?.paneId) return; // left, or onStateUpdate re-resolved
     showToast('Orchestrator stopped', 'It did not come back after Clear.');
-    handleRoute(); // the stopped Home
+    if (covered) onStateUpdate(); // the stopped Home, drawn afresh under Settings
+    else handleRoute(); // the stopped Home
   }, HOME_REPLACE_GRACE_MS);
 }
 
