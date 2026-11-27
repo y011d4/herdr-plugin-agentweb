@@ -115,6 +115,20 @@ describe('notify', () => {
     assert.deepEqual(closed, ['p3']);
   });
 
+  it('a notification for the pane Settings covers is shown even when the page shows meanwhile', async () => {
+    const shown: string[] = [];
+    const reg = { showNotification: async (_t: string, o: NotificationOptions) => { shown.push(o.tag!); }, getNotifications: async () => [] };
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { getRegistration: async () => { hidden = false; return reg; } } });
+    store.view.activePaneId = 'p3';
+    store.view.settingsOpen = true;
+    notifyAgentStatus(done);
+    await settle();
+    await settle();
+    assert.deepEqual(shown, ['p3'], 'out of sight under Settings: shown');
+    hidden = true;
+    store.view.settingsOpen = false;
+  });
+
   it("opening a pane closes its OS notifications", async () => {
     dismissNotificationsForPane('p3');
     await settle();
