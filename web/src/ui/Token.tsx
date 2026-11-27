@@ -15,8 +15,9 @@ export function Token({ message, onToken }: { message?: string; onToken: (token:
       <Text className="login-subtitle" size="sm" c="dimmed" ta="center" maw={320}>{message || 'Enter the access token shown when the bridge server started.'}</Text>
       <form id="token-form" className="w-full max-w-[360px]" onSubmit={submit}>
         <Stack gap={12}>
+          {/* the eye shows what was pasted; Tab reaches it (Mantine's default leaves it out) */}
           <PasswordInput id="token-input" ref={input} aria-label="Access token" placeholder="Paste access token…"
-            autoComplete="off" autoCorrect="off" spellCheck={false} />
+            autoComplete="off" autoCorrect="off" spellCheck={false} visibilityToggleFocusable />
           <Button type="submit" fullWidth>Connect</Button>
         </Stack>
       </form>
