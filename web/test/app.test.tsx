@@ -365,6 +365,21 @@ describe('App', () => {
     assert.ok(!$('.agent-drawer #screen-pane'));
   });
 
+  it('an Escape from ⋮ right after its menu opens closes the menu, not the drawer; the next one closes the drawer', async () => {
+    await go('#/agents');
+    await go('#/pane/p1');
+    await click($('#btn-agent-menu'));
+    assert.ok($('[data-menu-dropdown]'));
+    // Mantine moves the focus into the menu a moment after it opens (a timer): an Escape before that comes from ⋮,
+    // which Mantine's own handler (the dropdown's) never sees (webcheck M2.escape under load)
+    await act(async () => { $('#btn-agent-menu')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    await settle();
+    assert.ok(!$('[data-menu-dropdown]') && !!$('.agent-drawer #screen-pane') && location.hash === '#/pane/p1', 'only the menu closed');
+    await act(async () => { (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    await settle();
+    assert.equal(location.hash, '#/agents', 'the next Escape closes the drawer');
+  });
+
   it("a stopped orchestrator's Home has Start; its running Home opens once the State shows it", async () => {
     const s = fresh(); // "work" stopped
     await act(async () => push!({ type: 'state', state: s }));
