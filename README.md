@@ -414,7 +414,8 @@ billing). Its Home is then the chat alone: messages go out also while it works, 
 usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable), the model it runs on (a pick from
 Claude Code's `/model` list switches it between turns, or for its next start) and what went wrong, each with what to do. It
 also keeps a to-do list for you (its `todo` tool), under "Needs you" on its Home: what only you can do, such
-as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; ✓ ticks one off. Each Home's switcher button
+as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; ✓ ticks one off and tells the Home, which takes up what follows
+(a stopped Home isn't told). Each Home's switcher button
 (and its heading in the PC sidebar) counts what waits on you there. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
@@ -558,8 +559,10 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   joined by `", "`, free text allowed (Claude Code's "Type something."); `chat` is Claude Code's "Chat about
   this": refused with its words, which list the questions and the answers given so far; 409 when that id
   isn't the one pending.
-- `DELETE /api/orchestrators/:name/todos/:id` — tick an item of that Home's to-do list off; 404 when
-  there is no such item (already ticked off, or done by its orchestrator).
+- `DELETE /api/orchestrators/:name/todos/:id` — tick an item of that Home's to-do list off; a running
+  headless Home is woken with `[yoicks] to-do done by the user: <text> (<agent>, <url>)` (several within
+  3 s in one message; a stopped one is never told); 404 when there is no such item (already ticked off,
+  or done by its orchestrator).
 - `DELETE /api/panes/:paneId` — stop an agent by closing its pane
 - `POST /api/panes/:paneId/rename` `{"name": "worker-2"}` — rename the agent running in the pane
 - `POST /api/agents/:target/clear` — start a fresh replacement agent (same profile + cwd) and close

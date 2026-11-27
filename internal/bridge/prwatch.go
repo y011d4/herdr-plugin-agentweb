@@ -158,7 +158,7 @@ func (s *server) watchPRs() {
 		if it.agent != nil {
 			line += " (" + *it.agent + ")"
 		}
-		if found, err := s.todos.Done(it.home, it.id); err != nil || !found { // kept: told on a later look; gone: the user ticked it off meanwhile
+		if done, err := s.todos.Done(it.home, it.id); err != nil || done == nil { // kept: told on a later look; gone: the user ticked it off meanwhile
 			if err != nil {
 				logf("[pr-watch] %s: %s", it.home, err)
 			}

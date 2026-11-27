@@ -101,11 +101,11 @@ func TestTodoStore(t *testing.T) {
 	}
 	done := func(name, id string) bool {
 		t.Helper()
-		found, err := s.Done(name, id)
+		item, err := s.Done(name, id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return found
+		return item != nil && item.ID == id
 	}
 	if !done("a", items[1].ID) || done("a", items[1].ID) || done("b", items[0].ID) || changes != 2 {
 		t.Errorf("Done %d", changes)
@@ -142,8 +142,8 @@ func TestTodoStore(t *testing.T) {
 	if _, _, err := s.Apply("a", []todoAdd{{Text: "lost"}}, nil, now); err == nil || !reflect.DeepEqual(s.Items("a"), before) {
 		t.Errorf("%v %v", err, s.Items("a"))
 	}
-	if found, err := s.Done("a", before[0].ID); !found || err == nil || !reflect.DeepEqual(s.Items("a"), before) {
-		t.Errorf("%v %v %v", found, err, s.Items("a"))
+	if item, err := s.Done("a", before[0].ID); item != nil || err == nil || !reflect.DeepEqual(s.Items("a"), before) {
+		t.Errorf("%v %v %v", item, err, s.Items("a"))
 	}
 	if changes != 3 {
 		t.Errorf("%d changes", changes)
@@ -161,8 +161,8 @@ func TestTodoStore(t *testing.T) {
 			t.Errorf("done %v: %v", done, err)
 		}
 	}
-	if found, err := s.Done("a", "0a0b0c"); found || err == nil {
-		t.Errorf("Done: %v %v", found, err)
+	if item, err := s.Done("a", "0a0b0c"); item != nil || err == nil {
+		t.Errorf("Done: %v %v", item, err)
 	}
 	if got, _ := os.ReadFile(broken); string(got) != "{" {
 		t.Errorf("written over: %s", got)
@@ -275,5 +275,75 @@ func TestHeadlessTodo(t *testing.T) {
 	b = startHeadless(t, state, nil, nil)
 	if v := b.view(t); len(v.Todos) != 2 || v.Todos[0].ID != ids[1][1] {
 		t.Errorf("%+v", v.Todos)
+	}
+}
+
+// The user ticking items off wakes the Home: those ticked off together in one message, one line
+// each; ticked off while it is stopped, never (not at its next start either). The PR watch's
+// removal and the orchestrator's own done wake nothing of this kind.
+func TestHeadlessTodoTickWake(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	items, _, err := b.srv.todos.Apply(b.name, []todoAdd{
+		{Text: "add the ui-change label to #157", Agent: "w-vrt", URL: "https://github.com/o/r/pull/157"},
+		{Text: "run /login"}, {Text: "while stopped"}, {Text: "after the start"}, {Text: "done by the orchestrator"},
+	}, nil, nowMs())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tick := func(i int) {
+		t.Helper()
+		if status, body, _ := b.do(t, "DELETE", "/api/orchestrators/"+b.name+"/todos/"+items[i].ID, b.token, nil); status != 200 {
+			t.Fatalf("%d %s", status, body)
+		}
+	}
+	const prefix = "[yoicks] to-do done by the user: "
+	// the messages written to the child that carry such a line
+	tickMessages := func() []string {
+		_, stdin := b.runs(t)
+		var out []string
+		for _, l := range stdin {
+			var m struct{ Message struct{ Content string } }
+			json.Unmarshal([]byte(l), &m)
+			if strings.Contains(m.Message.Content, prefix) {
+				out = append(out, m.Message.Content)
+			}
+		}
+		return out
+	}
+	waitTicks := func(n int) []string {
+		t.Helper()
+		var got []string
+		waitUntil(t, 10*time.Second, "the tick wake-ups", func() bool {
+			b.clock.Advance(wakeCoalesce)
+			got = tickMessages()
+			return len(got) >= n
+		})
+		return got
+	}
+
+	tick(0)
+	tick(1)
+	want := prefix + "add the ui-change label to #157 (w-vrt, https://github.com/o/r/pull/157)\n" + prefix + "run /login"
+	if got := waitTicks(1); !slices.Equal(got, []string{want}) {
+		t.Errorf("%q", got)
+	}
+	if _, _, err := b.srv.todos.Apply(b.name, nil, []string{items[4].ID}, nowMs()); err != nil {
+		t.Fatal(err)
+	}
+
+	b.post(t, "stop", "")
+	b.waitStatus(t, "stopped")
+	tick(2)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	tick(3)
+	if got := waitTicks(2); len(got) != 2 || got[1] != prefix+"after the start" {
+		t.Errorf("%q", got)
+	}
+	b.clock.Advance(wakeCoalesce + time.Second)
+	if got := tickMessages(); len(got) != 2 {
+		t.Errorf("%q", got)
 	}
 }
