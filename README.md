@@ -388,6 +388,10 @@ its own Claude account. The account is an agent process's `CLAUDE_CONFIG_DIR` (d
 - `worktree remove <checkout path>` — removes a finished worker's linked worktree and its branch,
   only when no agent is left in it, it has no uncommitted or untracked files, and the branch is
   merged (an ancestor of `origin/HEAD`, or the head of a merged PR per `gh`, for squash merges).
+  A worktree left on a detached HEAD (a worker that checked out what it deployed) is removed
+  when that commit is in `origin/HEAD`, and the branch its dir is named after
+  (`<repo>-wt-<branch>`) only when that branch is merged too; otherwise the branch is kept, and
+  the answer says so. A shell left in the worktree doesn't hold it: herdr closes its workspace.
 
 The `.claude/settings.json` the plugin writes keeps the orchestrator to those commands:
 `"defaultMode": "dontAsk"` (anything not allowed is refused without asking), allow only those

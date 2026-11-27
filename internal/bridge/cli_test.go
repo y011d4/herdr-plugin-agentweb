@@ -5,7 +5,9 @@ package bridge
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -134,4 +136,142 @@ func TestIsBridgeCommandLine(t *testing.T) {
 			t.Errorf("isBridgeCommandLine(%q) = %v, want %v", cmd, got, want)
 		}
 	}
+}
+
+// worktree remove on real git: herdr's worktree.remove stood in for by the `git worktree
+// remove` it runs; direnv and gh faked (no .envrc: the default account; gh's merged PR
+// heads from a file).
+func TestRemoveOwnWorktree(t *testing.T) {
+	tmp := t.TempDir()
+	bin := filepath.Join(tmp, "bin")
+	os.Mkdir(bin, 0o755)
+	os.WriteFile(filepath.Join(bin, "direnv"), []byte("#!/bin/sh\ncd \"$2\" && shift 2 && exec \"$@\"\n"), 0o755)
+	os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\ncat \""+tmp+"/gh-heads\" 2>/dev/null\n"), 0o755)
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	own := accountForConfigDir("", "")
+	eq := func(t *testing.T, got, want any) {
+		t.Helper()
+		if got != want {
+			t.Errorf("got %#v, want %#v", got, want)
+		}
+	}
+
+	// a repo with an origin and a worktree <repo>-wt-<branch> one commit ahead, its
+	// idle shell left in it, and an ignored build output
+	setup := func(t *testing.T, branch string) (repo, wt string, rpc, slow Rpc) {
+		os.Remove(filepath.Join(tmp, "gh-heads"))
+		dir := t.TempDir()
+		repo = filepath.Join(dir, "repo")
+		gitT(t, "init", "-q", "--bare", "-b", "main", filepath.Join(dir, "origin.git"))
+		gitT(t, "init", "-q", "-b", "main", repo)
+		os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("bin/\n"), 0o644)
+		gitT(t, "-C", repo, "add", ".gitignore")
+		gitT(t, "-C", repo, "commit", "-q", "-m", "init")
+		gitT(t, "-C", repo, "remote", "add", "origin", filepath.Join(dir, "origin.git"))
+		gitT(t, "-C", repo, "push", "-q", "origin", "main")
+		gitT(t, "-C", repo, "remote", "set-head", "origin", "main")
+		wt = repo + "-wt-" + unsafePathChars.ReplaceAllString(branch, "-")
+		gitT(t, "-C", repo, "worktree", "add", "-q", "-b", branch, wt)
+		gitT(t, "-C", wt, "commit", "-q", "--allow-empty", "-m", "work")
+		os.MkdirAll(filepath.Join(wt, "bin"), 0o755)
+		os.WriteFile(filepath.Join(wt, "bin", "yoicks"), nil, 0o755)
+		linked := true
+		rpc = func(string, map[string]any) (json.RawMessage, error) {
+			return json.Marshal(map[string]any{"snapshot": RawSnapshot{
+				Workspaces: []RawWorkspace{{WorkspaceID: "w1", Worktree: &RawWorktree{RepoRoot: repo, CheckoutPath: wt, IsLinkedWorktree: &linked}}},
+				Panes:      []RawPane{{PaneID: "p1", WorkspaceID: "w1", Cwd: wt}},
+			}})
+		}
+		slow = func(method string, params map[string]any) (json.RawMessage, error) {
+			if method != "worktree.remove" || params["workspace_id"] != "w1" {
+				t.Fatalf("slow %s %v", method, params)
+			}
+			if out, err := exec.Command("git", "-C", repo, "worktree", "remove", wt).CombinedOutput(); err != nil {
+				if strings.Contains(string(out), "contains modified or untracked files") {
+					return nil, &HerdrError{Code: "dirty_worktree_requires_force", Message: string(out)}
+				}
+				return nil, errors.New(string(out))
+			}
+			return json.RawMessage(`{}`), nil
+		}
+		return
+	}
+	mergeAndDetach := func(t *testing.T, repo, wt, branch string) {
+		gitT(t, "-C", repo, "merge", "-q", "--no-ff", "-m", "merge", branch)
+		gitT(t, "-C", repo, "push", "-q", "origin", "main")
+		gitT(t, "-C", wt, "checkout", "-q", "--detach", "origin/main")
+	}
+	hasBranch := func(repo, branch string) bool {
+		return exec.Command("git", "-C", repo, "rev-parse", "-q", "--verify", "refs/heads/"+branch).Run() == nil
+	}
+	gone := func(dir string) bool { _, err := os.Stat(dir); return os.IsNotExist(err) }
+
+	t.Run("on its merged branch: the checkout and the branch go", func(t *testing.T) {
+		repo, wt, rpc, slow := setup(t, "done")
+		gitT(t, "-C", repo, "merge", "-q", "--no-ff", "-m", "merge", "done")
+		gitT(t, "-C", repo, "push", "-q", "origin", "main")
+		out, err := removeOwnWorktree(rpc, slow, own, wt)
+		eq(t, err, nil)
+		eq(t, out, "removed "+wt+" and branch done")
+		eq(t, gone(wt), true)
+		eq(t, hasBranch(repo, "done"), false)
+	})
+	t.Run("detached in origin/main, its branch (named in the dir) merged: both go", func(t *testing.T) {
+		repo, wt, rpc, slow := setup(t, "feat/x")
+		mergeAndDetach(t, repo, wt, "feat/x")
+		out, err := removeOwnWorktree(rpc, slow, own, wt)
+		eq(t, err, nil)
+		eq(t, out, "removed "+wt+" and branch feat/x")
+		eq(t, gone(wt), true)
+		eq(t, hasBranch(repo, "feat/x"), false)
+	})
+	t.Run("detached in origin/main, its branch squash-merged (a merged PR's head per gh): both go", func(t *testing.T) {
+		repo, wt, rpc, slow := setup(t, "sq")
+		gitT(t, "-C", repo, "merge", "-q", "--squash", "sq")
+		gitT(t, "-C", repo, "commit", "-q", "--allow-empty", "-m", "squash")
+		gitT(t, "-C", repo, "push", "-q", "origin", "main")
+		gitT(t, "-C", wt, "checkout", "-q", "--detach", "origin/main")
+		os.WriteFile(filepath.Join(tmp, "gh-heads"), []byte(gitT(t, "-C", repo, "rev-parse", "sq")), 0o644)
+		out, err := removeOwnWorktree(rpc, slow, own, wt)
+		eq(t, err, nil)
+		eq(t, out, "removed "+wt+" and branch sq")
+		eq(t, hasBranch(repo, "sq"), false)
+	})
+	t.Run("detached in origin/main, its branch not merged: the checkout goes, the branch stays", func(t *testing.T) {
+		repo, wt, rpc, slow := setup(t, "wip")
+		gitT(t, "-C", wt, "checkout", "-q", "--detach", "origin/main")
+		out, err := removeOwnWorktree(rpc, slow, own, wt)
+		eq(t, err, nil)
+		eq(t, out, "removed "+wt+" (branch wip kept: git can't tell it is merged into origin/main (nor gh that it is a merged PR's head))")
+		eq(t, gone(wt), true)
+		eq(t, hasBranch(repo, "wip"), true)
+	})
+	t.Run("detached in origin/main, no branch named after it: the checkout goes", func(t *testing.T) {
+		repo, wt, rpc, slow := setup(t, "old")
+		mergeAndDetach(t, repo, wt, "old")
+		gitT(t, "-C", repo, "branch", "-q", "-D", "old")
+		out, err := removeOwnWorktree(rpc, slow, own, wt)
+		eq(t, err, nil)
+		eq(t, out, "removed "+wt+" (no local branch is named after it)")
+		eq(t, gone(wt), true)
+	})
+	t.Run("detached at a commit not in origin/main: refused", func(t *testing.T) {
+		repo, wt, rpc, slow := setup(t, "ahead")
+		gitT(t, "-C", wt, "checkout", "-q", "--detach")
+		_, err := removeOwnWorktree(rpc, slow, own, wt)
+		eq(t, err.Error(), "refused: its HEAD is detached at a commit not in origin/main; "+wt+" was left as it is")
+		eq(t, gone(wt), false)
+		eq(t, hasBranch(repo, "ahead"), true)
+	})
+	t.Run("detached in origin/main with an untracked file: refused, the branch kept", func(t *testing.T) {
+		repo, wt, rpc, slow := setup(t, "dirty")
+		mergeAndDetach(t, repo, wt, "dirty")
+		os.WriteFile(filepath.Join(wt, "notes.txt"), []byte("x"), 0o644)
+		_, err := removeOwnWorktree(rpc, slow, own, wt)
+		eq(t, err.Error(), "refused: it has uncommitted or untracked files; "+wt+" was left as it is")
+		eq(t, gone(wt), false)
+		eq(t, hasBranch(repo, "dirty"), true)
+	})
 }
