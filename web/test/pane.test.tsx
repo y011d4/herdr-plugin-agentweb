@@ -443,7 +443,7 @@ describe('Home', () => {
     assert.equal($('.home-counts').textContent, '1 working1 done0 idleAgents ›'); // p1, p3 (p4 is the orchestrator)
     // two configured, one running: the switcher lists both, the stopped one dimmed
     const sw = [...container.querySelectorAll<HTMLElement>('.home-switch-btn')];
-    assert.deepEqual(sw.map((b) => switcher(b, b.dataset.orch!)), ['on|personal|idle|Personal', 'stopped|work|stopped|work']);
+    assert.deepEqual(sw.map((b) => switcher(b, b.dataset.orch!)), ['on|personal|idle|Personal', 'stopped|work|stopped|work1']); // 1: p6 waits, and work's account is unknown (every agent)
     assert.equal(container.querySelector('.home-attn'), null);
     await fire(() => $('.home-counts').click());
     assert.equal(location.hash, '#/agents/personal');
@@ -457,11 +457,25 @@ describe('Home', () => {
     const chips = [...container.querySelectorAll<HTMLElement>('.home-chip')];
     assert.deepEqual(chips.map((c) => `${c.dataset.paneId}:${c.textContent}`), ['p6:feat #2repo-wt-feat']);
     const sw = [...container.querySelectorAll<HTMLElement>('.home-switch-btn')];
-    assert.deepEqual(sw.map((b) => switcher(b, b.dataset.paneId!)), ['on|p4|idle|Personal', '|p7|unknown|repo']);
+    assert.deepEqual(sw.map((b) => switcher(b, b.dataset.paneId!)), ['on|p4|idle|Personal1', '|p7|unknown|repo1']); // the badges: p6 waits at both
     await fire(() => sw[1].click());
     assert.equal(location.hash, '#/home/work');
     await fire(() => chips[0].click());
     assert.equal(location.hash, '#/pane/p6');
+  });
+
+  it('lists its to-do items under Needs you, with nothing blocked too, and counts them on the switcher', async () => {
+    const s = fresh();
+    const todo = (id: string, text: string, due: number | null = null) => ({ id, text, agent: null, url: null, due, createdAt: 0 });
+    s.orchestrators[0].todos = [todo('a1b2c3', 'merge PR #119'), todo('d4e5f6', 'later on', Date.now() + 3_600_000)];
+    s.orchestrators[1].agents = []; // so work's count is its own items only
+    s.orchestrators[1].todos = [todo('0a0b0c', 'log in')];
+    await home(s);
+    assert.equal($('.home-attn').textContent, 'Needs you', 'no chip: only the label, over the items');
+    assert.deepEqual([...container.querySelectorAll<HTMLElement>('.home-todo')].map((r) => r.dataset.todo), ['a1b2c3']);
+    assert.equal($('[data-action="todo-later"]').textContent, 'Later (1) ›');
+    const sw = [...container.querySelectorAll<HTMLElement>('.home-switch-btn')];
+    assert.deepEqual(sw.map((b) => b.querySelector('.home-needs')?.textContent ?? ''), ['1', '1'], 'due now only');
   });
 
   it("hides the terminal keys until the view is on the terminal; its toggle doesn't change the preferred view", async () => {

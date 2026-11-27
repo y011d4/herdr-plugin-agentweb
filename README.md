@@ -399,8 +399,9 @@ billing). Its Home is then the chat alone: messages go out also while it works, 
 "doing now" line interrupts it, its questions get an answer panel, and the status bar shows its
 usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable), the model it runs on (a pick from
 Claude Code's `/model` list switches it between turns, or for its next start) and what went wrong, each with what to do. It
-also keeps a to-do list for you (its `todo` tool): what only you can do, such as a PR to merge or a login,
-each reminded once when it comes due. It has no herdr pane: on the PC,
+also keeps a to-do list for you (its `todo` tool), under "Needs you" on its Home: what only you can do, such
+as a PR to merge or a login, each reminded once when it comes due; ✓ ticks one off. Each Home's switcher button
+(and its heading in the PC sidebar) counts what waits on you there. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
 fresh session); the Home's warnings and Settings show the same steps.
