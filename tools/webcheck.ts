@@ -290,11 +290,15 @@ async function previewCmd(sub: string, o: Record<string, any>): Promise<number> 
   const unlock = await lock(); // never under a run; the holder process keeps the lock from the bridge
   try {
     const old = readPreview(port);
-    // a bridge still answering after a failed stop keeps its record: it is still on the herdr it began on
-    if (old) await previewCtl(old, 'stop').catch(async (e) => {
-      if (await fetch(`http://127.0.0.1:${port}/healthz`).then(() => true, () => false)) throw env(`preview ${port} did not stop (${e.message}): stop its bridge by hand`);
-      console.log(`WARN ${e.message} (nothing answers on ${port}: taken as stopped)`);
-    });
+    // the record goes only once nothing answers on its port, whatever the stop said (a stop that timed out has
+    // already dropped the bridge's pid file: a second one "succeeds"): a bridge still up stays on the herdr it began on
+    if (old) {
+      const said = await previewCtl(old, 'stop').then(() => '', (e) => (e as Error).message);
+      if ((await waitFn(() => fetch(`http://127.0.0.1:${port}/healthz`).then(() => false, () => true), 5000, 200)).timeout) {
+        throw env(`preview ${port} still answers after its stop${said ? ` (${said})` : ''}: stop its bridge by hand`);
+      }
+      if (said) console.log(`WARN ${said} (nothing answers on ${port}: stopped)`);
+    }
     if (sub === 'stop') {
       fs.rmSync(path.join(previewDir(port), 'preview.json'), { force: true }); // no record: not running (herdr start/stop look)
       console.log(`preview ${port} stopped`);
@@ -333,7 +337,11 @@ async function herdrCmd(sub: string): Promise<number> {
     return st === 'running';
   };
   // the default root is the desktop herdr's, shared by every worker: a private herdr there would switch their runs too
-  const real = (d: string) => { try { return fs.realpathSync(d); } catch { return path.resolve(d); } };
+  // through symlinks, the nearest existing ancestor's too (the default root may not exist yet)
+  const real = (d: string): string => {
+    const abs = path.resolve(d);
+    try { return fs.realpathSync(abs); } catch { return path.dirname(abs) === abs ? abs : path.join(real(path.dirname(abs)), path.basename(abs)); }
+  };
   if (!process.env.WEBCHECK_ROOT || real(WC_ROOT) === real(DEFAULT_ROOT)) throw env('a private herdr needs a WEBCHECK_ROOT of its own (export WEBCHECK_ROOT=$(mktemp -d /tmp/wc-XXXX))');
   const unlock = await lock();
   try {
