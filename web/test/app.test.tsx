@@ -92,7 +92,7 @@ describe('App', () => {
     assert.equal(document.querySelectorAll('#screen').length, 1);
     assert.equal(document.querySelectorAll('#toast-container').length, 1);
     assert.equal($('#topbar')!.style.display, '');
-    assert.equal($('#topbar-title')!.textContent, 'Herdr');
+    assert.equal($('#topbar-title')!.textContent, 'Yoicks');
     assert.equal($('#screen')!.childElementCount, 0);
     assert.equal($('#conn-dot')!.title, 'Disconnected');
     assert.equal($('#reconnect-banner')!.classList.contains('visible'), false, 'no banner before the first link change');

@@ -1,6 +1,6 @@
 {
   "name": "Yoicks",
-  "short_name": "Herdr",
+  "short_name": "Yoicks",
   "description": "Monitor and control coding agents running in herdr",
   "start_url": "/",
   "display": "standalone",
