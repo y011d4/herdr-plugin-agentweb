@@ -56,8 +56,8 @@ describe('Sidebar', () => {
     store.seenDone = { p3: 4 };
     const c = await show('#/agents', fresh());
     const p1 = c.querySelector<HTMLElement>('[data-sidebar-pane="p1"]')!;
-    assert.equal(p1.textContent, 'one #1' + 'repo · main' + 'working'); // label, location and branch, status
-    assert.equal(p1.querySelector('.card-location')!.textContent, 'repo · main');
+    assert.equal(p1.textContent, 'one #1' + 'repo' + 'main' + 'working'); // label, location, branch, status
+    assert.deepEqual(['.card-location', '.card-branch'].map((s) => p1.querySelector(s)!.textContent), ['repo', 'main']);
     assert.ok(!p1.querySelector('.card-purpose'), 'none given');
     const p3 = c.querySelector<HTMLElement>('[data-sidebar-pane="p3"]')!;
     assert.equal(p3.textContent, 'w-review' + 'レビューの指摘を直す' + 'repo-wt-feat › feat #1' + 'idle'); // herdr's name, its purpose

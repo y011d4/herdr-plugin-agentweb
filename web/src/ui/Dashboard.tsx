@@ -32,12 +32,21 @@ export function cardTitle(card: DashboardCard): string {
   return card.pane.agent?.herdrName || tabTitle(card);
 }
 
-/** The dim last line: where the agent runs, as far as its name doesn't say (the workspace › the tab),
- *  then its branch. */
+/** Where a card's agent runs, as far as its name doesn't say: the workspace › the tab. */
 export function cardLocation(card: DashboardCard): string {
   const tab = tabTitle(card);
-  const where = tab === cardTitle(card) ? card.workspaceLabel : `${card.workspaceLabel} › ${tab}`;
-  return [where, card.branch].filter(Boolean).join(' · ');
+  return tab === cardTitle(card) ? card.workspaceLabel : `${card.workspaceLabel} › ${tab}`;
+}
+
+/** The start of a card's (or a sidebar row's) dim last line: the location, then the branch; short of room,
+ *  the location is cut short faster (the branch says more). */
+export function CardWhere({ card }: { card: DashboardCard }) {
+  return (
+    <span className="flex min-w-0">
+      <span className="card-location min-w-0 shrink-[4] truncate">{cardLocation(card)}</span>
+      {card.branch ? <span className="card-branch min-w-0 truncate before:px-1 before:content-['·']">{card.branch}</span> : null}
+    </span>
+  );
 }
 
 /** The agents a list or a Home shows, most recent status change first: never the orchestrators,
@@ -132,7 +141,7 @@ function AgentCard({ card }: { card: DashboardCard }) {
       {purpose ? <Text className="card-purpose" fz={14} lh={1.35} mb={6} lineClamp={2} title={purpose}>{purpose}</Text> : null}
       {meta ? <Text fz={13} c="dimmed" mb={4} truncate>{meta}</Text> : null}
       <Group gap={12} fz={13} c="dimmed" wrap="nowrap">
-        <Text className="card-location min-w-0" inherit truncate>{cardLocation(card)}</Text>
+        <CardWhere card={card} />
         <Tag>{agentKind}</Tag>
         {isWorktree ? <Tag c="working">worktree</Tag> : null}
         {title ? <Text fz={12} inherit truncate>{title}</Text> : null}
