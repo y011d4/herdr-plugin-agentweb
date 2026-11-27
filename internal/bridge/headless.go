@@ -265,6 +265,7 @@ type headlessRunner struct {
 	waitRPC      func(ctx context.Context, method string, params map[string]any) (json.RawMessage, error)
 	profiles     map[string]LaunchProfile   // agent_start's
 	todos        *todoStore                 // the to-do lists: its todo tool writes its own
+	purposes     *purposeStore              // what each worker is for: agent_start and agent_prompt set it
 	onChange     func()                     // its view changed
 	onAlert      func(kind, message string) // a new warning: once per kind and session
 	onStatus     func(from, to string)      // it went done or blocked

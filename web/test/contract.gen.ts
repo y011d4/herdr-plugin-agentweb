@@ -210,7 +210,10 @@ export const state: AppState = {
   }
  ],
  "orchestratorPaneId": "p4",
- "claudeCheck": null
+ "claudeCheck": null,
+ "purposes": {
+  "p3": "レビューの指摘を直す"
+ }
 };
 
 export const messages: WsMessage[] = [
@@ -422,7 +425,10 @@ export const messages: WsMessage[] = [
     }
    ],
    "orchestratorPaneId": "p4",
-   "claudeCheck": null
+   "claudeCheck": null,
+   "purposes": {
+    "p3": "レビューの指摘を直す"
+   }
   }
  },
  {
@@ -740,6 +746,9 @@ export const messages: WsMessage[] = [
      "interrupt",
      "resume"
     ]
+   },
+   "purposes": {
+    "p3": "レビューの指摘を直す"
    }
   }
  },

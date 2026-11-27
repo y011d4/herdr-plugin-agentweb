@@ -225,7 +225,10 @@ All in `internal/bridge/` (one package):
   start, Stop and Clear, and a watch or question it registers once that child is replaced is
   refused; the workers' generation, which a restart keeps, is separate). Its tools
   are the CLI's orchestrator commands as functions (`overview`, `agent_get`, `agent_read`, `agent_prompt`, `agent_start`,
-  `worktree_remove`), confined to the account its child runs under, and `todo`, its Home's to-do list for the user
+  `worktree_remove`), confined to the account its child runs under (`agent_start`, and `agent_prompt` re-tasking a worker,
+  also take a `purpose`: one line in the user's language, `purpose.go`, by pane id in `<state>/agent-purposes.json`, sent as
+  state `purposes`, dropped once its pane has no agent, after it was seen with one or a minute on; the CLI has none, as it can't reach the
+  bridge), and `todo`, its Home's to-do list for the user
   (`todo.go`: one list per orchestrator in `<state>/todos/<name>.json`, kept across Stop, Clear and restarts; an item
   `{id, text, agent, url (http(s) only), due, createdAt}`, sent as state `orchestrators[].todos`; the user ticks one off with
   `DELETE /api/orchestrators/:name/todos/:id`; the items come due are reminded once from the bridge's minute tick, in one
@@ -412,8 +415,9 @@ Verified live against herdr 0.7.3 / protocol 16:
   untagged checkout has no herdr identity, so it derives its full worktree info from the
   pane cwd (and clears when that stops resolving). `repo_key` uses git's
   shared `--git-common-dir`, matching herdr's own repoKey. In the UI each card (and sidebar
-  row, and drawer title) shows the agent's herdr name (`herdrName`, else its tab name) and
-  (dim, beside it) its git branch. The dashboard is one flat list of every agent, most
+  row, and drawer title) shows the agent's purpose (state `purposes`) else its herdr name
+  (`herdrName`, else its tab name), and (dim, beside it) its git branch; under a purpose, the
+  name leads the dim location line. The dashboard is one flat list of every agent, most
   recent status change first, so each card names its own location (`cardLocation`); a linked
   worktree's card adds a `worktree` chip. The order is herdr's `stateChangeSeq` (a change
   not fetched yet counts as newest), then `sinceUnixMs`: that one lives only in bridge memory,

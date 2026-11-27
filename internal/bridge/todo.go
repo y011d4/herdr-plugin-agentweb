@@ -66,12 +66,7 @@ type todoAdd struct {
 // newTodo checks a and makes it an item (id left empty); the error says what to fix.
 func newTodo(a todoAdd, now int64, loc *time.Location) (todoEntry, error) {
 	var e todoEntry
-	e.Text = strings.Join(strings.FieldsFunc(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, a.Text), isJSSpace), " ")
+	e.Text = oneLine(a.Text)
 	switch n := len([]rune(e.Text)); {
 	case n == 0:
 		return e, fmt.Errorf("an item needs a text")

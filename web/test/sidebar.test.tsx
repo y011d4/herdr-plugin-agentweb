@@ -58,7 +58,8 @@ describe('Sidebar', () => {
     const p1 = c.querySelector<HTMLElement>('[data-sidebar-pane="p1"]')!;
     assert.equal(p1.textContent, 'one #1 main' + 'repo' + 'working'); // label (title, branch), location, status
     assert.equal(p1.querySelector('.card-branch')!.textContent, ' main');
-    assert.equal(c.querySelector('[data-sidebar-pane="p3"]')!.textContent, 'w-review' + 'repo-wt-feat › feat #1' + 'idle'); // herdr's name
+    // its purpose, then herdr's name before the location
+    assert.equal(c.querySelector('[data-sidebar-pane="p3"]')!.textContent, 'レビューの指摘を直す' + 'w-review · repo-wt-feat › feat #1' + 'idle');
     assert.equal(p1.querySelector<HTMLElement>('.status-badge')!.dataset.status, 'working');
     assert.equal(c.querySelector('[data-sidebar-pane="p3"] .status-badge')!.textContent, 'idle');
     assert.equal(c.querySelector('[data-sidebar-pane="p6"] .status-badge')!.textContent, 'blocked');
