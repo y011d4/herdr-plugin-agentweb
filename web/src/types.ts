@@ -20,6 +20,8 @@ export interface AgentInfo {
   /** herdr's state_change_seq: herdr's order of status changes, kept across bridge restarts
    *  (null until the bridge fetches it, e.g. right after a change) */
   stateChangeSeq: number | null;
+  /** the agent's herdr name (agent.start's), as `[yoicks]` notices name it (null until fetched) */
+  herdrName: string | null;
 }
 
 export interface PaneNode {

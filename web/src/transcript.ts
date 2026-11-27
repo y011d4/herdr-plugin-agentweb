@@ -285,6 +285,17 @@ export function renderAskQuestions(ask: AskQuestion[]): string {
 
 // the bridge writes each of its lines at a line's start: an indented one is the user's (a list item's, a quote's)
 const YOICKS_NOTICE = /^\[yoicks\] /;
+// a notice about a worker, named as herdr names agents: its status change (`<name>: <from> → <to>`) or start
+// (`started <name> (pane …`); the name is a button that opens it (ui/Pane.tsx)
+const WORKER_NOTICE = /^(\[yoicks\] (?:started )?)([a-z][a-z0-9_-]{0,31})((?:: | \(pane ).*)$/s;
+
+/** A notice line as HTML: escaped, a worker's name a button (data-agent) that opens it. */
+export function noticeHtml(line: string): string {
+  const m = WORKER_NOTICE.exec(line);
+  if (!m) return escapeHtml(line);
+  const name = escapeHtml(m[2]);
+  return `${escapeHtml(m[1])}<button type="button" class="chat-notice-agent" data-agent="${name}">${name}</button>${escapeHtml(m[3])}`;
+}
 
 /**
  * A user turn's leading and trailing `[yoicks] …` lines (the bridge's own word to a headless
@@ -318,7 +329,7 @@ export function renderItem(item: TimelineItem): string {
       const { before, body, after } = splitNotices(item.text);
       if (!before.length && !after.length) return bubble(item.text);
       // the bridge's notices: dim lines, not the user's
-      const notices = (ls: string[]): string => ls.map((l) => `<div class="chat-item chat-notice${sub}">${escapeHtml(l)}</div>`).join('');
+      const notices = (ls: string[]): string => ls.map((l) => `<div class="chat-item chat-notice${sub}">${noticeHtml(l)}</div>`).join('');
       return notices(before) + (body ? bubble(body) : '') + notices(after);
     }
     case 'assistant':

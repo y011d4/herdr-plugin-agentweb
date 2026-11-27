@@ -30,6 +30,9 @@ type AgentInfo struct {
 	// herdr's state_change_seq: when this status began, in herdr's own order of
 	// changes, which (unlike sinceUnixMs) survives a bridge restart
 	StateChangeSeq *int64 `json:"stateChangeSeq"`
+	// the agent's herdr name (agent.start's, as `yoicks agent` and a headless orchestrator's
+	// [yoicks] notices name it; agent.list only, null until fetched)
+	HerdrName *string `json:"herdrName"`
 }
 
 // PaneNode is a pane. Nodes reachable from a published State are never modified:
@@ -317,6 +320,7 @@ type RawSnapshot struct {
 // RawAgentSeqs is the part of an agent.list entry applyCompletionSeqs reads.
 type RawAgentSeqs struct {
 	PaneID         string `json:"pane_id"`
+	Name           string `json:"name"` // the agent's herdr name (agent.start's)
 	AgentStatus    string `json:"agent_status"`
 	CompletionSeq  *int64 `json:"completion_seq"`
 	StateChangeSeq *int64 `json:"state_change_seq"`

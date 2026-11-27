@@ -180,6 +180,20 @@ describe("a headless orchestrator's Home", () => {
     assert.ok(container.querySelector('#input-images') === null);
   });
 
+  it("a worker's name in a [yoicks] notice opens its pane (herdr's name, from the State); one gone says so", async () => {
+    await home(withPilot(idle)); // p3's agent is herdr's w-review (contract.gen.ts)
+    location.hash = '#/home/pilot';
+    await answer('/transcript', { ...transcript[0], items: [{ kind: 'user', text: '[yoicks] w-review: working → done\n[yoicks] w-gone: working → done', sidechain: false, ts: null }] });
+    const names = [...container.querySelectorAll<HTMLElement>('#chat-log .chat-notice-agent')];
+    assert.deepEqual(names.map((b) => b.dataset.agent), ['w-review', 'w-gone']);
+    await fire(() => names[0].click());
+    assert.equal(location.hash, '#/pane/p3');
+    location.hash = '#/home/pilot';
+    await fire(() => names[1].click());
+    assert.equal(location.hash, '#/home/pilot');
+    assert.deepEqual(getToasts().map((t) => t.body), ['w-gone is no longer running.']);
+  });
+
   it('sends nothing while an image is still being scaled', async () => {
     await home(withPilot(idle));
     let release = () => {};
@@ -269,8 +283,8 @@ describe('around a headless orchestrator', () => {
       /^Claude Code 2\.1\.330 failed \(interrupt\), 30h ago: none since, the periodic check looks off$/);
   });
 
-  it("shows the bridge's [yoicks] words as a dim line, escaped", () => {
+  it("shows the bridge's [yoicks] words as a dim line, escaped, the worker's name a button", () => {
     assert.equal(renderItem({ kind: 'user', text: '[yoicks] w-1: working → done <b>', sidechain: false, ts: null }),
-      '<div class="chat-item chat-notice">[yoicks] w-1: working → done &lt;b&gt;</div>');
+      '<div class="chat-item chat-notice">[yoicks] <button type="button" class="chat-notice-agent" data-agent="w-1">w-1</button>: working → done &lt;b&gt;</div>');
   });
 });

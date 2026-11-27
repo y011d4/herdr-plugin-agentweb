@@ -1,6 +1,6 @@
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
-import { askAnswer, renderMarkdown, renderItem, conversationItems, latestActivity, type TimelineItem } from '../src/transcript.ts';
+import { askAnswer, noticeHtml, renderMarkdown, renderItem, conversationItems, latestActivity, type TimelineItem } from '../src/transcript.ts';
 
 // renderMarkdown is the chat prose renderer used for user + assistant turns.
 // It must be XSS-safe (all text escaped before formatting) and dependency-free.
@@ -189,6 +189,19 @@ describe('renderItem — assistant + user turns use the markdown renderer', () =
     assert.deepEqual(shown(user('a\n[yoicks] x\nb')), ['chat-user: a[yoicks] xb']);
     assert.deepEqual(shown(user('see [yoicks] x')), ['chat-user: see [yoicks] x']);
     assert.doesNotMatch(user('- this:\n  [yoicks] w-a: done'), /chat-notice/); // indented: a list item's line
+  });
+
+  it("makes a worker's name in a notice a button that opens it (data-agent); the rest stays text, escaped", () => {
+    const btn = (n: string): string => `<button type="button" class="chat-notice-agent" data-agent="${n}">${n}</button>`;
+    assert.equal(noticeHtml('[yoicks] w-a: working → done'), `[yoicks] ${btn('w-a')}: working → done`);
+    assert.equal(noticeHtml('[yoicks] w-a: done → idle, ready, task not sent'), `[yoicks] ${btn('w-a')}: done → idle, ready, task not sent`);
+    assert.equal(noticeHtml('[yoicks] started w_b2 (pane w8:p1) in /x <y>; sent'), `[yoicks] started ${btn('w_b2')} (pane w8:p1) in /x &lt;y&gt;; sent`);
+    // not a worker: the bridge's own word, a name herdr wouldn't take, nothing after it
+    for (const l of ['[yoicks] restarted while you were working; check overview.', '[yoicks] W-A: x → y', '[yoicks] w-a', '[yoicks] <b>: x']) {
+      assert.doesNotMatch(noticeHtml(l), /<button/, l);
+    }
+    assert.equal(noticeHtml('[yoicks] <b>: x'), '[yoicks] &lt;b&gt;: x');
+    assert.match(renderItem({ kind: 'user', text: '[yoicks] w-a: working → done', sidechain: false, ts: null }), /class="chat-item chat-notice">\[yoicks\] <button[^>]*data-agent="w-a"/);
   });
 });
 

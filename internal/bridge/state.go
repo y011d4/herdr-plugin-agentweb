@@ -93,10 +93,13 @@ func createState(snap RawSnapshot, now int64, prev *State) *State {
 	for _, p := range snap.Panes {
 		pane := normalizePane(p, now)
 		if prev != nil {
-			if pp := prev.paneByID[p.PaneID]; pane.Agent != nil && pp != nil && pp.Agent != nil && pp.Agent.Status == pane.Agent.Status {
-				pane.Agent.SinceUnixMs = pp.Agent.SinceUnixMs
-				pane.Agent.CompletionSeq = pp.Agent.CompletionSeq
-				pane.Agent.StateChangeSeq = pp.Agent.StateChangeSeq
+			if pp := prev.paneByID[p.PaneID]; pane.Agent != nil && pp != nil && pp.Agent != nil {
+				pane.Agent.HerdrName = pp.Agent.HerdrName // agent.list's, until it says otherwise
+				if pp.Agent.Status == pane.Agent.Status {
+					pane.Agent.SinceUnixMs = pp.Agent.SinceUnixMs
+					pane.Agent.CompletionSeq = pp.Agent.CompletionSeq
+					pane.Agent.StateChangeSeq = pp.Agent.StateChangeSeq
+				}
 			}
 		}
 		if _, dup := s.paneByID[p.PaneID]; !dup {
@@ -313,11 +316,12 @@ func rebuildWorkspaces(workspaces []*WorkspaceNode, tabByID map[string]*TabNode)
 	return out
 }
 
-// applyCompletionSeqs fills in each agent's completionSeq and stateChangeSeq from
-// herdr's agent.list (the only place herdr reports them). A pane is updated only if
-// its status matches the reply and hasn't changed since the request went out
+// applyCompletionSeqs fills in each agent's completionSeq and stateChangeSeq, and its herdr
+// name, from herdr's agent.list (the only place herdr reports them). The seqs only where the
+// pane's status matches the reply and hasn't changed since the request went out
 // (requestedAt): after done -> working -> done mid-request the reply would carry
-// the previous completion's seq. Returns s itself when nothing changed.
+// the previous completion's seq. The name whatever the status. Returns s itself when
+// nothing changed.
 func applyCompletionSeqs(s *State, agents []RawAgentSeqs, requestedAt int64) *State {
 	paneByID := make(map[string]*PaneNode, len(s.paneByID))
 	for k, v := range s.paneByID {
@@ -330,15 +334,20 @@ func applyCompletionSeqs(s *State, agents []RawAgentSeqs, requestedAt int64) *St
 			continue
 		}
 		ag := pane.Agent
-		if ag.Status != a.AgentStatus || ag.SinceUnixMs >= requestedAt {
-			continue
-		}
-		if eqSeq(ag.CompletionSeq, a.CompletionSeq) && eqSeq(ag.StateChangeSeq, a.StateChangeSeq) {
+		seqs := ag.Status == a.AgentStatus && ag.SinceUnixMs < requestedAt &&
+			!(eqSeq(ag.CompletionSeq, a.CompletionSeq) && eqSeq(ag.StateChangeSeq, a.StateChangeSeq))
+		name := a.Name != "" && (ag.HerdrName == nil || *ag.HerdrName != a.Name)
+		if !seqs && !name {
 			continue
 		}
 		u := *pane
 		na := *ag
-		na.CompletionSeq, na.StateChangeSeq = copySeq(a.CompletionSeq), copySeq(a.StateChangeSeq) // not the reply's own pointers
+		if seqs {
+			na.CompletionSeq, na.StateChangeSeq = copySeq(a.CompletionSeq), copySeq(a.StateChangeSeq) // not the reply's own pointers
+		}
+		if name {
+			na.HerdrName = strp(a.Name)
+		}
 		u.Agent = &na
 		paneByID[a.PaneID] = &u
 		changed = true
