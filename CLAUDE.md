@@ -295,7 +295,7 @@ that checkout, with the PC at hand. The gate is CI, not a local webcheck: each p
 all of ci.yml, webcheck's Tier 1 included, so the run of main's head checks the merged PRs together:
 
 ```bash
-git fetch -q origin main && gh run watch "$(gh run list --workflow ci.yml --commit "$(git rev-parse origin/main)" --limit 1 --json databaseId -q '.[0].databaseId')" --exit-status
+git fetch -q origin main && sha=$(git rev-parse origin/main) && gh run watch "$(gh run list --workflow ci.yml --commit "$sha" --limit 1 --json databaseId -q '.[0].databaseId')" --exit-status
 sh scripts/redeploy.sh main      # fetch, fast-forward main, rebuild, stop/start, wait for /healthz
 sh scripts/redeploy.sh <commit>  # rolling back: the same, to <commit> (detached)
 ```
@@ -305,7 +305,9 @@ it takes about 3 minutes, and a bad deploy is a restart the phone feels and a ro
 failed run, or none yet: don't deploy; say which. A cancelled one means main moved on (CI cancels
 the older run): fetch and check the new head. Then, with nothing in between, check that no Home is
 working or waiting on a question (`/api/state`; redeploy.sh only warns), run it, and report the
-`BUILD` and `CACHE` it prints, and any Home it interrupted anyway.
+`BUILD` and `CACHE` it prints, and any Home it interrupted anyway. It fetches again and prints the
+commit it switches to (`switching to main (<short sha>)`): one other than `$sha` means main moved in
+between, so check that commit's run the same way at once, and roll back to `$sha` if it fails.
 
 It refuses (before stopping anything) outside the linked checkout, on a dirty tree, when local
 main can't fast-forward, and when `herdr-plugin.toml` would change: herdr caches the linked
