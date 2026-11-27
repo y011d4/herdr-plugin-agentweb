@@ -881,6 +881,11 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 	r.warnings = slices.DeleteFunc(r.warnings, func(w HeadlessWarning) bool { return w.Kind == "silent" })
 	from, seq := r.model.Status, r.model.CompletionSeq
 	step := r.model.apply(line, nowMs())
+	// a pending question keeps it blocked: its turn's init (stdout) can be read after the
+	// question itself came (over MCP)
+	if r.pending != nil && r.model.Status == "working" {
+		r.model.Status = "blocked"
+	}
 	to := r.model.Status
 	if r.model.CompletionSeq != seq {
 		r.persist()
