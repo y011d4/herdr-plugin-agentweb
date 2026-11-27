@@ -291,12 +291,21 @@ To check the built app, SW included, without rebuilding the binary: `npx vite bu
 and run the bridge with `YOICKS_WEB_DIR=web/dist`.
 
 Deploying to the running bridge (the binary of the checkout herdr links, normally main's), in
-that checkout, with the PC at hand:
+that checkout, with the PC at hand. The gate is CI, not a local webcheck: each push to main runs
+all of ci.yml, webcheck's Tier 1 included, so the run of main's head checks the merged PRs together:
 
 ```bash
+git fetch -q origin main && gh run watch "$(gh run list --workflow ci.yml --commit "$(git rev-parse origin/main)" --limit 1 --json databaseId -q '.[0].databaseId')" --exit-status
 sh scripts/redeploy.sh main      # fetch, fast-forward main, rebuild, stop/start, wait for /healthz
 sh scripts/redeploy.sh <commit>  # rolling back: the same, to <commit> (detached)
 ```
+
+Deploy only when that `gh run watch` exits 0. A run still going is waited for, not deployed past:
+it takes about 3 minutes, and a bad deploy is a restart the phone feels and a rollback by hand. A
+failed run, or none yet: don't deploy; say which. A cancelled one means main moved on (CI cancels
+the older run): fetch and check the new head. Then, with nothing in between, check that no Home is
+working or waiting on a question (`/api/state`; redeploy.sh only warns), run it, and report the
+`BUILD` and `CACHE` it prints, and any Home it interrupted anyway.
 
 It refuses (before stopping anything) outside the linked checkout, on a dirty tree, when local
 main can't fast-forward, and when `herdr-plugin.toml` would change: herdr caches the linked
@@ -610,10 +619,11 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   (`Input.dispatchTouchEvent`, mobile metrics, fresh profile). "The screen
   changed" is not proof by itself on a busy pane — assert on content moving
   to *older* lines and on the composer staying clean.
-- **webcheck** (`tools/webcheck.ts`: headless Chrome over CDP, no dependencies) is the gate before
-  deploying a web change: all of Tier 1 passes. CI's `webcheck` job runs Tier 1 on every PR, over a
-  private herdr (the release binary of `HERDR_VERSION`, pinned by SHA-256 in ci.yml). By hand, the same,
-  in a root of your own (its own lock: no other worker's run to wait for) and nowhere production shows:
+- **webcheck** (`tools/webcheck.ts`: headless Chrome over CDP, no dependencies): CI's `webcheck` job
+  runs Tier 1 on every PR and every push to main, over a private herdr (the release binary of
+  `HERDR_VERSION`, pinned by SHA-256 in ci.yml), and main's run is the gate before a deploy (above).
+  By hand it is optional, for debugging a UI flow or writing a check: the same, in a root of your own
+  (its own lock: no other worker's run to wait for) and nowhere production shows:
   ```bash
   export WEBCHECK_ROOT=$(mktemp -d /tmp/wc-XXXX)  # short: the private herdr's socket lives under it
   go build -o "$FC/claude" ./tools/fakeclaude   # FC: any dir; the H items' wc-h1 runs it

@@ -136,6 +136,7 @@ jobs:
   # step by hand). herdr is the release binary of the version production runs (CLAUDE.md's herdr 0.9.5), checked
   # against the SHA-256 below (herdr publishes none): a release replaced under the same tag fails here, not runs.
   # Raising the version is a PR that changes both lines, and so runs this against the new herdr first.
+  # It runs on pushes to main too, with no `if:`: main's run is the deploy gate (CLAUDE.md's deploy steps).
   webcheck:
     runs-on: ubuntu-latest
     timeout-minutes: 20
