@@ -396,7 +396,8 @@ this boundary is about what each orchestrator, and so each account, sees.
 instead of an agent in a herdr pane (your Claude subscription only: the bridge refuses API-key
 billing). Its Home is then the chat alone: messages go out also while it works, ■ on the
 "doing now" line interrupts it, its questions get an answer panel, and the status bar shows its
-usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable) and what went wrong, each with what to do. It has no herdr pane: on the PC,
+usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable), its model (Claude Code's `/model`
+list: a pick switches it between turns, or for its next start) and what went wrong, each with what to do. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
 fresh session); the Home's warnings and Settings show the same steps.
@@ -476,7 +477,9 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   `"mode": "headless"`), whose `paneId` is `"hl:<name>"` while it runs and whose
   `headless` is `{ status: stopped|idle|working|blocked|done|error, completionSeq, pending: { id, questions } | null,
   usage: { fiveHour, sevenDay, fable: { utilization (0–1), resetsAt (ms) } | null, contextPct | null, at } | null,
-  warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }] }`, `null` for a tui one)
+  warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }], model, models: [{ value, displayName, description, resolvedModel }] }`,
+  `null` for a tui one; `models` is Claude Code's `/model` list, `[]` until a child of this bridge has given it, and
+  `model` one of its values, `"default"` for Claude Code's own)
   and `orchestratorPaneId` (the first running tui one's, or `null`), and `claudeCheck`, the last Claude Code check
   (`{ at (ms), version, ok, failed: [items] }`, `null` when none has run). Each agent's `completionSeq` is herdr's
   `completion_seq` (which completion its idle/done status is; `null` until fetched), and its
@@ -521,6 +524,10 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   blocks before the text; 400 otherwise. The web UI's + and paste
   attach them, scaled and recompressed to JPEG. A headless orchestrator has no herdr pane: `/api/panes/hl:<name>/…` and
   `/api/agents/hl:<name>/…` answer 404, except `GET /api/panes/hl:<name>/transcript`.
+- `POST /api/orchestrators/:name/model` `{"model": "<value>"}` — set a headless orchestrator's model to one of
+  `headless.models` (400 for another): a running one switches in place (Claude Code's `set_model`, from its next
+  turn), 409 while a turn runs, 504 when Claude Code hasn't answered within 10 s (kept once it does); a stopped one
+  starts on it. Kept across restarts and Clear (`--model` at each start).
 - `POST /api/orchestrators/:name/answer` `{"id": "…", "answers": {"<question>": "<label>"}}` or
   `{"id": "…", "deny": "<message>"}` or `{"id": "…", "chat": true, "answers"?: {…}}` — answer (or refuse) the
   headless orchestrator's pending question (`headless.pending`, its AskUserQuestion): a multiSelect's labels

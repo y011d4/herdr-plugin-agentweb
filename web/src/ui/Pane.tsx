@@ -8,13 +8,13 @@
  * A pane's chat is read-only: its composer and keys show with its terminal (or for a kept first task),
  * and while it works ■ Interrupt sends Esc.
  * A headless orchestrator's Home (hl:<name>: no herdr pane) sends through /api/orchestrators/:name/*,
- * has ■ on its "doing now" line, its usage and warnings on the status bar and its question (the
+ * has ■ on its "doing now" line, its usage, model and warnings on the status bar and its question (the
  * State's headless.pending) in HeadlessPrompt; no terminal and no keys.
  *
  * State pushes re-render it constantly. The composer's textarea is uncontrolled (React never sets its
  * value), so a push never resets what is being typed, an IME composition included.
  */
-import { ActionIcon, Button, CloseButton, FileButton, Group, Image, Menu, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Button, CloseButton, FileButton, Group, Image, Menu, NativeSelect, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
@@ -26,7 +26,7 @@ import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts
 import { openAgent, openAgentNamed } from '../nav.ts';
 import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
 import { emit, findPane, keptTasks, store, subscribe } from '../store.ts';
-import type { AppState, HeadlessUsage, OrchestratorView } from '../types.ts';
+import type { AppState, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
 import { TopbarIcon, agentCards, cardTitle, orchestratorLabel, relativeTime } from './Dashboard.tsx';
 import { StatusDot } from './Status.tsx';
 import type { Topbar } from './App.tsx';
@@ -186,7 +186,7 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
 // Home status bar: with two or more orchestrators configured a switcher between their Homes (a
 // stopped one dimmed: its Home has Start), its account's agents waiting on the user (tap → that
 // agent) and counts of the rest (tap → its list), then the orchestrator's Clear and Stop; for a
-// headless one also its usage and its warnings (`clear`: their Clear, on a stopped Home too).
+// headless one also its usage, its model and its warnings (`clear`: their Clear, on a stopped Home too).
 function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: string; state: AppState | null; actions?: HomeActions; clear?: () => void }) {
   if (!state) return <Stack id="home-status" className={STATUS_BAR}></Stack>;
   const all = state.orchestrators ?? [];
@@ -241,6 +241,7 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
         )}
       </Group>
       {self?.headless?.usage && <Usage usage={self.headless.usage} />}
+      {self?.headless && <ModelPicker o={self} />}
       {self?.headless && <HeadlessWarnings o={self} clear={clear} />}
     </Stack>
   );
@@ -275,6 +276,31 @@ function Usage({ usage }: { usage: HeadlessUsage }) {
     <Text id="home-usage" fz={12} c="dimmed" className="tabular-nums">
       {parts.map((p, i) => <span key={p.text} className={p.stale ? 'stale opacity-50' : undefined}>{i ? ` · ${p.text}` : p.text}</span>)}
     </Text>
+  );
+}
+
+// A headless orchestrator's model, from Claude Code's /model list (none until a child of this bridge gave
+// it): a pick switches it in place, or for its next start when stopped; not while a turn runs (the
+// bridge refuses that too). Default is named by the model it stands for.
+function ModelPicker({ o }: { o: OrchestratorView }) {
+  const h = o.headless!;
+  if (!h.models.length) return null;
+  const label = (m: HeadlessModel): string => m.value !== 'default' ? m.displayName
+    : `Default (${h.models.find((x) => x.value !== 'default' && x.resolvedModel === m.resolvedModel)?.displayName ?? m.description})`;
+  // a saved model Claude Code no longer lists (it still runs on it) shows as itself, so Default is a change
+  const data = [...(h.models.some((m) => m.value === h.model) ? [] : [{ value: h.model, label: h.model }]),
+    ...h.models.map((m) => ({ value: m.value, label: label(m) }))];
+  const pick = async (model: string): Promise<void> => {
+    try {
+      await orchestratorPost(o.name, 'model', { model });
+    } catch (err) {
+      // model_pending: Claude Code hasn't answered yet, and the Home shows the model once it does
+      showToast((err as { code?: string }).code === 'model_pending' ? 'Model change pending' : 'Model not changed', (err as Error).message);
+    }
+  };
+  return (
+    <NativeSelect id="home-model" size="xs" w="max-content" aria-label="Model" value={h.model} disabled={h.status === 'working' || h.status === 'blocked'}
+      data={data} onChange={(e) => { void pick(e.currentTarget.value); }} />
   );
 }
 

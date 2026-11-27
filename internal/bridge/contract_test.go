@@ -86,7 +86,9 @@ func withHeadless(state ClientState) ClientState {
 		Usage: &HeadlessUsage{
 			FiveHour: &UsageWindow{Utilization: 0.35, ResetsAt: 1795665000000}, SevenDay: nil, Fable: &UsageWindow{Utilization: 0.04, ResetsAt: 1795928400000}, ContextPct: new(12.5), At: now},
 		Warnings: []HeadlessWarning{{Kind: "silent", Message: "no event for 3m0s while working", Since: now, Actions: []string{"interrupt", "clear"}},
-			{Kind: "unknown_event", Message: "Claude Code sent an event yoicks doesn't know (mystery)", Since: now, Actions: []string{}}}}
+			{Kind: "unknown_event", Message: "Claude Code sent an event yoicks doesn't know (mystery)", Since: now, Actions: []string{}}},
+		Model: "sonnet", Models: []HeadlessModel{{"default", "Default (recommended)", "Opus 5.5 · Best for everyday, complex tasks", "claude-opus-5-5"},
+			{"sonnet", "Sonnet 5.5", "Most efficient for simpler tasks", "claude-sonnet-5-5"}}}
 	state.Orchestrators = append(slices.Clone(state.Orchestrators), v)
 	state.ClaudeCheck = &ClaudeCheck{At: now, Version: "2.1.330", OK: false, Failed: []string{"interrupt", "resume"}}
 	return state

@@ -166,7 +166,11 @@ All in `internal/bridge/` (one package):
   usage, warnings (unknown events, unreadable lines, the init check). Its state's `paneId` is
   `hl:<name>` while the child runs; the pane/agent routes and `watch_pane` refuse `hl:` (404 /
   nothing read), only the transcript route serves it (`resolvePaneTranscript`'s head). Saved in
-  `<state>/headless/<name>.json` (`{sessionId, wanted, rulesHash, watches, completionSeq}`: the count goes on across restarts, a phone's seen-done is keyed on it); `<state>/headless/<name>.mcp.json` (only the
+  `<state>/headless/<name>.json` (`{sessionId, wanted, rulesHash, watches, completionSeq, model}`: the count goes on across restarts, a phone's seen-done is keyed on it). Its
+  model: each child gets an `initialize` control request at its start, whose answer lists Claude Code's `/model`
+  choices (state `headless.models`; the answer also has the account's email: only `models` is read); `POST …/model`
+  switches a running child in place with `set_model` (refused mid-turn; Claude Code applies it from the next turn),
+  and each start passes the saved choice as `--model`. `<state>/headless/<name>.mcp.json` (only the
   bridge writes it, `--mcp-config` in the argv) is the marker that tells its own orphan from a user's
   `claude --resume`. Warnings also go out once per session and kind as WS `orchestrator_alert`, ntfy
   and herdr's `notification.show`; its working→done and →blocked go out as an agent's do, as

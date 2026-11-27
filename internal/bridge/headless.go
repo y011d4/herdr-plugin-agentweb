@@ -287,6 +287,9 @@ type headlessRunner struct {
 	extraArgs     []string     // tests: more argv (the claudelive test's --model haiku); never set in production
 
 	op sync.Mutex // start, stop, clear: one at a time
+	// user messages (read) and a model switch (write): no turn begins between SetModel's check that
+	// none runs and Claude Code's answer
+	gate sync.RWMutex
 
 	mu           sync.Mutex
 	sessionID    string
@@ -300,8 +303,10 @@ type headlessRunner struct {
 	alerted      map[string]bool // kinds notified this session
 	crashes      []time.Time
 	restartTimer interface{ Stop() bool }
-	interrupts   map[string]chan struct{}
-	nInterrupt   int
+	acks         map[string]chan string // control requests awaiting their answer, by request_id: its error ("" = none); closed at the child's end
+	nRequest     int
+	switches     map[string]string // set_model requests awaiting their answer: request_id → the model
+	modelChoice  string            // the model it runs on ("" = Claude Code's default), passed as --model at each start
 	lastEvent    time.Time
 	pending      *hlPending                // the question waiting for the user
 	asks         map[string]bool           // AskUserQuestion tool_use ids: did each reach approve?
@@ -339,7 +344,8 @@ type headlessState struct {
 	Wakes       []string  `json:"wakes,omitempty"` // wake-ups not written to it yet
 	// its completed turns so far, kept across bridge restarts: a phone's seen-done record is
 	// keyed on it, so a count starting over would pass a new completion off as one seen
-	CompletionSeq int64 `json:"completionSeq,omitempty"`
+	CompletionSeq int64  `json:"completionSeq,omitempty"`
+	Model         string `json:"model,omitempty"` // its model (SetModel); "" = Claude Code's default
 }
 
 // newHeadlessRunner is def's runner; the server fills in its herdr calls, profiles and
@@ -352,13 +358,16 @@ func newHeadlessRunner(def OrchestratorDef, stateDir, rules string) *headlessRun
 		clock:         realClock{},
 		restartDelays: []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second},
 		crashWindow:   10 * time.Minute, interruptWait: 2 * time.Second, silence: 3 * time.Minute,
-		alerted: map[string]bool{}, interrupts: map[string]chan struct{}{}, asks: map[string]bool{}, chatNext: map[string]map[string]any{}, served: map[string]bool{},
+		alerted: map[string]bool{}, acks: map[string]chan string{}, switches: map[string]string{}, asks: map[string]bool{}, chatNext: map[string]map[string]any{}, served: map[string]bool{},
 		watches: map[string]*hlWatch{}}
 	r.model.Status = "stopped"
 	var saved headlessState
 	if b, err := os.ReadFile(headlessPath(stateDir, def.Name, ".json")); err == nil && json.Unmarshal(b, &saved) == nil && (saved.SessionID == "" || sessionIDRe.MatchString(saved.SessionID)) {
 		r.sessionID, r.wanted, r.interrupted, r.rulesHash, r.saved, r.wakes = saved.SessionID, saved.Wanted, saved.Interrupted, saved.RulesHash, saved.Watches, saved.Wakes
 		r.model.CompletionSeq = saved.CompletionSeq
+		if modelRe.MatchString(saved.Model) {
+			r.modelChoice = saved.Model
+		}
 	}
 	if kind, msg := r.refusedEnv(); msg != "" {
 		r.model.Status = "error"
@@ -394,7 +403,11 @@ func (r *headlessRunner) refusedEnv() (kind, message string) {
 func (r *headlessRunner) view() (HeadlessView, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	v := HeadlessView{Status: r.model.Status, CompletionSeq: r.model.CompletionSeq, Warnings: slices.Clone(r.warnings)}
+	v := HeadlessView{Status: r.model.Status, CompletionSeq: r.model.CompletionSeq, Warnings: slices.Clone(r.warnings),
+		Model: firstNonEmpty(r.modelChoice, "default"), Models: slices.Clone(r.model.models)}
+	if v.Models == nil {
+		v.Models = []HeadlessModel{}
+	}
 	if v.Warnings == nil {
 		v.Warnings = []HeadlessWarning{}
 	}
@@ -471,7 +484,7 @@ func (r *headlessRunner) persist() {
 		}
 	}
 	slices.SortFunc(watches, func(a, b hlWatch) int { return strings.Compare(a.Pane, b.Pane) })
-	b, _ := json.Marshal(headlessState{r.sessionID, r.wanted, r.interrupted, r.rulesHash, watches, r.wakes, r.model.CompletionSeq})
+	b, _ := json.Marshal(headlessState{r.sessionID, r.wanted, r.interrupted, r.rulesHash, watches, r.wakes, r.model.CompletionSeq, r.modelChoice})
 	if os.MkdirAll(filepath.Join(r.stateDir, "headless"), 0o700) == nil {
 		writeFile0600(headlessPath(r.stateDir, r.def.Name, ".json"), b)
 	}
@@ -681,10 +694,20 @@ func (r *headlessRunner) start(resume bool) error {
 	notice := r.interrupted
 	r.interrupted = false
 	r.persist()
+	argv := headlessArgv(r.sessionID, resume && !begin, mcpConfig, r.tools)
+	if r.modelChoice != "" {
+		argv = append(argv, "--model", r.modelChoice)
+	}
 	r.mu.Unlock()
 	alert()
-	if err := r.spawn(append(headlessArgv(r.session(), resume && !begin, mcpConfig, r.tools), r.extraArgs...), env); err != nil {
+	if err := r.spawn(append(argv, r.extraArgs...), env); err != nil {
 		return r.fail("start", &LifecycleError{Status: 500, Code: "claude_failed", Message: "could not start claude: " + err.Error()})
+	}
+	r.mu.Lock()
+	c := r.child
+	r.mu.Unlock()
+	if c != nil { // its answer lists the models the Home offers
+		c.write(map[string]any{"type": "control_request", "request_id": initRequest, "request": map[string]any{"subtype": "initialize"}})
 	}
 	r.rearm()
 	r.mu.Lock()
@@ -888,9 +911,15 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 	for _, w := range step.Warnings {
 		alerts = append(alerts, r.warn(w.Kind, w.Message))
 	}
-	if ch := r.interrupts[step.Acked]; ch != nil {
-		close(ch)
-		delete(r.interrupts, step.Acked)
+	if value, ok := r.switches[step.Acked]; ok { // before its ack: SetModel answers with the choice kept
+		delete(r.switches, step.Acked)
+		if step.AckError == "" {
+			r.chooseModel(value)
+		}
+	}
+	if ch := r.acks[step.Acked]; ch != nil {
+		ch <- step.AckError
+		delete(r.acks, step.Acked)
 	}
 	for _, res := range step.Results {
 		// an error for a call the bridge never served failed on the way (the MCP session, its
@@ -985,10 +1014,11 @@ func (r *headlessRunner) watchSilence(c *hlChild) {
 func (r *headlessRunner) exited(c *hlChild, werr error) {
 	r.mu.Lock()
 	r.child = nil
-	for id, ch := range r.interrupts {
+	for id, ch := range r.acks {
 		close(ch)
-		delete(r.interrupts, id)
+		delete(r.acks, id)
 	}
+	clear(r.switches)
 	r.denyPending("the orchestrator ended")
 	busy := r.model.Status == "working" || r.model.Status == "blocked"
 	how := "exit 0"
@@ -1187,6 +1217,8 @@ func (r *headlessRunner) write(content any) error {
 
 // writeTo writes a user message to child c (never to a later one); it works on it from then.
 func (r *headlessRunner) writeTo(c *hlChild, content any) error {
+	r.gate.RLock()
+	defer r.gate.RUnlock()
 	r.mu.Lock()
 	if r.child == c && r.model.Status != "working" && r.model.Status != "blocked" {
 		r.model.Status, r.lastEvent = "working", r.clock.Now()
@@ -1204,11 +1236,11 @@ func (r *headlessRunner) writeTo(c *hlChild, content any) error {
 func (r *headlessRunner) Interrupt() error {
 	r.mu.Lock()
 	c, err := r.running()
-	r.nInterrupt++
-	id := fmt.Sprintf("yoicks-interrupt-%d", r.nInterrupt)
-	acked := make(chan struct{})
+	r.nRequest++
+	id := fmt.Sprintf("yoicks-interrupt-%d", r.nRequest)
+	acked := make(chan string, 1)
 	if err == nil {
-		r.interrupts[id] = acked
+		r.acks[id] = acked
 		r.denyPending("interrupted") // an approve call ends with its cancellation; a stdio request with this
 	}
 	r.mu.Unlock()
@@ -1225,7 +1257,7 @@ func (r *headlessRunner) Interrupt() error {
 	r.op.Lock()
 	defer r.op.Unlock()
 	r.mu.Lock()
-	delete(r.interrupts, id)
+	delete(r.acks, id)
 	alert := r.warn("interrupt", fmt.Sprintf("the interrupt got no answer within %s; restarted with --resume", r.interruptWait))
 	same := r.child == c
 	r.mu.Unlock()
@@ -1235,6 +1267,87 @@ func (r *headlessRunner) Interrupt() error {
 	}
 	r.stopChild(c)
 	return r.start(true)
+}
+
+// SetModel sets the model it runs on: one of the models its child listed ("default": Claude
+// Code's own). A running child switches in place (Claude Code's set_model, which applies from the
+// next turn), never mid-turn: refused while one runs; the choice is kept once Claude Code says yes,
+// however late (onLine). A stopped one starts on it. Kept across restarts and Clear (--model at
+// each start).
+func (r *headlessRunner) SetModel(value string) error {
+	r.op.Lock() // a start in progress has its child before this goes on
+	opHeld := true
+	defer func() {
+		if opHeld {
+			r.op.Unlock()
+		}
+	}()
+	r.mu.Lock()
+	pending := len(r.switches) > 0 // one waits for its answer, holding the gate: this would wait holding op
+	r.mu.Unlock()
+	if pending {
+		return &LifecycleError{Status: 409, Code: "model_pending", Message: "a model change is still waiting for Claude Code's answer"}
+	}
+	r.gate.Lock()
+	defer r.gate.Unlock()
+	r.mu.Lock()
+	if !slices.ContainsFunc(r.model.models, func(m HeadlessModel) bool { return m.Value == value }) {
+		r.mu.Unlock()
+		return &LifecycleError{Status: 400, Code: "invalid_params", Message: fmt.Sprintf("%q isn't one of the models Claude Code offers here", value)}
+	}
+	c := r.child
+	if c == nil {
+		r.chooseModel(value)
+		r.mu.Unlock()
+		r.onChange()
+		return nil
+	}
+	if r.model.Status == "working" || r.model.Status == "blocked" {
+		r.mu.Unlock()
+		return &LifecycleError{Status: 409, Code: "busy", Message: "it is working: change the model once its turn has ended"}
+	}
+	r.nRequest++
+	id := fmt.Sprintf("yoicks-model-%d", r.nRequest)
+	acked := make(chan string, 1)
+	r.acks[id], r.switches[id] = acked, value
+	r.mu.Unlock()
+	req := map[string]any{"subtype": "set_model"}
+	if value != "default" {
+		req["model"] = value
+	}
+	failed := func(msg string) error {
+		return &LifecycleError{Status: 502, Code: "model_failed", Message: "could not switch the model: " + msg}
+	}
+	if err := c.write(map[string]any{"type": "control_request", "request_id": id, "request": req}); err != nil {
+		r.mu.Lock()
+		delete(r.acks, id)
+		delete(r.switches, id)
+		r.mu.Unlock()
+		return failed(err.Error())
+	}
+	r.op.Unlock() // Stop, Clear, ■ needn't wait for the answer: the child's end ends the wait
+	opHeld = false
+	select {
+	case e, ok := <-acked:
+		if !ok {
+			return failed("it ended before Claude Code answered")
+		} else if e != "" {
+			return failed("Claude Code refused it: " + e)
+		}
+		return nil
+	case <-r.clock.After(10 * time.Second):
+		return &LifecycleError{Status: 504, Code: "model_pending", Message: "Claude Code hasn't answered within 10s: the Home shows the new model once it does"}
+	}
+}
+
+// chooseModel keeps value as its model; r.mu held.
+func (r *headlessRunner) chooseModel(value string) {
+	r.modelChoice = value
+	if value == "default" {
+		r.modelChoice = ""
+	}
+	r.persist()
+	r.log("model %s", value)
 }
 
 // stopChild ends a child, on one clock from its call: interrupt (after a write in progress,
@@ -1312,7 +1425,7 @@ func (r *headlessRunner) Clear() error {
 	r.resetLocked()
 	r.sessionID, r.interrupted = "", false // saved now: a refused start leaves a fresh session to come
 	r.alerted = map[string]bool{}
-	r.model = hlModel{Status: r.model.Status, CompletionSeq: r.model.CompletionSeq, check: r.model.check}
+	r.model = hlModel{Status: r.model.Status, CompletionSeq: r.model.CompletionSeq, check: r.model.check, models: r.model.models}
 	r.persist()
 	r.mu.Unlock()
 	return r.start(false)

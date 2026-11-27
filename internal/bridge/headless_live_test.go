@@ -342,6 +342,32 @@ func TestClaudeLive(t *testing.T) {
 	remembered := resumed && turn("What was the code word I asked you to remember? Reply with just the code word.", 120*time.Second) && resultsWith("ZEBRA-17") > words
 	item("resume", stopped && resumed && remembered, "stopped %v, resumed session %v, the word remembered: %v", stopped, resumed, remembered)
 
+	if late("model") {
+		return
+	}
+	// the model: Claude Code's list (its initialize answer) and a switch in place (set_model) that
+	// the next turn's init reports (to haiku again: no dearer turn)
+	models, haiku := b.view(t).Headless.Models, ""
+	for _, m := range models {
+		if m.Value == "haiku" {
+			haiku = m.ResolvedModel
+		}
+	}
+	inits := count(isInit)
+	code, body = b.post(t, "model", `{"model":"haiku"}`)
+	switched := code == 200 && b.view(t).Headless.Model == "haiku" && turn("Reply with just the word OK.", 120*time.Second)
+	var on any
+	mu.Lock()
+	for n, i := 0, 0; i < len(lines) && on == nil; i++ {
+		if isInit(lines[i]) {
+			if n++; n > inits {
+				on = lines[i]["model"]
+			}
+		}
+	}
+	mu.Unlock()
+	item("model", haiku != "" && switched && on == haiku, "%d models, haiku = %q; set: %d %s; the next turn on %v", len(models), haiku, code, body, on)
+
 	if late("mcp_failure") {
 		return
 	}
