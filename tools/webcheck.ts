@@ -1324,16 +1324,17 @@ async function p18(c: Ctx) {
       window.__wcMo = new MutationObserver((rs) => { const t = performance.now(); for (const r of rs) window.__wcMut.push(t);
         if (!window.__wcShown && window.__wcLabel && ${CARD}?.textContent.includes(window.__wcLabel)) window.__wcShown = t; });
       window.__wcMo.observe(s, { subtree: true, childList: true, characterData: true, attributes: true });
-      s.addEventListener('touchend', () => { window.__wcTE = performance.now(); }, { once: true, passive: true }); })()`);
+      s.addEventListener('touchend', () => { window.__wcTE = performance.now(); window.__wcDown = window.__wcMut.length; }, { once: true, passive: true }); })()`);
     await pg.touch('touchStart', [[p.x, p.y]]);
     await pg.ev('window.__wcMut = []');
     for (let i = 1; i <= 5; i++) { await sleep(16); await pg.touch('touchMove', [[p.x, p.y - 10 * i]]); }
     const p2 = await push();
     await pg.ev(`window.__wcLabel = ${js(`wc-less-${n}`)}`);
     await sleep(500);
-    const down = await pg.ev('window.__wcMut.length');
     await pg.touch('touchEnd', []);
-    const lift = await pg.until(`window.__wcShown && window.__wcTE && { d: Math.round(window.__wcShown - window.__wcTE) }`, 1000);
+    // counted at touchend, and shown only after it: what showed while the finger was down never passes
+    const lift = await pg.until(`window.__wcShown >= window.__wcTE && window.__wcTE && { d: Math.round(window.__wcShown - window.__wcTE) }`, 1000);
+    const down = await pg.ev('window.__wcDown');
     await pg.ev('window.__wcMo.disconnect()');
     const d = lift.timeout ? null : lift.v.d;
     result(c, p2 && down === 0 && d !== null && d <= 100, 'P18.touch', `push=${p2},mutationsWhileDown=${down},shownAfterLift=${d === null ? 'none' : `${d}ms`}`,
