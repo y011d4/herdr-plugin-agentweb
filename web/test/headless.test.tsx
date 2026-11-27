@@ -259,7 +259,7 @@ describe("a headless orchestrator's Home", () => {
     await home(withPilot((p) => {
       p.headless!.warnings.push({ kind: 'version', message: 'Claude Code 9.9.9 is not verified', since: Date.now(), actions: ['tui'] });
     }), { clear: () => { cleared++; }, stop: () => {} });
-    assert.deepEqual([...container.querySelectorAll('#home-usage span')].map((e) => `${e.textContent}|${e.className}`), ['5h 35%|stale', ' · fable 4%|stale', ' · ctx 13%|']);
+    assert.deepEqual([...container.querySelectorAll('#home-usage span')].map((e) => `${e.textContent}|${e.classList.contains('stale') ? 'stale' : ''}`), ['5h 35%|stale', ' · fable 4%|stale', ' · ctx 13%|']);
     const rows = [...container.querySelectorAll<HTMLElement>('.home-warning')];
     assert.deepEqual(rows.map((r) => `${r.dataset.kind}:${[...r.querySelectorAll<HTMLElement>('button')].map((b) => b.dataset.action).join(',')}`),
       ['silent:interrupt,clear', 'unknown_event:', 'version:tui']);

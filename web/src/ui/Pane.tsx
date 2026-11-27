@@ -28,6 +28,7 @@ import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
 import { emit, findPane, keptTasks, store, subscribe } from '../store.ts';
 import type { AppState, HeadlessUsage, OrchestratorView } from '../types.ts';
 import { TopbarIcon, agentCards, cardTitle, orchestratorLabel, relativeTime } from './Dashboard.tsx';
+import { StatusDot } from './Status.tsx';
 import type { Topbar } from './App.tsx';
 import { previewImage } from './Modals.tsx';
 import { HeadlessPrompt, PromptPanel } from './PromptPanel.tsx';
@@ -153,11 +154,11 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
       {prompt && paneView && <PromptPanel paneId={paneId} prompt={prompt} view={paneView} />}
       {hl && pending && <HeadlessPrompt key={pending.id} name={hl} pending={pending} />}
       {home && (
-        <div className="home-activity" id="home-activity" style={working ? undefined : { display: 'none' }}>
-          {/* first: a float beside the one-line text */}
-          {hl && working && <button className="home-interrupt" id="btn-home-interrupt" aria-label="Interrupt" onClick={() => { void interrupt(hl); }}>&#9632;</button>}
-          {working ? (activity ? `▸ ${activity}` : 'thinking…') : null}
-        </div>
+        <Group id="home-activity" gap={8} wrap="nowrap" py={6} className="shrink-0 px-4 border-t border-(--color-border) bg-(--color-bg) lg:px-(--wide-gutter)"
+          style={working ? undefined : { display: 'none' }}>
+          <Text flex={1} ff="monospace" fz={12} c="dimmed" truncate>{working ? (activity ? `▸ ${activity}` : 'thinking…') : null}</Text>
+          {hl && working && <Button id="btn-home-interrupt" {...SMALL} c="blocked" aria-label="Interrupt" onClick={() => { void interrupt(hl); }}>&#9632;</Button>}
+        </Group>
       )}
       {/* Esc: Claude Code's interrupt, the one key a read-only chat keeps */}
       {readOnly && working && (
@@ -187,56 +188,70 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
 // agent) and counts of the rest (tap → its list), then the orchestrator's Clear and Stop; for a
 // headless one also its usage and its warnings (`clear`: their Clear, on a stopped Home too).
 function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: string; state: AppState | null; actions?: HomeActions; clear?: () => void }) {
-  if (!state) return <div className="home-status" id="home-status"></div>;
+  if (!state) return <Stack id="home-status" className={STATUS_BAR}></Stack>;
   const all = state.orchestrators ?? [];
   const self = all.find((o) => o.name === name);
   const s = homeSummary(agentCards(state, self), store.seenDone);
   const open = (id: string): void => openAgent(id);
   return (
-    <div className="home-status" id="home-status">
+    <Stack id="home-status" gap={8} py={10} className={`px-3.5 ${STATUS_BAR}`}>
+      {/* a PC's sidebar does this (style.css hides it there): the row scrolls sideways, its scrollbar hidden */}
       {all.length >= 2 && (
-        <div className="home-switch">
+        <Group className="home-switch overflow-x-auto [scrollbar-width:none]" gap={6} wrap="nowrap">
           {all.map((o) => {
             const pane = o.paneId ? findPane(o.paneId)?.pane : undefined;
-            const st = orchestratorStatus(o, pane, store.seenDone);
+            const on = o.name === name;
             return (
-              <button key={o.name} className={`home-switch-btn${o.name === name ? ' active' : ''}${o.paneId ? '' : ' stopped'}`}
-                data-orch={o.name} data-pane-id={o.paneId ?? undefined} onClick={() => { location.hash = homeHash(o.name); }}>
-                <i className={`home-dot ${st}`}></i>{orchestratorLabel(o)}
-              </button>
+              <Button key={o.name} className={`home-switch-btn shrink-0 ${on ? 'border-(--color-accent) text-(--color-text)' : 'bg-transparent text-(--color-text-dim)'}`}
+                variant="default" size="compact-sm" radius="xl" fz={13} fw={600} opacity={o.paneId ? undefined : 0.55}
+                aria-current={on ? 'page' : undefined} data-stopped={o.paneId ? undefined : ''} data-orch={o.name} data-pane-id={o.paneId ?? undefined}
+                leftSection={<StatusDot status={orchestratorStatus(o, pane, store.seenDone)} />} onClick={() => { location.hash = homeHash(o.name); }}>
+                {orchestratorLabel(o)}
+              </Button>
             );
           })}
-        </div>
+        </Group>
       )}
+      {/* at most ~3 rows of chips, so the counts row below (the way to the list) stays on screen */}
       {s.blocked.length > 0 && (
-        <div className="home-attn">
-          <span className="home-attn-label">Needs you</span>
+        <Group className="home-attn max-h-[88px] overflow-y-auto" gap={6}>
+          <Text fz={12} fw={700} c="blocked" mr={2}>Needs you</Text>
           {s.blocked.map((c) => (
-            <button key={c.pane.paneId} className="home-chip" data-pane-id={c.pane.paneId} onClick={() => open(c.pane.paneId)}>
-              {cardTitle(c)}<span className="home-chip-ws">{c.workspaceLabel}</span>
-            </button>
+            <Button key={c.pane.paneId} className="home-chip max-w-full text-(--color-text)" variant="outline" color="blocked" size="compact-sm" radius="xl"
+              fz={13} fw={600} data-pane-id={c.pane.paneId} onClick={() => open(c.pane.paneId)}>
+              {cardTitle(c)}<Text span fz={11} fw={500} c="dimmed" ml={6} truncate>{c.workspaceLabel}</Text>
+            </Button>
           ))}
-        </div>
+        </Group>
       )}
-      <div className="home-row">
-        <button className="home-counts" data-go="agents" onClick={() => { location.hash = homeAgentsHash(location.hash); }}>
-          <span><i className="home-dot working"></i>{`${s.working} working`}</span>
-          <span><i className="home-dot done"></i>{`${s.done} done`}</span>
-          <span><i className="home-dot idle"></i>{`${s.idle} idle`}</span>
-          <span className="home-counts-more">Agents &#8250;</span>
-        </button>
+      {/* the counts, then the orchestrator's Clear and Stop at the right end */}
+      <Group gap={10} wrap="nowrap">
+        <UnstyledButton className="home-counts flex min-w-0 flex-1 flex-wrap items-center gap-x-3.5 gap-y-1 text-left text-[13px] text-(--color-text-dim)"
+          data-go="agents" onClick={() => { location.hash = homeAgentsHash(location.hash); }}>
+          <span><Dot status="working" />{`${s.working} working`}</span>
+          <span><Dot status="done" />{`${s.done} done`}</span>
+          <span><Dot status="idle" />{`${s.idle} idle`}</span>
+          <span className="home-counts-more ml-auto font-semibold text-(--color-accent)">Agents &#8250;</span>
+        </UnstyledButton>
         {actions && (
-          <span className="home-actions">
-            <button className="home-action" id="btn-home-clear" onClick={actions.clear}>Clear</button>
-            <button className="home-action danger" id="btn-home-stop" onClick={actions.stop}>Stop</button>
-          </span>
+          <Group gap={6} wrap="nowrap" className="shrink-0">
+            <Button id="btn-home-clear" {...SMALL} onClick={actions.clear}>Clear</Button>
+            <Button id="btn-home-stop" {...SMALL} c="blocked" onClick={actions.stop}>Stop</Button>
+          </Group>
         )}
-      </div>
+      </Group>
       {self?.headless?.usage && <Usage usage={self.headless.usage} />}
       {self?.headless && <HeadlessWarnings o={self} clear={clear} />}
-    </div>
+    </Stack>
   );
 }
+
+// Home's status bar, on the surface below the topbar (padding as classes: Mantine's px, inline, would beat lg:)
+const STATUS_BAR = 'shrink-0 border-b border-(--color-border) bg-(--color-surface) lg:px-(--wide-gutter)';
+// Home's small outlined buttons (Clear, Stop, ■, a warning's): dim text unless given a color
+const SMALL = { variant: 'default', size: 'compact-xs', radius: 'xl', fz: 12, fw: 600, c: 'dimmed', className: 'bg-transparent' } as const;
+// a count's dot, before its number
+const Dot = ({ status }: { status: string }) => <span className="mr-[5px] inline-block align-[1px]"><StatusDot status={status} /></span>;
 
 const STALE_LIMITS_MS = 10 * 60_000;
 const pct = (n: number): string => `${Math.round(n)}%`;
@@ -257,9 +272,9 @@ function Usage({ usage }: { usage: HeadlessUsage }) {
   const parts = usageParts(usage, Date.now());
   if (!parts.length) return null;
   return (
-    <div className="home-usage" id="home-usage">
-      {parts.map((p, i) => <span key={p.text} className={p.stale ? 'stale' : undefined}>{i ? ` · ${p.text}` : p.text}</span>)}
-    </div>
+    <Text id="home-usage" fz={12} c="dimmed" className="tabular-nums">
+      {parts.map((p, i) => <span key={p.text} className={p.stale ? 'stale opacity-50' : undefined}>{i ? ` · ${p.text}` : p.text}</span>)}
+    </Text>
   );
 }
 
@@ -271,19 +286,19 @@ function HeadlessWarnings({ o, clear }: { o: OrchestratorView; clear?: () => voi
   const warnings = o.headless?.warnings ?? [];
   if (!warnings.length) return null;
   return (
-    <div className="home-warnings" id="home-warnings">
+    <Stack id="home-warnings" className="home-warnings" gap={6}>
       {warnings.map((w) => (
-        <div key={w.kind} className="home-warning" data-kind={w.kind}>
-          <span className="home-warning-text">{`⚠ ${w.message}`}<span className="home-warning-since">{` · ${relativeTime(w.since) || 'now'}`}</span></span>
-          <span className="home-warning-actions">
-            {w.actions.includes('interrupt') && <button className="home-action" data-action="interrupt" onClick={() => { void interrupt(o.name); }}>&#9632; Interrupt</button>}
-            {w.actions.includes('clear') && clear && <button className="home-action" data-action="clear" onClick={clear}>Clear</button>}
-            {w.actions.includes('tui') && <button className="home-action" data-action="tui" onClick={() => setSteps(!steps)}>Back to TUI</button>}
-          </span>
-        </div>
+        <Group key={w.kind} className="home-warning" data-kind={w.kind} gap="4px 8px" fz={12} c="blocked">
+          <Text inherit flex="1 1 200px" miw={0} className="wrap-anywhere">{`⚠ ${w.message}`}<Text span inherit c="dimmed">{` · ${relativeTime(w.since) || 'now'}`}</Text></Text>
+          <Group gap={6}>
+            {w.actions.includes('interrupt') && <Button {...SMALL} data-action="interrupt" onClick={() => { void interrupt(o.name); }}>&#9632; Interrupt</Button>}
+            {w.actions.includes('clear') && clear && <Button {...SMALL} data-action="clear" onClick={clear}>Clear</Button>}
+            {w.actions.includes('tui') && <Button {...SMALL} data-action="tui" onClick={() => setSteps(!steps)}>Back to TUI</Button>}
+          </Group>
+        </Group>
       ))}
       {steps && <TuiSteps name={o.name} />}
-    </div>
+    </Stack>
   );
 }
 
