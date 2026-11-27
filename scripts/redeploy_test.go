@@ -313,16 +313,23 @@ func TestRedeploy(t *testing.T) {
 		out, err := redeploy(t, w, "main", "ON_STOP=git -C '"+w.prod+"' commit -q --allow-empty -m race")
 		restored(t, w, out, err, old)
 	})
-	t.Run("restarts the old binary when main moves past the checked commit", func(t *testing.T) {
-		w := setup(t)
-		old := read(filepath.Join(w.prod, "bin/yoicks"))
-		push(t, w, "README", "x")
-		// during the stop: a newer commit lands, and local main is fast-forwarded to it
-		out, err := redeploy(t, w, "main", "ON_STOP=git -C '"+w.seed+"' commit -q --allow-empty -m next && git -C '"+w.seed+
-			"' push -q origin HEAD:main && git -C '"+w.prod+"' pull -q --ff-only")
-		restored(t, w, out, err, old)
-		if !strings.Contains(out, "something moved it") {
-			t.Errorf("want the moved checkout named:\n%s", out)
+	t.Run("restarts the old binary when the checkout changes during the stop", func(t *testing.T) {
+		for name, onStop := range map[string]func(w world) string{
+			// a newer commit lands, and local main is fast-forwarded to it
+			"main moved": func(w world) string {
+				return "git -C '" + w.seed + "' commit -q --allow-empty -m next && git -C '" + w.seed +
+					"' push -q origin HEAD:main && git -C '" + w.prod + "' pull -q --ff-only"
+			},
+			"file edited": func(w world) string { return "echo edited >'" + filepath.Join(w.prod, "herdr-plugin.toml") + "'" },
+		} {
+			w := setup(t)
+			old := read(filepath.Join(w.prod, "bin/yoicks"))
+			push(t, w, "README", "x")
+			out, err := redeploy(t, w, "main", "ON_STOP="+onStop(w))
+			restored(t, w, out, err, old)
+			if !strings.Contains(out, "something moved it") {
+				t.Errorf("%s: want the changed checkout named:\n%s", name, out)
+			}
 		}
 	})
 	t.Run("restores the old binary when the new one isn't healthy", func(t *testing.T) {

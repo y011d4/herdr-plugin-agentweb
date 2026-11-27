@@ -182,8 +182,10 @@ say "stopping $id"
 action stop
 say "switching to $ref ($(git rev-parse --short "$target"))"
 sh -c "$switch"
-# exactly the commit checked: a main moved past it meanwhile would merge as "Already up to date"
-[ "$(git rev-parse HEAD)" = "$target" ] || die "the checkout is at $(git rev-parse --short HEAD), not $(git rev-parse --short "$target"): something moved it"
+# exactly the commit checked, clean: a main moved past it meanwhile would merge as "Already up
+# to date", and git switch carries an edit made since the clean-tree check along
+[ "$(git rev-parse HEAD)" = "$target" ] && [ -z "$(git status --porcelain)" ] ||
+	die "the checkout isn't a clean $(git rev-parse --short "$target") (at $(git rev-parse --short HEAD)): something moved it"
 npm_config_prefer_offline=true sh scripts/plugin-build.sh source
 say "starting $id"
 action start
