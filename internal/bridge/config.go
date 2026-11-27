@@ -41,16 +41,9 @@ func loadFileConfig() map[string]any {
 	return file
 }
 
-// dataDir is where the plugin keeps its data, the managed orchestrators' dirs among it.
-// The dir from before the rename (herdr-agentweb) stays in use while it exists: moving
-// it would move the orchestrators' cwds, and Claude Code keys their memory, transcripts
-// and folder trust by cwd.
+// dataDir is where the plugin keeps its data, the orchestrators' dirs among it.
 func dataDir(home string) string {
-	base := firstNonEmpty(os.Getenv("XDG_DATA_HOME"), filepath.Join(home, ".local", "share"))
-	if legacy := filepath.Join(base, "herdr-agentweb"); fileExists(legacy) {
-		return legacy
-	}
-	return filepath.Join(base, "herdr-yoicks")
+	return filepath.Join(firstNonEmpty(os.Getenv("XDG_DATA_HOME"), filepath.Join(home, ".local", "share")), "herdr-yoicks")
 }
 
 // nonEmpty is v as a string when it is one with more than white space.
@@ -68,8 +61,6 @@ func expandHome(v, home string) string {
 	return v
 }
 
-func expandDir(dir, home string) string { return strings.TrimRight(expandHome(dir, home), "/") }
-
 var (
 	orchestratorNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 	envNameRE          = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -79,12 +70,9 @@ var (
 // order. Each is managed by the plugin in <data>/orchestrators/<name> and started
 // with its env (string values; a leading ~ is expanded, so
 // "CLAUDE_CONFIG_DIR": "~/.config/claude/work" works); `"mode": "headless"` runs it as
-// the bridge's own child process (headless.go) instead of a herdr pane. An entry that still has the
-// earlier format's dir is that dir, unmanaged. Malformed entries and repeated names
-// are dropped. With none left, the older setup stays as it was: the single
-// orchestrator_dir, else the old default dir (<data>/dispatcher) when it exists,
-// both unmanaged as the user's own dir, else one managed orchestrator named default.
-func parseOrchestrators(raw, legacyDir any, home, data string, exists func(string) bool) []OrchestratorDef {
+// the bridge's own child process (headless.go) instead of a herdr pane. Malformed entries
+// and repeated names are dropped. With none left, there is one orchestrator named default.
+func parseOrchestrators(raw any, home, data string) []OrchestratorDef {
 	var out []OrchestratorDef
 	entries, _ := raw.([]any)
 	for _, e := range entries {
@@ -105,31 +93,13 @@ func parseOrchestrators(raw, legacyDir any, home, data string, exists func(strin
 		if l, ok := nonEmpty(entry["label"]); ok {
 			label = jsTrim(l)
 		}
-		headless := entry["mode"] == "headless"
-		// an entry with its own dir (the earlier format) stays that unmanaged dir
-		if dir, ok := nonEmpty(entry["dir"]); ok {
-			if headless {
-				logf("[config] orchestrator %s: mode headless needs a managed entry (one without dir); it runs as tui", name)
-			}
-			out = append(out, OrchestratorDef{Name: name, Label: label, Dir: expandDir(dir, home), Env: vars})
-		} else {
-			mode := map[bool]string{true: "headless"}[headless]
-			out = append(out, OrchestratorDef{Name: name, Label: label, Dir: filepath.Join(data, "orchestrators", name), Env: vars, Managed: true, Mode: mode})
-		}
+		mode := map[bool]string{true: "headless"}[entry["mode"] == "headless"]
+		out = append(out, OrchestratorDef{Name: name, Label: label, Dir: filepath.Join(data, "orchestrators", name), Env: vars, Mode: mode})
 	}
 	if len(out) > 0 {
 		return out
 	}
-	legacy, configured := nonEmpty(legacyDir)
-	if configured {
-		legacy = expandDir(legacy, home)
-	} else {
-		legacy = filepath.Join(data, "dispatcher")
-	}
-	if configured || exists(legacy) {
-		return []OrchestratorDef{{Name: "default", Dir: legacy, Env: map[string]string{}}}
-	}
-	return []OrchestratorDef{{Name: "default", Dir: filepath.Join(data, "orchestrators", "default"), Env: map[string]string{}, Managed: true}}
+	return []OrchestratorDef{{Name: "default", Dir: filepath.Join(data, "orchestrators", "default"), Env: map[string]string{}}}
 }
 
 // jsParseInt is parseInt(s, 10), or -1 for NaN and for a number too big for an int:
@@ -185,7 +155,6 @@ func loadConfig() Config {
 		StateDir:       firstNonEmpty(os.Getenv("HERDR_PLUGIN_STATE_DIR"), defaultStateDir()),
 		SocketPath:     firstNonEmpty(os.Getenv("HERDR_SOCKET_PATH"), filepath.Join(home, ".config", "herdr", "herdr.sock")),
 		LaunchProfiles: parseLaunchProfiles(file["launch_profiles"]),
-		Orchestrators: parseOrchestrators(file["orchestrators"], file["orchestrator_dir"], home, dataDir(home),
-			func(p string) bool { _, err := os.Stat(p); return err == nil }),
+		Orchestrators:  parseOrchestrators(file["orchestrators"], home, dataDir(home)),
 	}
 }

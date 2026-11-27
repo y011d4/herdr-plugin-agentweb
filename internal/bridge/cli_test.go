@@ -26,9 +26,6 @@ func TestIsBridgeArgv(t *testing.T) {
 		"/x/yoicks agent wait p1 --status done":          false,
 		"/x/yoicks overview":                             false,
 		"/x/yoicks-old serve":                            false,
-		"/x/bin/agentwebctl serve":                       true, // started before the rename
-		"./bin/agentwebctl run":                          true,
-		"/x/agentwebctl agent wait p1":                   false,
 		"sleep 600":                                      false,
 		"":                                               false,
 	} {
@@ -38,42 +35,20 @@ func TestIsBridgeArgv(t *testing.T) {
 	}
 }
 
-// Outside herdr the state dir is herdr's own for the plugin, unless only the TS
-// default (~/.local/state/herdr-agentweb) holds a token: a paired phone keeps working.
+// Outside herdr the state dir is herdr's own for the plugin.
 func TestDefaultStateDir(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv("HOME", "/home/u")
 	t.Setenv("XDG_STATE_HOME", "")
-	herdrDir := filepath.Join(home, ".local", "state", "herdr", "plugins", "y011d4.yoicks")
-	legacy := filepath.Join(home, ".local", "state", "herdr-agentweb")
-	token := func(dir string) {
-		os.MkdirAll(dir, 0o700)
-		os.WriteFile(filepath.Join(dir, "token"), []byte("0123456789abcdef0123456789abcdef"), 0o600)
+	if got, want := defaultStateDir(), "/home/u/.local/state/herdr/plugins/y011d4.yoicks"; got != want {
+		t.Errorf("%s, want %s", got, want)
 	}
-	if got := defaultStateDir(); got != herdrDir {
-		t.Errorf("no token anywhere: %s, want herdr's %s", got, herdrDir)
-	}
-	token(legacy)
-	if got := defaultStateDir(); got != legacy {
-		t.Errorf("a token only in the TS default: %s, want %s", got, legacy)
-	}
-	token(herdrDir)
-	if got := defaultStateDir(); got != herdrDir {
-		t.Errorf("tokens in both: %s, want herdr's %s", got, herdrDir)
-	}
-	xdg := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", xdg)
-	if got, want := defaultStateDir(), filepath.Join(xdg, "herdr", "plugins", "y011d4.yoicks"); got != legacy {
-		// herdr's dir under XDG_STATE_HOME has no token yet, so the TS one still wins
-		t.Errorf("XDG_STATE_HOME without a token there: %s, want %s (not %s)", got, legacy, want)
-	}
-	os.RemoveAll(legacy)
-	if got, want := defaultStateDir(), filepath.Join(xdg, "herdr", "plugins", "y011d4.yoicks"); got != want {
+	t.Setenv("XDG_STATE_HOME", "/xdg")
+	if got, want := defaultStateDir(), "/xdg/herdr/plugins/y011d4.yoicks"; got != want {
 		t.Errorf("XDG_STATE_HOME: %s, want %s", got, want)
 	}
 }
 
-// The CLI's herdr errors read like bin/agentwebctl.ts's: they reach the orchestrator.
+// The CLI's herdr errors name the method that failed: they reach the orchestrator.
 func TestCliRPCErrors(t *testing.T) {
 	dir, _ := os.MkdirTemp("", "fh")
 	defer os.RemoveAll(dir)
@@ -134,11 +109,9 @@ func TestCLIPort(t *testing.T) {
 func TestIsBridgeCommandLine(t *testing.T) {
 	for cmd, want := range map[string]bool{
 		"/Users/u/Library/herdr plugins/bin/yoicks serve": true,
-		"./bin/yoicks run":                                         true,
-		"/x/yoicks agent wait p1":                                  false,
-		"/Users/u/herdr/bin/agentwebctl serve":                     true, // started before the rename
-		"/x/agentwebctl overview":                                  false,
-		"/x/yoicks overview":                                       false,
+		"./bin/yoicks run":        true,
+		"/x/yoicks agent wait p1": false,
+		"/x/yoicks overview":      false,
 		"/opt/homebrew/bin/node /Users/u/repo/dist/server/main.js": false,
 		"sleep 600": false,
 	} {
