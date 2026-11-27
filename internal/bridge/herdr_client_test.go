@@ -327,6 +327,94 @@ func TestHerdrWaitHasNoDeadline(t *testing.T) {
 	}
 }
 
+// agent.list answers can land out of order: one that lands after a newer one is dropped, so a
+// renamed agent's old name doesn't come back.
+func TestHerdrClientDropsAnOlderAgentList(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "fh")
+	defer os.RemoveAll(dir)
+	world := fakeherdr.NewWorld()
+	worldH := world.Handler()
+	var mu sync.Mutex
+	calls := 0
+	srv, err := fakeherdr.Start(filepath.Join(dir, "h.sock"), func(m string, p json.RawMessage) fakeherdr.Reply {
+		if m != "agent.list" {
+			return worldH(m, p)
+		}
+		mu.Lock()
+		calls++
+		first := calls == 1
+		mu.Unlock()
+		name, status, delay := "w-new", "working", time.Duration(0)
+		if first { // answered after the next one
+			name, status, delay = "w-old", "idle", 1500*time.Millisecond
+		}
+		return fakeherdr.Reply{Delay: delay, Result: map[string]any{"agents": []any{
+			map[string]any{"pane_id": "p1", "name": name, "agent": "claude", "agent_status": status}}}}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	c := NewHerdrClient(srv.Path, HerdrClientCallbacks{})
+	defer c.Destroy()
+	c.Start()
+	env := &fakeherdr.Env{Srv: srv, World: world, Errorf: t.Errorf}
+	env.WaitCount("agent.list", 1, 5*time.Second)
+	env.WaitSubscribed(1, 5*time.Second)
+	env.Status("p1", "working") // a second agent.list, answered at once
+	env.WaitCount("agent.list", 2, 5*time.Second)
+	time.Sleep(2000 * time.Millisecond) // then the first lands
+	if s := c.State(); s == nil || s.Pane("p1").Agent.HerdrName == nil || *s.Pane("p1").Agent.HerdrName != "w-new" {
+		t.Errorf("p1's herdr name: want w-new from the newer answer, got %+v", s.Pane("p1").Agent)
+	}
+}
+
+// A failed agent.list is asked again once, without waiting for another status change; a later
+// trigger gets its own retry, also merged with a retry.
+func TestHerdrClientRetriesAFailedAgentList(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "fh")
+	defer os.RemoveAll(dir)
+	world := fakeherdr.NewWorld()
+	worldH := world.Handler()
+	var mu sync.Mutex
+	calls := 0
+	srv, err := fakeherdr.Start(filepath.Join(dir, "h.sock"), func(m string, p json.RawMessage) fakeherdr.Reply {
+		if m != "agent.list" {
+			return worldH(m, p)
+		}
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n <= 3 { // the first and its retry fail (no third without a trigger), then a trigger's first
+			return fakeherdr.Reply{Code: "internal", Message: "busy"}
+		}
+		return fakeherdr.Reply{Result: map[string]any{"agents": []any{map[string]any{"pane_id": "p1", "name": "w-x", "agent": "claude", "agent_status": "idle"}}}}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	c := NewHerdrClient(srv.Path, HerdrClientCallbacks{})
+	defer c.Destroy()
+	c.Start()
+	env := &fakeherdr.Env{Srv: srv, World: world, Errorf: t.Errorf}
+	env.WaitCount("agent.list", 2, 5*time.Second) // the retry, 2 s after the failure
+	time.Sleep(2500 * time.Millisecond)
+	if n := env.Count("agent.list"); n != 2 {
+		t.Errorf("agent.list asked %d times: want the one retry only", n)
+	}
+	env.WaitSubscribed(1, 5*time.Second)
+	// a trigger merged in one debounce with a retry (the retry last) keeps its own retry: the
+	// request fails, and its retry answers
+	actorValue(c, func() bool { c.refreshAgentList(false); c.refreshAgentList(true); return true })
+	env.WaitCount("agent.list", 4, 6*time.Second)
+	time.Sleep(300 * time.Millisecond)
+	if s := c.State(); s == nil || s.Pane("p1").Agent.HerdrName == nil || *s.Pane("p1").Agent.HerdrName != "w-x" {
+		t.Errorf("p1's herdr name: want w-x, got %+v", s.Pane("p1").Agent)
+	}
+}
+
 // A no-deadline call (herdr's waits) is given up by its context: one cancelled already sends
 // nothing (not even a connection), one cancelled while herdr says nothing returns at once.
 func TestHerdrCallCancellation(t *testing.T) {

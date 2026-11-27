@@ -75,7 +75,7 @@ function headlessWorkspaces(state: AppState): WorkspaceNode[] {
     const status: AgentStatus = h.status === 'stopped' || h.status === 'error' ? 'unknown' : h.status;
     const label = o.label || o.name;
     const pane: PaneNode = { paneId: o.paneId, focused: false, cwd: null, launchCwd: null, title: null, agent: { name: 'claude', displayName: label,
-      status, customStatus: null, message: null, sinceUnixMs: 0, completionSeq: h.completionSeq, stateChangeSeq: null } };
+      status, customStatus: null, message: null, sinceUnixMs: 0, completionSeq: h.completionSeq, stateChangeSeq: null, herdrName: null } };
     return [{ workspaceId: o.paneId, label, cwd: null, worktree: null, tabs: [{ tabId: o.paneId, label: '', panes: [pane] }] }];
   });
 }

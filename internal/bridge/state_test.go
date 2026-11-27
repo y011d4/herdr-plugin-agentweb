@@ -362,7 +362,7 @@ func TestToClientState(t *testing.T) {
 				`"tabs":[{"tabId":"w0:t1","label":"1","panes":[`+
 				`{"paneId":"w0:p1","focused":true,"cwd":"/home/user/proj","launchCwd":"/home/user/proj","title":null,`+
 				`"agent":{"name":"claude","displayName":"claude","status":"working","customStatus":null,"message":null,`+
-				`"sinceUnixMs":1000,"completionSeq":null,"stateChangeSeq":null}},`+
+				`"sinceUnixMs":1000,"completionSeq":null,"stateChangeSeq":null,"herdrName":null}},`+
 				`{"paneId":"w0:p2","focused":false,"cwd":"/home/user/proj","launchCwd":"/home/user/proj","title":null,"agent":null}]}]}]}`)
 		})
 	})
@@ -602,6 +602,22 @@ func TestApplyCompletionSeqs(t *testing.T) {
 			checkEq(t, applyCompletionSeqs(s0, reply(7, "done"), 500), s0)
 			s1 := applyCompletionSeqs(s0, reply(7, "done"), later)
 			checkEq(t, applyCompletionSeqs(s1, reply(7, "done"), later), s1)
+		})
+
+		t.Run("fills the herdr name whatever the status, keeps it across a re-snapshot and a status change", func(t *testing.T) {
+			s0 := createState(doneSnap(), 1000, nil)
+			checkEq(t, s0.Pane("w0:p1").Agent.HerdrName, nil)
+			named := []RawAgentSeqs{{PaneID: "w0:p1", Name: "w-fix", AgentStatus: "working"}} // a stale status: no seqs, the name all the same
+			s1 := applyCompletionSeqs(s0, named, 500)
+			checkEq(t, valOf(s1.Pane("w0:p1").Agent.HerdrName), "w-fix")
+			checkEq(t, s1.Pane("w0:p1").Agent.CompletionSeq, nil)
+			checkEq(t, s0.Pane("w0:p1").Agent.HerdrName, nil)
+			checkEq(t, applyCompletionSeqs(s1, named, 500), s1) // the same name: nothing changed
+			checkEq(t, valOf(createState(doneSnap(), 3000, s1).Pane("w0:p1").Agent.HerdrName), "w-fix")
+			state, _ := applyEvent(s1, "pane_agent_status_changed", map[string]any{"pane_id": "w0:p1", "agent_status": "working"}, nowMs())
+			checkEq(t, valOf(state.Pane("w0:p1").Agent.HerdrName), "w-fix")
+			renamed := applyCompletionSeqs(s1, []RawAgentSeqs{{PaneID: "w0:p1", Name: "w-fix2", AgentStatus: "done"}}, later)
+			checkEq(t, valOf(renamed.Pane("w0:p1").Agent.HerdrName), "w-fix2")
 		})
 
 		t.Run("survives a re-snapshot with the same status and clears on a status change", func(t *testing.T) {

@@ -93,7 +93,7 @@ All in `internal/bridge/` (one package):
   it (the chat, empty until its session's first line) and `PromptPanel.tsx`'s `HeadlessPrompt` answers
   `headless.pending`; its usage and warnings (■, Clear, the steps back to the TUI) sit on the status
   bar. `orchestrator_alert` raises an OS notification while hidden (`notifyOrchestratorAlert`);
-  Settings shows the last Claude Code check and the TUI steps; the `[yoicks] …` lines at either end of a user turn render as dim lines (`splitNotices`), the rest as its bubble; an `agent_start` result shows as such a line. Its composer
+  Settings shows the last Claude Code check and the TUI steps; the `[yoicks] …` lines at either end of a user turn render as dim lines (`splitNotices`), the rest as its bubble; an `agent_start` result shows as such a line, and a worker's name in one is a button that opens its drawer (`noticeHtml`; the State's `agent.herdrName`, from `agent.list`, `nav.ts`'s `openAgentNamed`). Its composer
   takes images (+ or paste; `image.ts` scales them to JPEG, the bridge's `imageBlocks` checks them); a tap on one, attached or sent, opens it full screen (`previewImage`: its own history entry, so Back closes it). `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
