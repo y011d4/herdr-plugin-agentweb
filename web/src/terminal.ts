@@ -449,7 +449,9 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
         wheelQueue = 0;
         if (wheelFlushTimer) clearTimeout(wheelFlushTimer);
         wheelFlushTimer = null;
-        // a gesture going on is over: its touchend starts no fling, its tap counts for nothing
+        // a gesture going on is over: its touchend starts no fling, its tap counts for nothing, and it holds
+        // up no read (the resume's scrollback) nor drawing once released
+        terminalTouchActive = false;
         singleFingerGesture = false;
         tapCandidate = false;
         pinchStartDist = 0;

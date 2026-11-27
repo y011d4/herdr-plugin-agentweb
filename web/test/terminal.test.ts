@@ -142,10 +142,15 @@ describe('terminal', () => {
     touch(el, 'touchstart', [[10, 300]]);
     term.render('deferred under a finger');
     term.setHeld(true);
-    touch(el, 'touchend');
-    assert.ok(!/deferred under a finger/.test(live().textContent!), 'not drawn while held');
     term.setHeld(false);
-    assert.match(live().textContent!, /deferred under a finger/, 'drawn once released');
+    assert.match(live().textContent!, /deferred under a finger/, 'the gesture ended by the hold holds nothing up once released');
+    touch(el, 'touchstart', [[10, 300]]);
+    term.render('second, deferred');
+    term.setHeld(true);
+    touch(el, 'touchend');
+    assert.ok(!/second, deferred/.test(live().textContent!), 'not drawn while held');
+    term.setHeld(false);
+    assert.match(live().textContent!, /second, deferred/, 'drawn once released');
     touch(el, 'touchstart', [[10, 300]]);
     term.setHeld(true);
     term.setHeld(false);
