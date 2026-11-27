@@ -90,6 +90,13 @@ interface PendingAnswer {
   sent: boolean; resumed: boolean; timer: ReturnType<typeof setTimeout> | null;
 }
 
+/** The view a pane opens on: a headless orchestrator's chat; a Claude pane's chat, but where its terminal was
+ *  chosen (an orchestrator's always its chat); any other pane's terminal. Also the route's first watch (App.tsx). */
+export function openingMode(paneId: string): 'terminal' | 'chat' {
+  if (paneId.startsWith('hl:')) return 'chat';
+  return paneIsClaude(paneId) && (preferredView(paneId) === 'chat' || orchestratorOfPane(store.appState, paneId)) ? 'chat' : 'terminal';
+}
+
 export function createPaneView(container: HTMLElement, paneId: string, opts: PaneViewOpts): PaneView {
   const { view } = store;
   const headless = paneId.startsWith('hl:');
@@ -500,7 +507,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   // view is continuously scrollable from the very first swipe; then polling, and
   // the probe for a Claude transcript (it reveals the toggle and switches to chat
   // when that's the preferred view).
-  if (headless || (paneIsClaude(paneId) && (preferredView(paneId) === 'chat' || orchestratorOfPane(store.appState, paneId)))) {
+  if (openingMode(paneId) === 'chat') {
     // straight to the chat: a headless orchestrator has no terminal; a Claude pane opens on its chat, not
     // its terminal first (its transcript's GET and watch tell; none: the terminal, then its first look)
     chatAvailable = true;
