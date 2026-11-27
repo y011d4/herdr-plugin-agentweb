@@ -1409,6 +1409,8 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
 .chat-prompt-hint { font-size: 12px; color: var(--color-text-dim); margin-top: 8px; }
 #headless-prompt-next { margin-top: 2px; }
 /* the bridge's own words to a headless orchestrator: a dim line, not a bubble */
+/* a worker's name in a notice: opens it (ui/Pane.tsx) */
+.chat-notice-agent { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; padding: 4px 0; }
 .chat-notice {
   align-self: center;
   font-size: 12px;

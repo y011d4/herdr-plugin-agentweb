@@ -524,7 +524,8 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   (`{ at (ms), version, ok, failed: [items] }`, `null` when none has run). Each agent's `completionSeq` is herdr's
   `completion_seq` (which completion its idle/done status is; `null` until fetched), and its
   `stateChangeSeq` is herdr's `state_change_seq` (herdr's order of status changes, which the app
-  lists by; `null` until fetched)
+  lists by; `null` until fetched), and its `herdrName` herdr's name for it (`agent.start`'s, as
+  `yoicks agent` and a headless orchestrator's `[yoicks]` notices name it; `null` until fetched)
 - `GET /api/panes/:paneId/read?source=visible|recent&lines=N&format=text|ansi` — `visible` is the
   pane's live screen: the bridge reads the bottom screen (herdr's `detection` for text, `recent`
   one viewport tall for ANSI), since herdr's own `visible` follows the desktop's view, which may be

@@ -56,7 +56,7 @@ func contractState() ClientState {
 	const now = 1795478400000
 	s := createState(raw, now, nil)
 	seq, change := int64(4), int64(9)
-	s = applyCompletionSeqs(s, []RawAgentSeqs{{PaneID: "p3", AgentStatus: "done", CompletionSeq: &seq, StateChangeSeq: &change}}, now+1)
+	s = applyCompletionSeqs(s, []RawAgentSeqs{{PaneID: "p3", Name: "w-review", AgentStatus: "done", CompletionSeq: &seq, StateChangeSeq: &change}}, now+1)
 	// worktree-resolve adds the branch; the linked worktree is detached (null)
 	for i, b := range []*string{strp("main"), nil} {
 		wt := *s.Workspaces[i].Worktree
