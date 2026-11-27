@@ -234,7 +234,10 @@ All in `internal/bridge/` (one package):
   `POST …/answer`: the panel's "Type something." is a question's own answer, its "Chat about this" (`{chat}`) refuses it with Claude Code's words; a `/send` meanwhile is written, then refuses it the same way), held open with progress, anything
   else is denied unasked. `agent_prompt` watches the worker (one goroutine, herdr's waits on a
   closable no-deadline connection, `HerdrClient.Wait`) and wakes the orchestrator with `[yoicks]
-  <worker>: <from> → <to>` (names and status only, 3 s coalesced); the watches are saved and
+  <worker>: <from> → <to>` (names and status only, 3 s coalesced); a watch outlives the worker's
+  end (until its pane goes, its worktree is removed, a newer prompt, Stop or Clear), so a turn it
+  takes up on its own (a background task's event, the user in its pane; not a `done → idle`, a look)
+  wakes it too, once that end has held 10 s (`resumeQuiet`: a flap wakes once); the watches are saved and
   re-armed after a restart. rules.md has `<!-- tui -->`/`<!-- headless -->` sections (`rulesFor`
   keeps the mode's, and the `<!-- pr-watch -->` parts inside headless only with `pr_watch`,
   `OrchestratorDef.PRWatch`; the TUI output is pinned by `orchestrator_golden_test.go`). `tools/fakeclaude`
