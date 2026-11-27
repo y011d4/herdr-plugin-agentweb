@@ -39,7 +39,7 @@ export interface Topbar { title?: ReactNode; left?: ReactNode; right?: ReactNode
 
 // The topbar before anything is routed (as index.html paints it) and while a Home waits for
 // the first State.
-const BARE: Topbar = { title: 'Herdr' };
+const BARE: Topbar = { title: 'Yoicks' };
 
 // hash: the route it shows (null: none, the token screen or a Home waiting for a State)
 interface Shown { kind: View['screen']; node: ReactNode; topbar?: Topbar; key: number; hash: string | null }
