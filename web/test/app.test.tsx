@@ -141,6 +141,7 @@ describe('App', () => {
     assert.ok($('#modal-root .agent-drawer #screen-pane'), 'the pane, in the drawer');
     assert.ok($('#screen #screen-agents') === list, 'the list under it, the same element');
     assert.match($('.agent-drawer-head')!.textContent!, /claude/);
+    assert.ok(document.activeElement === $('.agent-drawer-head'), 'the focus starts on its header, not on ✕');
     assert.equal(store.view.activePaneId, 'p1');
     await act(async () => push!({ type: 'pane_gone', paneId: 'p1' }));
     await settle();
