@@ -67,6 +67,10 @@ html, body {
 /* 15px text, on the body: the root stays 16px, for Mantine's and Tailwind's rem (theme.ts) */
 body { font-size: 15px; }
 
+/* A disabled control takes no click: not the pointer (theme.ts's cursorType, reset.css's) but Mantine's
+   not-allowed, which its Button and ActionIcon set and UnstyledButton (an answer's option) doesn't. */
+:is(button, [role='button']):is(:disabled, [aria-disabled='true']) { cursor: not-allowed; }
+
 /* ── Layout shell ── */
 #app {
   display: flex;
