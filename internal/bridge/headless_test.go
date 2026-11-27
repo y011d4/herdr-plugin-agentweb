@@ -487,8 +487,9 @@ func TestHeadlessModel(t *testing.T) {
 	if v.Headless.Model != "default" || v.Headless.Models[2] != (HeadlessModel{"fake-big", "Fake Big", "For hard work", "fake-big-1"}) {
 		t.Fatalf("%+v", v.Headless)
 	}
-	if status, body := model("fake-big"); status != 200 || b.view(t).Headless.Model != "fake-big" {
-		t.Fatalf("switch: %d %s", status, body)
+	b.waitFor(t, "the model in effect", func(v OrchestratorView) bool { return v.Headless.ActiveModel == "fake" })
+	if status, body := model("fake-big"); status != 200 || b.view(t).Headless.Model != "fake-big" || b.view(t).Headless.ActiveModel != "fake-big-1" {
+		t.Fatalf("switch: %d %s, %+v", status, body, b.view(t).Headless)
 	}
 	b.waitStdin(t, `"request":{"model":"fake-big","subtype":"set_model"}`)
 	for m, want := range map[string]int{"opus": 400, "": 400} {
@@ -562,6 +563,26 @@ func TestHeadlessModel(t *testing.T) {
 	waitUntil(t, 5*time.Second, "the run after", func() bool { runs, _ = b2.runs(t); return len(runs) == 4 })
 	if slices.Contains(runs[3].argv, "--model") || !slices.Contains(runs[2].argv, "fake-big") {
 		t.Errorf("runs %v", runs)
+	}
+}
+
+// A resumed session keeps the model it last ran on (Claude Code 2.1.322), not the default: with none
+// chosen here, the model in effect is that one, and picking Default really switches to the default.
+func TestHeadlessModelCarriedByTheSession(t *testing.T) {
+	t.Setenv("FAKECLAUDE_MODEL", "fake-big-1") // the fake's stand-in for a session resumed from Fable
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	b.start(t)
+	v := b.waitFor(t, "the model in effect", func(v OrchestratorView) bool { return v.Headless.ActiveModel != "" && len(v.Headless.Models) > 0 })
+	if v.Headless.Model != "default" || v.Headless.ActiveModel != "fake-big-1" {
+		t.Fatalf("%+v", v.Headless)
+	}
+	if status, body := b.post(t, "model", `{"model":"default"}`); status != 200 || b.view(t).Headless.ActiveModel != "fake" {
+		t.Fatalf("default: %d %s, %+v", status, body, b.view(t).Headless)
+	}
+	b.send(t, "hello")
+	b.waitStatus(t, "done")
+	if v := b.view(t); v.Headless.ActiveModel != "fake" {
+		t.Errorf("after a turn: %q", v.Headless.ActiveModel)
 	}
 }
 

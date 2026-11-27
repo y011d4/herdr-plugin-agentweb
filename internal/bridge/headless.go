@@ -404,7 +404,7 @@ func (r *headlessRunner) view() (HeadlessView, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	v := HeadlessView{Status: r.model.Status, CompletionSeq: r.model.CompletionSeq, Warnings: slices.Clone(r.warnings),
-		Model: firstNonEmpty(r.modelChoice, "default"), Models: slices.Clone(r.model.models)}
+		Model: firstNonEmpty(r.modelChoice, "default"), ActiveModel: r.model.active, Models: slices.Clone(r.model.models)}
 	if v.Models == nil {
 		v.Models = []HeadlessModel{}
 	}
@@ -706,8 +706,9 @@ func (r *headlessRunner) start(resume bool) error {
 	r.mu.Lock()
 	c := r.child
 	r.mu.Unlock()
-	if c != nil { // its answer lists the models the Home offers
+	if c != nil { // the models the Home offers, and the one in effect
 		c.write(map[string]any{"type": "control_request", "request_id": initRequest, "request": map[string]any{"subtype": "initialize"}})
+		c.write(map[string]any{"type": "control_request", "request_id": settingsRequest, "request": map[string]any{"subtype": "get_settings"}})
 	}
 	r.rearm()
 	r.mu.Lock()

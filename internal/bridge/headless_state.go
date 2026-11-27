@@ -55,12 +55,19 @@ type hlModel struct {
 	check         *ClaudeCheck      // the last claude check (the version warning tells it)
 	version       string            // the Claude Code version it last reported (the version warning's)
 	models        []HeadlessModel   // the models Claude Code offers (its answer to initRequest)
+	// the model in effect, Claude Code's id: get_settings' answer at the start, set_model's, each
+	// turn's init. A resumed session keeps the model it last ran on, whatever the default says.
+	active string
 }
 
 // initRequest is the request_id of the initialize control request each child gets at its start:
 // its answer lists the models Claude Code offers this account (and the account's email: only
 // the models are read).
 const initRequest = "yoicks-init"
+
+// settingsRequest is the get_settings control request each child gets at its start: its answer's
+// applied.model is the model in effect, known before any turn.
+const settingsRequest = "yoicks-settings"
 
 // modelRe is a model value fit for --model: one of Claude Code's aliases or ids (opus,
 // claude-opus-4-8, opus[1m]), never a flag.
@@ -129,6 +136,9 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 	switch typ {
 	case "system":
 		if sub == "init" {
+			if model, _ := ev["model"].(string); model != "" {
+				m.active = model
+			}
 			m.Status = "working" // init opens every turn
 			if !m.inited {
 				m.inited = true
@@ -227,6 +237,12 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 			st.AckError = firstNonEmpty(st.AckError, "an error")
 		}
 		inner, _ := resp["response"].(map[string]any)
+		applied, _ := inner["applied"].(map[string]any)
+		for _, model := range []any{inner["model"], applied["model"]} { // set_model's answer, get_settings'
+			if model, _ := model.(string); model != "" && st.AckError == "" {
+				m.active = model
+			}
+		}
 		if list, ok := inner["models"].([]any); ok && st.Acked == initRequest {
 			m.models = nil
 			for _, it := range list {

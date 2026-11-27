@@ -197,6 +197,22 @@ func TestHeadlessStream(t *testing.T) {
 		}
 	})
 
+	t.Run("the model in effect: get_settings' answer, set_model's, each init; not a refusal or a synthetic message", func(t *testing.T) {
+		m := hlModel{}
+		active := func(line, want string) {
+			t.Helper()
+			m.apply([]byte(line), 0)
+			if m.active != want {
+				t.Errorf("%s: active %q, want %q", line, m.active, want)
+			}
+		}
+		active(`{"type":"control_response","response":{"subtype":"success","request_id":"yoicks-settings","response":{"effective":{},"sources":[],"applied":{"model":"claude-fable-5-2","effort":"medium"}}}}`, "claude-fable-5-2")
+		active(`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"You've reached your Fable limit."}]}}`, "claude-fable-5-2")
+		active(`{"type":"control_response","response":{"subtype":"error","request_id":"yoicks-model-1","error":"Model 'x' not found","model":"claude-fable-5-2"}}`, "claude-fable-5-2")
+		active(`{"type":"control_response","response":{"subtype":"success","request_id":"yoicks-model-2","response":{"model":"claude-opus-5-5"}}}`, "claude-opus-5-5")
+		active(lineInit, "claude-haiku-5-5")
+	})
+
 	t.Run("a yoicks tool's result is reported with its tool_use, an error's first line with it (or that it has none)", func(t *testing.T) {
 		m := hlModel{}
 		use := `{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"toolu_y1","name":"mcp__yoicks__overview","input":{}},` +

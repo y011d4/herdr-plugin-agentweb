@@ -162,8 +162,12 @@ type HeadlessView struct {
 	Pending  *HeadlessPending  `json:"pending"`
 	Usage    *HeadlessUsage    `json:"usage"`
 	Warnings []HeadlessWarning `json:"warnings"`
-	// the model it runs on (set with /model): one of models' values, "default" = Claude Code's own
+	// the model chosen here (set with /model): one of models' values, "default" = none chosen, or
+	// Claude Code's default picked
 	Model string `json:"model"`
+	// the model in effect, Claude Code's id ("" until its child has said): a resumed session keeps
+	// the model it last ran on, so with none chosen it needn't be the default
+	ActiveModel string `json:"activeModel"`
 	// the models Claude Code offers the account, as its /model lists them; [] until a child of
 	// this bridge has said
 	Models []HeadlessModel `json:"models"`
