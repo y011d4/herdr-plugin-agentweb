@@ -8,7 +8,10 @@ package bridge
 // (the pane profile store, the account cache, the WS client set).
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +27,7 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -60,6 +64,9 @@ var mimeTypes = map[string]string{
 	".ico":         "image/x-icon",
 }
 
+// The text types: served gzipped to a client that accepts it.
+var compressible = map[string]bool{".html": true, ".js": true, ".css": true, ".webmanifest": true, ".svg": true}
+
 // pane routes: the id segment is any non-slash text (pane ids contain ':')
 var (
 	paneRoute   = regexp.MustCompile(`^/api/panes/([^/]+)/(\w+)$`)
@@ -74,7 +81,8 @@ type server struct {
 	client   *HerdrClient
 	rpc      Rpc
 	web      fs.FS
-	rules    string // the bundled orchestrator/rules.md
+	gz       sync.Map // a web file's sha256 → its gzipped bytes (gzipped)
+	rules    string   // the bundled orchestrator/rules.md
 	profiles *PaneProfileStore
 	accounts *PaneAccountCache
 	// each configured orchestrator's expectedAccount ("": not found yet), found in the
@@ -388,7 +396,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !strings.HasPrefix(pathname, "/api") && !strings.HasPrefix(pathname, "/ws") { // no auth
-		s.serveStatic(w, pathname)
+		s.serveStatic(w, r, pathname)
 		return
 	}
 	if strings.HasPrefix(pathname, "/api") && !verifyToken(extractToken(r)) {
@@ -1349,8 +1357,10 @@ func (s *server) clearAgentRoute(w http.ResponseWriter, target string) {
 // ── static files ─────────────────────────────────────────────────────────────
 
 // serveStatic serves the web UI (no auth). urlPath is still percent-encoded, as in
-// http.ts, which looks files up by the encoded name.
-func (s *server) serveStatic(w http.ResponseWriter, urlPath string) {
+// http.ts, which looks files up by the encoded name. A text file goes gzipped to a
+// client that accepts it, under its own ETag; http.ServeContent does HEAD, ranges
+// and If-None-Match on whichever body is sent.
+func (s *server) serveStatic(w http.ResponseWriter, r *http.Request, urlPath string) {
 	rel := urlPath
 	if rel == "/" {
 		rel = "/index.html"
@@ -1391,6 +1401,55 @@ func (s *server) serveStatic(w http.ResponseWriter, urlPath string) {
 	if strings.HasPrefix(name, "assets/") {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
-	w.WriteHeader(http.StatusOK)
-	io.Copy(w, f)
+	data, err := io.ReadAll(f)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	sum := sha256.Sum256(data)
+	body, etag := data, fmt.Sprintf("%x", sum[:8])
+	if compressible[ext] {
+		w.Header().Set("Vary", "Accept-Encoding")
+		if acceptsGzip(r.Header.Get("Accept-Encoding")) {
+			if gz := s.gzipped(sum, data); len(gz) < len(data) {
+				body, etag = gz, etag+"-gzip"
+				w.Header().Set("Content-Encoding", "gzip")
+			}
+		}
+	}
+	w.Header().Set("ETag", `"`+etag+`"`)
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(body))
+}
+
+// gzipped is data gzipped, compressed once per content (keyed by its sha256).
+// ponytail: never evicted; only YOICKS_WEB_DIR's rebuilds add entries.
+func (s *server) gzipped(sum [32]byte, data []byte) []byte {
+	if gz, ok := s.gz.Load(sum); ok {
+		return gz.([]byte)
+	}
+	var buf bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	zw.Write(data)
+	zw.Close()
+	s.gz.Store(sum, buf.Bytes())
+	return buf.Bytes()
+}
+
+// acceptsGzip reports whether an Accept-Encoding value lists gzip with a q above 0.
+// A bare * doesn't count: identity is always acceptable, so that client gets the plain file.
+func acceptsGzip(header string) bool {
+	for _, part := range strings.Split(header, ",") {
+		coding, params, _ := strings.Cut(part, ";")
+		if !strings.EqualFold(strings.TrimSpace(coding), "gzip") {
+			continue
+		}
+		for _, p := range strings.Split(params, ";") {
+			if k, v, _ := strings.Cut(strings.TrimSpace(p), "="); strings.EqualFold(k, "q") {
+				q, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+				return err == nil && q > 0
+			}
+		}
+		return true
+	}
+	return false
 }
