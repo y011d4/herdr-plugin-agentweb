@@ -229,6 +229,26 @@ describe('App', () => {
     assert.equal(watches.at(-1), 'p4:chat', 'its watch back');
   });
 
+  it('a Home whose orchestrator stopped under the drawer is drawn afresh on close, its old view gone', async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/agents');
+    await go('#/home/personal');
+    await answer('/api/panes/p4/transcript', transcript[0]);
+    await go('#/pane/p1');
+    const s = fresh();
+    s.orchestrators[0].paneId = null;
+    await act(async () => push!({ type: 'state', state: s }));
+    const looks = transcripts('p4') + reads('p4');
+    const close = $('#btn-drawer-close')!;
+    await act(async () => close.click());
+    await settle();
+    assert.equal(location.hash, '#/home/personal');
+    assert.ok($('#screen #screen-home-stopped'), 'the stopped Home, drawn afresh');
+    assert.ok(!$('#screen #chat-log'));
+    assert.ok(!watches.at(-1)!.startsWith('p4:'), 'no watch for the gone pane');
+    assert.equal(transcripts('p4') + reads('p4'), looks, 'the old view reads nothing');
+  });
+
   it('pane to pane replaces the entry (Back still closes the drawer); a pane opened afresh closes to the list in its place', async () => {
     // happy-dom's replace() adds an entry, as assign() does: a browser's, in place
     const replace = vi.spyOn(location, 'replace').mockImplementation((url: string | URL) => {
