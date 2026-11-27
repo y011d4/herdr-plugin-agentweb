@@ -503,10 +503,12 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   window, silence and question checks) and the World's waits alike: a test moves it on (`pass`,
   `Advance`) where real time would pass, and never sleeps for a timer; fakeclaude's `hang` and
   `hold` go on at a SIGUSR1 (`release`). The WS watches' polls (`server.clock`) and the herdr
-  client's reconnects and debounces (`HerdrClient.clock`) take one the same way, and a test waits
+  client's reconnects, debounces and agent.list retry (`HerdrClient.clock`) take one the same way, and a test waits
   for the PC notifications in flight with `server.bg`. Only real-process deadlines (`stopChild`'s
   signals, write deadlines) and herdr's socket deadline (`TestHerdrWaitHasNoDeadline`) stay on
-  the real clock; so do the TS-recorded client scenarios and `record-wire`, which drive real time.
+  the real clock, and so does `record-wire`. The TS-recorded client scenarios run the client on a
+  FakeClock kept at the real time's pace (`runScenario`), which a scenario may jump over a long
+  wait (`Client.Jump`: ack-timeout's 10 s). fakeclaude is built once per test binary (`fakeClaudeEnv`).
 - **The real Claude** only in `headless_live_test.go` (`//go:build claudelive`; CI only vets it):
   `go test -tags claudelive -count=1 -run TestClaudeLive -v ./internal/bridge` runs `claude` itself
   through the runner (haiku via the test-only `extraArgs`, the personal account, throwaway dirs,
