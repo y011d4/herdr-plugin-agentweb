@@ -173,9 +173,12 @@ All in `internal/bridge/` (one package):
   `homeMode` (Stop leaves the Home stopped; a Clear holds it ≤8s for the replacement) — a switcher
   between the configured orchestrators (2+; stopped ones dimmed; each with its "needs you" count, `ui/Todos.tsx`'s `needsYou`:
   its account's blocked agents, its question, its to-do items due now; the PC sidebar's Home headings have it too), a
-  status bar of its account's agents (blocked chips + counts, `homeSummary`; no orchestrators) with its to-do items under the
-  chips' "Needs you" (`ui/Todos.tsx` over the pure `todos.ts`: ✓ = `DELETE …/todos/:id`, an item due ahead under Later until
-  its time, a link shown by its host, a worker's name opening its drawer; a stopped Home has them too), dialogue-only chat
+  status bar of one row (wrapping only where it must): "Needs you · n" (that count, orange; `To-do · n`, dim, while only items
+  due later wait; none at all otherwise: `NeedsButton`), the counts of its account's agents (`homeSummary`; no orchestrators),
+  and at the right a headless one's usage and model, Clear and Stop. Needs you opens a Mantine Popover (Escape, a tap outside
+  and leaving the screen close it; as wide as a phone allows, no taller than the room below it): the blocked agents' chips, its
+  question's line, and its to-do list (`ui/Todos.tsx` over the pure `todos.ts`: ✓ = `DELETE …/todos/:id`, an item due ahead under
+  Later until its time, a link shown by its host, a worker's name opening its drawer; a stopped Home has them too), dialogue-only chat
   (`conversationItems` hides tools/injected turns, but for questions and worker starts), a "doing now" line (`latestActivity`) and a
   composer (the terminal + quick keys stay one `>_` tap away — the only way to send Esc/Ctrl+C, and
   the fallback when there's no transcript). Orchestrators get no card in any agents list (`agentCards`
