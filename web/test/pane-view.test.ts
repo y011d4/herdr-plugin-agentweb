@@ -208,6 +208,23 @@ describe('pane view: chat', () => {
     assert.equal(calls.modes, modes, 'no modeChanged');
   });
 
+  it("a terminal look from before a suspend leaves the scrollback to the resume's", async () => {
+    open('p1');
+    await answer('/transcript', transcript[0]);
+    view.setMode('terminal', false); // its first terminal look: a screen read, then the scrollback
+    view.suspend();
+    view.resume(); // the resume's own look
+    const screens = reqs.filter((q) => !q.answered && q.url.startsWith('/api/panes/p1/read?source=visible'));
+    assert.equal(screens.length, 2);
+    screens[0].answered = true;
+    screens[0].answer(200, read[1]); // the old one lands first: held then, it draws nothing
+    await flush();
+    assert.equal(count('source=recent'), 0, 'no scrollback from the old look');
+    await answer('/api/panes/p1/read?source=visible', read[1]);
+    assert.equal(count('source=recent'), 1, "the resume's look reads it");
+    view.setMode('chat', false);
+  });
+
   it('a fallback poll in flight as it is suspended applies neither then nor after the resume', async () => {
     vi.useFakeTimers();
     open('p1');
