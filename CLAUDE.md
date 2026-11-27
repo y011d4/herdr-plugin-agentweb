@@ -223,7 +223,7 @@ All in `internal/bridge/` (one package):
   are the CLI's orchestrator commands as functions (`overview`, `agent_get`, `agent_read`, `agent_prompt`, `agent_start`,
   `worktree_remove`), confined to the account its child runs under (`agent_start`, and `agent_prompt` re-tasking a worker,
   also take a `purpose`: one line in the user's language, `purpose.go`, by pane id in `<state>/agent-purposes.json`, sent as
-  state `purposes`, dropped once a pane seen with an agent has none or is gone; the CLI has none, as it can't reach the
+  state `purposes`, dropped once its pane has no agent, after it was seen with one or a minute on; the CLI has none, as it can't reach the
   bridge), and `todo`, its Home's to-do list for the user
   (`todo.go`: one list per orchestrator in `<state>/todos/<name>.json`, kept across Stop, Clear and restarts; an item
   `{id, text, agent, url (http(s) only), due, createdAt}`, sent as state `orchestrators[].todos`; the user ticks one off with
