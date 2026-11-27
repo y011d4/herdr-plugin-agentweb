@@ -43,7 +43,12 @@ except the order of a fan-out sent concurrently (`cli-overview`'s account lookup
 
 `TestGoMatchesWireRecordings` (`tools/fakeherdr/cmd/record-wire/main_test.go`, part of
 `go test ./...`) builds the Go `yoicks`, records it (`yoicks serve` and its CLI
-commands) through every operation on a free port, and compares:
+commands) through every operation on a free port, and compares what follows. Recording
+waits 700 ms after each operation for the bridge's late requests; comparing waits only
+until the requests recorded for it have come, as every request goes to one operation (a
+late extra one shows in a later operation's comparison, which may be innocent). The WS
+watches keep their windows (their polls run on the bridge's own timer) and run beside the
+rest, each on a bridge of its own.
 
 - the HTTP exchange and WS messages as JSON values (key order doesn't count; WS
   messages received as a set);
