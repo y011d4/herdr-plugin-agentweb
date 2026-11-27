@@ -160,6 +160,12 @@ describe('App', () => {
     await go('#/agents');
     await go('#/pane/p3');
     assert.equal($('.agent-drawer-head .topbar-title')!.textContent, 'w-review· repo-wt-feat / feat');
+    const was = store.appState!;
+    const s = structuredClone(was);
+    s.workspaces.flatMap((w) => w.tabs).find((t) => t.panes.some((p) => p.paneId === 'p3'))!.label = 'w-review';
+    await act(async () => push!({ type: 'state', state: s }));
+    assert.equal($('.agent-drawer-head .topbar-title')!.textContent, 'w-review· repo-wt-feat', 'a tab labelled by the name: not again');
+    await act(async () => push!({ type: 'state', state: was }));
     await go('#/agents');
     await go('#/pane/p7');
     assert.equal($('.agent-drawer-head .topbar-title')!.textContent, 'codex· repo / 2');
