@@ -22,8 +22,9 @@ import { WIDE_QUERY } from '../theme.ts';
 import { AgentMenu, Pane, PaneTitle, ViewToggle, type AgentActions } from './Pane.tsx';
 
 /** The pane on show (ui/App.tsx): `key` is new for each pane route (a fresh view); a closing drawer
- *  keeps its last pane, its view stopped, until it is gone. `opener`: what had the focus as it opened. */
-export interface Sheet { paneId: string; key: number; open: boolean; opener: HTMLElement | null }
+ *  keeps its last pane, its view stopped, until it is gone. `opener`: what had the focus as it opened, and
+ *  the pane it opened then (`openedPane`: pane to pane keeps both). */
+export interface Sheet { paneId: string; key: number; open: boolean; opener: HTMLElement | null; openedPane: string }
 
 // Another layer over the drawer: a dialog of Modals.tsx (Mantine's confirm too) or ⋮'s menu.
 const OTHER_LAYER = '.modal-overlay, [data-modal-backdrop], [data-menu-dropdown]';
@@ -43,7 +44,7 @@ export function AgentDrawer({ sheet, actions }: { sheet: Sheet | null; actions: 
   useLayoutEffect(() => {
     const a = document.activeElement;
     if (open || !sheet || !wide || (a && a !== document.body && !content.current?.contains(a))) return;
-    const back = sheet.opener?.isConnected ? sheet.opener : document.querySelector<HTMLElement>(`#screen [data-pane-id="${CSS.escape(sheet.paneId)}"]`);
+    const back = sheet.opener?.isConnected ? sheet.opener : document.querySelector<HTMLElement>(`#screen [data-pane-id="${CSS.escape(sheet.openedPane)}"]`);
     back?.focus({ preventScroll: true });
   }, [open]); // on a close only
   useEffect(() => {

@@ -63,8 +63,9 @@ function show(kind: View['screen'], node: ReactNode, topbar?: Topbar, hash: stri
 /** Opens the drawer on a pane, a fresh view of it; what had the focus as it opened (not on a pane to pane)
  *  gets it back on its close. */
 function openSheet(paneId: string): void {
-  const opener = sheet?.open ? sheet.opener : document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  sheet = { paneId, key: (sheet?.key ?? 0) + 1, open: true, opener };
+  const fresh = !sheet?.open;
+  const opener = fresh ? (document.activeElement instanceof HTMLElement ? document.activeElement : null) : sheet!.opener;
+  sheet = { paneId, key: (sheet?.key ?? 0) + 1, open: true, opener, openedPane: fresh ? paneId : sheet!.openedPane };
   changed();
 }
 

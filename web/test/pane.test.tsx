@@ -45,7 +45,7 @@ async function show(paneId: string, home = false, back = '#/agents', name = home
   store.view.paneOverBase = false;
   const t = homeTopbar(paneId);
   ({ container, unmount } = await render(home ? <><div id="tb">{t.title}{t.right}</div><Pane paneId={paneId} home name={name} /></>
-    : <AgentDrawer sheet={{ paneId, key: 1, open: true, opener: null }} actions={noActions} />));
+    : <AgentDrawer sheet={{ paneId, key: 1, open: true, opener: null, openedPane: paneId }} actions={noActions} />));
 }
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => container.querySelector<T>(sel)!;
 const ta = () => $<HTMLTextAreaElement>('#pane-input');
@@ -310,7 +310,7 @@ describe('pane header', () => {
     let set: (s: Sheet) => void = () => {};
     let screen: (k: number) => void = () => {};
     function Host({ opener }: { opener: HTMLElement | null }) {
-      const [s, setS] = useState<Sheet>({ paneId: 'p2', key: 1, open: true, opener });
+      const [s, setS] = useState<Sheet>({ paneId: 'p2', key: 1, open: true, opener, openedPane: 'p2' });
       const [k, setK] = useState(0); // the screen under it drawn afresh (a Home): a new chip
       set = setS;
       screen = setK;
@@ -318,8 +318,9 @@ describe('pane header', () => {
     }
     const outside = document.body.appendChild(document.createElement('button'));
     ({ container, unmount } = await render(<Host opener={outside} />));
-    const close = (opener: HTMLElement | null) => fire(() => set({ paneId: 'p2', key: 1, open: false, opener }));
-    const reopen = (opener: HTMLElement | null) => fire(() => set({ paneId: 'p2', key: 2, open: true, opener }));
+    // closed on p7, opened on p2 (pane to pane in between): the chip is p2's
+    const close = (opener: HTMLElement | null) => fire(() => set({ paneId: 'p7', key: 3, open: false, opener, openedPane: 'p2' }));
+    const reopen = (opener: HTMLElement | null) => fire(() => set({ paneId: 'p2', key: 2, open: true, opener, openedPane: 'p2' }));
     assert.ok(document.activeElement === $('.agent-drawer-head'));
     await close(outside);
     assert.ok(document.activeElement === outside, 'back to its opener');
