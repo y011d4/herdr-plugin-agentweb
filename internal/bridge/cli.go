@@ -926,21 +926,24 @@ func removeOwnWorktree(rpc, slow Rpc, own, path string) (string, error) {
 	} else {
 		// detached (a worker that deployed checks out the commit it deployed): the checkout
 		// goes once that commit is upstream, the branch it was made for only when that is
-		// merged too. That branch is the one its oldest checkout moved away from, per its
+		// merged too. That branch is the one its first checkout moved away from, per its
 		// HEAD's reflog (git's own record of this worktree), and its dir (<repo>-wt-<branch>)
 		// must be named after it (the name alone can't tell feat/x from feat-x)
 		if !inUpstream(tip) {
 			return refuse("its HEAD is detached at a commit not in " + upstream)
 		}
-		log, _ := git("reflog", "--format=%gs", "HEAD")
-		lines := strings.Split(jsTrim(log), "\n") // newest first
+		lp, _ := git("rev-parse", "--path-format=absolute", "--git-path", "logs/HEAD")
+		log, _ := os.ReadFile(jsTrim(lp))
+		lines := strings.Split(string(log), "\n") // oldest first: "<old id> <new id> <who> <when>\t<message>"
 		first := ""
-		// only a reflog back to `git worktree add`'s own entry: with older ones expired,
-		// the oldest checkout left needn't be the first
-		if lines[len(lines)-1] == "reset: moving to HEAD" {
+		// only a reflog from HEAD's creation (`git worktree add`'s entry, from the null id):
+		// with older entries expired (gc keeps the ids), the oldest checkout left needn't be the first
+		if old, _, _ := strings.Cut(lines[0], " "); old != "" && strings.Trim(old, "0") == "" {
 			for _, l := range lines {
-				if from, ok := strings.CutPrefix(l, "checkout: moving from "); ok {
+				_, msg, _ := strings.Cut(l, "\t")
+				if from, ok := strings.CutPrefix(msg, "checkout: moving from "); ok {
 					first, _, _ = strings.Cut(from, " ")
+					break
 				}
 			}
 		}
