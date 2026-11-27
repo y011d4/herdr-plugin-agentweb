@@ -1460,11 +1460,15 @@ async function m2(c: Ctx) {
     await click(m.x, m.y);
     const menu = await pg.until(`!!document.querySelector('[data-menu-dropdown]')`, 2000);
     await esc();
-    const [menuGone, stayed] = await pg.ev(`[!document.querySelector('[data-menu-dropdown]'), location.hash === ${js(pane)} && !!${SHEET}]`);
+    // the menu closes on the key, its dropdown leaves after Mantine's exit transition (150ms; 170-190ms from the key,
+    // idle or under load): waited for, not read at a fixed 300ms, which left ~110ms for the renderer's stalls. A menu
+    // the Escape missed stays open, so it still fails.
+    const gone = await pg.until(`!document.querySelector('[data-menu-dropdown]')`, 2000);
+    const stayed = await pg.ev(`location.hash === ${js(pane)} && !!${SHEET}`);
     await esc();
     const closed = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
-    result(c, !menu.timeout && menuGone && stayed && !closed.timeout, 'M2.escape', `menu=${ms(menu)},menuGone=${menuGone},drawerStayed=${stayed},closed=${ms(closed)}`,
-      "with ⋮'s menu open, Escape closes the menu only; Escape again closes the drawer back to #/agents within 3s");
+    result(c, !menu.timeout && !gone.timeout && stayed && !closed.timeout, 'M2.escape', `menu=${ms(menu)},menuGone=${ms(gone)},drawerStayed=${stayed},closed=${ms(closed)}`,
+      "with ⋮'s menu open, Escape closes the menu only (its dropdown gone within 2s); Escape again closes the drawer back to #/agents within 3s");
     await pg.goto(pane);
     await pg.until(`!!${SHEET}`, 3000);
     await sleep(400);
