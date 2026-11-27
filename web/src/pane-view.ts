@@ -121,7 +121,8 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   // ── Chat view (Claude Code transcript) ──────────────────────────────────────
   // A claude pane can be shown as its structured transcript instead of the raw
   // terminal (view.paneViewMode). Availability is probed per pane; the terminal stays the fallback.
-  // chat view starts closed; availability is probed after the terminal loads
+  // set as it opens (openingMode): a Claude pane on its chat but where its terminal was chosen, any other
+  // pane on its terminal, probed for a transcript once its screen is in
   view.paneViewMode = 'terminal';
   let mode: 'terminal' | 'chat' = 'terminal'; // this view's (view.paneViewMode is the one on show's)
   let suspended = false; // under a drawer (suspend/resume)
