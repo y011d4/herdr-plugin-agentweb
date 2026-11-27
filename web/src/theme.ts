@@ -14,6 +14,8 @@ export const theme = createTheme({
   fontFamily: 'system-ui, -apple-system, sans-serif',
   fontFamilyMonospace: "'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace",
   fontSizes: { md: rem(15) },
+  // the chat's markdown headings (Typography): the app's font, its 650 weight (style.css's .chat-md sizes them)
+  headings: { fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: '650' },
   lineHeights: { md: '1.5' },
   colors: {
     // Mantine's dark scheme reads text from 0, dimmed 2, borders 4, inputs 6, its body (a modal's,

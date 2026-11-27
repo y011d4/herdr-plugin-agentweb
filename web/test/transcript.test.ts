@@ -4,11 +4,11 @@ import assert from 'node:assert/strict';
 import { askAnswer, renderMarkdown, conversationItems, latestActivity, type TimelineItem } from '../src/transcript.ts';
 import { createElement } from 'react';
 import { Notice } from '../src/ui/ChatLog.tsx';
-import { chatHtml, htmlOf } from './render.ts';
+import { chatDom, drawn } from './render.ts';
 
-// what ui/ChatLog.tsx draws for an item, or a notice line, as HTML
-const renderItem = (item: TimelineItem): string => chatHtml(item);
-const noticeHtml = (line: string): string => htmlOf(createElement(Notice, { line }));
+// what ui/ChatLog.tsx draws for an item, or a notice line
+const item = (it: TimelineItem): HTMLElement => chatDom([it]);
+const notice = (line: string): HTMLElement => drawn(createElement(Notice, { line }));
 
 // renderMarkdown is the chat prose renderer used for user + assistant turns.
 // It must be XSS-safe (all text escaped before formatting) and dependency-free.
@@ -167,25 +167,29 @@ describe('renderMarkdown — safety', () => {
   });
 });
 
-describe('renderItem — assistant + user turns use the markdown renderer', () => {
-  it('wraps assistant prose in chat-md and renders markdown', () => {
-    const item: TimelineItem = { kind: 'assistant', text: '# Hi\n\n- one', sidechain: false, ts: null };
-    const h = renderItem(item);
-    assert.match(h, /class="chat-item chat-assistant"/);
-    assert.match(h, /<div class="chat-md"><h1 class="chat-h chat-h1">Hi<\/h1><ul class="chat-ul"><li>one<\/li><\/ul><\/div>/);
+describe('the chat log (ui/ChatLog.tsx): assistant + user turns use the markdown renderer', () => {
+  it("draws the assistant's prose as renderMarkdown's HTML in Typography (.chat-md)", () => {
+    const d = item({ kind: 'assistant', text: '# Hi\n\n- one', sidechain: false, ts: null });
+    const md = d.querySelector('.chat-item.chat-assistant .chat-md')!;
+    assert.equal(md.innerHTML, '<h1 class="chat-h chat-h1">Hi</h1><ul class="chat-ul"><li>one</li></ul>');
+    assert.ok(md.classList.contains('mantine-Typography-root'));
   });
 
-  it('renders user prompt markdown inside the bubble', () => {
-    const item: TimelineItem = { kind: 'user', text: 'run `ls` please', sidechain: false, ts: null };
-    const h = renderItem(item);
-    assert.match(h, /class="chat-bubble chat-md"/);
-    assert.match(h, /<code>ls<\/code>/);
+  it("draws a user's markdown in the bubble", () => {
+    const d = item({ kind: 'user', text: 'run `ls` please', sidechain: false, ts: null });
+    assert.equal(d.querySelector('.chat-item.chat-user .chat-bubble .chat-md code')!.textContent, 'ls');
+  });
+
+  it("draws a Home's replies as bubbles, another pane's as prose", () => {
+    const a: TimelineItem = { kind: 'assistant', text: 'ok', sidechain: false, ts: null };
+    assert.ok(chatDom([a], true).querySelector('.chat-assistant > .mantine-Paper-root > .chat-md'), 'a Home: a bubble');
+    assert.ok(chatDom([a]).querySelector('.chat-assistant > .chat-md'), 'a pane: the prose alone');
   });
 
   it("splits the bridge's [yoicks] lines at either end of a user turn from the user's own words", () => {
-    const user = (text: string): string => renderItem({ kind: 'user', text, sidechain: false, ts: null });
-    const shown = (h: string): string[] => [...h.matchAll(/class="chat-item (chat-notice|chat-user)">(.*?)<\/div>/g)]
-      .map((m) => `${m[1]}: ${m[2].replace(/<[^>]+>/g, '')}`);
+    const user = (text: string): HTMLElement => item({ kind: 'user', text, sidechain: false, ts: null });
+    const shown = (d: HTMLElement): string[] => [...d.querySelectorAll('.chat-notice, .chat-user')]
+      .map((e) => `${e.classList.contains('chat-notice') ? 'chat-notice' : 'chat-user'}: ${e.textContent}`);
     assert.deepEqual(shown(user('[yoicks] w-a: working → done')), ['chat-notice: [yoicks] w-a: working → done']);
     assert.deepEqual(shown(user('[yoicks] w-a: working → done\n[yoicks] w-b: working → blocked')),
       ['chat-notice: [yoicks] w-a: working → done', 'chat-notice: [yoicks] w-b: working → blocked']);
@@ -196,20 +200,21 @@ describe('renderItem — assistant + user turns use the markdown renderer', () =
     // only the ends: one in the middle, or not at a line's start, stays the user's
     assert.deepEqual(shown(user('a\n[yoicks] x\nb')), ['chat-user: a[yoicks] xb']);
     assert.deepEqual(shown(user('see [yoicks] x')), ['chat-user: see [yoicks] x']);
-    assert.doesNotMatch(user('- this:\n  [yoicks] w-a: done'), /chat-notice/); // indented: a list item's line
+    assert.equal(user('- this:\n  [yoicks] w-a: done').querySelector('.chat-notice'), null); // indented: a list item's line
   });
 
   it("makes a worker's name in a notice a button that opens it (data-agent); the rest stays text, escaped", () => {
-    const btn = (n: string): string => `<button type="button" class="chat-notice-agent" data-agent="${n}">${n}</button>`;
-    assert.equal(noticeHtml('[yoicks] w-a: working → done'), `[yoicks] ${btn('w-a')}: working → done`);
-    assert.equal(noticeHtml('[yoicks] w-a: done → idle, ready, task not sent'), `[yoicks] ${btn('w-a')}: done → idle, ready, task not sent`);
-    assert.equal(noticeHtml('[yoicks] started w_b2 (pane w8:p1) in /x <y>; sent'), `[yoicks] started ${btn('w_b2')} (pane w8:p1) in /x &lt;y&gt;; sent`);
+    // the line's text as it is, the name a button (data-agent), every child but that button text
+    const parts = (line: string): Array<[string, string]> => [...notice(line).childNodes]
+      .map((n) => [n instanceof HTMLButtonElement ? `button[${n.dataset.agent}]` : n.nodeName, n.textContent ?? '']);
+    assert.deepEqual(parts('[yoicks] w-a: working → done'), [['#text', '[yoicks] '], ['button[w-a]', 'w-a'], ['#text', ': working → done']]);
+    assert.deepEqual(parts('[yoicks] w-a: done → idle, ready, task not sent'), [['#text', '[yoicks] '], ['button[w-a]', 'w-a'], ['#text', ': done → idle, ready, task not sent']]);
+    assert.deepEqual(parts('[yoicks] started w_b2 (pane w8:p1) in /x <y>; sent'), [['#text', '[yoicks] started '], ['button[w_b2]', 'w_b2'], ['#text', ' (pane w8:p1) in /x <y>; sent']]);
     // not a worker: the bridge's own word, a name herdr wouldn't take, nothing after it
     for (const l of ['[yoicks] restarted while you were working; check overview.', '[yoicks] W-A: x → y', '[yoicks] w-a', '[yoicks] <b>: x']) {
-      assert.doesNotMatch(noticeHtml(l), /<button/, l);
+      assert.deepEqual(parts(l), [['#text', l]], l); // text, escaped: no element in it
     }
-    assert.equal(noticeHtml('[yoicks] <b>: x'), '[yoicks] &lt;b&gt;: x');
-    assert.match(renderItem({ kind: 'user', text: '[yoicks] w-a: working → done', sidechain: false, ts: null }), /class="chat-item chat-notice">\[yoicks\] <button[^>]*data-agent="w-a"/);
+    assert.ok(item({ kind: 'user', text: '[yoicks] w-a: working → done', sidechain: false, ts: null }).querySelector('.chat-item.chat-notice button.chat-notice-agent[data-agent="w-a"]'));
   });
 });
 
@@ -243,7 +248,7 @@ describe('conversationItems / latestActivity (home chat)', () => {
     // Chat about this (Claude Code's refusal, the bridge's /answer {chat}): a dim notice, not the refusal's words
     const chat = conversationItems([answered('q1', 'The user wants to clarify these questions.\n    This means they may…\n- "好きな果物は？"\n  (No answer provided)', true)], asks);
     assert.deepEqual(chat, [{ kind: 'user', text: '[yoicks] Chat about this', sidechain: false, ts: 5 }]);
-    assert.match(renderItem(chat[0]), /class="chat-item chat-notice"/);
+    assert.ok(item(chat[0]).querySelector('.chat-item.chat-notice'));
     // the answers given before it stay, a line each (as the bridge's clarify lists them)
     const listed = 'The user wants to clarify these questions.\n    Questions asked:\n- "好きな果物は？"\n  Answer: ばなな, りんご\n- "いつ？"\n  (No answer provided)\n- "量は？"\n  Answer: 2 個\nくらい';
     assert.deepEqual(conversationItems([answered('q1', listed, true)], asks).map((i) => (i as { text: string }).text),
@@ -265,7 +270,7 @@ describe('conversationItems / latestActivity (home chat)', () => {
     // the bridge's answer, as on 11-26's personal session: one line, a dim notice
     const shown = conversationItems([res('s1', 'started w-a (pane w8H:p1) in /r; delivered to w-a: you are woken when it finishes or stops for an answer'), result], calls);
     assert.deepEqual(shown, [{ kind: 'user', text: '[yoicks] started w-a (pane w8H:p1) in /r; delivered to w-a: you are woken when it finishes or stops for an answer', sidechain: false, ts: 7 }]);
-    assert.match(renderItem(shown[0]), /class="chat-item chat-notice"/);
+    assert.ok(item(shown[0]).querySelector('.chat-item.chat-notice'));
     // not delivered (an error result) says so too, on one line
     assert.deepEqual(conversationItems([res('s1', 'started w-a (pane p) in /r; not delivered to w-a:\nagent_pane_busy', true)], calls).map((i) => (i as { text: string }).text),
       ['[yoicks] started w-a (pane p) in /r; not delivered to w-a: agent_pane_busy']);
@@ -287,16 +292,21 @@ describe('conversationItems / latestActivity (home chat)', () => {
   });
 });
 
-describe('renderItem — images', () => {
+describe('the chat log — images', () => {
   const png = 'data:image/png;base64,iVBORw0KGgo=';
+  const imgs = (d: HTMLElement): string[] => [...d.querySelectorAll<HTMLImageElement>('.chat-images button.chat-image-open[aria-label="View image"] img.chat-image')]
+    .map((i) => `${i.getAttribute('src')}|${i.alt}`);
   it("shows a user turn's images under its words, or alone", () => {
-    const h = renderItem({ kind: 'user', text: 'what is it?', images: [png, png], sidechain: false, ts: null });
-    assert.match(h, /^<div class="chat-item chat-user"><div class="chat-bubble chat-md"><p class="chat-p">what is it\?<\/p><\/div><\/div><div class="chat-item chat-user chat-images">/);
-    assert.equal(h.split(`<img class="chat-image" alt="image" src="${png}">`).length, 3);
-    assert.equal(renderItem({ kind: 'user', text: '', images: [png], sidechain: false, ts: null }),
-      `<div class="chat-item chat-user chat-images"><button type="button" class="chat-image-open" aria-label="View image"><img class="chat-image" alt="image" src="${png}"></button></div>`);
+    const d = item({ kind: 'user', text: 'what is it?', images: [png, png], sidechain: false, ts: null });
+    assert.deepEqual([...d.children].map((e) => e.className.includes('chat-images') ? 'images' : e.querySelector('.chat-bubble')?.textContent), ['what is it?', 'images']);
+    assert.deepEqual(imgs(d), [`${png}|image`, `${png}|image`]);
+    const alone = item({ kind: 'user', text: '', images: [png], sidechain: false, ts: null });
+    assert.equal(alone.children.length, 1);
+    assert.deepEqual(imgs(alone), [`${png}|image`]);
   });
-  it('escapes a src', () => {
-    assert.doesNotMatch(renderItem({ kind: 'user', text: '', images: ['x" onerror="y'], sidechain: false, ts: null }), /" onerror/);
+  it('takes a src as it is, as an attribute', () => {
+    const img = item({ kind: 'user', text: '', images: ['x" onerror="y'], sidechain: false, ts: null }).querySelector('img')!;
+    assert.equal(img.getAttribute('src'), 'x" onerror="y');
+    assert.ok(!img.hasAttribute('onerror'));
   });
 });
