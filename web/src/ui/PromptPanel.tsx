@@ -11,7 +11,8 @@
  * typing ("Type something.", "Chat about this") switches the view to the terminal once it lands: the
  * composer is there.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Button, Loader, Text, UnstyledButton } from '@mantine/core';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { apiPost, orchestratorPost } from '../api.ts';
 import { showToast } from '../notify.ts';
 import type { PaneView, PanelPrompt } from '../pane-view.ts';
@@ -98,24 +99,20 @@ export function PromptPanel({ paneId, prompt, view }: { paneId: string; prompt: 
   }
 
   return (
-    <div className={sending ? 'chat-prompt chat-prompt-sending' : 'chat-prompt'} id="chat-prompt">
-      <div className="chat-prompt-head">&#9203; Waiting for your input <span className="chat-prompt-build">{BUILD}</span></div>
-      <div className="chat-prompt-q">{parsed?.question ?? ''}</div>
-      <div className="chat-prompt-options">
+    <div className={PANEL} id="chat-prompt">
+      <Head>&#9203; Waiting for your input <Text span ff="monospace" fz={10} fw={400} c="dimmed">{BUILD}</Text></Head>
+      <Question>{parsed?.question ?? ''}</Question>
+      <Options>
         {parsed?.options.map((o) => (
-          <button key={`${id}\n${o.send}`} className={sent === o.send ? 'ask-opt ask-opt-sent' : 'ask-opt'} type="button" onClick={() => { void tap(o); }}>
-            <span className="ask-opt-num">{o.send}</span>
-            <span className="ask-opt-text">
-              <span className="ask-opt-label">{o.label}</span>
-              {o.description ? <span className="ask-opt-desc">{o.description}</span> : null}
-            </span>
-          </button>
+          // while an answer is settling, the buttons take no taps: a double tap can't press the digit again into the next prompt
+          <Option key={`${id}\n${o.send}`} num={o.send} label={o.label} description={o.description} marked={sent === o.send} disabled={sending}
+            onClick={() => { void tap(o); }} />
         ))}
-      </div>
+      </Options>
       <details className="chat-prompt-term" ref={term}>
         <summary>Terminal</summary>
         {screen === null
-          ? <div className="chat-prompt-screen"><span className="loading-spinner"></span></div>
+          ? <div className="chat-prompt-screen"><Loader size={20} /></div>
           : <div className="chat-prompt-screen" dangerouslySetInnerHTML={{ __html: screen }}></div>}
       </details>
     </div>
@@ -167,31 +164,54 @@ export function HeadlessPrompt({ name, pending }: { name: string; pending: { id:
 
   const toggle = (label: string): void => setPicked((p) => (p.includes(label) ? p.filter((l) => l !== label) : [...p, label]));
   return (
-    <div className={sending ? 'chat-prompt chat-prompt-sending' : 'chat-prompt'} id="headless-prompt">
-      <div className="chat-prompt-head">
-        &#9203; {q.header || 'Question'}{pending.questions.length > 1 ? ` (${step + 1}/${pending.questions.length})` : ''}
-      </div>
-      <div className="chat-prompt-q">{q.question}</div>
-      <div className="chat-prompt-options">
-        {q.options.map((o, i) => (
-          <button key={o.label} type="button" className={q.multiSelect && picked.includes(o.label) ? 'ask-opt ask-opt-sent' : 'ask-opt'}
-            aria-pressed={q.multiSelect ? picked.includes(o.label) : undefined}
-            onClick={() => { if (q.multiSelect) toggle(o.label); else answer(o.label); }}>
-            <span className="ask-opt-num">{q.multiSelect ? (picked.includes(o.label) ? '✓' : '') : i + 1}</span>
-            <span className="ask-opt-text">
-              <span className="ask-opt-label">{o.label}</span>
-              {o.description ? <span className="ask-opt-desc">{o.description}</span> : null}
-            </span>
-          </button>
-        ))}
-      </div>
+    <div className={PANEL} id="headless-prompt">
+      <Head>&#9203; {q.header || 'Question'}{pending.questions.length > 1 ? ` (${step + 1}/${pending.questions.length})` : ''}</Head>
+      <Question>{q.question}</Question>
+      <Options>
+        {q.options.map((o, i) => {
+          const on = picked.includes(o.label);
+          return (
+            <Option key={o.label} num={q.multiSelect ? (on ? '✓' : '') : String(i + 1)} label={o.label} description={o.description}
+              marked={q.multiSelect && on} pressed={q.multiSelect ? on : undefined} disabled={sending}
+              onClick={() => { if (q.multiSelect) toggle(o.label); else answer(o.label); }} />
+          );
+        })}
+      </Options>
       {q.multiSelect && (
-        <button type="button" className="btn-primary" id="headless-prompt-next" disabled={!picked.length || sending}
+        <Button id="headless-prompt-next" fullWidth mt={2} disabled={!picked.length || sending}
           onClick={() => answer(q.options.filter((o) => picked.includes(o.label)).map((o) => o.label).join(', '))}>
           {last ? 'Send' : 'Next'}
-        </button>
+        </Button>
       )}
-      <div className="chat-prompt-hint">Or type your own answer below and send it.</div>
+      <Text fz={12} c="dimmed" mt={8}>Or type your own answer below and send it.</Text>
     </div>
+  );
+}
+
+// ── The panels' parts ─────────────────────────────────────────────────────────
+
+// below the chat, an orange rule on top; past 45% of the screen it scrolls on its own
+const PANEL = 'chat-prompt shrink-0 max-h-[45vh] overflow-y-auto border-t-2 border-(--color-blocked) bg-(--color-surface) px-3 py-2.5 lg:px-(--wide-gutter)';
+
+const Head = ({ children }: { children: ReactNode }) => <Text className="chat-prompt-head" fz={12} fw={650} c="blocked" mb={8}>{children}</Text>;
+// the question (none: no line)
+const Question = ({ children }: { children: string }) => (
+  <Text className="chat-prompt-q whitespace-pre-wrap wrap-anywhere empty:hidden" fz={14} lh={1.4} mb={8}>{children}</Text>
+);
+const Options = ({ children }: { children: ReactNode }) => <div className="flex flex-col gap-1.5 not-empty:mb-2">{children}</div>;
+
+/** An answer: its number (or a multiSelect's ✓) on orange, its label, its description under it smaller and dimmer.
+ *  `marked`: the one tapped, or a multiSelect's checked one. */
+function Option({ num, label, description, marked, pressed, disabled, onClick }:
+  { num: string; label: string; description: string; marked: boolean; pressed?: boolean; disabled: boolean; onClick: () => void }) {
+  return (
+    <UnstyledButton disabled={disabled} aria-pressed={pressed} onClick={onClick}
+      className={`ask-opt${marked ? ' ask-opt-sent' : ''} flex min-h-11 items-baseline gap-2 rounded-lg border bg-(--color-surface-2) px-3 py-2.5 text-left text-[14px] text-(--color-text) active:bg-(--color-border) disabled:opacity-55 ${marked ? 'border-(--color-done) opacity-60' : 'border-(--color-border)'}`}>
+      <span className="ask-opt-num bg-(--color-blocked) text-white">{num}</span>
+      <span className="ask-opt-text flex min-w-0 flex-col gap-0.5 wrap-anywhere">
+        <span className="ask-opt-label">{label}</span>
+        {description ? <span className="ask-opt-desc text-[12px] leading-[1.4]">{description}</span> : null}
+      </span>
+    </UnstyledButton>
   );
 }
