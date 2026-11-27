@@ -496,6 +496,37 @@ func TestHeadlessWakeUps(t *testing.T) {
 			t.Errorf("%d prompts, %d watches", n, b.watches())
 		}
 	})
+	t.Run("re-armed at its end: a turn of its own that ended meanwhile wakes, a worker gone in the quiet time doesn't", func(t *testing.T) {
+		b := startHeadless(t, t.TempDir(), nil, nil)
+		w := worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
+			w.Set(pane, "working")
+			w.Set(pane, "done")
+		})
+		b.start(t)
+		b.waitStatus(t, "idle")
+		b.prompt(t)
+		b.waitWakes(t, "[yoicks] w1: working → done")
+		raw, _ := b.srv.rpc("agent.get", map[string]any{"target": "w1p"})
+		_, seq, _ := agentState(raw)
+		h := b.srv.headless["h1"]
+		h.mu.Lock()
+		epoch := h.epoch
+		h.mu.Unlock()
+		// saved at an earlier end (seq-1): it has ended a turn since, unseen
+		if !h.watch(&hlWatch{Pane: "w1p", Name: "w1", Status: "done", Seq: seq - 1}, "", nil, epoch) {
+			t.Fatal("not watched")
+		}
+		b.pass(t, "the quiet time", resumeQuiet)
+		b.waitWakes(t, "[yoicks] w1: working → done", "[yoicks] w1: working → done")
+
+		w.Set("w1p", "working") // another turn of its own
+		b.watching(t, "working")
+		w.Set("w1p", "done")
+		b.waiting(t, "the quiet time", resumeQuiet)
+		w.Remove("w1p") // its pane closed before the end held: not told
+		waitUntil(t, 10*time.Second, "the watch ended", func() bool { return b.watches() == 0 })
+		b.waitWakes(t, "[yoicks] w1: working → done", "[yoicks] w1: working → done")
+	})
 	t.Run("a stalled prompt goes on with the level wait", func(t *testing.T) {
 		b := startHeadless(t, t.TempDir(), nil, nil)
 		w := worker(t, b, "idle", nil)
