@@ -141,7 +141,8 @@ All in `internal/bridge/` (one package):
   which tunes Mantine's Typography for the chat's prose), the toasts' box, the drawer's and the PC grid's
   layout, and the Settings sheet's. The theme makes a button given no size, and an input at its default size (sm; every
   Mantine input has one), 44px tall (`--touch-min`), an input's text 16px (below that iOS zooms in on focus;
-  the composer keeps 14px); `theme.test.ts` checks it. Mantine's style props (`px`, `c`, `bg`…) are inline
+  the composer keeps 14px); `theme.test.ts` checks it. What is clicked shows the pointer: a Mantine control by
+  the theme's `cursorType`, a `summary` or `[role=button]` by reset.css, a disabled one `not-allowed` (style.css). Mantine's style props (`px`, `c`, `bg`…) are inline
   styles, so they beat any class, a Tailwind `lg:` one too: a value that changes with the width goes in
   classes only. A class (Tailwind's layer, or `app`) beats Mantine's own CSS. Ids stay; the class names the
   tests and webcheck select on stay on their elements as hooks without CSS (`agent-card`, `home-chip`,

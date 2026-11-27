@@ -30,6 +30,9 @@ export const theme = createTheme({
     unknown: colorsTuple('#3a3e4f'),
   },
   primaryColor: 'accent',
+  // a pointer over every Mantine control (button, menu item, nav link, anchor, switch, select): Mantine's
+  // default is the arrow; a disabled one is not-allowed (Mantine's, and style.css's for UnstyledButton)
+  cursorType: 'pointer',
   components: {
     // Mantine's portals (a modal, a menu's dropdown) go into #modal-root, above the app (index.html)
     Portal: Portal.extend({ defaultProps: { target: '#modal-root' } }),

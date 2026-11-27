@@ -246,7 +246,7 @@ function Option({ id, extra, num, label, description, marked, pressed, disabled,
   { id?: string; extra?: boolean; num: string; label: string; description: string; marked: boolean; pressed?: boolean; disabled: boolean; onClick: () => void }) {
   return (
     <UnstyledButton id={id} disabled={disabled} aria-pressed={pressed} onClick={onClick}
-      className={`ask-opt${extra ? ' ask-extra' : ''}${marked ? ' ask-opt-sent' : ''} flex min-h-11 items-baseline gap-2 rounded-lg border bg-(--color-surface-2) px-3 py-2.5 text-left text-[14px] text-(--color-text) active:bg-(--color-border) disabled:opacity-55 ${marked ? 'border-(--color-done) opacity-60' : 'border-(--color-border)'}`}>
+      className={`ask-opt${extra ? ' ask-extra' : ''}${marked ? ' ask-opt-sent' : ''} flex min-h-11 items-baseline gap-2 rounded-lg border bg-(--color-surface-2) px-3 py-2.5 text-left text-[14px] text-(--color-text) enabled:hover:bg-(--color-border) active:bg-(--color-border) disabled:opacity-55 ${marked ? 'border-(--color-done) opacity-60' : 'border-(--color-border)'}`}>
       <span className="ask-opt-num bg-(--color-blocked) text-white">{num}</span>
       <span className="ask-opt-text flex min-w-0 flex-col gap-0.5 wrap-anywhere">
         <span className="ask-opt-label">{label}</span>
