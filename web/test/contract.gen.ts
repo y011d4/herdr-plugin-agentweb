@@ -196,7 +196,8 @@ export const state: AppState = {
     "p4"
    ],
    "mode": "tui",
-   "headless": null
+   "headless": null,
+   "todos": []
   },
   {
    "name": "work",
@@ -204,7 +205,8 @@ export const state: AppState = {
    "paneId": null,
    "agents": null,
    "mode": "tui",
-   "headless": null
+   "headless": null,
+   "todos": []
   }
  ],
  "orchestratorPaneId": "p4",
@@ -406,7 +408,8 @@ export const messages: WsMessage[] = [
       "p4"
      ],
      "mode": "tui",
-     "headless": null
+     "headless": null,
+     "todos": []
     },
     {
      "name": "work",
@@ -414,7 +417,8 @@ export const messages: WsMessage[] = [
      "paneId": null,
      "agents": null,
      "mode": "tui",
-     "headless": null
+     "headless": null,
+     "todos": []
     }
    ],
    "orchestratorPaneId": "p4",
@@ -615,7 +619,8 @@ export const messages: WsMessage[] = [
       "p4"
      ],
      "mode": "tui",
-     "headless": null
+     "headless": null,
+     "todos": []
     },
     {
      "name": "work",
@@ -623,7 +628,8 @@ export const messages: WsMessage[] = [
      "paneId": null,
      "agents": null,
      "mode": "tui",
-     "headless": null
+     "headless": null,
+     "todos": []
     },
     {
      "name": "pilot",
@@ -704,7 +710,25 @@ export const messages: WsMessage[] = [
         "resolvedModel": "claude-sonnet-5-5"
        }
       ]
-     }
+     },
+     "todos": [
+      {
+       "id": "a1b2c3",
+       "text": "merge PR #108",
+       "agent": "w-review",
+       "url": "https://github.com/o/r/pull/108",
+       "due": null,
+       "createdAt": 1795478400000
+      },
+      {
+       "id": "d4e5f6",
+       "text": "delete ~/backup.tgz",
+       "agent": null,
+       "url": null,
+       "due": 1795564800000,
+       "createdAt": 1795478400000
+      }
+     ]
     }
    ],
    "orchestratorPaneId": "p4",

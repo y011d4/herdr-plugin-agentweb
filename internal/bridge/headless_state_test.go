@@ -155,7 +155,7 @@ func TestHeadlessStream(t *testing.T) {
 
 	t.Run("with the bridge's tools: init must list them and have yoicks connected", func(t *testing.T) {
 		tools := headlessTools(true)
-		good := strings.Replace(strings.Replace(lineInit, `"tools":["AskUserQuestion"]`, `"tools":["mcp__yoicks__overview","mcp__yoicks__agent_get","mcp__yoicks__agent_read","mcp__yoicks__agent_prompt","mcp__yoicks__agent_start","mcp__yoicks__worktree_remove","AskUserQuestion"]`, 1),
+		good := strings.Replace(strings.Replace(lineInit, `"tools":["AskUserQuestion"]`, `"tools":["mcp__yoicks__overview","mcp__yoicks__agent_get","mcp__yoicks__agent_read","mcp__yoicks__agent_prompt","mcp__yoicks__agent_start","mcp__yoicks__worktree_remove","mcp__yoicks__todo","AskUserQuestion"]`, 1),
 			`"mcp_servers":[]`, `"mcp_servers":[{"name":"yoicks","source":"dynamic","status":"connected"}]`, 1)
 		for line, fatal := range map[string]string{
 			good: "",

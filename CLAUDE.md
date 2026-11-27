@@ -190,7 +190,7 @@ All in `internal/bridge/` (one package):
   usage, warnings (unknown events, unreadable lines, the init check). Its state's `paneId` is
   `hl:<name>` while the child runs; the pane/agent routes and `watch_pane` refuse `hl:` (404 /
   nothing read), only the transcript route serves it (`resolvePaneTranscript`'s head). Saved in
-  `<state>/headless/<name>.json` (`{sessionId, wanted, rulesHash, watches, completionSeq, model}`: the count goes on across restarts, a phone's seen-done is keyed on it). Its
+  `<state>/headless/<name>.json` (`{sessionId, wanted, watches, completionSeq, model}`: the count goes on across restarts, a phone's seen-done is keyed on it). Its
   model: each child gets an `initialize` control request at its start, whose answer lists Claude Code's `/model`
   choices (state `headless.models`; the answer also has the account's email: only `models` is read); `POST …/model`
   switches a running child in place with `set_model` (refused mid-turn; Claude Code applies it from the next turn),
@@ -207,7 +207,12 @@ All in `internal/bridge/` (one package):
   start, Stop and Clear, and a watch or question it registers once that child is replaced is
   refused; the workers' generation, which a restart keeps, is separate). Its tools
   are the CLI's orchestrator commands as functions (`overview`, `agent_get`, `agent_read`, `agent_prompt`, `agent_start`,
-  `worktree_remove`), confined to the account its child runs under; `approve` is the child's
+  `worktree_remove`), confined to the account its child runs under, and `todo`, its Home's to-do list for the user
+  (`todo.go`: one list per orchestrator in `<state>/todos/<name>.json`, kept across Stop, Clear and restarts; an item
+  `{id, text, agent, url (http(s) only), due, createdAt}`, sent as state `orchestrators[].todos`; the user ticks one off with
+  `DELETE /api/orchestrators/:name/todos/:id`; the items come due are reminded once from the bridge's minute tick, in one
+  `orchestrator_alert` of kind `todo` per Home (the phone tags notifications by Home), ntfy and `notification.show`; blocked workers and the Home's question are not
+  items: the web shows those from the State); `approve` is the child's
   `--permission-prompt-tool`: AskUserQuestion becomes state `headless.pending` (answered by
   `POST …/answer`: the panel's "Type something." is a question's own answer, its "Chat about this" (`{chat}`) refuses it with Claude Code's words; a `/send` meanwhile is written, then refuses it the same way), held open with progress, anything
   else is denied unasked. `agent_prompt` watches the worker (one goroutine, herdr's waits on a
@@ -271,8 +276,9 @@ manifest, so that switch is by hand (it prints the steps: stop, switch, build, `
 start). Any failure after the stop puts the old binary back and starts it. It prints the `BUILD`
 and `CACHE` that Settings → App version should show on the phone. A commit from before the script
 (before the Vite build) has no copy: `t=$(mktemp) && git show main:scripts/redeploy.sh > "$t" && sh
-"$t" main`. The binary path doesn't change, so the orchestrators' allowlists still match; Clear them
-when `orchestrator/rules.md` differs between the versions.
+"$t" main`. The binary path doesn't change, so the orchestrators' allowlists still match; Clear the TUI ones
+when `orchestrator/rules.md` differs between the versions. A headless one needs nothing: the restart resumes
+it, and a resumed session reads the CLAUDE.md and rules.md of its start (checked live on Claude Code 2.1.322).
 
 **Service worker cache**: the build generates `CACHE_VERSION` (`herdr-yoicks-` + 8 hex of a hash
 over every built file's name and content) and the SW's asset list: never bump or edit them by

@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -279,29 +278,9 @@ func TestHeadlessNoTools(t *testing.T) {
 	}
 }
 
-func TestHeadlessRulesChanged(t *testing.T) {
-	// a session begun under other rules (with a message: one without would begin again, on today's)
-	state := t.TempDir()
-	b := startHeadless(t, state, nil, nil)
-	b.start(t)
-	b.waitStatus(t, "idle")
-	b.send(t, "hello")
-	b.waitStatus(t, "done")
-	b.post(t, "stop", "")
-	saved := headlessPath(state, "h1", ".json")
-	raw, _ := os.ReadFile(saved)
-	os.WriteFile(saved, regexp.MustCompile(`"rulesHash":"[^"]*"`).ReplaceAll(raw, []byte(`"rulesHash":"old"`)), 0o600)
-	b = startHeadless(t, state, nil, nil)
-	b.start(t)
-	v := b.waitStatus(t, "idle")
-	if !hasWarning(v, "rules") {
-		t.Errorf("%+v", v.Headless.Warnings)
-	}
-	b.post(t, "clear", "")
-	if v := b.waitStatus(t, "idle"); hasWarning(v, "rules") {
-		t.Errorf("after clear: %+v", v.Headless.Warnings)
-	}
-	// the headless rules are its section of the bundled ones
+func TestHeadlessRulesSections(t *testing.T) {
+	// the headless rules are their section of the bundled ones (a changed rules.md needs no Clear:
+	// a resumed session reads the new one at its start, checked live with Claude Code 2.1.322)
 	rules, _ := os.ReadFile(filepath.Join("..", "..", "orchestrator", "rules.md"))
 	hl, tui := rulesFor(string(rules), "headless"), rulesFor(string(rules), "tui")
 	if !strings.Contains(hl, "agent_prompt") || strings.Contains(hl, "{{yoicks}}") || strings.Contains(hl, "<!--") ||

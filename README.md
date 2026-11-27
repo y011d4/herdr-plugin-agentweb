@@ -91,6 +91,7 @@ herdr plugin action invoke y011d4.yoicks.start
 
 Then restart each running orchestrator (**Clear** on its Home). The bridge rewrites their rules and
 allowlists with the new `yoicks` path when it starts, and a running orchestrator still calls the old one.
+A headless one needs nothing: the bridge's restart resumes it, and the resumed session reads the new rules.
 
 ### Rolling back
 
@@ -397,7 +398,9 @@ instead of an agent in a herdr pane (your Claude subscription only: the bridge r
 billing). Its Home is then the chat alone: messages go out also while it works, ■ on the
 "doing now" line interrupts it, its questions get an answer panel, and the status bar shows its
 usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable), the model it runs on (a pick from
-Claude Code's `/model` list switches it between turns, or for its next start) and what went wrong, each with what to do. It has no herdr pane: on the PC,
+Claude Code's `/model` list switches it between turns, or for its next start) and what went wrong, each with what to do. It
+also keeps a to-do list for you (its `todo` tool): what only you can do, such as a PR to merge or a login,
+each reminded once when it comes due. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
 fresh session); the Home's warnings and Settings show the same steps.
@@ -471,7 +474,7 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
 ## API surface (for scripting)
 
 - `GET /api/state` — normalized workspaces/tabs/panes/agents tree, plus `orchestrators`
-  (`[{ name, label, paneId, agents, mode, headless }]` in config order; `paneId` is the agent running in its dir, or
+  (`[{ name, label, paneId, agents, mode, headless, todos }]` in config order; `paneId` is the agent running in its dir, or
   `null`; `agents` the agent panes of its Claude account, itself included, or `null` when unknown;
   `mode` is `"tui"`, or `"headless"` for one the bridge runs itself as `claude -p` (config
   `"mode": "headless"`), whose `paneId` is `"hl:<name>"` while it runs and whose
@@ -480,7 +483,10 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }], model, activeModel, models: [{ value, displayName, description, resolvedModel }] }`,
   `null` for a tui one; `models` is Claude Code's `/model` list without its `default` (whose model, if nothing else
   offers it, stays as its id), `[]` until a child of this bridge has given it; `model` the one chosen here, `""` for none; `activeModel` the model in effect, Claude Code's id, `""`
-  until known: with none chosen, a resumed session keeps the model it last ran on)
+  until known: with none chosen, a resumed session keeps the model it last ran on), `todos` the user's
+  to-do list on its Home (`[{ id, text, agent, url, due, createdAt }]`, oldest first, never `null`: what its
+  orchestrator wrote down for the user to do; `agent` a worker's herdr name, `url` an http(s) link, `due` ms, each
+  `null` when not given)
   and `orchestratorPaneId` (the first running tui one's, or `null`), and `claudeCheck`, the last Claude Code check
   (`{ at (ms), version, ok, failed: [items] }`, `null` when none has run). Each agent's `completionSeq` is herdr's
   `completion_seq` (which completion its idle/done status is; `null` until fetched), and its
@@ -535,6 +541,8 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   joined by `", "`, free text allowed (Claude Code's "Type something."); `chat` is Claude Code's "Chat about
   this": refused with its words, which list the questions and the answers given so far; 409 when that id
   isn't the one pending.
+- `DELETE /api/orchestrators/:name/todos/:id` — tick an item of that Home's to-do list off; 404 when
+  there is no such item (already ticked off, or done by its orchestrator).
 - `POST /api/worktrees` `{"cwd": "/repo", "branch": "feat/x", "base": "origin/main"}` — create a git
   worktree next to the repo, as above (herdr `worktree.create`; `cwd` is any path in the source repo,
   `branch`/`base` optional) and return `{"workspaceId", "checkoutPath", "branch", "paneId"}`. Standalone (create a worktree
@@ -555,7 +563,8 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
 - `WS /ws?token=…` — `{"type":"state"}` snapshots and `{"type":"agent_status"}`
   transitions, and `{"type":"orchestrator_alert","name","kind","message"}` for a headless
   orchestrator's new warning (once per session and kind; also to ntfy when `notify_url` is set; `name` `""`
-  with `kind` `"canary"`: a failed Claude Code check, once). A
+  with `kind` `"canary"`: a failed Claude Code check, once; `kind` `"todo"`: to-do items come due, each
+  once, their text as `message`, one alert per Home). A
   headless orchestrator's working → done and → blocked come as `agent_status` with `paneId: "hl:<name>"`
   and its label as `workspaceLabel`. `{"type":"watch_transcript","paneId":…}` starts a live tail that
   pushes `{"type":"transcript_items",…}` (`reset` rebuilds, else appends);
