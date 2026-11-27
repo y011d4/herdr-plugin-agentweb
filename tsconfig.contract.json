@@ -9,5 +9,5 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["web/test/contract.gen.ts"]
+  "include": ["web/test/contract.gen.ts", "tools/shots-fixture.ts"]
 }
