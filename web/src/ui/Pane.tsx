@@ -280,24 +280,21 @@ function Usage({ usage }: { usage: HeadlessUsage }) {
 }
 
 // A headless orchestrator's model, from Claude Code's /model list (none until a child of this bridge gave
-// it): a pick switches it in place, or for its next start when stopped; not while a turn runs (the
-// bridge refuses that too). It shows the model in effect (a resumed session keeps the one it last ran
-// on, so with none chosen that needn't be Default); Default is named by the model it stands for.
+// it): it shows the model in effect (a resumed session keeps the one it last ran on), and a pick
+// switches to it in place, or for its next start when stopped; not while a turn runs (the bridge
+// refuses that too).
 function ModelPicker({ o }: { o: OrchestratorView }) {
   const h = o.headless!;
   if (!h.models.length) return null;
-  const label = (m: HeadlessModel): string => m.value !== 'default' ? m.displayName
-    : `Default (${h.models.find((x) => x.value !== 'default' && x.resolvedModel === m.resolvedModel)?.displayName ?? m.description})`;
-  // the entry for the model in effect: the choice when it stands for it, else the first that does (an
-  // alias before Default), else the model itself, unlisted (a saved one Claude Code dropped), so any pick
-  // is a change; unknown yet (no child has said): the choice
+  // the entry for the model in effect: the choice when it stands for it, else the first that does, else
+  // the model itself, unlisted, so any pick is a change; not said yet (just started, or picked while
+  // stopped): the choice, or '…' for none
   const base = (id: string): string => id.replace(/\[.*\]$/, ''); // opus[1m] is opus
   const runs = (m?: HeadlessModel): boolean => !!m && base(m.resolvedModel) === base(h.activeModel);
   const chosen = h.models.find((m) => m.value === h.model);
-  const current = !h.activeModel || runs(chosen) ? h.model
-    : (h.models.find((m) => m.value !== 'default' && runs(m)) ?? h.models.find(runs))?.value ?? h.activeModel;
-  const data = [...(h.models.some((m) => m.value === current) ? [] : [{ value: current, label: current, disabled: true }]),
-    ...h.models.map((m) => ({ value: m.value, label: label(m) }))];
+  const current = !h.activeModel || runs(chosen) ? h.model : h.models.find(runs)?.value ?? h.activeModel;
+  const data = [...(h.models.some((m) => m.value === current) ? [] : [{ value: current, label: current || '…', disabled: true }]),
+    ...h.models.map((m) => ({ value: m.value, label: m.displayName }))];
   const pick = async (model: string): Promise<void> => {
     try {
       await orchestratorPost(o.name, 'model', { model });

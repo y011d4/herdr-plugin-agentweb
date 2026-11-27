@@ -396,8 +396,8 @@ this boundary is about what each orchestrator, and so each account, sees.
 instead of an agent in a herdr pane (your Claude subscription only: the bridge refuses API-key
 billing). Its Home is then the chat alone: messages go out also while it works, ■ on the
 "doing now" line interrupts it, its questions get an answer panel, and the status bar shows its
-usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable), its model (Claude Code's `/model`
-list: a pick switches it between turns, or for its next start) and what went wrong, each with what to do. It has no herdr pane: on the PC,
+usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable), the model it runs on (a pick from
+Claude Code's `/model` list switches it between turns, or for its next start) and what went wrong, each with what to do. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
 fresh session); the Home's warnings and Settings show the same steps.
@@ -478,9 +478,9 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   `headless` is `{ status: stopped|idle|working|blocked|done|error, completionSeq, pending: { id, questions } | null,
   usage: { fiveHour, sevenDay, fable: { utilization (0–1), resetsAt (ms) } | null, contextPct | null, at } | null,
   warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }], model, activeModel, models: [{ value, displayName, description, resolvedModel }] }`,
-  `null` for a tui one; `models` is Claude Code's `/model` list, `[]` until a child of this bridge has given it, and
-  `model` the one chosen, `"default"` for none (or Claude Code's default picked); `activeModel` is the model in effect, Claude
-  Code's id, `""` until known: a resumed session keeps the model it last ran on, so it needn't be the default)
+  `null` for a tui one; `models` is Claude Code's `/model` list without its `default`, `[]` until a child of this bridge
+  has given it; `model` the one chosen here, `""` for none; `activeModel` the model in effect, Claude Code's id, `""`
+  until known: with none chosen, a resumed session keeps the model it last ran on)
   and `orchestratorPaneId` (the first running tui one's, or `null`), and `claudeCheck`, the last Claude Code check
   (`{ at (ms), version, ok, failed: [items] }`, `null` when none has run). Each agent's `completionSeq` is herdr's
   `completion_seq` (which completion its idle/done status is; `null` until fetched), and its

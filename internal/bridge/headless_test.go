@@ -483,8 +483,8 @@ func TestHeadlessModel(t *testing.T) {
 		t.Errorf("before any child: %d", status)
 	}
 	b.start(t)
-	v := b.waitFor(t, "the models", func(v OrchestratorView) bool { return len(v.Headless.Models) == 4 })
-	if v.Headless.Model != "default" || v.Headless.Models[2] != (HeadlessModel{"fake-big", "Fake Big", "For hard work", "fake-big-1"}) {
+	v := b.waitFor(t, "the models", func(v OrchestratorView) bool { return len(v.Headless.Models) == 3 }) // the fake's default left out
+	if v.Headless.Model != "" || v.Headless.Models[1] != (HeadlessModel{"fake-big", "Fake Big", "For hard work", "fake-big-1"}) {
 		t.Fatalf("%+v", v.Headless)
 	}
 	b.waitFor(t, "the model in effect", func(v OrchestratorView) bool { return v.Headless.ActiveModel == "fake" })
@@ -492,14 +492,14 @@ func TestHeadlessModel(t *testing.T) {
 		t.Fatalf("switch: %d %s, %+v", status, body, b.view(t).Headless)
 	}
 	b.waitStdin(t, `"request":{"model":"fake-big","subtype":"set_model"}`)
-	for m, want := range map[string]int{"opus": 400, "": 400} {
+	for m, want := range map[string]int{"opus": 400, "": 400, "default": 400} {
 		if status, _ := model(m); status != want {
 			t.Errorf("%q: %d, want %d", m, status, want)
 		}
 	}
 	b.send(t, "hang")
 	b.waitStatus(t, "working")
-	if status, body := model("default"); status != 409 || !strings.Contains(body, "once its turn has ended") {
+	if status, body := model("fake"); status != 409 || !strings.Contains(body, "once its turn has ended") {
 		t.Errorf("mid-turn: %d %s", status, body)
 	}
 	b.release(t)
@@ -518,7 +518,7 @@ func TestHeadlessModel(t *testing.T) {
 		t.Fatal("a message went out while a switch waited for its answer")
 	case <-time.After(200 * time.Millisecond):
 	}
-	if status, body := model("default"); status != 409 || !strings.Contains(body, "still waiting") {
+	if status, body := model("fake"); status != 409 || !strings.Contains(body, "still waiting") {
 		t.Errorf("a second switch: %d %s", status, body)
 	}
 	b.pass(t, "the switch's answer", 10*time.Second)
@@ -544,7 +544,7 @@ func TestHeadlessModel(t *testing.T) {
 	if slices.Contains(runs[0].argv, "--model") || !slices.Equal(runs[1].argv[len(runs[1].argv)-2:], []string{"--model", "fake-big"}) {
 		t.Fatalf("runs %v", runs)
 	}
-	b.waitFor(t, "the models again", func(v OrchestratorView) bool { return len(v.Headless.Models) == 4 })
+	b.waitFor(t, "the models again", func(v OrchestratorView) bool { return len(v.Headless.Models) == 3 })
 	b.srv.shutdownHeadless()
 	b2 := startHeadless(t, state, nil, nil)
 	if v := b2.view(t); v.Headless.Model != "fake-big" {
@@ -555,31 +555,30 @@ func TestHeadlessModel(t *testing.T) {
 	if status, body := b2.post(t, "stop", ""); status != 200 {
 		t.Fatalf("stop: %d %s", status, body)
 	}
-	// stopped: kept for its next start, Default too (--model default beats the model a resumed
-	// session keeps); the selector shows the pick until that child says
-	if status, body := b2.post(t, "model", `{"model":"default"}`); status != 200 || b2.view(t).Headless.ActiveModel != "" {
+	// stopped: kept for its next start; the selector shows the pick until that child says
+	if status, body := b2.post(t, "model", `{"model":"fake"}`); status != 200 || b2.view(t).Headless.ActiveModel != "" {
 		t.Fatalf("stopped: %d %s, %+v", status, body, b2.view(t).Headless)
 	}
 	b2.start(t)
 	waitUntil(t, 5*time.Second, "the run after", func() bool { runs, _ = b2.runs(t); return len(runs) == 4 })
-	if !slices.Equal(runs[3].argv[len(runs[3].argv)-2:], []string{"--model", "default"}) || !slices.Contains(runs[2].argv, "fake-big") {
+	if !slices.Equal(runs[3].argv[len(runs[3].argv)-2:], []string{"--model", "fake"}) || !slices.Contains(runs[2].argv, "fake-big") {
 		t.Errorf("runs %v", runs)
 	}
-	b2.waitFor(t, "the default in effect", func(v OrchestratorView) bool { return v.Headless.ActiveModel == "fake" })
+	b2.waitFor(t, "the pick in effect", func(v OrchestratorView) bool { return v.Headless.ActiveModel == "fake" })
 }
 
 // A resumed session keeps the model it last ran on (Claude Code 2.1.322), not the default: with none
-// chosen here, the model in effect is that one, and picking Default really switches to the default.
+// chosen here it starts without --model, and the model in effect is that one; a pick switches it.
 func TestHeadlessModelCarriedByTheSession(t *testing.T) {
 	t.Setenv("FAKECLAUDE_MODEL", "fake-big-1") // the fake's stand-in for a session resumed from Fable
 	b := startHeadless(t, t.TempDir(), nil, nil)
 	b.start(t)
 	v := b.waitFor(t, "the model in effect", func(v OrchestratorView) bool { return v.Headless.ActiveModel != "" && len(v.Headless.Models) > 0 })
-	if v.Headless.Model != "default" || v.Headless.ActiveModel != "fake-big-1" {
-		t.Fatalf("%+v", v.Headless)
+	if runs, _ := b.runs(t); v.Headless.Model != "" || v.Headless.ActiveModel != "fake-big-1" || slices.Contains(runs[0].argv, "--model") {
+		t.Fatalf("%+v, %v", v.Headless, runs)
 	}
-	if status, body := b.post(t, "model", `{"model":"default"}`); status != 200 || b.view(t).Headless.ActiveModel != "fake" {
-		t.Fatalf("default: %d %s, %+v", status, body, b.view(t).Headless)
+	if status, body := b.post(t, "model", `{"model":"fake"}`); status != 200 || b.view(t).Headless.ActiveModel != "fake" {
+		t.Fatalf("a pick: %d %s, %+v", status, body, b.view(t).Headless)
 	}
 	b.send(t, "hello")
 	b.waitStatus(t, "done")
@@ -599,7 +598,7 @@ func TestHeadlessModelAnswer(t *testing.T) {
 		t.Errorf("a second switch: %v", err)
 	}
 	r.onLine(c, []byte(`{"type":"control_response","response":{"subtype":"error","request_id":"yoicks-model-2","error":"Model 'other' not found"}}`))
-	if v, _ := r.view(); v.Model != "default" {
+	if v, _ := r.view(); v.Model != "" {
 		t.Errorf("after the refusal: %q", v.Model)
 	}
 	r.onLine(c, []byte(`{"type":"control_response","response":{"subtype":"success","request_id":"yoicks-model-1","response":{"model":"fake-big-1"}}}`))

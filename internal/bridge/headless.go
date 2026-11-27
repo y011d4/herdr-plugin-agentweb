@@ -306,7 +306,7 @@ type headlessRunner struct {
 	acks         map[string]chan string // control requests awaiting their answer, by request_id: its error ("" = none); closed at the child's end
 	nRequest     int
 	switches     map[string]string // set_model requests awaiting their answer: request_id → the model
-	modelChoice  string            // chosen here, --model at each start ("default" too: it beats the model a resumed session keeps); "" = none, the session's own
+	modelChoice  string            // chosen here, --model at each start; "" = none: --resume keeps the session's own
 	lastEvent    time.Time
 	pending      *hlPending                // the question waiting for the user
 	asks         map[string]bool           // AskUserQuestion tool_use ids: did each reach approve?
@@ -404,7 +404,7 @@ func (r *headlessRunner) view() (HeadlessView, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	v := HeadlessView{Status: r.model.Status, CompletionSeq: r.model.CompletionSeq, Warnings: slices.Clone(r.warnings),
-		Model: firstNonEmpty(r.modelChoice, "default"), ActiveModel: r.model.active, Models: slices.Clone(r.model.models)}
+		Model: r.modelChoice, ActiveModel: r.model.active, Models: slices.Clone(r.model.models)}
 	if v.Models == nil {
 		v.Models = []HeadlessModel{}
 	}
@@ -1270,8 +1270,7 @@ func (r *headlessRunner) Interrupt() error {
 	return r.start(true)
 }
 
-// SetModel sets the model it runs on: one of the models its child listed ("default": Claude
-// Code's own). A running child switches in place (Claude Code's set_model, which applies from the
+// SetModel sets the model it runs on: one of the models its child listed. A running child switches in place (Claude Code's set_model, which applies from the
 // next turn), never mid-turn: refused while one runs; the choice is kept once Claude Code says yes,
 // however late (onLine). A stopped one starts on it. Kept across restarts and Clear (--model at
 // each start).
@@ -1313,10 +1312,7 @@ func (r *headlessRunner) SetModel(value string) error {
 	acked := make(chan string, 1)
 	r.acks[id], r.switches[id] = acked, value
 	r.mu.Unlock()
-	req := map[string]any{"subtype": "set_model"}
-	if value != "default" {
-		req["model"] = value
-	}
+	req := map[string]any{"subtype": "set_model", "model": value}
 	failed := func(msg string) error {
 		return &LifecycleError{Status: 502, Code: "model_failed", Message: "could not switch the model: " + msg}
 	}
