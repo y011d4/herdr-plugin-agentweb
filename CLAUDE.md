@@ -283,7 +283,7 @@ dev bridge:
 ```bash
 STATE=$(mktemp -d)   # the bridge's state (token, bridge.log) and data (orchestrator dirs)
 HERDR_PLUGIN_STATE_DIR=$STATE XDG_DATA_HOME=$STATE HERDR_YOICKS_PORT=8392 ./bin/yoicks start   # stop: the same, with stop
-echo "http://localhost:5174/?token=$(cat "$STATE/token")"   # the URL to open
+echo "http://localhost:5174/?token=$(cat "$STATE/token")"   # the URL to open (this throwaway bridge's token only)
 YOICKS_DEV_BRIDGE=http://127.0.0.1:8392 npm run dev          # /api and /ws proxied to that bridge
 ```
 
@@ -539,9 +539,12 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
 
 - Every `/api` and `/ws` request requires the bearer token
   (`timingSafeEqual`); `/healthz` is the only open endpoint.
-- The tokenized connect URL is printed only by the bridge's startup (`yoicks serve`/`run`: run
-  pane + 0600 bridge.log) and the `qr` entrypoint. **Never print the token in
-  action stdout** — herdr captures action output into its plugin logs.
+- The tokenized connect URL is printed only by the `qr` entrypoint (the "Connect phone" pane): the
+  user's one way to get it. **The token is never logged**: the bridge's startup line (the run pane,
+  0600 bridge.log), errors and requests (a `?token=` query included) never carry it, since workers
+  read the log; `start` also redacts it from lines an older bridge wrote. **Never print the token in
+  action stdout** — herdr captures action output into its plugin logs. `TestGoLifecycleCommands`
+  (record-wire) checks the actions' output, bridge.log and the run pane for it.
 - Bind stays loopback-only by default; remote access is Tailscale's job
   (`tailscale serve`). No outbound requests unless `notify_url` or `pr_watch` is set (`pr_watch`:
   the user's `gh`, once a minute, asks GitHub's GraphQL API for the state of the github.com PR
