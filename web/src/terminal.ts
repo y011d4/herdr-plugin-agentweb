@@ -245,7 +245,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
     // app-scroll may have turned off (pane left full-screen) since these were
     // queued — drop them so we don't inject SGR wheel bytes into a normal pane.
     if (!appScrollPane) { wheelQueue = 0; stopFling(); return; }
-    if (destroyed || wheelQueue === 0) return;
+    if (destroyed || held || wheelQueue === 0) return;
     const direction = wheelQueue > 0 ? 'up' : 'down';
     const steps = Math.min(30, Math.abs(wheelQueue));
     wheelQueue -= (direction === 'up' ? steps : -steps);
@@ -440,7 +440,13 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
     setAppScroll(on) { appScrollPane = on; },
     setHeld(on) {
       held = on;
-      if (on) { refreshReqSeq++; holds++; historyRefreshing = false; } // a read in flight now never applies, also once released; nor holds up the next
+      if (on) {
+        refreshReqSeq++; holds++; historyRefreshing = false; // a read in flight now never applies, also once released; nor holds up the next
+        stopFling(); // and no scroll goes on reaching the pane under the drawer
+        wheelQueue = 0;
+        if (wheelFlushTimer) clearTimeout(wheelFlushTimer);
+        wheelFlushTimer = null;
+      }
     },
     destroy() {
       destroyed = true;
