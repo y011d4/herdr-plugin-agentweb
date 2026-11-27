@@ -21,7 +21,11 @@ import (
 
 func TestMain(m *testing.M) {
 	logf = log.New(io.Discard, "", 0).Printf
-	os.Exit(m.Run())
+	code := m.Run()
+	if fakeClaudeDir != "" {
+		os.RemoveAll(fakeClaudeDir)
+	}
+	os.Exit(code)
 }
 
 // Every fakeherdr scenario, run against this client, must report what the
@@ -52,9 +56,13 @@ func TestHerdrClientMatchesTypeScriptRecordings(t *testing.T) {
 	}
 }
 
-type goClient struct{ c *HerdrClient }
+type goClient struct {
+	c     *HerdrClient
+	clock *fakeherdr.FakeClock
+}
 
-func (g goClient) Refresh() { go g.c.Refresh() }
+func (g goClient) Refresh()             { go g.c.Refresh() }
+func (g goClient) Jump(d time.Duration) { g.clock.Advance(d) }
 
 func runScenario(t *testing.T, sc fakeherdr.Scenario) []fakeherdr.Output {
 	dir, err := os.MkdirTemp("", "fh") // unix socket paths must stay short
@@ -91,11 +99,32 @@ func runScenario(t *testing.T, sc fakeherdr.Scenario) []fakeherdr.Output {
 		},
 		OnConnectionChange: func(v bool) { add(fakeherdr.Output{Kind: "conn", Connected: &v}) },
 	})
+	// the client's clock keeps the real time's pace, as the recordings did, but a scenario can
+	// jump it over a long wait (Client.Jump)
+	clock := fakeherdr.NewFakeClock()
+	c.clock = clock
+	stop, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		tick := time.NewTicker(time.Millisecond)
+		defer tick.Stop()
+		for last := time.Now(); ; {
+			select {
+			case <-stop:
+				return
+			case now := <-tick.C:
+				clock.Advance(now.Sub(last))
+				last = now
+			}
+		}
+	}()
 	c.Start()
-	env.Client = goClient{c}
+	env.Client = goClient{c, clock}
 	sc.Run(env)
 	time.Sleep(fakeherdr.Settle)
 	c.Destroy()
+	close(stop)
+	<-stopped
 	mu.Lock()
 	defer mu.Unlock()
 	return append([]fakeherdr.Output(nil), outs...)
@@ -163,6 +192,32 @@ func actorValue[T any](c *HerdrClient, f func() T) T {
 	ch := make(chan T, 1)
 	c.post(func() { ch <- f() })
 	return <-ch
+}
+
+// agentListsHandled has c report each agent.list answer it has handled (applied or not): the
+// func returns waits for the next one. Set before Start.
+func agentListsHandled(t *testing.T, c *HerdrClient) func(what string) {
+	handled := make(chan struct{}, 8)
+	c.agentListHook = func() { handled <- struct{}{} }
+	return func(what string) {
+		t.Helper()
+		select {
+		case <-handled:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s never handled", what)
+		}
+	}
+}
+
+// connectedSnapshot waits until c has applied the snapshot after its subscription's ack (the
+// state says connected from the snapshot before it on), and so armed its agent.list debounce.
+func connectedSnapshot(t *testing.T, c *HerdrClient) {
+	t.Helper()
+	waitUntil(t, 5*time.Second, "the ack", c.IsConnected)
+	// the ack's actor step asked for that snapshot (snapshotDepth); none is in flight once it's applied
+	waitUntil(t, 5*time.Second, "the snapshot after the ack", func() bool {
+		return actorValue(c, func() bool { return c.snapshotDepth == 0 })
+	})
 }
 
 // The wait before a reconnect doubles after each failure, up to 30 s, and starts over
@@ -245,16 +300,7 @@ func TestHerdrClientIgnoresAnAgentListFromBeforeADrop(t *testing.T) {
 	clock := fakeherdr.NewFakeClock()
 	c := NewHerdrClient(srv.Path, HerdrClientCallbacks{})
 	c.clock = clock
-	handled := make(chan struct{}, 2)
-	wasHandled := func(what string) {
-		t.Helper()
-		select {
-		case <-handled:
-		case <-time.After(5 * time.Second):
-			t.Fatalf("%s never handled", what)
-		}
-	}
-	c.agentListHook = func() { handled <- struct{}{} }
+	wasHandled := agentListsHandled(t, c)
 	defer c.Destroy()
 	c.Start()
 	seq := func() int64 {
@@ -336,6 +382,7 @@ func TestHerdrClientDropsAnOlderAgentList(t *testing.T) {
 	worldH := world.Handler()
 	var mu sync.Mutex
 	calls := 0
+	older := make(chan struct{}) // the first answer goes out when closed
 	srv, err := fakeherdr.Start(filepath.Join(dir, "h.sock"), func(m string, p json.RawMessage) fakeherdr.Reply {
 		if m != "agent.list" {
 			return worldH(m, p)
@@ -344,28 +391,52 @@ func TestHerdrClientDropsAnOlderAgentList(t *testing.T) {
 		calls++
 		first := calls == 1
 		mu.Unlock()
-		name, status, delay := "w-new", "working", time.Duration(0)
-		if first { // answered after the next one
-			name, status, delay = "w-old", "idle", 1500*time.Millisecond
+		list := func(name, status string) fakeherdr.Reply {
+			return fakeherdr.Reply{Result: map[string]any{"agents": []any{
+				map[string]any{"pane_id": "p1", "name": name, "agent": "claude", "agent_status": status}}}}
 		}
-		return fakeherdr.Reply{Delay: delay, Result: map[string]any{"agents": []any{
-			map[string]any{"pane_id": "p1", "name": name, "agent": "claude", "agent_status": status}}}}
+		if !first {
+			return list("w-new", "working")
+		}
+		return fakeherdr.Reply{Wait: func(gone <-chan struct{}) fakeherdr.Reply { // answered after the next one
+			select {
+			case <-older:
+				return list("w-old", "idle")
+			case <-gone:
+				return fakeherdr.Reply{Close: true}
+			}
+		}}
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer srv.Close()
+	clock := fakeherdr.NewFakeClock()
 	c := NewHerdrClient(srv.Path, HerdrClientCallbacks{})
+	c.clock = clock
+	handled := agentListsHandled(t, c)
 	defer c.Destroy()
 	c.Start()
+	name := func() string {
+		if s := c.State(); s != nil && s.Pane("p1").Agent.HerdrName != nil {
+			return *s.Pane("p1").Agent.HerdrName
+		}
+		return ""
+	}
 	env := &fakeherdr.Env{Srv: srv, World: world, Errorf: t.Errorf}
+	connectedSnapshot(t, c)
+	pass(t, clock, "agent.list's debounce", completionSeqDebounce)
 	env.WaitCount("agent.list", 1, 5*time.Second)
-	env.WaitSubscribed(1, 5*time.Second)
 	env.Status("p1", "working") // a second agent.list, answered at once
-	env.WaitCount("agent.list", 2, 5*time.Second)
-	time.Sleep(2000 * time.Millisecond) // then the first lands
-	if s := c.State(); s == nil || s.Pane("p1").Agent.HerdrName == nil || *s.Pane("p1").Agent.HerdrName != "w-new" {
-		t.Errorf("p1's herdr name: want w-new from the newer answer, got %+v", s.Pane("p1").Agent)
+	pass(t, clock, "agent.list's debounce", completionSeqDebounce)
+	handled("the newer answer")
+	if got := name(); got != "w-new" {
+		t.Fatalf("p1's herdr name: want w-new from the newer answer, got %q", got)
+	}
+	close(older) // then the first lands
+	handled("the older answer")
+	if got := name(); got != "w-new" {
+		t.Errorf("p1's herdr name: want w-new from the newer answer, got %q", got)
 	}
 }
 
@@ -395,21 +466,32 @@ func TestHerdrClientRetriesAFailedAgentList(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer srv.Close()
+	clock := fakeherdr.NewFakeClock()
 	c := NewHerdrClient(srv.Path, HerdrClientCallbacks{})
+	c.clock = clock
+	handled := agentListsHandled(t, c)
 	defer c.Destroy()
 	c.Start()
 	env := &fakeherdr.Env{Srv: srv, World: world, Errorf: t.Errorf}
-	env.WaitCount("agent.list", 2, 5*time.Second) // the retry, 2 s after the failure
-	time.Sleep(2500 * time.Millisecond)
-	if n := env.Count("agent.list"); n != 2 {
-		t.Errorf("agent.list asked %d times: want the one retry only", n)
+	// fetch lets one agent.list out (its debounce) and waits for its answer: the first three fail
+	fetch := func(what string) {
+		t.Helper()
+		pass(t, clock, what+"'s debounce", completionSeqDebounce)
+		handled(what)
 	}
-	env.WaitSubscribed(1, 5*time.Second)
+	connectedSnapshot(t, c)
+	fetch("the first")
+	pass(t, clock, "the retry", agentListRetry)
+	fetch("the retry")
+	if n := env.Count("agent.list"); n != 2 || clock.Pending(agentListRetry) {
+		t.Errorf("agent.list asked %d times (a retry pending: %v): want the one retry only", n, clock.Pending(agentListRetry))
+	}
 	// a trigger merged in one debounce with a retry (the retry last) keeps its own retry: the
 	// request fails, and its retry answers
 	actorValue(c, func() bool { c.refreshAgentList(false); c.refreshAgentList(true); return true })
-	env.WaitCount("agent.list", 4, 6*time.Second)
-	time.Sleep(300 * time.Millisecond)
+	fetch("the trigger's")
+	pass(t, clock, "its retry", agentListRetry)
+	fetch("its retry")
 	if s := c.State(); s == nil || s.Pane("p1").Agent.HerdrName == nil || *s.Pane("p1").Agent.HerdrName != "w-x" {
 		t.Errorf("p1's herdr name: want w-x, got %+v", s.Pane("p1").Agent)
 	}
