@@ -195,7 +195,10 @@ func TestHeadlessAskAndAnswer(t *testing.T) {
 	// an interrupt cancels the call and the question
 	b.send(t, "ask")
 	b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
-	if status, body := b.post(t, "interrupt", ""); status != 200 {
+	var status int
+	var body string
+	b.gate.during(func() { status, body = b.post(t, "interrupt", "") }) // the refusal at a model's pace
+	if status != 200 {
 		t.Fatalf("interrupt: %d %s", status, body)
 	}
 	b.waitFor(t, "no question", func(v OrchestratorView) bool { return v.Headless.Pending == nil && v.Headless.Status == "idle" })
