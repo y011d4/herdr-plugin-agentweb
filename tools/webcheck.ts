@@ -1035,13 +1035,16 @@ async function p10(c: Ctx) {
   const tq = Date.now(); // before the tap: its POST, even its answer, can come before tapEl returns
   await pg.tapEl(`[...document.querySelectorAll('.qkey')].find((b) => b.textContent === '\\u2193')`);
   // the echo's two reads go out 120 and 500 ms after the key's POST /input is answered (terminal.ts echo), not after
-  // the tap: under CPU load that answer alone takes a few hundred ms, so the window starts there
+  // the tap: under CPU load that answer alone takes a few hundred ms, so the window starts there. It ends 1s after it:
+  // the page sees the answer and runs its timers later than CDP saw it, by as long as the renderer waits for a CPU (up
+  // to ~60ms on CI's runner), and nothing else reads this pane's screen meanwhile (the 3s refresh reads only while the
+  // WS is down, the scrollback only on a local scroll), so a window past the 500ms read counts no other read
   const answered = await waitFn(() => pg.resps.find((r) => r.t >= tq && r.url.includes(`/api/panes/${enc(less)}/input`)), 3000, 20);
   const tAns = answered.v?.t ?? tq;
-  await waitFn(() => Date.now() >= tAns + 700, 2000, 20);
-  const reads = pg.reqs.filter((q) => q.method === 'GET' && q.t >= tAns && q.t <= tAns + 600 && q.url.includes(`/api/panes/${enc(less)}/read`)).length;
-  result(c, !answered.timeout && reads >= 2, 'P10.app-quickkey', `answered=${answered.timeout ? 'timeout' : `${tAns - tq}ms`},reads600ms=${reads}`,
-    "a quick key's POST /input answered within 3s, then >= 2 GET /read within 600ms of the answer");
+  await waitFn(() => Date.now() >= tAns + 1100, 2000, 20);
+  const reads = pg.reqs.filter((q) => q.method === 'GET' && q.t >= tAns && q.t <= tAns + 1000 && q.url.includes(`/api/panes/${enc(less)}/read`)).length;
+  result(c, !answered.timeout && reads >= 2, 'P10.app-quickkey', `answered=${answered.timeout ? 'timeout' : `${tAns - tq}ms`},reads1s=${reads}`,
+    "a quick key's POST /input answered within 3s, then >= 2 GET /read within 1s of the answer");
 }
 
 /** Stale responses: wc-shell's screen read, held until wc-less is on screen, must not paint wc-less's terminal. */
