@@ -287,6 +287,10 @@ func TestHeadlessRulesSections(t *testing.T) {
 		!strings.Contains(tui, "{{yoicks}}") || strings.Contains(tui, "agent_prompt") || strings.Contains(tui, "<!--") {
 		t.Error("rulesFor's sections")
 	}
+	// a PR not ready to merge leaves the to-do list until it is (every headless Home, pr_watch or not)
+	if !strings.Contains(hl, "A PR's item is for merging it now.") || strings.Contains(tui, "A PR's item") {
+		t.Error("the to-do list's PR rule")
+	}
 	// the PR watch's parts: only for a headless Home with pr_watch
 	pr := orchestratorFiles(OrchestratorDef{Name: "p", Mode: "headless", PRWatch: true}, string(rules), "yoicks")["rules.md"]
 	if strings.Contains(hl, "[yoicks] PR") || !strings.Contains(pr, "`[yoicks] PR merged: <url>") || strings.Contains(pr, "<!--") ||
