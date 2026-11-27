@@ -20,8 +20,8 @@ import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, store, sub
 import type { AppState, ClearResponse, WsMessage } from '../types.ts';
 import { onWsMessage, wsConnect, wsSendWatch } from '../ws.ts';
 import { Dashboard, dashboardTopbar } from './Dashboard.tsx';
-import { Modals, confirmModal, openAgentMenu } from './Modals.tsx';
-import { closePaneView, Pane, paneTopbar, paneViewOnState, StoppedHome, stoppedHomeTopbar } from './Pane.tsx';
+import { Modals, confirmModal, openRename } from './Modals.tsx';
+import { closePaneView, Pane, paneTopbar, paneViewOnState, StoppedHome, stoppedHomeTopbar, type AgentActions } from './Pane.tsx';
 import { Settings, settingsTopbar } from './Settings.tsx';
 import { Toasts } from './Toasts.tsx';
 import { Token } from './Token.tsx';
@@ -299,15 +299,15 @@ function signIn(token: string): void {
 
 // ── Agent lifecycle UI (rename / clear / stop) ────────────────────────────────
 
-// A pane's ⋮ (ui/Modals.tsx): Rename… (the header follows the store), Clear, Stop. A Home has no ⋮:
-// its Clear and Stop are buttons on its status bar (ui/Pane.tsx), through the same confirm flows. A
-// headless orchestrator's (hl:<name>) go to /api/orchestrators/:name/*: it has no herdr pane.
-function agentMenu(paneId: string): void {
-  const agent = findPane(paneId)?.pane.agent;
-  openAgentMenu(paneId, agent?.displayName || agent?.name || '', {
+// A pane's ⋮ (ui/Pane.tsx's AgentMenu): Rename… (the header follows the store), Clear, Stop. A Home
+// has no ⋮: its Clear and Stop are buttons on its status bar (ui/Pane.tsx), through the same confirm
+// flows. A headless orchestrator's (hl:<name>) go to /api/orchestrators/:name/*: it has no herdr pane.
+function agentActions(paneId: string): AgentActions {
+  return {
+    rename: () => { const agent = findPane(paneId)?.pane.agent; openRename(paneId, agent?.displayName || agent?.name || ''); },
     clear: () => { void clearAgentFlow(paneId); },
     stop: () => { void stopAgentFlow(paneId); },
-  });
+  };
 }
 
 async function clearAgentFlow(paneId: string): Promise<void> {
@@ -352,7 +352,7 @@ function renderPaneDetail(paneId: string, homeName?: string): void {
   view.paneViewMode = 'terminal';
   const actions = view.homeMode ? { clear: () => { void clearAgentFlow(paneId); }, stop: () => { void stopAgentFlow(paneId); } } : undefined;
   show('pane', <Pane paneId={paneId} home={view.homeMode} actions={actions} name={homeName} />,
-    paneTopbar(paneId, view.homeMode, view.paneBackRoute, () => agentMenu(paneId)));
+    paneTopbar(paneId, view.homeMode, view.paneBackRoute, agentActions(paneId)));
 }
 
 // ── Startup ───────────────────────────────────────────────────────────────────

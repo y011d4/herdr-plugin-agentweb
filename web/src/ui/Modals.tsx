@@ -1,9 +1,10 @@
 /**
- * ui/Modals.tsx — the modal dialogs, one at a time, drawn into #modal-root: Confirm, the
- * agent-actions menu, Rename, New agent and the image preview. A modal closes on a backdrop tap, Escape or its
+ * ui/Modals.tsx — the modal dialogs, one at a time, drawn into #modal-root: Confirm (on Mantine's
+ * Modal), Rename, New agent and the image preview. A modal closes on a backdrop tap, Escape or its
  * buttons; its close() is idempotent and fires the opener's onClose exactly once (so a
  * confirm resolves on dismiss). Opening one closes the one before.
  */
+import { Modal } from '@mantine/core';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { apiGet, apiPost } from '../api.ts';
 import { taskToKeep } from '../kept-tasks.ts';
@@ -11,7 +12,9 @@ import { showToast } from '../notify.ts';
 import { keptTasks, store } from '../store.ts';
 import type { AgentStartResponse, ProfilesResponse, RenameResponse } from '../types.ts';
 
-interface Open { id: number; render: (close: () => void) => ReactNode; close: () => void; className: string }
+// mantine: drawn by Mantine's Modal (the confirm), else by Overlay below. opener: where the focus goes
+// back on close.
+interface Open { id: number; render: (close: () => void) => ReactNode; close: () => void; className: string; mantine: boolean; opener: HTMLElement | null }
 
 let current: Open | null = null;
 let seq = 0;
@@ -19,8 +22,18 @@ const listeners = new Set<() => void>();
 const changed = (): void => { for (const fn of listeners) fn(); };
 const subscribe = (fn: () => void): (() => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
 
-/** Shows a modal (closing the one on show); returns its close(). */
-function showModal(render: (close: () => void) => ReactNode, onClose?: () => void, className = 'modal'): () => void {
+/** What has the focus, but for a Mantine menu's item (gone once picked): that menu's button. */
+function focused(): HTMLElement | null {
+  const active = document.activeElement as HTMLElement | null;
+  const menu = active?.closest('[data-menu-dropdown]');
+  return menu ? document.getElementById(menu.getAttribute('aria-labelledby') ?? '') : active;
+}
+
+/** Shows a modal (closing the one on show); returns its close(). On close the focus goes back to what
+ *  had it on open; a modal that takes another's place takes over that one's opener instead (the one
+ *  before gives it back first, and the new one takes it as it mounts). */
+function showModal(render: (close: () => void) => ReactNode, onClose?: () => void, className = 'modal', mantine = false): () => void {
+  const opener = current ? current.opener : focused();
   current?.close();
   const id = ++seq;
   let closed = false;
@@ -29,15 +42,31 @@ function showModal(render: (close: () => void) => ReactNode, onClose?: () => voi
     closed = true;
     if (current?.id === id) { current = null; changed(); }
     onClose?.();
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
   };
-  current = { id, render, close, className };
+  current = { id, render, close, className, mantine, opener };
   changed();
   return close;
 }
 
 export function Modals() {
   const open = useSyncExternalStore(subscribe, () => current);
-  return open && <Overlay key={open.id} close={open.close} className={open.className}>{open.render(open.close)}</Overlay>;
+  if (!open) return null;
+  if (open.mantine) return <MantineDialog key={open.id} close={open.close} className={open.className}>{open.render(open.close)}</MantineDialog>;
+  return <Overlay key={open.id} close={open.close} className={open.className}>{open.render(open.close)}</Overlay>;
+}
+
+// Overlay's look on Mantine's Modal: the same backdrop, fade and width, and above the toasts (z 1000).
+// Mantine closes it on Escape and a backdrop tap and traps the focus. (Its own focus return needs
+// `opened` to turn false; this one unmounts, and showModal gives the focus back.)
+function MantineDialog({ close, className, children }: { close: () => void; className: string; children: ReactNode }) {
+  return (
+    <Modal.Root opened onClose={close} centered zIndex={2000} size="min(92vw, 420px)" xOffset={16} yOffset={16}
+      transitionProps={{ transition: 'fade', duration: 150 }} classNames={{ content: className }}>
+      <Modal.Overlay color="#000" backgroundOpacity={0.55} data-modal-backdrop />
+      <Modal.Content>{children}</Modal.Content>
+    </Modal.Root>
+  );
 }
 
 // Above everything (toasts are z 1000, modals sit higher: style.css).
@@ -72,7 +101,6 @@ export function previewImage(src: string, alt: string): void {
 }
 
 function showPreview(src: string, alt: string, mark: number): void {
-  const opener = document.activeElement as HTMLElement | null;
   const close = showModal((close) => (
     <>
       <img src={src} alt={alt} onClick={close} />
@@ -81,7 +109,6 @@ function showPreview(src: string, alt: string, mark: number): void {
   ), () => {
     removeEventListener('popstate', close);
     if (history.state?.imagePreview === mark) history.back();
-    opener?.focus();
   }, 'image-preview');
   addEventListener('popstate', close);
 }
@@ -111,27 +138,13 @@ export function confirmModal(title: string, message: string, confirmLabel: strin
           <button className={`btn-primary${danger ? ' danger' : ''}`} id="cf-ok" style={{ width: 'auto' }} onClick={() => { result = true; close(); }}>{confirmLabel}</button>
         </div>
       </>
-    ), () => resolve(result));
+    ), () => resolve(result), 'modal', true);
   });
 }
 
-// ── Agent actions: rename, clear (fresh session), stop ────────────────────────
+// ── Rename (from a pane's ⋮, ui/Pane.tsx's AgentMenu) ────────────────────────
 
-/** The pane's agent-actions menu; Rename… is handled here (the header follows the State). */
-export function openAgentMenu(paneId: string, current: string, on: { clear: () => void; stop: () => void }): void {
-  showModal((close) => (
-    <>
-      <div className="modal-title">Agent actions</div>
-      <div className="modal-menu">
-        <button className="modal-menu-item" id="am-rename" onClick={() => { close(); openRename(paneId, current); }}>Rename…</button>
-        <button className="modal-menu-item" id="am-clear" onClick={() => { close(); on.clear(); }}>Clear (fresh session)…</button>
-        <button className="modal-menu-item danger" id="am-stop" onClick={() => { close(); on.stop(); }}>Stop agent…</button>
-      </div>
-      <div className="modal-actions"><button className="btn-secondary" id="am-cancel" onClick={close}>Cancel</button></div>
-    </>
-  ));
-}
-
+/** Rename… (the header follows the State). */
 export function openRename(paneId: string, current: string): void {
   showModal((close) => <Rename paneId={paneId} current={current} close={close} />);
 }
