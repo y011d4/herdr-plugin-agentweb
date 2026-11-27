@@ -760,7 +760,7 @@ async function p7(c: Ctx) {
 
 /** Without a running orchestrator, a fresh open (/) and #/home land on #/agents by location.replace. */
 /** A Home's status bar total: its counts (working, done, idle) plus its blocked agents (Needs you's data-blocked, none without it). */
-const HOME_TOTAL = `[...document.querySelectorAll('.home-counts > span:not(.home-counts-more)')].reduce((n, e) => n + parseInt(e.textContent), 0)
+const HOME_TOTAL = `[...document.querySelectorAll('.home-counts [data-count]')].reduce((n, e) => n + parseInt(e.textContent), 0)
   + Number(document.querySelector('#home-status [data-action="needs"]')?.dataset.blocked ?? 0)`;
 
 /** The stopped Home of `name` (Start) within `wait`, and its status bar total = /api/state's agents of its account (within 5s, as P7). */

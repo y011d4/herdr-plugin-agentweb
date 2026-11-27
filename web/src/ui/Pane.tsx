@@ -236,15 +236,16 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
       )}
       <Group className="home-row" gap="6px 14px">
         {self && <NeedsButton o={self} s={s} n={needsYou(self, state, now)} now={now} />}
-        {/* below sm only the numbers: the words come back with the room */}
-        <UnstyledButton className="home-counts flex shrink-0 items-center gap-x-3 whitespace-nowrap text-[13px] text-(--color-text-dim)"
-          data-go="agents" aria-label={`${s.working} working, ${s.done} done, ${s.idle} idle: the agents`}
+        {/* the counts are the way to its agents: an outlined pill and a dim ›, as its other buttons;
+            below sm only the numbers: the words come back with the room */}
+        <Button {...SMALL} className="home-counts shrink-0 bg-transparent" classNames={{ label: 'gap-x-3' }} size="compact-sm" fz={13} fw={400}
+          data-go="agents" title="Agents" aria-label={`Agents: ${s.working} working, ${s.done} done, ${s.idle} idle`}
+          rightSection={<span aria-hidden="true">&#8250;</span>}
           onClick={() => { location.hash = homeAgentsHash(location.hash); }}>
-          <span><Dot status="working" />{s.working}<span className="max-sm:hidden"> working</span></span>
-          <span><Dot status="done" />{s.done}<span className="max-sm:hidden"> done</span></span>
-          <span><Dot status="idle" />{s.idle}<span className="max-sm:hidden"> idle</span></span>
-          <span className="home-counts-more font-semibold text-(--color-accent)">Agents &#8250;</span>
-        </UnstyledButton>
+          <span data-count=""><Dot status="working" />{s.working}<span className="max-sm:hidden"> working</span></span>
+          <span data-count=""><Dot status="done" />{s.done}<span className="max-sm:hidden"> done</span></span>
+          <span data-count=""><Dot status="idle" />{s.idle}<span className="max-sm:hidden"> idle</span></span>
+        </Button>
         {(usage || self?.headless || actions) && (
           <Group gap={10} className="ml-auto">
             {usage}
@@ -581,8 +582,8 @@ export function AgentMenu({ actions }: { actions: AgentActions }) {
   );
 }
 
-/** A running Home's topbar: the orchestrator, the view toggle and Settings (its Agents ›, Clear and
- *  Stop are on its status bar). A pane's header is its drawer's (ui/AgentDrawer.tsx). */
+/** A running Home's topbar: the orchestrator, the view toggle and Settings (its agents' counts, the
+ *  way to its list, Clear and Stop are on its status bar). A pane's header is its drawer's (ui/AgentDrawer.tsx). */
 export const homeTopbar = (paneId: string): Topbar => ({
   title: <PaneTitle paneId={paneId} home />,
   right: (
