@@ -25,7 +25,13 @@ func TestGoLifecycleCommands(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts and stops real bridges")
 	}
-	bin := buildYoicks(t)
+	t.Parallel()
+	// a copy of its own: serving tells this test's bridges by their binary's path, and
+	// TestGoMatchesWireRecordings runs a bridge of the shared one meanwhile
+	bin := filepath.Join(t.TempDir(), "yoicks")
+	if b, err := os.ReadFile(buildYoicks(t)); err != nil || os.WriteFile(bin, b, 0o755) != nil {
+		t.Fatal("copying the binary:", err)
+	}
 	dir := t.TempDir()
 	sockDir, err := os.MkdirTemp("", "fh") // unix socket paths must stay short
 	if err != nil {
