@@ -1,9 +1,10 @@
 /**
- * ui/Modals.tsx — the modal dialogs, one at a time, drawn into #modal-root: Confirm, the
- * agent-actions menu, Rename, New agent and the image preview. A modal closes on a backdrop tap, Escape or its
+ * ui/Modals.tsx — the modal dialogs, one at a time, drawn into #modal-root: Confirm (on Mantine's
+ * Modal), Rename, New agent and the image preview. A modal closes on a backdrop tap, Escape or its
  * buttons; its close() is idempotent and fires the opener's onClose exactly once (so a
  * confirm resolves on dismiss). Opening one closes the one before.
  */
+import { Modal } from '@mantine/core';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { apiGet, apiPost } from '../api.ts';
 import { taskToKeep } from '../kept-tasks.ts';
@@ -11,7 +12,8 @@ import { showToast } from '../notify.ts';
 import { keptTasks, store } from '../store.ts';
 import type { AgentStartResponse, ProfilesResponse, RenameResponse } from '../types.ts';
 
-interface Open { id: number; render: (close: () => void) => ReactNode; close: () => void; className: string }
+// mantine: drawn by Mantine's Modal (the confirm), else by Overlay below
+interface Open { id: number; render: (close: () => void) => ReactNode; close: () => void; className: string; mantine: boolean }
 
 let current: Open | null = null;
 let seq = 0;
@@ -20,7 +22,7 @@ const changed = (): void => { for (const fn of listeners) fn(); };
 const subscribe = (fn: () => void): (() => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
 
 /** Shows a modal (closing the one on show); returns its close(). */
-function showModal(render: (close: () => void) => ReactNode, onClose?: () => void, className = 'modal'): () => void {
+function showModal(render: (close: () => void) => ReactNode, onClose?: () => void, className = 'modal', mantine = false): () => void {
   current?.close();
   const id = ++seq;
   let closed = false;
@@ -30,14 +32,28 @@ function showModal(render: (close: () => void) => ReactNode, onClose?: () => voi
     if (current?.id === id) { current = null; changed(); }
     onClose?.();
   };
-  current = { id, render, close, className };
+  current = { id, render, close, className, mantine };
   changed();
   return close;
 }
 
 export function Modals() {
   const open = useSyncExternalStore(subscribe, () => current);
-  return open && <Overlay key={open.id} close={open.close} className={open.className}>{open.render(open.close)}</Overlay>;
+  if (!open) return null;
+  if (open.mantine) return <MantineDialog key={open.id} close={open.close} className={open.className}>{open.render(open.close)}</MantineDialog>;
+  return <Overlay key={open.id} close={open.close} className={open.className}>{open.render(open.close)}</Overlay>;
+}
+
+// Overlay's look on Mantine's Modal: the same backdrop, fade and width, and above the toasts (z 1000).
+// Mantine closes it on Escape and a backdrop tap, traps the focus and gives it back on close.
+function MantineDialog({ close, className, children }: { close: () => void; className: string; children: ReactNode }) {
+  return (
+    <Modal.Root opened onClose={close} centered zIndex={2000} size="min(92vw, 420px)" xOffset={16} yOffset={16}
+      transitionProps={{ transition: 'fade', duration: 150 }} classNames={{ content: className }}>
+      <Modal.Overlay color="#000" backgroundOpacity={0.55} data-modal-backdrop />
+      <Modal.Content>{children}</Modal.Content>
+    </Modal.Root>
+  );
 }
 
 // Above everything (toasts are z 1000, modals sit higher: style.css).
@@ -111,27 +127,13 @@ export function confirmModal(title: string, message: string, confirmLabel: strin
           <button className={`btn-primary${danger ? ' danger' : ''}`} id="cf-ok" style={{ width: 'auto' }} onClick={() => { result = true; close(); }}>{confirmLabel}</button>
         </div>
       </>
-    ), () => resolve(result));
+    ), () => resolve(result), 'modal', true);
   });
 }
 
-// ── Agent actions: rename, clear (fresh session), stop ────────────────────────
+// ── Rename (from a pane's ⋮, ui/Pane.tsx's AgentMenu) ────────────────────────
 
-/** The pane's agent-actions menu; Rename… is handled here (the header follows the State). */
-export function openAgentMenu(paneId: string, current: string, on: { clear: () => void; stop: () => void }): void {
-  showModal((close) => (
-    <>
-      <div className="modal-title">Agent actions</div>
-      <div className="modal-menu">
-        <button className="modal-menu-item" id="am-rename" onClick={() => { close(); openRename(paneId, current); }}>Rename…</button>
-        <button className="modal-menu-item" id="am-clear" onClick={() => { close(); on.clear(); }}>Clear (fresh session)…</button>
-        <button className="modal-menu-item danger" id="am-stop" onClick={() => { close(); on.stop(); }}>Stop agent…</button>
-      </div>
-      <div className="modal-actions"><button className="btn-secondary" id="am-cancel" onClick={close}>Cancel</button></div>
-    </>
-  ));
-}
-
+/** Rename… (the header follows the State). */
 export function openRename(paneId: string, current: string): void {
   showModal((close) => <Rename paneId={paneId} current={current} close={close} />);
 }
