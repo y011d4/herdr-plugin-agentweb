@@ -511,8 +511,13 @@ func TestHeadlessNotifications(t *testing.T) {
 		if !got {
 			t.Errorf("%s: no agent_status", name)
 		}
-		if s := <-told; s != "working → done" {
-			t.Errorf("%s: told %q", name, s)
+		select {
+		case s := <-told:
+			if s != "working → done" {
+				t.Errorf("%s: told %q", name, s)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: the status callback never ran", name)
 		}
 		b.srv.bg.Wait() // the PC notifications it began, shown
 		if shown := len(b.world.Notifications()); (shown > 0) != (name == "h1") {
