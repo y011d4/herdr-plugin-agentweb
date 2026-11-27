@@ -164,7 +164,7 @@ function leaveClosedPane(): void {
 
 /** herdr closed a pane (pane_gone): the open one leaves; a Home's orchestrator going is the State's to show. */
 function onPaneGone(paneId: string): void {
-  if (paneId !== view.activePaneId) return;
+  if (paneId !== view.activePaneId || paneId === clearingPane) return; // a Clear's old pane: its drawer waits for the new one
   if (!view.homeMode) leaveClosedPane();
 }
 
@@ -192,7 +192,7 @@ function onStateUpdate(): void {
   if (hash.startsWith('#/pane/')) {
     // If the pane vanished (e.g. seen via /api/state polling while the WS is
     // down, so the pane_gone push can't fire), leave the now-stale view.
-    if (view.activePaneId && !findPane(view.activePaneId)) {
+    if (view.activePaneId && view.activePaneId !== clearingPane && !findPane(view.activePaneId)) {
       leaveClosedPane();
       return;
     }
@@ -363,12 +363,20 @@ function agentActions(paneId: string): AgentActions {
   };
 }
 
+// The pane a Clear is replacing: its going is expected (its drawer stays for the new pane).
+let clearingPane: string | null = null;
+
+/** Whether `paneId` is the drawer's pane now. The hash, not view.activePaneId: it changes at once, and
+ *  the drawer is the hash's until the route has moved on (a close's Back may still be under way). */
+const drawerShows = (paneId: string): boolean => location.hash === `#/pane/${encodeURIComponent(paneId)}`;
+
 async function clearAgentFlow(paneId: string): Promise<void> {
   const hl = headlessName(paneId);
   const ok = await confirmModal('Clear agent?', hl ? 'Starts a fresh session and ends the current one. In-session context is lost.'
     : 'Starts a fresh session (same profile & directory) and closes the current one. In-session context is lost.', 'Clear', false);
   if (!ok) return;
   if (view.homeMode) homeClearing = true; // the gap before the replacement isn't a stop
+  else clearingPane = paneId;
   try {
     const res = hl ? await orchestratorPost<{ paneId: string }>(hl, 'clear') : await apiPost<ClearResponse>(`/api/agents/${encodeURIComponent(paneId)}/clear`);
     showToast('Cleared', 'Started a fresh session');
@@ -376,13 +384,16 @@ async function clearAgentFlow(paneId: string): Promise<void> {
     // replacement yet, so stay on #/home/<name> and let onStateUpdate re-resolve it. The hold's
     // timer bounds the Clear's flag too: it ends within 8s even if no gap is ever seen.
     if (view.homeMode) { if (homeClearing) holdHomeForReplacement(); return; }
-    if (view.activePaneId !== paneId) return; // another pane opened meanwhile: it stays
+    if (!drawerShows(paneId)) return; // another pane (or none) opened meanwhile: it stays
     if (res.paneId) openAgent(res.paneId);
     else closeAgent();
   } catch (err) {
     stopHoldingHome();
     showToast('Clear failed', (err as Error).message);
     if (view.homeMode) handleRoute(); // it may have stopped meanwhile: show what the State says
+    else if (drawerShows(paneId) && !findPane(paneId)) leaveClosedPane(); // gone, the Clear failed or not
+  } finally {
+    if (clearingPane === paneId) clearingPane = null;
   }
 }
 
@@ -393,7 +404,7 @@ async function stopAgentFlow(paneId: string): Promise<void> {
   try {
     await (hl ? orchestratorPost(hl, 'stop') : apiDelete(`/api/panes/${encodeURIComponent(paneId)}`));
     showToast('Stopped', hl ? 'The orchestrator stopped' : 'Agent pane closed');
-    if (!view.homeMode && view.activePaneId === paneId) closeAgent(); // a Home stays: the State shows it stopped; another pane opened meanwhile too
+    if (!view.homeMode && drawerShows(paneId)) closeAgent(); // a Home stays: the State shows it stopped; another pane opened meanwhile too
   } catch (err) {
     showToast('Stop failed', (err as Error).message);
   }

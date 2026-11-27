@@ -398,6 +398,26 @@ describe('App', () => {
     assert.equal(store.view.activePaneId, 'p1');
   });
 
+  it("a Clear whose old pane goes before it answers opens the new pane, saying nothing of the old one's going", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/agents');
+    await go('#/pane/p1');
+    await click($('#btn-agent-menu'));
+    await click($('#am-clear'));
+    await click($('#modal-root #cf-ok'));
+    await act(async () => push!({ type: 'pane_gone', paneId: 'p1' })); // herdr closed it first
+    const s = fresh();
+    s.workspaces[0].tabs[0].panes = s.workspaces[0].tabs[0].panes.filter((p) => p.paneId !== 'p1');
+    await act(async () => push!({ type: 'state', state: s }));
+    await settle();
+    assert.equal(location.hash, '#/pane/p1', 'held for the new pane');
+    await answer('POST /api/agents/p1/clear', { ok: true, paneId: 'p8' });
+    assert.equal(location.hash, '#/pane/p8');
+    assert.deepEqual(toastTitles(), ['Cleared']);
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/agents');
+  });
+
   it("a Stop answered after another pane opened leaves that pane's drawer open", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/agents');
