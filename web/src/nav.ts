@@ -5,6 +5,7 @@
  * so the phone's Back still closes the drawer; a close goes back to the entry under it when the
  * drawer was opened on top of it here, else replaces itself with that screen.
  */
+import { showToast } from './notify.ts';
 import { paneRoute } from './routes.ts';
 import { store } from './store.ts';
 
@@ -18,6 +19,16 @@ export function go(hash: string): void {
 
 /** Opens a pane: its drawer, or for an orchestrator's pane its Home. */
 export const openAgent = (paneId: string): void => go(paneRoute(store.appState, paneId));
+
+/** Opens the agent herdr names `name` (a [yoicks] notice's worker), or says none is: while an agent's
+ *  name isn't known (agent.list fills names in a moment after an agent shows), it may be that one. */
+export function openAgentNamed(name: string): void {
+  const agents = (store.appState?.workspaces ?? []).flatMap((w) => w.tabs.flatMap((t) => t.panes)).filter((p) => p.agent);
+  const pane = agents.find((p) => p.agent!.herdrName === name);
+  if (pane) openAgent(pane.paneId);
+  else if (agents.some((p) => p.agent!.herdrName === null)) showToast('Agent not found', `${name} isn't known yet, or is gone: try again in a moment.`);
+  else showToast('Agent not found', `No running agent is named ${name}.`);
+}
 
 // The URL a close is under way from: a second close before the history moves (a tap on ✕ as an
 // answer lands, say) would go back twice. And whether a Back of the app's is under way (`back`): a

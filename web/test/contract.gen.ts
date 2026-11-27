@@ -47,7 +47,8 @@ export const state: AppState = {
         "message": null,
         "sinceUnixMs": 1795478400000,
         "completionSeq": null,
-        "stateChangeSeq": null
+        "stateChangeSeq": null,
+        "herdrName": null
        }
       },
       {
@@ -64,7 +65,8 @@ export const state: AppState = {
         "message": null,
         "sinceUnixMs": 1795478400000,
         "completionSeq": null,
-        "stateChangeSeq": null
+        "stateChangeSeq": null,
+        "herdrName": null
        }
       }
      ]
@@ -95,7 +97,8 @@ export const state: AppState = {
         "message": null,
         "sinceUnixMs": 1795478400000,
         "completionSeq": null,
-        "stateChangeSeq": null
+        "stateChangeSeq": null,
+        "herdrName": null
        }
       }
      ]
@@ -133,7 +136,8 @@ export const state: AppState = {
         "message": null,
         "sinceUnixMs": 1795478400000,
         "completionSeq": 4,
-        "stateChangeSeq": 9
+        "stateChangeSeq": 9,
+        "herdrName": "w-review"
        }
       },
       {
@@ -150,7 +154,8 @@ export const state: AppState = {
         "message": null,
         "sinceUnixMs": 1795478400000,
         "completionSeq": null,
-        "stateChangeSeq": null
+        "stateChangeSeq": null,
+        "herdrName": null
        }
       }
      ]
@@ -252,7 +257,8 @@ export const messages: WsMessage[] = [
           "message": null,
           "sinceUnixMs": 1795478400000,
           "completionSeq": null,
-          "stateChangeSeq": null
+          "stateChangeSeq": null,
+          "herdrName": null
          }
         },
         {
@@ -269,7 +275,8 @@ export const messages: WsMessage[] = [
           "message": null,
           "sinceUnixMs": 1795478400000,
           "completionSeq": null,
-          "stateChangeSeq": null
+          "stateChangeSeq": null,
+          "herdrName": null
          }
         }
        ]
@@ -300,7 +307,8 @@ export const messages: WsMessage[] = [
           "message": null,
           "sinceUnixMs": 1795478400000,
           "completionSeq": null,
-          "stateChangeSeq": null
+          "stateChangeSeq": null,
+          "herdrName": null
          }
         }
        ]
@@ -338,7 +346,8 @@ export const messages: WsMessage[] = [
           "message": null,
           "sinceUnixMs": 1795478400000,
           "completionSeq": 4,
-          "stateChangeSeq": 9
+          "stateChangeSeq": 9,
+          "herdrName": "w-review"
          }
         },
         {
@@ -355,7 +364,8 @@ export const messages: WsMessage[] = [
           "message": null,
           "sinceUnixMs": 1795478400000,
           "completionSeq": null,
-          "stateChangeSeq": null
+          "stateChangeSeq": null,
+          "herdrName": null
          }
         }
        ]
@@ -456,7 +466,8 @@ export const messages: WsMessage[] = [
           "message": null,
           "sinceUnixMs": 1795478400000,
           "completionSeq": null,
-          "stateChangeSeq": null
+          "stateChangeSeq": null,
+          "herdrName": null
          }
         },
         {
@@ -473,7 +484,8 @@ export const messages: WsMessage[] = [
           "message": null,
           "sinceUnixMs": 1795478400000,
           "completionSeq": null,
-          "stateChangeSeq": null
+          "stateChangeSeq": null,
+          "herdrName": null
          }
         }
        ]
@@ -504,7 +516,8 @@ export const messages: WsMessage[] = [
           "message": null,
           "sinceUnixMs": 1795478400000,
           "completionSeq": null,
-          "stateChangeSeq": null
+          "stateChangeSeq": null,
+          "herdrName": null
          }
         }
        ]
@@ -542,7 +555,8 @@ export const messages: WsMessage[] = [
           "message": null,
           "sinceUnixMs": 1795478400000,
           "completionSeq": 4,
-          "stateChangeSeq": 9
+          "stateChangeSeq": 9,
+          "herdrName": "w-review"
          }
         },
         {
@@ -559,7 +573,8 @@ export const messages: WsMessage[] = [
           "message": null,
           "sinceUnixMs": 1795478400000,
           "completionSeq": null,
-          "stateChangeSeq": null
+          "stateChangeSeq": null,
+          "herdrName": null
          }
         }
        ]

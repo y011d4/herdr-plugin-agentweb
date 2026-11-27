@@ -35,6 +35,7 @@ const (
 	// short, so the seq reaches the phone with (or right after) the done status itself:
 	// the phone records a "seen" only against a known seq
 	completionSeqDebounce   = 50 * time.Millisecond
+	agentListRetry          = 2 * time.Second
 	worktreeRefreshInterval = 30 * time.Second
 )
 
@@ -175,6 +176,9 @@ type HerdrClient struct {
 	rebuildT      debounce
 	broadcastT    debounce
 	completionT   debounce
+	listSent      int64 // agent.list requests sent, and the number of the one whose answer was applied last:
+	listApplied   int64 // an older answer is dropped (a count, not the clock, which can step back)
+	listTriggered bool  // a status change or a snapshot asked for the agent.list now debounced (not only a retry)
 	coverageEpoch int // bumped whenever live event coverage is lost
 	// pane IDs covered by the currently acknowledged subscription; snapshot status
 	// replays skip these (live events deliver their changes) and cover the rest
@@ -739,13 +743,24 @@ func (c *HerdrClient) scheduleBroadcast() {
 // completion_seq and state_change_seq) after each snapshot and status change.
 // Trailing debounce: the request always goes out after the change that asked for
 // it, which applyCompletionSeqs' requestedAt guard relies on. Best-effort.
-func (c *HerdrClient) refreshCompletionSeqsSoon() {
+func (c *HerdrClient) refreshCompletionSeqsSoon() { c.refreshAgentList(false) }
+
+// refreshAgentList is refreshCompletionSeqsSoon's; `retry`: this is a failed one's second try, which
+// isn't tried again. Each trigger gets one retry, also when the debounce merges it with a retry.
+func (c *HerdrClient) refreshAgentList(retry bool) {
 	if c.destroyed {
 		return
 	}
+	if !retry {
+		c.listTriggered = true
+	}
 	c.schedule(&c.completionT, completionSeqDebounce, func() {
+		retry := !c.listTriggered
+		c.listTriggered = false
 		requestedAt := nowMs()
 		epoch := c.coverageEpoch
+		c.listSent++
+		n := c.listSent
 		go func() {
 			res, err := herdrRPC(c.socketPath, "agent.list", nil)
 			c.post(func() {
@@ -753,15 +768,26 @@ func (c *HerdrClient) refreshCompletionSeqsSoon() {
 					defer c.agentListHook()
 				}
 				// coverage lost meanwhile: the reconnect snapshot schedules a fresh fetch
-				if err != nil || c.destroyed || c.cur == nil || !c.cur.Connected || epoch != c.coverageEpoch {
+				if c.destroyed || c.cur == nil || !c.cur.Connected || epoch != c.coverageEpoch {
+					return
+				}
+				// failed: asked again once, a while later (or the names and seqs would wait for the
+				// next status change or snapshot)
+				if err != nil {
+					if !retry {
+						time.AfterFunc(agentListRetry, func() { c.post(func() { c.refreshAgentList(true) }) })
+					}
 					return
 				}
 				var r struct {
 					Agents []RawAgentSeqs `json:"agents"`
 				}
-				if json.Unmarshal(res, &r) != nil {
+				// answers can land out of order: an older one would put back what the newer one
+				// replaced (a renamed agent's old name)
+				if json.Unmarshal(res, &r) != nil || n < c.listApplied {
 					return
 				}
+				c.listApplied = n
 				next := applyCompletionSeqs(c.cur, r.Agents, requestedAt)
 				if next == c.cur {
 					return
