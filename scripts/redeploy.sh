@@ -79,25 +79,9 @@ if [ -z "$linked" ] || [ "$(cd "$linked" 2>/dev/null && pwd -P)" != "$(pwd -P)" 
 fi
 [ -x bin/yoicks ] || die "no bin/yoicks to fall back to: build it first (sh scripts/plugin-build.sh)"
 
-# A clean tree first: nothing uncommitted may end up in the build. git status leaves out
-# ignored files, so build output passes, but a changed or new .gitignore doesn't (nor one
-# that ignores itself, listed separately): the cleanup below goes by the .gitignore files,
-# and one of those could make it take someone's file for build output.
-changes=$(git status --porcelain && git ls-files --others -- ':(glob)**/.gitignore')
-[ -z "$changes" ] || die "the checkout has uncommitted or untracked files (a .gitignore too): commit or remove them first
-$changes"
-# Then the build output goes: what the .gitignore files ignore among web/*.js (tsc's
-# output, before Vite) and web/dist (since); not a personal ignore (core.excludesFile,
-# .git/info/exclude).
-git ls-files -z --others --ignored --exclude-per-directory=.gitignore --directory -- ':(glob)web/*.js' web/dist |
-	xargs -0 rm -rf --
-
 if [ "$ref" = main ]; then
 	git fetch -q origin
 	target=$(git rev-parse --verify --quiet 'origin/main^{commit}') || die "no origin/main"
-	if git show-ref --verify --quiet refs/heads/main && ! git merge-base --is-ancestor refs/heads/main origin/main; then
-		die "local main has commits origin/main lacks: it can't fast-forward"
-	fi
 	switch="git switch main && git merge --ff-only $target" # the commit CI checked, even if origin/main moves
 	# The gate, before anything stops: CI's run of this very commit (ci.yml on its push to main,
 	# webcheck's Tier 1 included) passed. One still going is waited for (a few minutes); none yet,
@@ -109,10 +93,27 @@ if [ "$ref" = main ]; then
 	[ -n "$run" ] || die "no CI run of $short yet: try again in a moment"
 	say "waiting for CI run $run of $short"
 	"$gh" run watch "$run" --exit-status >/dev/null 2>&1 || die "CI run $run of $short didn't pass: not deploying (gh run view $run)"
+	# this and the clean tree below come after the wait: right before the stop
+	if git show-ref --verify --quiet refs/heads/main && ! git merge-base --is-ancestor refs/heads/main "$target"; then
+		die "local main has commits $short lacks: it can't fast-forward"
+	fi
 else
 	target=$(git rev-parse --verify --quiet "$ref^{commit}") || die "can't resolve $ref (git fetch first?)"
 	switch="git switch --detach $target"
 fi
+
+# A clean tree: nothing uncommitted may end up in the build. git status leaves out
+# ignored files, so build output passes, but a changed or new .gitignore doesn't (nor one
+# that ignores itself, listed separately): the cleanup below goes by the .gitignore files,
+# and one of those could make it take someone's file for build output.
+changes=$(git status --porcelain && git ls-files --others -- ':(glob)**/.gitignore')
+[ -z "$changes" ] || die "the checkout has uncommitted or untracked files (a .gitignore too): commit or remove them first
+$changes"
+# Then the build output goes: what the .gitignore files ignore among web/*.js (tsc's
+# output, before Vite) and web/dist (since); not a personal ignore (core.excludesFile,
+# .git/info/exclude).
+git ls-files -z --others --ignored --exclude-per-directory=.gitignore --directory -- ':(glob)web/*.js' web/dist |
+	xargs -0 rm -rf --
 
 if ! git diff --quiet HEAD "$target" -- herdr-plugin.toml; then
 	die "herdr-plugin.toml differs between HEAD and $ref. herdr caches the linked manifest, so this
@@ -181,6 +182,8 @@ say "stopping $id"
 action stop
 say "switching to $ref ($(git rev-parse --short "$target"))"
 sh -c "$switch"
+# exactly the commit checked: a main moved past it meanwhile would merge as "Already up to date"
+[ "$(git rev-parse HEAD)" = "$target" ] || die "the checkout is at $(git rev-parse --short HEAD), not $(git rev-parse --short "$target"): something moved it"
 npm_config_prefer_offline=true sh scripts/plugin-build.sh source
 say "starting $id"
 action start
