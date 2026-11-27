@@ -23,7 +23,7 @@ import { homeSummary, orchestratorStatus } from '../dashboard-group.ts';
 import { fitImages, MAX_IMAGES, toAttachment, type ImageAttachment } from '../image.ts';
 import { showToast } from '../notify.ts';
 import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
-import { openAgent, openAgentNamed } from '../nav.ts';
+import { openAgent } from '../nav.ts';
 import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
 import { emit, findPane, keptTasks, store, subscribe } from '../store.ts';
 import type { AppState, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
@@ -167,13 +167,8 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
   return (
     <div id="screen-pane" className={home ? 'screen-home' : undefined} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       {home && <HomeStatus name={name} state={state} actions={actions} />}
-      {/* a sent image in the chat opens full screen; a worker's name in a [yoicks] notice, that worker */}
-      <div id="pane-view" ref={body} style={{ display: 'contents' }} onClick={(e) => {
-        const img = (e.target as Element).closest('.chat-image-open')?.querySelector('img');
-        if (img) previewImage(img.src, img.alt);
-        const agent = (e.target as Element).closest<HTMLElement>('.chat-notice-agent')?.dataset.agent;
-        if (agent) openAgentNamed(agent);
-      }}></div>
+      {/* the engine's (pane-view.ts): the terminal and the chat (its images and workers' names: ui/ChatLog.tsx) */}
+      <div id="pane-view" ref={body} style={{ display: 'contents' }}></div>
       {prompt && paneView && <PromptPanel paneId={paneId} prompt={prompt} view={paneView} />}
       {hl && pending && <HeadlessPrompt key={pending.id} name={hl} pending={pending} />}
       {home && (

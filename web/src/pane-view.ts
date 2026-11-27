@@ -22,7 +22,8 @@ import type { ParsedPrompt } from './prompt.ts';
 import { orchestratorOfPane } from './routes.ts';
 import { findPane, store } from './store.ts';
 import { createTerminal } from './terminal.ts';
-import { conversationItems, latestActivity, renderItems } from './transcript.ts';
+import { conversationItems, latestActivity } from './transcript.ts';
+import { createChatLog } from './ui/ChatLog.tsx';
 import type { TimelineItem } from './transcript.ts';
 import type { ReadResponse, TranscriptResponse, WsMessage, WsTranscriptItemsMessage } from './types.ts';
 import { onWsMessage, wsSendWatch } from './ws.ts';
@@ -104,6 +105,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   const chatEl = Object.assign(document.createElement('div'), { className: 'chat-log', id: 'chat-log' });
   chatEl.style.display = 'none';
   container.replaceChildren(terminalEl, chatEl);
+  const chat = createChatLog(chatEl); // draws the items (React) into chatEl; this keeps the scroll
   const term = createTerminal(terminalEl, { paneId });
   const listeners = new AbortController();
   const { signal } = listeners;
@@ -245,8 +247,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       calls = new Map();
       items = conversationItems(items, calls);
     }
-    if (items.length) chatEl.innerHTML = renderItems(items);
-    else chatEl.replaceChildren(Object.assign(document.createElement('div'), { className: 'chat-empty', textContent: 'No messages yet.' }));
+    chat.reset(items);
     chatEl.scrollTop = preserveScroll
       ? (prevFromBottom < 40 ? chatEl.scrollHeight : prevTop)
       : chatEl.scrollHeight;
@@ -263,8 +264,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     // follow the bottom only if the user is already there — don't yank them out of
     // history they've scrolled up to read.
     const atBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 60;
-    chatEl.querySelector('.chat-empty')?.remove();
-    chatEl.insertAdjacentHTML('beforeend', renderItems(items));
+    chat.append(items);
     if (atBottom) chatEl.scrollTop = chatEl.scrollHeight;
   }
 
@@ -596,6 +596,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       stopPromptScreenPoll();
       dropPendingAnswer(); // left the pane: nothing to go back from
       term.destroy();
+      chat.destroy();
     },
   };
 }

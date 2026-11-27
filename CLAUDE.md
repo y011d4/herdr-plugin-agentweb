@@ -97,9 +97,11 @@ All in `internal/bridge/` (one package):
   it (the chat, empty until its session's first line) and `PromptPanel.tsx`'s `HeadlessPrompt` answers
   `headless.pending`; its usage and warnings (■, Clear, the steps back to the TUI) sit on the status
   bar. `orchestrator_alert` raises an OS notification while hidden (`notifyOrchestratorAlert`);
-  Settings shows the last Claude Code check and the TUI steps; the `[yoicks] …` lines at either end of a user turn render as dim lines (`splitNotices`), the rest as its bubble; an `agent_start` result shows as such a line, and a worker's name in one is a button that opens its drawer (`noticeHtml`; the State's `agent.herdrName`, from `agent.list`, `nav.ts`'s `openAgentNamed`). Its composer
+  Settings shows the last Claude Code check and the TUI steps; the `[yoicks] …` lines at either end of a user turn render as dim lines (`splitNotices`), the rest as its bubble; an `agent_start` result shows as such a line, and a worker's name in one is a button that opens its drawer (`ui/ChatLog.tsx`'s `Notice`; the State's `agent.herdrName`, from `agent.list`, `nav.ts`'s `openAgentNamed`). Its composer
   takes images (+ or paste; `image.ts` scales them to JPEG, the bridge's `imageBlocks` checks them); a tap on one, attached or sent, opens it full screen (`previewImage`: its own history entry, so Back closes it). `ansi.ts` — pure ANSI→HTML,
-  `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
+  `transcript.ts` — pure: the chat's markdown as escaped HTML and what a Home's chat keeps, drawn by
+  `ui/ChatLog.tsx` (the items as React components, in a React root of its own on pane-view's `#chat-log`,
+  synchronously, so the engine keeps measuring and scrolling it), `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
   (manifest, icons: `scripts/icons.mjs` draws them from one mark, by hand, outputs committed) is copied as is, and `web/dist` (`//go:embed all:web/dist*`) is the output: one
   JS and one CSS file under `assets/`, named by content hash (no code splitting: an open PWA would
@@ -439,7 +441,7 @@ vendor-neutrality is preserved.
 ## Touch/DOM rules in the web UI (regression-prone)
 
 Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only escaped HTML:
-`ansiToHtml`'s and `renderItem(s)`'s output.
+`ansiToHtml`'s and `renderMarkdown`'s / `inlineMarkdown`'s output.
 
 - **`terminal.ts`: never replace terminal DOM during an active touch** — the browser cancels
   the in-progress scroll gesture. Renders defer via `pendingAnsi` while
