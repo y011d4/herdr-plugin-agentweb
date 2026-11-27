@@ -294,7 +294,10 @@ async function previewCmd(sub: string, o: Record<string, any>): Promise<number> 
     // already dropped the bridge's pid file: a second one "succeeds"): a bridge still up stays on the herdr it began on
     if (old) {
       const said = await previewCtl(old, 'stop').then(() => '', (e) => (e as Error).message);
-      if ((await waitFn(() => fetch(`http://127.0.0.1:${port}/healthz`).then(() => false, () => true), 5000, 200)).timeout) {
+      // quiet = refused; a request left hanging (a stopped process still holding the port) is not quiet
+      const quiet = () => fetch(`http://127.0.0.1:${port}/healthz`, { signal: AbortSignal.timeout(1000) })
+        .then(() => false, (e) => (e as Error).name !== 'TimeoutError');
+      if ((await waitFn(quiet, 5000, 200)).timeout) {
         throw env(`preview ${port} still answers after its stop${said ? ` (${said})` : ''}: stop its bridge by hand`);
       }
       if (said) console.log(`WARN ${said} (nothing answers on ${port}: stopped)`);
