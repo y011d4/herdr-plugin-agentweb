@@ -40,18 +40,15 @@ type Mode = 'terminal' | 'chat';
 // pane has a transcript (the terminal ⇄ chat toggle shows) and its mode (null: not reported yet). Keyed
 // on the pane: a closing drawer's late unmount can't reset the next screen's.
 let paneView: PaneView | null = null;
-interface Toggle { paneId: string | null; shown: boolean; mode: Mode | null }
-const NO_TOGGLE: Toggle = { paneId: null, shown: false, mode: null };
-let toggle = NO_TOGGLE;
+interface Toggle { shown: boolean; mode: Mode | null }
+const NO_TOGGLE: Toggle = { shown: false, mode: null };
+const toggles = new Map<string, Toggle>(); // per pane: a Home waiting under a drawer keeps its own
 const setToggle = (paneId: string, t: Partial<Toggle>): void => {
-  toggle = { ...(toggle.paneId === paneId ? toggle : { ...NO_TOGGLE, paneId }), ...t };
+  toggles.set(paneId, { ...(toggles.get(paneId) ?? NO_TOGGLE), ...t });
   emit();
 };
-/** What `paneId`'s view last reported (nothing while another pane's is on show). */
-const useToggle = (paneId: string): Toggle => {
-  const t = useSyncExternalStore(subscribe, () => toggle);
-  return t.paneId === paneId ? t : NO_TOGGLE;
-};
+/** What `paneId`'s view last reported (nothing once it is gone). */
+const useToggle = (paneId: string): Toggle => useSyncExternalStore(subscribe, () => toggles.get(paneId) ?? NO_TOGGLE);
 const useAppState = (): AppState | null => useSyncExternalStore(subscribe, () => store.appState);
 let shownInput: HTMLTextAreaElement | null = null; // the composer on screen
 let shownKey = ''; // and its draft's key (drafts.ts)
@@ -69,16 +66,19 @@ export function paneViewOnState(): void {
 export function closePaneView(): void {
   paneView?.destroy();
   paneView = null;
-  toggle = NO_TOGGLE;
+  for (const id of toggles.keys()) if (id !== waitingPane) toggles.delete(id); // a waiting Home's stays
 }
 
 // A Home's view waiting under a drawer (suspended), until the drawer closes back onto it or the Home goes.
 let waiting: PaneView | null = null;
+let waitingPane = '';
+let paneViewPane = ''; // paneView's pane
 
 /** A drawer opens over the Home on screen: its view waits, its DOM as it is. */
 export function suspendPaneView(): void {
   paneView?.suspend();
   waiting = paneView;
+  waitingPane = paneView ? paneViewPane : '';
   paneView = null;
 }
 
@@ -86,7 +86,9 @@ export function suspendPaneView(): void {
 export function resumePaneView(): boolean {
   if (!waiting) return false;
   paneView = waiting;
+  paneViewPane = waitingPane;
   waiting = null;
+  waitingPane = '';
   paneView.resume();
   return true;
 }
@@ -144,11 +146,12 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
       prompt: setPrompt,
     });
     paneView = view;
+    paneViewPane = paneId;
     return () => {
       view.destroy();
       if (paneView === view) paneView = null;
-      if (waiting === view) waiting = null;
-      if (toggle.paneId === paneId) toggle = NO_TOGGLE;
+      if (waiting === view) { waiting = null; waitingPane = ''; }
+      toggles.delete(paneId);
       setPrompt(null);
     };
   }, [paneId]);

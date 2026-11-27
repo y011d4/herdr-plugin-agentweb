@@ -206,8 +206,14 @@ describe('App', () => {
     const home = $('#screen #screen-pane.screen-home');
     const log = $('#screen #chat-log');
     const homeLooks = transcripts('p4') + reads('p4');
+    const homeToggle = () => $<HTMLElement>('#topbar #btn-view-toggle')!.style.display;
+    assert.equal(homeToggle(), '');
+    const watched = watches.length;
     await go('#/pane/p1');
+    assert.equal(watches[watched], 'p1:chat', 'a Claude pane: its chat from the first watch (no screen read for nothing)');
+    await answer('/api/panes/p1/transcript', transcript[0]);
     assert.ok($('#screen #screen-pane.screen-home') === home, 'the Home under it, as it was');
+    assert.equal(homeToggle(), '', "its toggle (and keys) as they were: the drawer's view has its own");
     assert.ok($('.agent-drawer #screen-pane'));
     assert.equal(store.view.homeMode, false);
     assert.equal(watches.at(-1), 'p1:chat', 'the watch follows the drawer (a Claude pane: on its chat)');

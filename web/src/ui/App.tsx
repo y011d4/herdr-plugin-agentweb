@@ -20,6 +20,7 @@ import { createPortal } from 'react-dom';
 import { apiDelete, apiGet, apiPost, getToken, headlessName, loadToken, onUnauthorized, orchestratorPost, setToken } from '../api.ts';
 import { dismissNotificationsForPane, notifyAgentStatus, notifyOrchestratorAlert, showToast } from '../notify.ts';
 import { closeAgent, closingDrawer, go, openAgent } from '../nav.ts';
+import { openingMode } from '../pane-view.ts';
 import { homeOf, isAgentsRoute, nextPaneBackRoute, nextPaneOverBase, nextSettingsBackRoute, resolveRoute } from '../routes.ts';
 import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, store, subscribe, type View } from '../store.ts';
 import type { AppState, ClearResponse, WsMessage } from '../types.ts';
@@ -342,9 +343,9 @@ function openPaneRoute(paneId: string, from: string | null): void {
   view.paneOverBase = nextPaneOverBase(from, base, view.paneOverBase);
   view.paneBackRoute = base;
   view.activePaneId = paneId;
-  // A pane view opens on the terminal (pane-view.ts) but mounts after the route's watch goes
-  // out (handleRoute's wsSendWatch): set its mode now, or that watch follows the last pane's chat.
-  view.paneViewMode = 'terminal';
+  // A pane view mounts after the route's watch goes out (handleRoute's wsSendWatch): set the mode it
+  // opens on now, or that watch follows the last pane's view.
+  view.paneViewMode = openingMode(paneId);
   // opening a pane clears its pending OS notifications
   dismissNotificationsForPane(paneId);
   markActivePaneSeen();
@@ -439,7 +440,7 @@ async function stopAgentFlow(paneId: string): Promise<void> {
 // ── A running Home ────────────────────────────────────────────────────────────
 
 function renderHome(paneId: string, name: string): void {
-  view.paneViewMode = 'terminal'; // as openPaneRoute's
+  view.paneViewMode = openingMode(paneId); // as openPaneRoute's
   const actions = { clear: () => { void clearAgentFlow(paneId); }, stop: () => { void stopAgentFlow(paneId); } };
   show('pane', <Pane paneId={paneId} home actions={actions} name={name} />, homeTopbar(paneId), location.hash);
 }

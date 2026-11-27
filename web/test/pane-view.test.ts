@@ -47,6 +47,14 @@ function open(paneId: string): void {
   });
 }
 const chatLog = () => container.querySelector<HTMLElement>('#chat-log')!;
+/** `paneId` opened afresh with its terminal chosen (the toggle's choice, in memory). */
+function openOnTerminal(paneId: string): void {
+  open(paneId);
+  view.setMode('terminal', true);
+  view.destroy();
+  reqs = [];
+  open(paneId);
+}
 
 beforeEach(() => {
   reqs = [];
@@ -119,12 +127,7 @@ describe('pane view: chat', () => {
 
   it('runs at most one availability probe at a time', async () => {
     vi.useFakeTimers();
-    open('p3'); // its terminal chosen (p3: no other test opens it)
-    await answer('/transcript', transcript[0]);
-    view.setMode('terminal', true);
-    view.destroy();
-    reqs = [];
-    open('p3');
+    openOnTerminal('p3');
     await answer('/read?source=visible', read[1]);
     assert.equal(count('/transcript'), 1);
     await vi.advanceTimersByTimeAsync(3000 * 3); // the refresh timer re-probes a claude pane without chat
@@ -197,9 +200,9 @@ describe('pane view: chat', () => {
     assert.match(chatLog().textContent!, /after/);
   });
 
-  it('a probe failing while suspended reports nothing (the toggle slot is the drawer\'s)', async () => {
+  it('a probe failing while suspended reports nothing (the resume reports anew)', async () => {
     vi.useFakeTimers();
-    open('p3'); // its terminal chosen in a test above: the terminal first, then the probe
+    openOnTerminal('p3'); // the terminal first, then the probe
     await answer('/api/panes/p3/read?source=visible', read[1]);
     assert.equal(count('/api/panes/p3/transcript'), 1);
     const modes = calls.modes;
@@ -209,7 +212,7 @@ describe('pane view: chat', () => {
   });
 
   it('a scrollback read dropped by a suspend is read again with the next look at the terminal', async () => {
-    open('p3'); // its terminal chosen above: the terminal first, then its scrollback
+    openOnTerminal('p3'); // the terminal first, then its scrollback
     await answer('/api/panes/p3/read?source=visible', read[1]);
     assert.equal(count('/api/panes/p3/read?source=recent'), 1);
     view.setMode('chat', false);
