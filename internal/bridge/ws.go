@@ -216,16 +216,17 @@ func (c *wsClient) handle(data []byte) {
 	}
 }
 
-// every runs poll now and then every interval until ctx ends or poll returns false.
-// A poll that overruns the interval skips the ticks it covered (the TS in-flight guard).
-func every(ctx context.Context, interval time.Duration, poll func() bool) {
-	t := time.NewTicker(interval)
-	defer t.Stop()
+// every runs poll now, then again interval after each look ends, until ctx ends or poll
+// returns false: a slow look never piles up (the TS in-flight guard).
+func every(ctx context.Context, clock clock, interval time.Duration, poll func() bool) {
 	for poll() {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case <-clock.After(interval):
+		}
+		if ctx.Err() != nil { // ended as the tick came: no look after the end
+			return
 		}
 	}
 }
@@ -256,7 +257,7 @@ func (c *wsClient) watchPane(paneID string) {
 	c.paneStop = stop
 	c.mu.Unlock()
 	var last *WsPaneOutputMessage // the last screen pushed
-	go every(ctx, paneWatchInterval, func() bool { return c.pollPane(gen, paneID, &last) })
+	go every(ctx, c.srv.clock, paneWatchInterval, func() bool { return c.pollPane(gen, paneID, &last) })
 }
 
 // pollPane is one look at the watched pane; false once the watch is over.
@@ -341,13 +342,13 @@ func (c *wsClient) watchTranscript(paneID string) {
 	c.transcriptEnd = stop
 	c.mu.Unlock()
 	tw := &transcriptWatch{}
-	go every(ctx, transcriptWatchInterval, func() bool { return c.pollTranscript(gen, paneID, tw) })
+	go every(ctx, c.srv.clock, transcriptWatchInterval, func() bool { return c.pollTranscript(gen, paneID, tw) })
 }
 
 func (c *wsClient) pollTranscript(gen int, paneID string, tw *transcriptWatch) bool {
 	current := func() bool { return c.transcriptGen == gen } // c.mu held
-	if time.Since(tw.resolveAt) >= c.srv.transcriptResolve {
-		tw.resolveAt = time.Now()
+	if now := c.srv.clock.Now(); now.Sub(tw.resolveAt) >= transcriptResolveInterval {
+		tw.resolveAt = now
 		sessionID, file, err := c.srv.resolvePaneTranscript(paneID)
 		c.mu.Lock()
 		defer c.mu.Unlock()

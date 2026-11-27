@@ -182,14 +182,13 @@ func startHeadless(t *testing.T, stateDir string, env map[string]string, tweak f
 // waiting waits until something waits d from now on the clock (what names it).
 func (b *hlBridge) waiting(t *testing.T, what string, d time.Duration) {
 	t.Helper()
-	waitUntil(t, 10*time.Second, what+" waits "+d.String(), func() bool { return b.clock.Pending(d) })
+	clockWaiting(t, b.clock, what, d)
 }
 
 // pass moves the clock d on once something waits d from now.
 func (b *hlBridge) pass(t *testing.T, what string, d time.Duration) {
 	t.Helper()
-	b.waiting(t, what, d)
-	b.clock.Advance(d)
+	pass(t, b.clock, what, d)
 }
 
 // restartDue moves the clock past a restart's delay when one is due after a crash (false: none is).
@@ -1130,8 +1129,7 @@ func TestHeadlessClaudeCheck(t *testing.T) {
 	}
 	write(first.Add(2*time.Hour), false, `"interrupt"`)
 	b.srv.checkClaude()
-	waitUntil(t, 5*time.Second, "the second alert", func() bool { return nAlerts() == 2 })
-	time.Sleep(200 * time.Millisecond)
+	b.srv.bg.Wait() // its notification (and any other in flight) shown
 	if n := nAlerts(); n != 2 {
 		t.Errorf("%d alerts: %q", n, alerts)
 	}

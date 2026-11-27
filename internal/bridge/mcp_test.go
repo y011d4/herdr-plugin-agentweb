@@ -492,22 +492,24 @@ func TestHeadlessNotifications(t *testing.T) {
 		b.send(t, "hello")
 		b.waitStatus(t, "done")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		got := false
-		for !got {
+		got, after := false, false
+		for !after { // its agent_status, then the state push its runner sends once that is told
 			_, data, err := c.Read(ctx)
 			if err != nil {
 				break
 			}
 			var m WsAgentStatusMessage
-			got = json.Unmarshal(data, &m) == nil && m.Type == "agent_status" && m.PaneID == "hl:"+name && m.From == "working" && m.To == "done" &&
+			json.Unmarshal(data, &m)
+			after = got && m.Type == "state"
+			got = got || m.Type == "agent_status" && m.PaneID == "hl:"+name && m.From == "working" && m.To == "done" &&
 				m.WorkspaceLabel != nil && *m.WorkspaceLabel == "H1"
 		}
 		cancel()
 		c.Close(websocket.StatusNormalClosure, "")
-		if !got {
-			t.Errorf("%s: no agent_status", name)
+		if !got || !after {
+			t.Errorf("%s: agent_status %v, a state after it %v", name, got, after)
 		}
-		time.Sleep(200 * time.Millisecond)
+		b.srv.bg.Wait() // the PC notifications it began, shown
 		if shown := len(b.world.Notifications()); (shown > 0) != (name == "h1") {
 			t.Errorf("%s: %d notifications", name, shown)
 		}
