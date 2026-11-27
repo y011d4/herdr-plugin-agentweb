@@ -262,20 +262,18 @@ func TestApplyEventPaneAgentStatusChanged(t *testing.T) {
 			checkEq(t, pane.Agent.Status, "working")
 		})
 
-		t.Run("merges agent/display_agent/custom_status/title from event payload", func(t *testing.T) {
+		t.Run("merges agent/display_agent/title from event payload", func(t *testing.T) {
 			state := createState(makeSnapshot(), 1000, nil)
 			next, changes := applyEvent(state, "pane_agent_status_changed", map[string]any{
 				"pane_id":       "w0:p1",
 				"agent_status":  "idle",
 				"agent":         "codex",
 				"display_agent": "Codex: auth",
-				"custom_status": "waiting",
 				"title":         "new title",
 			}, 4000)
 			agent := onlyChange(t, changes).Agent
 			checkEq(t, valOf(agent.Name), "codex")
 			checkEq(t, valOf(agent.DisplayName), "Codex: auth")
-			checkEq(t, valOf(agent.CustomStatus), "waiting")
 			checkEq(t, agent.Status, "idle")
 			checkEq(t, agent.SinceUnixMs, 4000)
 			pane := next.Workspaces[0].Tabs[0].Panes[0]
@@ -361,7 +359,7 @@ func TestToClientState(t *testing.T) {
 				`"workspaces":[{"workspaceId":"w0","label":"herdr","cwd":"/home/user/proj","worktree":null,`+
 				`"tabs":[{"tabId":"w0:t1","label":"1","panes":[`+
 				`{"paneId":"w0:p1","focused":true,"cwd":"/home/user/proj","launchCwd":"/home/user/proj","title":null,`+
-				`"agent":{"name":"claude","displayName":"claude","status":"working","customStatus":null,"message":null,`+
+				`"agent":{"name":"claude","displayName":"claude","status":"working",`+
 				`"sinceUnixMs":1000,"completionSeq":null,"stateChangeSeq":null,"herdrName":null}},`+
 				`{"paneId":"w0:p2","focused":false,"cwd":"/home/user/proj","launchCwd":"/home/user/proj","title":null,"agent":null}]}]}]}`)
 		})

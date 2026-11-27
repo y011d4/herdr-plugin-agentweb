@@ -698,9 +698,11 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   3. A worktree filled in from the cwd (herdr sent none) is treated as herdr's on the next fill:
      if that dir stops being a git checkout, the old worktree and branch show until the next
      snapshot. Fix: remember which worktrees were filled in and let git's answer replace them.
-- **`custom_status` and `agent_message`**, read from panes and status events, aren't in herdr
-  0.9.5's schema (protocol 22 has `state_labels`), so they are always empty
-  (`notInProtocol22` in `herdr_schema_test.go`).
+- **`custom_status` and `agent_message` were removed** (the bridge read them from panes and status
+  events into an agent's `customStatus`/`message`, which a card showed as a dim line): herdr 0.9.5's
+  schema has neither (protocol 22 has `state_labels`), so they were always empty. If herdr starts
+  filling them (or `state_labels` turns out to carry such a line), they can come back: the fields on
+  `RawPane`/`AgentInfo` and `applyEvent`, `herdr_schema_test.go`'s field lists, the contract, the card.
 - **Not verified before the switch** (watch in production): memory, threads and fds over days;
   recovery after the machine sleeps; the CLI account checks' allow side and `worktree remove`
   through a real orchestrator; `blocked` on the folder-trust prompt. Never run against a real

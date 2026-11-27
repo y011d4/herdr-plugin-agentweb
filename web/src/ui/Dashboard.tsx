@@ -117,18 +117,17 @@ const SCROLLER = 'flex-1 overflow-y-auto [overflow-anchor:none] pb-[calc(var(--s
 // one column of cards, side by side from lg
 const LIST = 'agent-list mt-4 flex flex-col gap-2.5 px-4 min-[600px]:px-6 lg:grid lg:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]';
 
-// One card: the name and the status; the purpose (two lines at most, all of it on hover); what it's
-// doing; then one dim line, cut short rather than wrapped: the location and the branch (the list is
-// flat, so each card names its own), the kind, the `worktree` chip (from that workspace), the time.
+// One card: the name and the status; the purpose (two lines at most, all of it on hover); then one dim
+// line, cut short rather than wrapped: the location and the branch (the list is flat, so each card names
+// its own), the kind, the `worktree` chip (from that workspace), the time.
 function AgentCard({ card }: { card: DashboardCard }) {
   const { pane, purpose, isWorktree } = card;
   const { paneId, agent, title } = pane;
-  const { displayName, name, customStatus, message, sinceUnixMs } = agent!;
+  const { displayName, name, sinceUnixMs } = agent!;
   // The chip shows the stable agent kind, so prefer `name` (raw pane.agent,
   // e.g. "claude"/"codex") over displayName, which can be a richer label.
   const agentKind = name || displayName || 'agent';
   const status = shownStatus(pane, store.seenDone) || 'unknown';
-  const meta = customStatus || message || '';
   const relTime = relativeTime(sinceUnixMs);
   return (
     <Card className={CARD} data-pane-id={paneId} role="button" tabIndex={0} withBorder radius={10} padding={0} px={16} py={14}
@@ -139,7 +138,6 @@ function AgentCard({ card }: { card: DashboardCard }) {
         <StatusBadge status={status} />
       </Group>
       {purpose ? <Text className="card-purpose" fz={14} lh={1.35} mb={6} lineClamp={2} title={purpose}>{purpose}</Text> : null}
-      {meta ? <Text fz={13} c="dimmed" mb={4} truncate>{meta}</Text> : null}
       <Group gap={12} fz={13} c="dimmed" wrap="nowrap">
         <CardWhere card={card} />
         <Tag>{agentKind}</Tag>
