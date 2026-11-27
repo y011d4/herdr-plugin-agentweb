@@ -104,6 +104,23 @@ export interface OrchestratorView {
   mode: 'tui' | 'headless';
   /** a headless orchestrator's state; null for 'tui' */
   headless: HeadlessView | null;
+  /** the user's to-do list on its Home, oldest first: what its orchestrator wrote down for the
+   *  user to do (ticked off with DELETE /api/orchestrators/:name/todos/:id) */
+  todos: TodoItem[];
+}
+
+/** One thing for the user to do, as its orchestrator wrote it down. */
+export interface TodoItem {
+  id: string;
+  text: string;
+  /** the worker it concerns (its herdr name, as an agent's herdrName) */
+  agent: string | null;
+  /** an http(s) link for it, e.g. the PR */
+  url: string | null;
+  /** when it is for (ms): the user is reminded once then; null = now */
+  due: number | null;
+  /** ms */
+  createdAt: number;
 }
 
 export interface HeadlessView {
