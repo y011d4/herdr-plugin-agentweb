@@ -10,14 +10,25 @@ import { dismissToast, getToasts, removeToast, subscribeToasts, type Toast } fro
 
 export function Toasts() {
   const toasts = useSyncExternalStore(subscribeToasts, getToasts);
-  // ponytail: checked as toasts come and go, not on a window resize (the cap is 100vh less a margin)
   // Overflowing is at its height cap with more inside: more inside alone isn't, as a toast's entry
-  // slides up 8px (a transform) and so overflows a box that isn't full.
+  // slides up 8px (a transform) and so overflows a box that isn't full until it ends. Checked as
+  // toasts come and go, as the box resizes (the cap follows the viewport) and as an entry ends;
+  // clientHeight is whole pixels, the cap may not be.
   useLayoutEffect(() => {
     const box = document.getElementById('toast-container');
     if (!box) return;
-    const full = box.clientHeight >= parseFloat(getComputedStyle(box).maxHeight);
-    box.toggleAttribute('data-overflow', full && box.scrollHeight > box.clientHeight);
+    const check = (): void => {
+      const full = box.clientHeight + 1 >= parseFloat(getComputedStyle(box).maxHeight);
+      box.toggleAttribute('data-overflow', full && box.scrollHeight > box.clientHeight + 1);
+    };
+    check();
+    const resized = new ResizeObserver(check);
+    resized.observe(box);
+    box.addEventListener('animationend', check);
+    return () => {
+      resized.disconnect();
+      box.removeEventListener('animationend', check);
+    };
   }, [toasts]);
   return <>{toasts.map((t) => <ToastItem key={t.id} toast={t} />)}</>;
 }
