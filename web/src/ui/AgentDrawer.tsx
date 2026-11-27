@@ -26,8 +26,8 @@ import { AgentMenu, Pane, PaneTitle, ViewToggle, type AgentActions } from './Pan
  *  the pane it opened then (`openedPane`: pane to pane keeps both). */
 export interface Sheet { paneId: string; key: number; open: boolean; opener: HTMLElement | null; openedPane: string }
 
-// Another layer over the drawer: a dialog of Modals.tsx (Mantine's confirm too) or ⋮'s menu.
-const OTHER_LAYER = '.modal-overlay, [data-modal-backdrop], [data-menu-dropdown]';
+// Another layer over the drawer: a dialog of Modals.tsx (Mantine's Modal) or ⋮'s menu.
+const OTHER_LAYER = '[data-modal-backdrop], [data-menu-dropdown]';
 
 // The content's one child, in place of Mantine's scroll area (100vh tall): a column the pane fills.
 const Fill = ({ children }: { children?: ReactNode }) => <div className="agent-drawer-fill">{children}</div>;
