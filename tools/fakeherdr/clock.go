@@ -100,7 +100,8 @@ func (c *FakeClock) Pending(d time.Duration) bool {
 
 // Advance moves the clock d on, firing each timer due by then in order of its time (Now
 // then reads that time): After's get it on their channel, AfterFunc's run before Advance
-// returns. A timer armed meanwhile that falls due within d fires too.
+// returns. A timer armed meanwhile that falls due within d fires too. Two may run at once (a
+// clock kept at the real time's pace, and a jump): the clock never goes back.
 func (c *FakeClock) Advance(d time.Duration) {
 	c.mu.Lock()
 	end := c.now.Add(d)
@@ -128,6 +129,8 @@ func (c *FakeClock) Advance(d time.Duration) {
 		}
 		c.mu.Lock()
 	}
-	c.now = end
+	if end.After(c.now) {
+		c.now = end
+	}
 	c.mu.Unlock()
 }

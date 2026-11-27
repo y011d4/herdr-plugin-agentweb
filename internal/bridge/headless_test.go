@@ -123,17 +123,32 @@ type hlBridge struct {
 	clock *fakeherdr.FakeClock
 }
 
-// fakeClaudeEnv builds tools/fakeclaude as `claude` (the orphan scan looks for that name)
-// and points the bridge at it, with a fresh HOME.
+// tools/fakeclaude, built once for the package as fakeClaudeDir/claude (the orphan scan
+// looks for that name); TestMain removes the dir
+var (
+	fakeClaudeOnce sync.Once
+	fakeClaudeDir  string
+	fakeClaudeErr  error
+)
+
+// fakeClaudeEnv points the bridge at fakeclaude, with a fresh HOME.
 func fakeClaudeEnv(t *testing.T) (log, home string) {
 	t.Helper()
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "claude")
-	build := exec.Command("go", "build", "-o", bin, "./tools/fakeclaude")
-	build.Dir = filepath.Join("..", "..")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("building fakeclaude: %v\n%s", err, out)
+	fakeClaudeOnce.Do(func() {
+		if fakeClaudeDir, fakeClaudeErr = os.MkdirTemp("", "fakeclaude"); fakeClaudeErr != nil {
+			return
+		}
+		build := exec.Command("go", "build", "-o", filepath.Join(fakeClaudeDir, "claude"), "./tools/fakeclaude")
+		build.Dir = filepath.Join("..", "..")
+		if out, err := build.CombinedOutput(); err != nil {
+			fakeClaudeErr = fmt.Errorf("%v\n%s", err, out)
+		}
+	})
+	if fakeClaudeErr != nil {
+		t.Fatalf("building fakeclaude: %v", fakeClaudeErr)
 	}
+	bin := filepath.Join(fakeClaudeDir, "claude")
+	dir := t.TempDir()
 	home = filepath.Join(dir, "home")
 	os.MkdirAll(home, 0o700)
 	log = filepath.Join(dir, "fakeclaude.log")
@@ -830,8 +845,11 @@ func TestHeadlessOrphanScan(t *testing.T) {
 	if pid := markedHeadlessChild(state, "h1"); pid != orphan.Process.Pid {
 		t.Errorf("markedHeadlessChild %d, want %d", pid, orphan.Process.Pid)
 	}
+	// reaped at once, as init reaps a real orphan (the scan waits while it is a zombie)
+	gone := make(chan struct{})
+	go func() { orphan.Wait(); close(gone) }()
 	b.start(t)
-	orphan.Wait()
+	<-gone
 	if v := b.waitStatus(t, "idle"); v.PaneID == nil {
 		t.Errorf("%+v", v)
 	}

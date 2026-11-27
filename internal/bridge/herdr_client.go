@@ -163,7 +163,7 @@ type HerdrClient struct {
 	published  atomic.Pointer[State]
 	isConn     atomic.Bool
 
-	clock clock // its reconnects, debounces and ack timeout (tests: a fakeherdr.FakeClock, set before Start)
+	clock clock // its reconnects, debounces, ack timeout and agent.list retry (tests: a fakeherdr.FakeClock, set before Start)
 	// tests: runs once an agent.list answer has been handled (applied or not), on the actor
 	agentListHook func()
 
@@ -179,7 +179,7 @@ type HerdrClient struct {
 	listSent      int64 // agent.list requests sent, and the number of the one whose answer was applied last:
 	listApplied   int64 // an older answer is dropped (a count, not the clock, which can step back)
 	listTriggered bool  // a status change or a snapshot asked for the agent.list now debounced (not only a retry)
-	coverageEpoch int // bumped whenever live event coverage is lost
+	coverageEpoch int   // bumped whenever live event coverage is lost
 	// pane IDs covered by the currently acknowledged subscription; snapshot status
 	// replays skip these (live events deliver their changes) and cover the rest
 	subscribed map[string]bool
@@ -775,7 +775,7 @@ func (c *HerdrClient) refreshAgentList(retry bool) {
 				// next status change or snapshot)
 				if err != nil {
 					if !retry {
-						time.AfterFunc(agentListRetry, func() { c.post(func() { c.refreshAgentList(true) }) })
+						c.clock.AfterFunc(agentListRetry, func() { c.post(func() { c.refreshAgentList(true) }) })
 					}
 					return
 				}

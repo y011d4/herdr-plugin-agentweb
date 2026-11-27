@@ -9,7 +9,8 @@ import (
 
 // Client is the bridge's herdr client as a scenario drives it.
 type Client interface {
-	Refresh() // force a snapshot re-fetch, as the bridge does after agent.rename
+	Refresh()             // force a snapshot re-fetch, as the bridge does after agent.rename
+	Jump(d time.Duration) // move its clock d on at once (it keeps the real time's pace otherwise)
 }
 
 // Env is what a scenario works with.
@@ -215,13 +216,15 @@ var Scenarios = []Scenario{
 	},
 	{
 		// the first subscription is never acked: give up after the request timeout
-		// (10 s) and reconnect
+		// (10 s, jumped over: the ack's timer runs from before the request) and reconnect
 		Name: "ack-timeout",
 		Setup: func(e *Env) {
 			e.Srv.WithholdAcks(1)
 		},
 		Run: func(e *Env) {
-			e.WaitSubscribed(1, 15*time.Second)
+			e.WaitCount("events.subscribe", 1, wait)
+			e.Client.Jump(10 * time.Second)
+			e.WaitSubscribed(1, wait)
 			e.Sleep(400)
 			e.Status("p1", "done")
 			e.Sleep(500)

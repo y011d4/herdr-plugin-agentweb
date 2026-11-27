@@ -787,7 +787,9 @@ func TestHeadlessClearForgetsWorkers(t *testing.T) {
 	if v := b.view(t); v.Headless.Status != "idle" {
 		t.Errorf("status %s: something was written to the fresh child", v.Headless.Status)
 	}
-	runs, _ := b.runs(t)
+	// idle comes at the spawn, before the child has logged its argv
+	var runs []procArgs
+	waitUntil(t, 5*time.Second, "the second run", func() bool { runs, _ = b.runs(t); return len(runs) == 2 })
 	if last := runs[len(runs)-1].argv; last[6] != "--session-id" || last[7] == runs[0].argv[7] {
 		t.Errorf("not a fresh session: %v", last)
 	}
