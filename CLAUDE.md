@@ -613,8 +613,10 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   The private herdr (`herdr server` under `$WC_ROOT/herdr` as its HOME and XDG dirs: none of the
   desktop herdr's config, so not its plugins, which would start a second yoicks) takes every herdr call
   of that root and its previews while `$WC_ROOT/herdr` exists; stopped, they fail rather than reach the
-  desktop's. Without `herdr start` (Tier 2, which needs the desktop's HOME and direnv), the preview is a
-  throwaway bridge over the real herdr.
+  desktop's. A preview and a run stay on the herdr they began on: `herdr start|stop` refuse while the root
+  has a preview or an unfinished run, a run refuses a preview of the other herdr, and the default root
+  (every worker's) gets none. Without `herdr start` (Tier 2, which needs the desktop's HOME and direnv),
+  the preview is a throwaway bridge over the real herdr.
   Each check prints `PASS|FAIL <id> <measured> <condition>`; the exit code is the failure count.
   `--only P10,P12` picks checks; `--profile DIR` reuses a Chrome profile, for the old-SW round trip
   (`P2.old` → `P2.upgrade` → `P2.downgrade`, the old build served with `preview start --web-dir`).
