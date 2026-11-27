@@ -134,10 +134,7 @@ type OrchestratorDef struct {
 	Dir string
 	// environment it is started with (e.g. CLAUDE_CONFIG_DIR, which picks its account)
 	Env map[string]string
-	// the plugin writes its dir; false for a legacy orchestrator_dir (the user's own)
-	Managed bool
-	// "tui" (an agent in a herdr pane; "" too) or "headless" (the bridge's own claude -p
-	// child; managed entries only)
+	// "tui" (an agent in a herdr pane; "" too) or "headless" (the bridge's own claude -p child)
 	Mode string
 }
 

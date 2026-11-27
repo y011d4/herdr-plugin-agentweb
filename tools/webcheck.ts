@@ -1471,9 +1471,8 @@ async function h7(c: Ctx) {
 async function ht2(c: Ctx) {
   const { pg } = c;
   if (!(await hlView(c, 'wc-h2'))) throw env(`no wc-h2 on this preview: ${H_HINT}`);
-  // it answers on haiku: its managed dir's local settings (the bridge writes only settings.json there), read at its start
-  const data = path.join(WC_ROOT, 'data', fs.existsSync(path.join(WC_ROOT, 'data', 'herdr-agentweb')) ? 'herdr-agentweb' : 'herdr-yoicks');
-  const local = path.join(data, 'orchestrators', 'wc-h2', '.claude', 'settings.local.json');
+  // it answers on haiku: its dir's local settings (the bridge writes only settings.json there), read at its start
+  const local = path.join(WC_ROOT, 'data', 'herdr-yoicks', 'orchestrators', 'wc-h2', '.claude', 'settings.local.json');
   let settings: Record<string, unknown> = {};
   try { settings = JSON.parse(fs.readFileSync(local, 'utf8')); } catch { /* none yet */ }
   if (settings.model !== 'haiku') {

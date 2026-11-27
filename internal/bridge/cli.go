@@ -1,6 +1,6 @@
 package bridge
 
-// yoicks's commands, a port of bin/agentwebctl.ts: run | start | stop | status |
+// yoicks's commands: run | start | stop | status |
 // qr | overview | agent | worktree | orchestrator, plus serve (the bridge itself, what
 // start launches in the background). herdr's actions and panes call them with cwd =
 // the plugin root; an orchestrator calls overview, agent and worktree from its Bash.
@@ -90,20 +90,10 @@ func (c cli) arg(i int) string {
 
 // ── state, config ────────────────────────────────────────────────────────────
 
-func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
-
 // defaultStateDir is where herdr keeps this plugin's state (what it passes as
-// HERDR_PLUGIN_STATE_DIR), also when yoicks runs outside herdr: the TS
-// used ~/.local/state/herdr-agentweb there (the name before the rename), so a token found only in that old place
-// keeps being used rather than unpairing a phone.
+// HERDR_PLUGIN_STATE_DIR), also when yoicks runs outside herdr.
 func defaultStateDir() string {
-	home := osHomedir()
-	herdrDir := herdrStateDir(pluginID)
-	legacy := filepath.Join(home, ".local", "state", "herdr-agentweb")
-	if !fileExists(filepath.Join(herdrDir, "token")) && fileExists(filepath.Join(legacy, "token")) {
-		return legacy
-	}
-	return herdrDir
+	return filepath.Join(firstNonEmpty(os.Getenv("XDG_STATE_HOME"), filepath.Join(osHomedir(), ".local", "state")), "herdr", "plugins", pluginID)
 }
 
 func stateDir() string {
@@ -151,15 +141,11 @@ func ownExe() string {
 	return exe
 }
 
-// bridgeNames are the names a bridge runs under: this binary's, and agentwebctl, its
-// name before the rename, so a bridge started before it can still be stopped.
-var bridgeNames = []string{"yoicks", "agentwebctl"}
-
 // isBridgeArgv is whether a command line is a bridge: `yoicks serve|run`, not
 // another yoicks command (an orchestrator's background `agent wait` must not get
 // a SIGTERM through a reused PID), whatever dir the binary lives in.
 func isBridgeArgv(argv []string) bool {
-	return len(argv) >= 2 && slices.Contains(bridgeNames, path.Base(argv[0])) && (argv[1] == "serve" || argv[1] == "run")
+	return len(argv) >= 2 && path.Base(argv[0]) == "yoicks" && (argv[1] == "serve" || argv[1] == "run")
 }
 
 // looksLikeBridge checks that a live pid from a pidfile still runs the bridge: the
@@ -189,14 +175,9 @@ func looksLikeBridge(pid int) bool {
 }
 
 // isBridgeCommandLine is the check for a command line as ps prints it (no /proc): it
-// ends in `yoicks serve|run` (a binary path may hold spaces), or a bridgeNames one.
+// ends in `yoicks serve|run` (a binary path may hold spaces).
 func isBridgeCommandLine(cmd string) bool {
-	for _, name := range bridgeNames {
-		if strings.HasSuffix(cmd, name+" serve") || strings.HasSuffix(cmd, name+" run") {
-			return true
-		}
-	}
-	return false
+	return strings.HasSuffix(cmd, "yoicks serve") || strings.HasSuffix(cmd, "yoicks run")
 }
 
 func pidAlive(pid int) bool { return syscall.Kill(pid, 0) == nil }
@@ -277,53 +258,19 @@ func waitForExit(pid int, timeout time.Duration) bool {
 	return true
 }
 
-// herdrStateDir is the state dir herdr keeps for plugin id.
-func herdrStateDir(id string) string {
-	return filepath.Join(firstNonEmpty(os.Getenv("XDG_STATE_HOME"), filepath.Join(osHomedir(), ".local", "state")), "herdr", "plugins", id)
-}
-
-// livePidFiles is the bridge's pidfiles and their live PIDs: this plugin's, or while
-// those have none, the ones of the plugin before the rename (herdr's state dir for
-// y011d4.agentweb), whose bridge, agentwebctl, is still ours to find and stop. Only
-// from the plugin's own state dir (herdr's, or the default): a throwaway one (a dev
-// run, a preview bridge, a test) must never reach, let alone stop, the real bridge.
+// livePidFiles is the bridge's pidfiles and their live PIDs.
 func livePidFiles() (daemonFile, runFile string, daemon, fg int) {
 	daemonFile, runFile = daemonPidFile(), runPidFile()
-	if daemon, fg = alivePid(daemonFile), alivePid(runFile); daemon != 0 || fg != 0 {
-		return
-	}
-	if d := os.Getenv("HERDR_PLUGIN_STATE_DIR"); d != "" && filepath.Clean(d) != herdrStateDir(pluginID) {
-		return
-	}
-	old := herdrStateDir("y011d4.agentweb")
-	oldDaemon, oldRun := filepath.Join(old, "bridge.pid"), filepath.Join(old, "bridge-run.pid")
-	if d, f := alivePid(oldDaemon), alivePid(oldRun); d != 0 || f != 0 {
-		return oldDaemon, oldRun, d, f
-	}
-	return
+	return daemonFile, runFile, alivePid(daemonFile), alivePid(runFile)
 }
 
-// runningPid is the live bridge's PID; old is whether it runs as agentwebctl, the
-// binary's name before the rename (it serves the old plugin's config and token),
-// wherever its pidfile is.
-func runningPid() (pid int, foreground, old bool) {
+// runningPid is the live bridge's PID.
+func runningPid() (pid int, foreground bool) {
 	_, _, daemon, fg := livePidFiles()
 	if pid = daemon; pid == 0 {
 		pid = fg
 	}
-	return pid, fg != 0, pid != 0 && isOldBridge(pid)
-}
-
-// isOldBridge is whether bridge pid runs as agentwebctl (see runningPid).
-func isOldBridge(pid int) bool {
-	if runtime.GOOS == "linux" {
-		b, _ := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
-		argv0, _, _ := strings.Cut(string(b), "\x00")
-		return path.Base(argv0) == "agentwebctl"
-	}
-	out, _ := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "args=").Output()
-	cmd := strings.TrimSpace(string(out))
-	return strings.HasSuffix(cmd, "agentwebctl serve") || strings.HasSuffix(cmd, "agentwebctl run")
+	return pid, fg != 0
 }
 
 func pidLabel(pid int, foreground bool) string {
@@ -336,11 +283,7 @@ func pidLabel(pid int, foreground bool) string {
 // ── bridge lifecycle ─────────────────────────────────────────────────────────
 
 func (c cli) start() int {
-	if pid, fg, old := runningPid(); old {
-		// it serves the old plugin's config and token: "already running" would hide that
-		fmt.Printf("a bridge the plugin started before its rename (agentwebctl) is running (%s): stop it (the stop action), then start again\n", pidLabel(pid, fg))
-		return 1
-	} else if pid != 0 {
+	if pid, fg := runningPid(); pid != 0 {
 		fmt.Printf("bridge already running (%s)\n", pidLabel(pid, fg))
 		printConnectInfo()
 		return 0
@@ -437,15 +380,10 @@ func (c cli) stop() int {
 }
 
 func (c cli) status() int {
-	if pid, fg, old := runningPid(); pid != 0 {
+	if pid, fg := runningPid(); pid != 0 {
 		fmt.Printf("bridge running (%s)\n", pidLabel(pid, fg))
-		if old { // its URL and token are the old plugin's: ours could mislead
-			fmt.Println("started before the plugin's rename (agentwebctl): stop and start it to run this version")
-			notify("yoicks: the old bridge is running", "stop and start it to run this version")
-		} else {
-			printConnectInfo()
-			notify("yoicks running", baseURL(readConfig()))
-		}
+		printConnectInfo()
+		notify("yoicks running", baseURL(readConfig()))
 	} else {
 		fmt.Println("bridge is not running")
 		notify("yoicks stopped", "invoke y011d4.yoicks.start to launch")
@@ -482,7 +420,7 @@ func printEnvironment() {
 
 // run serves in the foreground, in this process (the TS ran node in a child).
 func (c cli) run() int {
-	if pid, _, _ := runningPid(); pid != 0 {
+	if pid, _ := runningPid(); pid != 0 {
 		fmt.Fprintf(os.Stderr, "bridge already running (pid %d); stop it first\n", pid)
 		return 1
 	}
@@ -1005,7 +943,7 @@ func (c cli) orchestrator() int {
 	}
 	cfg := readConfig()
 	home := osHomedir()
-	defs := parseOrchestrators(cfg["orchestrators"], cfg["orchestrator_dir"], home, dataDir(home), fileExists)
+	defs := parseOrchestrators(cfg["orchestrators"], home, dataDir(home))
 	i := slices.IndexFunc(defs, func(d OrchestratorDef) bool { return d.Name == name })
 	if i == -1 {
 		fmt.Fprintf(os.Stderr, "no orchestrator named %s in config.json\n", name)

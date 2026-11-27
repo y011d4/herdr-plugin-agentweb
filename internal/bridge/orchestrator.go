@@ -53,7 +53,7 @@ const localTemplate = `<!-- This orchestrator's own rules: which repos it takes 
      rewritten each time it starts the orchestrator). -->
 `
 
-// orchestratorFiles is the plugin-written files of a managed orchestrator's dir
+// orchestratorFiles is the plugin-written files of an orchestrator's dir
 // (paths relative to it).
 func orchestratorFiles(def OrchestratorDef, rules, ctl string) map[string]string {
 	type permissions struct {
@@ -119,7 +119,7 @@ func rulesFor(rules, mode string) string {
 	return rules
 }
 
-// ensureOrchestratorDir writes a managed orchestrator's dir (see the top of this
+// ensureOrchestratorDir writes an orchestrator's dir (see the top of this
 // file); local.md only when missing. rules is the bundled orchestrator/rules.md.
 func ensureOrchestratorDir(def OrchestratorDef, rules string) error {
 	if err := os.MkdirAll(filepath.Join(def.Dir, ".claude"), 0o777); err != nil {
@@ -161,9 +161,9 @@ func expectedAccountRead(def OrchestratorDef) (string, bool) {
 }
 
 // startOrchestrator starts an orchestrator in a new workspace at its dir, with its
-// env, and returns its pane and agent name. Refused when one already runs there. A
-// managed dir is (re)written first; a legacy one must exist. The started agent must
-// come up under the account its env sets, else it is stopped again.
+// env, and returns its pane and agent name. Refused when one already runs there. Its
+// dir is (re)written first. The started agent must come up under the account its env
+// sets, else it is stopped again.
 func startOrchestrator(rpc Rpc, def OrchestratorDef, rules string) (paneID, name string, err error) {
 	if pane, err := agentInDir(rpc, def.Dir); err != nil {
 		return "", "", err
@@ -171,12 +171,8 @@ func startOrchestrator(rpc Rpc, def OrchestratorDef, rules string) (paneID, name
 		return "", "", &LifecycleError{Status: 409, Code: "already_running",
 			Message: fmt.Sprintf("orchestrator %s already runs (pane %s)", def.Name, pane)}
 	}
-	if def.Managed {
-		if err := ensureOrchestratorDir(def, rules); err != nil {
-			return "", "", err
-		}
-	} else if _, err := os.Stat(def.Dir); err != nil {
-		return "", "", &LifecycleError{Status: 404, Code: "not_found", Message: def.Dir + " does not exist"}
+	if err := ensureOrchestratorDir(def, rules); err != nil {
+		return "", "", err
 	}
 	expected := expectedAccount(def)
 	agent := agentName("orch-" + def.Name)

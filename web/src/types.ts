@@ -72,7 +72,7 @@ export interface AppState {
     paneId: string | null;
   };
   workspaces: WorkspaceNode[];
-  /** the configured orchestrators (config orchestrators / orchestrator_dir), in order: the
+  /** the configured orchestrators (config orchestrators), in order: the
    *  agent running in each one's dir (paneId) is shown as a Home (#/home/<name>) */
   orchestrators: OrchestratorView[];
   /** the first running orchestrator's pane, kept for clients older than `orchestrators` */
