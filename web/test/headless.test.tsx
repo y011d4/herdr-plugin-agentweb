@@ -59,6 +59,7 @@ async function home(s: AppState, actions?: { clear: () => void; stop: () => void
   store.view.homeMode = true;
   const t = homeTopbar('hl:pilot');
   ({ container, unmount } = await render(<><div id="tb">{t.title}{t.right}</div><Pane paneId="hl:pilot" home={true} actions={actions} name="pilot" /><Modals /></>));
+  await act(() => new Promise<void>((r) => { setTimeout(r, 0); })); // happy-dom's hashchange, on a timer: it would close a popover opened before it
 }
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => container.querySelector<T>(sel)!;
 const opts = () => [...container.querySelectorAll<HTMLButtonElement>('#headless-prompt .ask-opt:not(.ask-extra)')];
@@ -221,6 +222,20 @@ describe("a headless orchestrator's Home", () => {
     assert.equal($<HTMLButtonElement>('#btn-send-enter').disabled, false);
     await fire(() => $('#btn-send-enter').click());
     assert.deepEqual(posts('send'), [{ text: 'see this', images: [{ mediaType: 'image/jpeg', data: 'a.png' }] }]);
+  });
+
+  it('counts its own question on Needs you, whose popover says where it is answered', async () => {
+    const count = (): number => Number(/· (\d+)/.exec(container.querySelector('[data-action="needs"]')?.textContent ?? '')?.[1] ?? 0);
+    await home(withPilot((p) => { idle(p); p.todos = [{ id: 't1', text: 'log in', agent: null, url: null, due: null, createdAt: 0 }]; }));
+    const without = count();
+    await unmount();
+    await home(withPilot((p) => { p.todos = [{ id: 't1', text: 'log in', agent: null, url: null, due: null, createdAt: 0 }]; }));
+    assert.equal(count(), without + 1, 'blocked on its question: one more');
+    await fire(() => $('[data-action="needs"]').click());
+    assert.equal($('[data-asks]').textContent, 'Pilot is waiting for your answer, below the chat.');
+    await fire(() => setAppState(withPilot((p) => { idle(p); p.todos = [{ id: 't1', text: 'log in', agent: null, url: null, due: null, createdAt: 0 }]; })));
+    assert.equal(container.querySelector('[data-asks]'), null, 'answered');
+    assert.equal(count(), without);
   });
 
   it("answers its question with one POST per tap; a stale one says so and frees the options", async () => {
