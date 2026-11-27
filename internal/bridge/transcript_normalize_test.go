@@ -275,6 +275,8 @@ func TestTranscriptNormalize(t *testing.T) {
 				{"Read", `{"file_path":"/a/b.ts"}`, "/a/b.ts"},
 				{"Grep", `{"pattern":"foo","path":"src"}`, "foo in src"},
 				{"Task", `{"subagent_type":"Explore","description":"find x"}`, "Explore: find x"},
+				// whatever the key order: the Home's notice of it parses `<name>: ` (transcript.ts's conversationItems)
+				{"mcp__yoicks__agent_prompt", `{"text":"\n  Also add a test\nand more","name":"w-a"}`, "w-a: Also add a test"},
 			} {
 				if got := summarizeToolInput(c.name, mustParse(t, c.input)); got != c.want {
 					t.Errorf("%s: got %q, want %q", c.name, got, c.want)

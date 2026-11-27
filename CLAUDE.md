@@ -97,7 +97,7 @@ All in `internal/bridge/` (one package):
   it (the chat, empty until its session's first line) and `PromptPanel.tsx`'s `HeadlessPrompt` answers
   `headless.pending`; its usage and warnings (■, Clear, the steps back to the TUI) sit on the status
   bar. `orchestrator_alert` raises an OS notification while hidden (`notifyOrchestratorAlert`);
-  Settings shows the last Claude Code check and the TUI steps; the `[yoicks] …` lines at either end of a user turn render as dim lines (`splitNotices`), the rest as its bubble; an `agent_start` result shows as such a line, and a worker's name in one is a button that opens its drawer (`ui/ChatLog.tsx`'s `Notice`; the State's `agent.herdrName`, from `agent.list`, `nav.ts`'s `openAgentNamed`). Its composer
+  Settings shows the last Claude Code check and the TUI steps; the `[yoicks] …` lines at either end of a user turn render as dim lines (`splitNotices`), the rest as its bubble; an `agent_start`, `agent_prompt` (`sent to <name>: <the task's first line, cut short>`, or `not sent to <name>: <why>`) or `worktree_remove` result shows as such a line (`conversationItems`), and a worker's name in one is a button that opens its drawer (`ui/ChatLog.tsx`'s `Notice`; the State's `agent.herdrName`, from `agent.list`, `nav.ts`'s `openAgentNamed`). Its composer
   takes images (+ or paste; `image.ts` scales them to JPEG, the bridge's `imageBlocks` checks them); a tap on one, attached or sent, opens it full screen (`previewImage`: its own history entry, so Back closes it). `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure: the chat's markdown as escaped HTML and what a Home's chat keeps, drawn by
   `ui/ChatLog.tsx` (the items as React components, in a React root of its own on pane-view's `#chat-log`,
