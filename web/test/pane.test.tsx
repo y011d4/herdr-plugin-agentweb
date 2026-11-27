@@ -50,6 +50,9 @@ async function show(paneId: string, home = false, back = '#/agents', name = home
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => container.querySelector<T>(sel)!;
 const ta = () => $<HTMLTextAreaElement>('#pane-input');
 // a pane's view toggle (Chat | Term): the mode on show, and a tap on a segment
+// a switcher button: on show (aria-current) or not, stopped (dimmed) or not, its dot, its label
+const switcher = (b: HTMLElement, id: string): string =>
+  `${b.getAttribute('aria-current') === 'page' ? 'on' : ''}${b.hasAttribute('data-stopped') ? 'stopped' : ''}|${id}|${b.querySelector<HTMLElement>('.status-dot')!.dataset.status}|${b.textContent}`;
 const shownMode = (): string => $<HTMLInputElement>('#btn-view-toggle input:checked').value;
 const pick = (mode: 'chat' | 'terminal'): Promise<void> => fire(() => $(`#btn-view-toggle [data-mode="${mode}"]`).click());
 const type = (text: string) => fire(() => { ta().value = text; ta().dispatchEvent(new Event('input', { bubbles: true })); });
@@ -433,8 +436,7 @@ describe('Home', () => {
     assert.equal($('.home-counts').textContent, '1 working1 done0 idleAgents ›'); // p1, p3 (p4 is the orchestrator)
     // two configured, one running: the switcher lists both, the stopped one dimmed
     const sw = [...container.querySelectorAll<HTMLElement>('.home-switch-btn')];
-    assert.deepEqual(sw.map((b) => `${b.className}|${b.dataset.orch}|${b.querySelector('i')!.className}|${b.textContent}`),
-      ['home-switch-btn active|personal|home-dot idle|Personal', 'home-switch-btn stopped|work|home-dot stopped|work']);
+    assert.deepEqual(sw.map((b) => switcher(b, b.dataset.orch!)), ['on|personal|idle|Personal', 'stopped|work|stopped|work']);
     assert.equal(container.querySelector('.home-attn'), null);
     await fire(() => $('.home-counts').click());
     assert.equal(location.hash, '#/agents/personal');
@@ -448,8 +450,7 @@ describe('Home', () => {
     const chips = [...container.querySelectorAll<HTMLElement>('.home-chip')];
     assert.deepEqual(chips.map((c) => `${c.dataset.paneId}:${c.textContent}`), ['p6:feat #2repo-wt-feat']);
     const sw = [...container.querySelectorAll<HTMLElement>('.home-switch-btn')];
-    assert.deepEqual(sw.map((b) => `${b.className}|${b.dataset.paneId}|${b.querySelector('i')!.className}|${b.textContent}`),
-      ['home-switch-btn active|p4|home-dot idle|Personal', 'home-switch-btn|p7|home-dot unknown|repo']);
+    assert.deepEqual(sw.map((b) => switcher(b, b.dataset.paneId!)), ['on|p4|idle|Personal', '|p7|unknown|repo']);
     await fire(() => sw[1].click());
     assert.equal(location.hash, '#/home/work');
     await fire(() => chips[0].click());

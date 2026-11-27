@@ -1469,8 +1469,8 @@ async function h2(c: Ctx) {
   const done = await waitFn(async () => (await hlStatus(c, 'wc-h1')) === 'done', 10_000, 200);
   await pg.goto('#/home/wc-h1');
   const reply = await pg.until(`document.querySelectorAll('#chat-log .chat-assistant').length > ${n0} && ${CHAT}.includes('echo: slow 3')`, 5000);
-  const dot = `document.querySelector('.home-switch-btn[data-orch="wc-h1"] i')?.className`;
-  const seen = await pg.until(`${dot} === 'home-dot idle'`, 3000);
+  const dot = `document.querySelector('.home-switch-btn[data-orch="wc-h1"] .status-dot')?.dataset.status`;
+  const seen = await pg.until(`${dot} === 'idle'`, 3000);
   const api0 = await hlStatus(c, 'wc-h1');
   result(c, !working.timeout && !done.timeout && !reply.timeout && !seen.timeout && api0 === 'done', 'H2',
     `working=${ms(working)},done=${ms(done)},reply=${ms(reply)},dot=${seen.v ? 'idle' : await pg.ev(dot)},api=${api0}`,
