@@ -33,7 +33,11 @@
 //
 // A control_request interrupt ends the turn running, or with none running the one message it
 // overtook, whose turn hasn't begun (result error_during_execution, terminal_reason aborted_*),
-// then is answered; messages queued behind it stay and run next (as S0 measured).
+// then is answered; messages queued behind it stay and run next (as S0 measured). An initialize
+// control_request is answered with fakeModels (as Claude Code lists its /model choices), a
+// set_model one switches to one of them (no model: the default; another: an error; fake-held: its
+// answer waits for a SIGUSR1); the init and
+// the assistant messages report the model, --model's at first.
 // Stdin's end while idle exits 0; while working, after the turn. FAKECLAUDE_START=init sends
 // an init at once, before any message; =exit exits 1 at once. FAKECLAUDE_LOG, when set, gets
 // a JSON line for the argv (and env keys) and each stdin line. FAKECLAUDE_REAL=<path> execs that
@@ -52,6 +56,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -154,6 +159,7 @@ type queued struct {
 }
 
 func session(args []string) {
+	setModel(argAfter(args, "--model"))
 	f := &fake{id: firstNonEmpty(argAfter(args, "--session-id"), argAfter(args, "--resume")), answers: map[string]chan map[string]any{}, skip: map[int]bool{}}
 	if t := argAfter(args, "--tools"); t != "" {
 		f.tools = strings.Split(t, ",")
@@ -233,6 +239,15 @@ func session(args []string) {
 				msgs <- queued{text, msg["content"], n}
 			case "control_request":
 				req, _ := m["request"].(map[string]any)
+				if reply := control(req); reply != nil {
+					reply["request_id"] = m["request_id"]
+					answer := func() { f.emit(map[string]any{"type": "control_response", "response": reply}) }
+					if req["model"] == "fake-held" { // answered only at a SIGUSR1
+						go func() { <-release; answer() }()
+					} else {
+						answer()
+					}
+				}
 				if req["subtype"] == "interrupt" {
 					// registered before the answer: the turn running ends, or with none running
 					// the next message, which it overtook, never begins
@@ -265,7 +280,7 @@ func session(args []string) {
 
 func (f *fake) init() map[string]any {
 	return map[string]any{"type": "system", "subtype": "init", "session_id": f.id, "cwd": f.cwd, "tools": f.tools,
-		"mcp_servers": f.mcpServers, "model": "fake", "permissionMode": "default",
+		"mcp_servers": f.mcpServers, "model": model(), "permissionMode": "default",
 		"apiKeySource": env("FAKECLAUDE_APIKEYSOURCE", "none"), "claude_code_version": env("FAKECLAUDE_VERSION", "2.1.322")}
 }
 
@@ -396,7 +411,7 @@ func (f *fake) finish(ctx context.Context, result map[string]any) {
 }
 
 func assistant(content []any) map[string]any {
-	return map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "model": "fake", "content": content,
+	return map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "model": model(), "content": content,
 		"usage": map[string]any{"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 1990, "output_tokens": 5}}}
 }
 
@@ -444,4 +459,49 @@ func (f *fake) ask(ctx context.Context) {
 	case <-time.After(60 * time.Second):
 	}
 	f.emit(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "toolu_ask", "content": result}}}})
+}
+
+// fakeModels is what it offers, as Claude Code's initialize answer lists them.
+var fakeModels = []map[string]any{
+	{"value": "default", "resolvedModel": "fake", "displayName": "Default (recommended)", "description": "Fake · the default"},
+	{"value": "fake", "resolvedModel": "fake", "displayName": "Fake", "description": "The default model"},
+	{"value": "fake-big", "resolvedModel": "fake-big-1", "displayName": "Fake Big", "description": "For hard work"},
+	{"value": "fake-held", "resolvedModel": "fake-held-1", "displayName": "Fake Held", "description": "Its switch is answered only at a SIGUSR1"},
+}
+
+var current atomic.Pointer[string] // the model it runs on (resolved)
+
+func model() string {
+	if p := current.Load(); p != nil {
+		return *p
+	}
+	return "fake"
+}
+
+// setModel switches to value (an offered value; "": the default), false for another.
+func setModel(value string) bool {
+	for _, m := range fakeModels {
+		if m["value"] == firstNonEmpty(value, "default") {
+			r := m["resolvedModel"].(string)
+			current.Store(&r)
+			return true
+		}
+	}
+	return false
+}
+
+// control is the answer to a control request it knows besides interrupt (nil: none).
+func control(req map[string]any) map[string]any {
+	switch req["subtype"] {
+	case "initialize":
+		return map[string]any{"subtype": "success", "response": map[string]any{"models": fakeModels,
+			"account": map[string]any{"email": "someone@example.com"}}}
+	case "set_model":
+		value, _ := req["model"].(string)
+		if !setModel(value) {
+			return map[string]any{"subtype": "error", "error": "Model '" + value + "' not found", "error_code": "not_found", "model": model()}
+		}
+		return map[string]any{"subtype": "success", "response": map[string]any{"model": model()}}
+	}
+	return nil
 }

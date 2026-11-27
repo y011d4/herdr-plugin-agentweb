@@ -72,7 +72,7 @@ var (
 	paneRoute   = regexp.MustCompile(`^/api/panes/([^/]+)/(\w+)$`)
 	paneIDRoute = regexp.MustCompile(`^/api/panes/([^/]+)$`) // DELETE = stop the agent
 	agentRoute  = regexp.MustCompile(`^/api/agents/([^/]+)/(\w+)$`)
-	orchRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/(start|send|answer|interrupt|clear|stop)$`)
+	orchRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/(start|send|answer|interrupt|clear|stop|model)$`)
 )
 
 // server is the HTTP + WS server over one herdr client.
@@ -636,6 +636,13 @@ func (s *server) headlessRoute(w http.ResponseWriter, r *http.Request, h *headle
 		}
 	case "interrupt":
 		err = h.Interrupt()
+	case "model": // {model: one of headless.models' values}
+		body := readBody(w, r)
+		if body == nil {
+			return
+		}
+		model, _ := body["model"].(string)
+		err = h.SetModel(model)
 	case "stop":
 		err = h.Stop()
 	}

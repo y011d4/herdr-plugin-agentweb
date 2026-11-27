@@ -474,6 +474,21 @@
         "since": 1795478400000,
         "actions": []
        }
+      ],
+      "model": "sonnet",
+      "models": [
+       {
+        "value": "default",
+        "displayName": "Default (recommended)",
+        "description": "Opus 5.5 · Best for everyday, complex tasks",
+        "resolvedModel": "claude-opus-5-5"
+       },
+       {
+        "value": "sonnet",
+        "displayName": "Sonnet 5.5",
+        "description": "Most efficient for simpler tasks",
+        "resolvedModel": "claude-sonnet-5-5"
+       }
       ]
      }
     }
