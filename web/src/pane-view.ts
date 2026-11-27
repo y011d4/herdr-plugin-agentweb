@@ -540,6 +540,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       opts.modeChanged();
       startPaneRefresh();
       updatePromptPanel();
+      historyLoaded = false; // output may have scrolled into it under the drawer: the next look reads it again
       const w = wanted;
       wanted = null;
       if (w && w.mode !== mode) { // asked for under the drawer (a typing option's press landing)

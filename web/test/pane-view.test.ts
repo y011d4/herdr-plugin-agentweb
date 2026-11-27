@@ -219,6 +219,11 @@ describe('pane view: chat', () => {
     view.setMode('terminal', false);
     await answer('/api/panes/p3/read?source=visible', read[1]);
     assert.equal(count('/api/panes/p3/read?source=recent'), 2, 'read again');
+    await answer('/api/panes/p3/read?source=recent', { ansi: Array.from({ length: 40 }, (_, i) => `new-${i}`).join('\n') }); // in
+    view.suspend();
+    view.resume(); // on its terminal: what scrolled into its history under the drawer is read too
+    while (reqs.some((q) => !q.answered && q.url.startsWith('/api/panes/p3/read?source=visible'))) await answer('/api/panes/p3/read?source=visible', read[1]);
+    assert.equal(count('/api/panes/p3/read?source=recent'), 3, 'read again on the resume');
   });
 
   it('a switch asked for while suspended (a typing option landing under a drawer) is made as it resumes', async () => {
