@@ -146,8 +146,9 @@ The overlay pane shows a QR of your connect URL with the access token included:
 your configured `public_url` when set, otherwise an auto-detected Tailscale
 address, otherwise `http://127.0.0.1:<port>`. See
 [Exposing the bridge to your phone](#exposing-the-bridge-to-your-phone) to pick a
-transport and set `public_url`. `start`/`status` print the URL without the token;
-the token lives in the state dir (`token` file, printed path in the action output).
+transport and set `public_url`. This pane is the only place that shows the token:
+`start`/`status`, the `server` pane and `bridge.log` show the URL without it. The
+token lives in the state dir (`token` file, printed path in the action output).
 
 ### Managing the bridge
 
@@ -158,7 +159,7 @@ The plugin exposes three workspace actions and two panes:
 | `y011d4.yoicks.start` | action | Start the bridge as a detached daemon |
 | `y011d4.yoicks.stop` | action | Stop the running bridge |
 | `y011d4.yoicks.status` | action | Report whether it's running, the URL (no token), the versions of the plugin and herdr, and which optional commands it finds |
-| `server` | pane | Run the bridge in a visible pane (foreground; the tokenized URL is shown here) |
+| `server` | pane | Run the bridge in a visible pane (foreground; the URL is shown here, without the token) |
 | `connect` | pane | Show the connect QR / URL as an overlay |
 
 Invoke an action with `herdr plugin action invoke <id>`; open a pane with
@@ -481,7 +482,8 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   `herdr plugin log list --plugin y011d4.yoicks` (its `stdout`).
 - The detached bridge logs to `bridge.log` in the state dir
   (`~/.local/state/herdr/plugins/y011d4.yoicks`): the version it runs, the herdr it connected
-  to, and errors. It holds the tokenized connect URL, so keep it private.
+  to, and errors. It never has the token (`start` also redacts it from lines an older bridge
+  wrote), but it names your paths and agents, so keep it private.
 - The phone still shows the old app after an update: close and reopen it (the service worker
   fetches the new version in the background).
 - The connect pane prints a URL but no QR code: install `qrencode`.
