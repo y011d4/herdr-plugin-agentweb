@@ -629,6 +629,18 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
     `WC_ROOT` = `$WEBCHECK_ROOT` or `~/.local/state/herdr-yoicks-webcheck`.
   - A new check first passes on the current UI (the main before a screen's port), so it isn't
     written to fit the new code.
+- **PR screenshots** (`.github/workflows/screenshots.yml`): on a PR touching the web UI, CI shoots main's
+  web build and the PR's (`node tools/webcheck.ts shots`) and posts the screens whose pixels changed,
+  before | after, in one comment it updates (images in `refs/screenshots/pr-<n>`, outside the branches).
+  No herdr, no bridge: a stand-in serves `tools/shots-fixture.ts` (made-up data, typed as the web's
+  `State`, so `npm run check:contract` fails when it goes stale; the shots are public, so never real
+  data in it). A new screen is a line in its `scenes`. The same build shoots the same bytes: a browser
+  context per shot, a frozen clock, UTC, no animations, one origin for both builds, the entry script
+  under a fixed name (the app shows its hash). By hand, for a quick look before pushing:
+  ```bash
+  git worktree add "$T/before" main && (cd "$T/before" && npm ci --ignore-scripts && npx vite build)
+  npx vite build && node tools/webcheck.ts shots --before "$T/before/web/dist" --after web/dist --out "$T/shots"
+  ```
 
 ## Conventions
 
