@@ -238,7 +238,7 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
         {self && <NeedsButton o={self} s={s} n={needsYou(self, state, now)} now={now} />}
         {/* the counts are the way to its agents: an outlined pill and a dim ›, as its other buttons;
             below sm only the numbers: the words come back with the room */}
-        <Button {...SMALL} className="home-counts shrink-0 bg-transparent" classNames={{ label: 'gap-x-3' }} size="compact-sm" fz={13} fw={400}
+        <Button {...SMALL} className="home-counts shrink-0 bg-transparent hover:bg-(--color-surface-2)" classNames={{ label: 'gap-x-3' }} size="compact-sm" fz={13} fw={400}
           data-go="agents" title="Agents" aria-label={`Agents: ${s.working} working, ${s.done} done, ${s.idle} idle`}
           rightSection={<span aria-hidden="true">&#8250;</span>}
           onClick={() => { location.hash = homeAgentsHash(location.hash); }}>
@@ -263,7 +263,7 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
 // Home's status bar, on the surface below the topbar (padding as classes: Mantine's px, inline, would beat lg:)
 const STATUS_BAR = 'shrink-0 border-b border-(--color-border) bg-(--color-surface) lg:px-(--wide-gutter)';
 // Home's small outlined buttons (Clear, Stop, ■, a warning's): dim text unless given a color
-const SMALL = { variant: 'default', size: 'compact-xs', radius: 'xl', fz: 12, fw: 600, c: 'dimmed', className: 'bg-transparent' } as const;
+const SMALL = { variant: 'default', size: 'compact-xs', radius: 'xl', fz: 12, fw: 600, c: 'dimmed', className: 'bg-transparent hover:bg-(--color-surface-2)' } as const;
 // a count's dot, before its number
 const Dot = ({ status }: { status: string }) => <span className="mr-[5px] inline-block align-[1px]"><StatusDot status={status} /></span>;
 

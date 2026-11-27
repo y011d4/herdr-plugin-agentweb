@@ -140,7 +140,7 @@ function AgentCard({ card }: { card: DashboardCard }) {
 }
 
 // Mantine's Card on the app's surface (a pressed card, and a hovered one on a PC, the lighter surface-2)
-const CARD = 'agent-card cursor-pointer bg-(--color-surface) [-webkit-tap-highlight-color:transparent] active:bg-(--color-surface-2) lg:hover:bg-(--color-surface-2)';
+const CARD = 'agent-card bg-(--color-surface) [-webkit-tap-highlight-color:transparent] active:bg-(--color-surface-2) lg:hover:bg-(--color-surface-2)';
 
 // a card's small label: the agent kind, or (blue) worktree
 const Tag = ({ c = 'dimmed', children }: { c?: string; children: string }) => (

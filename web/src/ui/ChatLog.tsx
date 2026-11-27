@@ -156,7 +156,7 @@ export const ChatItem = memo(function ChatItem({ item, home = false }: { item: T
 export function Disclosure({ className, summary, children, ref }: { className: string; summary: ReactNode; children: ReactNode; ref?: Ref<HTMLDetailsElement> }) {
   return (
     <details ref={ref} className={`group ${className}`}>
-      <summary className="cursor-pointer list-none text-(--color-text-dim) before:content-['▸_'] group-open:before:content-['▾_'] [&::-webkit-details-marker]:hidden">
+      <summary className="list-none text-(--color-text-dim) hover:text-(--color-text) before:content-['▸_'] group-open:before:content-['▾_'] [&::-webkit-details-marker]:hidden">
         {summary}
       </summary>
       {children}
@@ -169,7 +169,7 @@ export function Notice({ line }: { line: string }) {
   const m = WORKER_NOTICE.exec(line);
   if (!m) return <>{line}</>;
   return (
-    <>{m[1]}<Anchor component="button" type="button" className="chat-notice-agent py-1 underline-offset-2" underline="always" inherit
+    <>{m[1]}<Anchor component="button" type="button" className="chat-notice-agent py-1 underline-offset-2 hover:text-(--color-text)" underline="always" inherit
       data-agent={m[2]} onClick={() => openAgentNamed(m[2])}>{m[2]}</Anchor>{m[3]}</>
   );
 }

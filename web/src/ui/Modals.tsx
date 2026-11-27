@@ -66,7 +66,7 @@ function Dialog({ close, preview, children }: { close: () => void; preview: bool
   return (
     <Modal.Root opened onClose={close} centered zIndex={2000} xOffset={16} yOffset={Y_OFFSET} radius={14}
       transitionProps={{ transition: 'fade', duration: 150 }} {...(preview
-        ? { fullScreen: true, classNames: { content: 'image-preview bg-transparent' } }
+        ? { fullScreen: true, classNames: { content: 'image-preview bg-transparent cursor-zoom-out' } }
         : { size: 'min(92vw, 420px)', classNames: { content: 'border border-(--color-border)' } })}>
       <Modal.Overlay color="#000" backgroundOpacity={preview ? 0.9 : 0.55} data-modal-backdrop />
       {/* the preview: a tap anywhere closes it */}
