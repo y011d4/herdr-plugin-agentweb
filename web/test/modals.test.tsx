@@ -5,7 +5,7 @@ import { act } from 'react';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { keptTasks, setAppState } from '../src/store.ts';
 import { confirmModal, Modals, openNewAgent, openRename, previewImage } from '../src/ui/Modals.tsx';
-import { paneTopbar } from '../src/ui/Pane.tsx';
+import { AgentMenu } from '../src/ui/Pane.tsx';
 import { agentStart, errors, profiles, rename, state } from './contract.gen.ts';
 import { fire, render } from './render.ts';
 
@@ -109,7 +109,7 @@ describe('Confirm', () => {
   });
 
   it("from a ⋮ item (gone once picked): back to the ⋮", async () => {
-    const { unmount } = await render(paneTopbar('p1', false, '#/agents', { rename: vi.fn(), clear: vi.fn(), stop: () => { void confirmModal('a', 'b', 'Stop', true); } }).right);
+    const { unmount } = await render(<AgentMenu actions={{ rename: vi.fn(), clear: vi.fn(), stop: () => { void confirmModal('a', 'b', 'Stop', true); } }} />);
     await fire(() => $('#btn-agent-menu').click());
     $('#am-stop').focus(); // a click focuses the button it lands on (Chrome)
     await fire(() => $('#am-stop').click());
@@ -125,8 +125,8 @@ describe('Agent actions (the ⋮) and Rename', () => {
   const actions = () => ({ rename: vi.fn(), clear: vi.fn(), stop: vi.fn() });
   const menuOpen = (): boolean => !!document.querySelector('[data-menu-dropdown]');
   const calls = (cb: ReturnType<typeof actions>): number[] => [cb.rename, cb.clear, cb.stop].map((f) => f.mock.calls.length);
-  // the topbar's right side of a pane (not a Home): the view toggle and the ⋮
-  const topbar = (cb: ReturnType<typeof actions>) => render(paneTopbar('p1', false, '#/agents', cb).right);
+  // a pane's ⋮ (its drawer's header)
+  const topbar = (cb: ReturnType<typeof actions>) => render(<AgentMenu actions={cb} />);
 
   it('the ⋮ opens Rename, Clear and Stop; a pick closes it and hands over', async () => {
     for (const [i, id] of ['#am-rename', '#am-clear', '#am-stop'].entries()) {

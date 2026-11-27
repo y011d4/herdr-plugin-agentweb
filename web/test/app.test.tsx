@@ -15,6 +15,7 @@ import { emit, setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
 import { WIDE_QUERY } from '../src/theme.ts';
 import { App, start } from '../src/ui/App.tsx';
+import { previewImage } from '../src/ui/Modals.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
 import { fakeMedia, mantine, settle } from './render.ts'; // and the act environment (settle: on the fake timers)
 
@@ -128,32 +129,148 @@ describe('App', () => {
     assert.equal(store.view.activePaneId, 'p6');
   });
 
-  it("lists #/agents/<name>'s account; a pane opened from it goes Back there, and returns there when it closes", async () => {
+  it("lists #/agents/<name>'s account; a pane opens in a drawer over it, which stays as it is, and closes back to it when the pane goes", async () => {
     await go('#/agents/personal');
     const ids = [...document.querySelectorAll<HTMLElement>('#screen-agents .agent-card')].map((c) => c.dataset.paneId).sort();
     assert.deepEqual(ids, ['p1', 'p3'], 'its account, never the orchestrator');
     assert.match($('#topbar-title')!.textContent!, /Agents.*Personal/);
+    const list = $('#screen #screen-agents');
+    const before = history.length;
     await click($('.agent-card[data-pane-id="p1"]'));
     assert.equal(location.hash, '#/pane/p1');
-    assert.equal($('#topbar-left .topbar-back')!.textContent, '← Agents');
+    assert.ok($('#modal-root .agent-drawer #screen-pane'), 'the pane, in the drawer');
+    assert.ok($('#screen #screen-agents') === list, 'the list under it, the same element');
+    assert.match($('.agent-drawer-head')!.textContent!, /claude/);
+    assert.ok(document.activeElement === $('.agent-drawer-head'), 'the focus starts on its header, not on ✕');
+    assert.equal(store.view.activePaneId, 'p1');
+    const inert = (sel: string): boolean => $(sel)!.hasAttribute('inert');
+    assert.ok(inert('#screen') && inert('#topbar') && inert('#reconnect-banner'), 'the screen under it out of reach');
+    assert.ok(!$('#sidebar') || !inert('#sidebar'), "a wide screen's sidebar stays usable");
     await act(async () => push!({ type: 'pane_gone', paneId: 'p1' }));
     await settle();
     assert.deepEqual(toastTitles(), ['Pane closed']);
     assert.equal(location.hash, '#/agents/personal');
-    assert.ok($('#screen #screen-agents'));
+    assert.ok(!$('.agent-drawer #screen-pane'), 'the drawer closed');
+    assert.ok($('#screen #screen-agents') === list, 'back on the same list');
+    assert.ok(!$('#screen')!.hasAttribute('inert') && !$('#topbar')!.hasAttribute('inert'));
+    assert.equal(history.length, before + 1, 'the close went back: no entry left over');
+  });
+
+  it("a pane gone under an image preview closes both: the preview's entry, then the drawer's", async () => {
+    await go('#/agents');
+    await go('#/pane/p1');
+    await act(async () => previewImage('data:image/png;base64,AA==', 'shot'));
+    assert.ok($('#modal-root .image-preview'));
+    await act(async () => push!({ type: 'pane_gone', paneId: 'p1' }));
+    await settle(50);
+    assert.equal(location.hash, '#/agents');
+    assert.ok(!$('#modal-root .image-preview') && !$('.agent-drawer #screen-pane'));
+
+    // the preview closed by hand, its Back still under way, as the pane goes: one Back each, no further.
+    // A browser's Back lands a task later (happy-dom's at once).
+    const realBack = history.back.bind(history);
+    const later = vi.spyOn(history, 'back').mockImplementation(() => { setTimeout(realBack, 0); });
+    await go('#/agents/personal');
+    await go('#/pane/p1');
+    await act(async () => previewImage('data:image/png;base64,AA==', 'shot'));
+    await act(async () => {
+      $('#modal-root .image-preview-close')!.click();
+      push!({ type: 'pane_gone', paneId: 'p1' });
+    });
+    await settle(50);
+    later.mockRestore();
+    assert.equal(location.hash, '#/agents/personal');
+    assert.ok(!$('#modal-root .image-preview') && !$('.agent-drawer #screen-pane'));
   });
 
   it('leaves a pane a State no longer has', async () => {
     await go('#/agents');
     await go('#/pane/p2');
-    assert.equal($('#topbar-left .topbar-back')!.textContent, '← Agents');
+    assert.ok($('.agent-drawer #screen-pane'));
     const s = fresh();
     s.workspaces[0].tabs[1].panes = s.workspaces[0].tabs[1].panes.filter((p) => p.paneId !== 'p2');
     s.orchestrators[1].paneId = 'p6';
     await act(async () => push!({ type: 'state', state: s }));
+    await act(async () => push!({ type: 'state', state: s })); // a second State before the close lands says nothing again
     await settle();
     assert.deepEqual(toastTitles(), ['Pane closed']);
     assert.equal(location.hash, '#/agents');
+  });
+
+  it("opens a pane over a Home, the Home's view stopped as it is; closing goes back to the Home, drawn afresh", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/home/personal');
+    const home = $('#screen #screen-pane.screen-home');
+    const homeReads = reads('p4');
+    await go('#/pane/p1');
+    assert.ok($('#screen #screen-pane.screen-home') === home, 'the Home under it, as it was');
+    assert.ok($('.agent-drawer #screen-pane'));
+    assert.equal(store.view.homeMode, false);
+    assert.equal(watches.at(-1), 'p1:terminal', 'the watch follows the drawer');
+    const close = $('#btn-drawer-close')!;
+    await act(async () => { close.click(); close.click(); }); // a double tap goes back once
+    await settle();
+    assert.equal(location.hash, '#/home/personal');
+    assert.ok(!$('.agent-drawer #screen-pane'));
+    assert.ok($('#screen #screen-pane.screen-home') !== home, 'a fresh Home');
+    assert.ok(reads('p4') > homeReads, "its new view reads the orchestrator's screen");
+    assert.equal(store.view.activePaneId, 'p4');
+  });
+
+  it('pane to pane replaces the entry (Back still closes the drawer); a pane opened afresh closes to the list in its place', async () => {
+    // happy-dom's replace() adds an entry, as assign() does: a browser's, in place
+    const replace = vi.spyOn(location, 'replace').mockImplementation((url: string | URL) => {
+      const oldURL = location.href;
+      history.replaceState(history.state, '', String(url));
+      dispatchEvent(new HashChangeEvent('hashchange', { oldURL, newURL: location.href }));
+    });
+    await go('#/agents');
+    await go('#/pane/p1');
+    const before = history.length;
+    await act(async () => { sw.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: '#/pane/p2' } })); });
+    await settle();
+    assert.equal(location.hash, '#/pane/p2');
+    assert.equal(history.length, before, 'replaced');
+    assert.equal(store.view.activePaneId, 'p2');
+    history.back(); // the phone's Back
+    await settle();
+    assert.equal(location.hash, '#/agents');
+    assert.ok(!$('.agent-drawer #screen-pane'));
+
+    await go('#/settings');
+    await go('#/pane/p2'); // not from a list or a Home: the list goes under it
+    assert.ok($('#screen #screen-agents') && $('.agent-drawer #screen-pane'));
+    replace.mockClear();
+    await click($('#btn-drawer-close'));
+    await settle();
+    assert.deepEqual(replace.mock.calls.map((c) => c[0]), ['#/agents']);
+    assert.equal(location.hash, '#/agents');
+    assert.ok(!$('.agent-drawer #screen-pane'));
+    replace.mockRestore();
+  });
+
+  it("Escape closes the drawer, but not while the ⋮ menu or a confirm is over it; it closes those", async () => {
+    await go('#/agents');
+    await go('#/pane/p1');
+    const esc = (): Promise<void> => act(async () => { (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    await click($('#btn-agent-menu'));
+    assert.ok($('[data-menu-dropdown]'));
+    await esc();
+    await settle();
+    assert.ok(!$('[data-menu-dropdown]') && $('.agent-drawer #screen-pane') && location.hash === '#/pane/p1', 'only the menu closed');
+    await click($('#btn-agent-menu'));
+    await click($('#am-stop'));
+    assert.ok($('#modal-root #cf-ok'));
+    await esc();
+    await settle();
+    assert.ok(!$('#modal-root #cf-ok') && $('.agent-drawer #screen-pane') && location.hash === '#/pane/p1', 'only the confirm closed');
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true })); });
+    await settle();
+    assert.equal(location.hash, '#/pane/p1', "an IME's Escape doesn't close it");
+    await esc();
+    await settle();
+    assert.equal(location.hash, '#/agents');
+    assert.ok(!$('.agent-drawer #screen-pane'));
   });
 
   it("a stopped orchestrator's Home has Start; its running Home opens once the State shows it", async () => {
@@ -275,6 +392,59 @@ describe('App', () => {
     await act(async () => push!({ type: 'state', state: s }));
     await settle();
     assert.equal(store.view.activePaneId, 'p1');
+  });
+
+  it("a Clear whose old pane goes before it answers opens the new pane, saying nothing of the old one's going", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/agents');
+    await go('#/pane/p1');
+    await click($('#btn-agent-menu'));
+    await click($('#am-clear'));
+    await click($('#modal-root #cf-ok'));
+    await act(async () => push!({ type: 'pane_gone', paneId: 'p1' })); // herdr closed it first
+    const s = fresh();
+    s.workspaces[0].tabs[0].panes = s.workspaces[0].tabs[0].panes.filter((p) => p.paneId !== 'p1');
+    await act(async () => push!({ type: 'state', state: s }));
+    await settle();
+    assert.equal(location.hash, '#/pane/p1', 'held for the new pane');
+    await answer('POST /api/agents/p1/clear', { ok: true, paneId: 'p8' });
+    assert.equal(location.hash, '#/pane/p8');
+    assert.deepEqual(toastTitles(), ['Cleared']);
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/agents');
+  });
+
+  it('a Clear answered while its drawer is closing (its Back under way) opens nothing', async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/agents');
+    await go('#/pane/p1');
+    await click($('#btn-agent-menu'));
+    await click($('#am-clear'));
+    await click($('#modal-root #cf-ok'));
+    const realBack = history.back.bind(history);
+    let land = (): void => {};
+    const later = vi.spyOn(history, 'back').mockImplementation(() => { land = realBack; });
+    await click($('#btn-drawer-close')); // its Back not landed yet
+    await answer('POST /api/agents/p1/clear', { ok: true, paneId: 'p8' });
+    later.mockRestore();
+    await act(async () => land());
+    await settle();
+    assert.equal(location.hash, '#/agents');
+    assert.ok(!$('.agent-drawer #screen-pane'));
+  });
+
+  it("a Stop answered after another pane opened leaves that pane's drawer open", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/agents');
+    await go('#/pane/p3');
+    await click($('#btn-agent-menu'));
+    await click($('#am-stop'));
+    await click($('#modal-root #cf-ok'));
+    await go('#/pane/p1'); // before the DELETE answers
+    await answer('DELETE /api/panes/p3', { ok: true });
+    assert.equal(location.hash, '#/pane/p1');
+    assert.ok($('.agent-drawer #screen-pane'));
+    await go('#/agents');
   });
 
   it("a Home's Stop button closes its orchestrator's pane after the confirm, and the Home stays, stopped", async () => {

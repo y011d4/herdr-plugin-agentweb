@@ -177,7 +177,7 @@ describe('pane view: answer panel', () => {
     assert.equal(shown(), null);
   });
 
-  it('goes Back once a sent answer has the agent working, not for "Chat about this" nor from a Home', async () => {
+  it('closes its drawer once a sent answer has the agent working, not for "Chat about this" nor on a Home', async () => {
     await blocked();
     store.view.paneBackRoute = '#/agents/personal';
     location.hash = '#/pane/p6';

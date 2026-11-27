@@ -10,7 +10,8 @@
  */
 import { useEffect, useRef, useState, useSyncExternalStore, type HTMLAttributes, type TouchEvent } from 'react';
 import { dashboardCards, shownStatus, type DashboardCard } from '../dashboard-group.ts';
-import { agentsScope, defaultHome, homeHash, paneRoute } from '../routes.ts';
+import { openAgent } from '../nav.ts';
+import { agentsScope, defaultHome, homeHash } from '../routes.ts';
 import { findPane, lastHome, store, subscribe } from '../store.ts';
 import type { AppState, OrchestratorView } from '../types.ts';
 import type { Topbar } from './App.tsx';
@@ -42,9 +43,6 @@ export function relativeTime(ms: number): string {
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
   return `${Math.floor(diff / 3_600_000)}h ago`;
 }
-
-/** Opens an agent's pane: the list's cards and the PC sidebar's agents (ui/Sidebar.tsx). */
-export const openPane = (paneId: string): void => { location.hash = paneRoute(store.appState, paneId); };
 
 /**
  * The State a list of agents draws (this list, the PC sidebar) and the touch handlers for its scroll
@@ -99,8 +97,8 @@ function Card({ card }: { card: DashboardCard }) {
   const meta = customStatus || message || '';
   const relTime = relativeTime(sinceUnixMs);
   return (
-    <div className="agent-card" data-pane-id={paneId} role="button" tabIndex={0} onClick={() => openPane(paneId)}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openPane(paneId); }}>
+    <div className="agent-card" data-pane-id={paneId} role="button" tabIndex={0} onClick={() => openAgent(paneId)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openAgent(paneId); }}>
       <div className="agent-card-header">
         <span className="agent-name">{cardTitle(card)}</span>
         {branch ? <span className="card-branch">{branch}</span> : null}

@@ -6,6 +6,7 @@
  * (orchestrator_alert) is told the same way, as its pane hl:<name>, so opening its Home clears it too.
  * Neither push toasts: a worker's progress shows on the Home, a warning on its status bar.
  */
+import { go } from './nav.ts';
 import { paneRoute } from './routes.ts';
 import { store } from './store.ts';
 import type { WsAgentStatusMessage, WsOrchestratorAlertMessage } from './types.ts';
@@ -146,7 +147,7 @@ function pageNotification(title: string, body: string, paneId: string): void {
     const n = new Notification(title, notificationOptions(body, paneId));
     n.onclick = () => {
       window.focus();
-      location.hash = paneId.startsWith('#/') ? paneId : paneRoute(store.appState, paneId);
+      go(paneId.startsWith('#/') ? paneId : paneRoute(store.appState, paneId));
     };
     const list = pageNotifications.get(paneId) ?? [];
     list.push(n);
