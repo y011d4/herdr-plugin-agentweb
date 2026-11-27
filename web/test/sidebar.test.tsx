@@ -45,7 +45,7 @@ describe('Sidebar', () => {
     assert.equal(personal.textContent, 'Personal');
     assert.equal(personal.querySelector<HTMLElement>('.status-dot')!.dataset.status, 'idle'); // p4's status
     const work = c.querySelector<HTMLAnchorElement>('a[data-home="work"]')!;
-    assert.equal(work.textContent, 'work'); // no label: its name
+    assert.equal(work.textContent, 'work1'); // no label: its name; 1: p6 waits (its account unknown: every agent)
     assert.match(work.style.color, /dimmed/); // not running
     assert.equal(work.querySelector<HTMLElement>('.status-dot')!.dataset.status, 'stopped');
     assert.equal(c.querySelector('section[data-home=""] .sidebar-heading')!.textContent, 'Other');

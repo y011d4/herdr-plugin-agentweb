@@ -29,6 +29,7 @@ import { emit, findPane, keptTasks, store, subscribe } from '../store.ts';
 import type { AppState, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
 import { TopbarIcon, agentCards, cardTitle, orchestratorLabel, relativeTime } from './Dashboard.tsx';
 import { StatusDot } from './Status.tsx';
+import { NeedsBadge, needsYou, Todos, useMinute } from './Todos.tsx';
 import type { Topbar } from './App.tsx';
 import { previewImage } from './Modals.tsx';
 import { answersSoFar, HeadlessPrompt, PromptPanel } from './PromptPanel.tsx';
@@ -211,6 +212,7 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
 // agent) and counts of the rest (tap → its list), then the orchestrator's Clear and Stop; for a
 // headless one also its usage, its model and its warnings (`clear`: their Clear, on a stopped Home too).
 function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: string; state: AppState | null; actions?: HomeActions; clear?: () => void }) {
+  const now = useMinute();
   if (!state) return <Stack id="home-status" className={STATUS_BAR}></Stack>;
   const all = state.orchestrators ?? [];
   const self = all.find((o) => o.name === name);
@@ -228,15 +230,17 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
               <Button key={o.name} className={`home-switch-btn shrink-0 ${on ? 'border-(--color-accent) text-(--color-text)' : 'bg-transparent text-(--color-text-dim)'}`}
                 variant="default" size="compact-sm" radius="xl" fz={13} fw={600} opacity={o.paneId ? undefined : 0.55}
                 aria-current={on ? 'page' : undefined} data-stopped={o.paneId ? undefined : ''} data-orch={o.name} data-pane-id={o.paneId ?? undefined}
-                leftSection={<StatusDot status={orchestratorStatus(o, pane, store.seenDone)} />} onClick={() => { location.hash = homeHash(o.name); }}>
+                leftSection={<StatusDot status={orchestratorStatus(o, pane, store.seenDone)} />} rightSection={<NeedsBadge n={needsYou(o, state, now)} />}
+                onClick={() => { location.hash = homeHash(o.name); }}>
                 {orchestratorLabel(o)}
               </Button>
             );
           })}
         </Group>
       )}
-      {/* at most ~3 rows of chips, so the counts row below (the way to the list) stays on screen */}
-      {s.blocked.length > 0 && (
+      {/* at most ~3 rows of chips, so the counts row below (the way to the list) stays on screen; its
+          to-do items below them */}
+      {(s.blocked.length > 0 || !!self?.todos?.length) && (
         <Group className="home-attn max-h-[88px] overflow-y-auto" gap={6}>
           <Text fz={12} fw={700} c="blocked" mr={2}>Needs you</Text>
           {s.blocked.map((c) => (
@@ -247,6 +251,7 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
           ))}
         </Group>
       )}
+      {self && <Todos o={self} now={now} />}
       {/* the counts, then the orchestrator's Clear and Stop at the right end */}
       <Group gap={10} wrap="nowrap">
         <UnstyledButton className="home-counts flex min-w-0 flex-1 flex-wrap items-center gap-x-3.5 gap-y-1 text-left text-[13px] text-(--color-text-dim)"

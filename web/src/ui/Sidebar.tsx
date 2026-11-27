@@ -18,6 +18,7 @@ import { findPane, store } from '../store.ts';
 import { TopbarIcon, agentCards, cardLocation, cardTitle, orchestratorLabel, useHeldState } from './Dashboard.tsx';
 import { openNewAgent } from './Modals.tsx';
 import { StatusBadge, StatusDot } from './Status.tsx';
+import { NeedsBadge, needsYou, useMinute } from './Todos.tsx';
 
 const subscribeHash = (fn: () => void): (() => void) => {
   addEventListener('hashchange', fn);
@@ -37,6 +38,7 @@ const current = (on: boolean): 'page' | undefined => (on ? 'page' : undefined);
 
 export function Sidebar() {
   const [state, hold] = useHeldState();
+  const now = useMinute();
   const hash = useSyncExternalStore(subscribeHash, () => location.hash);
   const cards = agentCards(state);
   return (
@@ -50,13 +52,14 @@ export function Sidebar() {
       <NavLink href="#/agents" className="sidebar-all rounded-lg" label="All agents" rightSection={cards.length}
         active={hash === '#/agents'} aria-current={current(hash === '#/agents')} />
       {homeGroups(cards, state?.orchestrators ?? []).map((g) => (
-        <Group key={g.home ? `home:${g.home.name}` : 'other'} group={g} hash={hash} />
+        <Group key={g.home ? `home:${g.home.name}` : 'other'} group={g} hash={hash} needs={g.home && state ? needsYou(g.home, state, now) : 0} />
       ))}
     </aside>
   );
 }
 
-function Group({ group: { home, cards }, hash }: { group: HomeGroup; hash: string }) {
+// needs: what waits on the user at its Home (Todos.tsx's needsYou), its heading's badge
+function Group({ group: { home, cards }, hash, needs }: { group: HomeGroup; hash: string; needs: number }) {
   const pane = shownPane(hash);
   let heading = <Text className="sidebar-heading" px={12} py={4} fz={12} fw={700} c="dimmed" tt="uppercase" lts="0.06em">Other</Text>;
   if (home) {
@@ -64,7 +67,7 @@ function Group({ group: { home, cards }, hash }: { group: HomeGroup; hash: strin
     const st = orchestratorStatus(home, home.paneId ? findPane(home.paneId)?.pane : undefined, store.seenDone);
     heading = (
       <NavLink href={homeHash(home.name)} className="rounded-lg" data-home={home.name} fw={700} c={home.paneId ? undefined : 'dimmed'}
-        label={orchestratorLabel(home)} leftSection={<StatusDot status={st} />} active={on} aria-current={current(on)} />
+        label={orchestratorLabel(home)} leftSection={<StatusDot status={st} />} rightSection={<NeedsBadge n={needs} />} active={on} aria-current={current(on)} />
     );
   }
   return (
