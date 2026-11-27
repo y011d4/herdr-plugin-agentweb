@@ -1311,25 +1311,30 @@ async function p18(c: Ctx) {
     result(c, !up.timeout && !moved.timeout && Math.abs(top3 - top2) <= 1 && same3, 'P18.reorder', `order=${!up.timeout && !moved.timeout},scrollTop=${top2}->${top3},sameNode=${same3}`,
       "wc-less first, scrolled 44px into its card: wc-probe under it reported working moves above it within 5s, and #screen-agents keeps its node and scrollTop (+-1px)");
 
-    // a finger down and moved 50px: a push changes nothing in the list until it lifts
+    // a finger down and moved 50px: a push changes nothing in the list until it lifts, then what it carried (the new
+    // tab label) shows within 100ms, RAIL's response budget, so it reads as part of the lift; a list still held would
+    // wait for the next push, minutes away on a quiet system. The app's part is ~2ms (~5ms at 4x CPU throttling); the
+    // rest is the renderer waiting for a CPU, up to 51ms on CI's runner, which the 50ms this had sat inside.
     const p = await pg.at(CARD);
     await pg.uncovered(CARD, p);
-    await pg.ev(`(() => { const s = ${SC}; window.__wcTE = 0; window.__wcMut = []; window.__wcMo?.disconnect();
-      window.__wcMo = new MutationObserver((rs) => { for (const r of rs) window.__wcMut.push(performance.now()); });
+    await pg.ev(`(() => { const s = ${SC}; window.__wcTE = 0; window.__wcShown = 0; window.__wcLabel = ''; window.__wcMut = []; window.__wcMo?.disconnect();
+      window.__wcMo = new MutationObserver((rs) => { const t = performance.now(); for (const r of rs) window.__wcMut.push(t);
+        if (!window.__wcShown && window.__wcLabel && ${CARD}?.textContent.includes(window.__wcLabel)) window.__wcShown = t; });
       window.__wcMo.observe(s, { subtree: true, childList: true, characterData: true, attributes: true });
       s.addEventListener('touchend', () => { window.__wcTE = performance.now(); }, { once: true, passive: true }); })()`);
     await pg.touch('touchStart', [[p.x, p.y]]);
     await pg.ev('window.__wcMut = []');
     for (let i = 1; i <= 5; i++) { await sleep(16); await pg.touch('touchMove', [[p.x, p.y - 10 * i]]); }
     const p2 = await push();
+    await pg.ev(`window.__wcLabel = ${js(`wc-less-${n}`)}`);
     await sleep(500);
     const down = await pg.ev('window.__wcMut.length');
     await pg.touch('touchEnd', []);
-    const lift = await pg.until(`(() => { const t = window.__wcMut.find((m) => window.__wcTE && m >= window.__wcTE); return t !== undefined && { d: Math.round(t - window.__wcTE) }; })()`, 1000);
+    const lift = await pg.until(`window.__wcShown && window.__wcTE && { d: Math.round(window.__wcShown - window.__wcTE) }`, 1000);
     await pg.ev('window.__wcMo.disconnect()');
     const d = lift.timeout ? null : lift.v.d;
-    result(c, p2 && down === 0 && d !== null && d <= 50, 'P18.touch', `push=${p2},mutationsWhileDown=${down},firstAfterLift=${d === null ? 'none' : `${d}ms`}`,
-      'with a finger down (moved 50px) a push records 0 mutations in the list; the first comes within 50ms of touchend');
+    result(c, p2 && down === 0 && d !== null && d <= 100, 'P18.touch', `push=${p2},mutationsWhileDown=${down},shownAfterLift=${d === null ? 'none' : `${d}ms`}`,
+      "with a finger down (moved 50px) a push records 0 mutations in the list; its new label shows on wc-less's card within 100ms of touchend");
 
     // a still tap on wc-less's card with a push arriving while the finger is down: what the push changed
     // shows only after touchend, and that mustn't swallow the tap's click
