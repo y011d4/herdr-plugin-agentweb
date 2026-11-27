@@ -71,7 +71,7 @@ func contractState() ClientState {
 		{Name: "work", Label: "", Dir: "/home/u/.local/share/herdr-yoicks/orchestrators/work"},
 	}
 	views := findOrchestrators(s, defs, map[string]*string{"p1": &account, "p3": &account, "p4": &account})
-	return ClientState{State: s, Orchestrators: views, OrchestratorPaneID: views[0].PaneID}
+	return ClientState{State: s, Orchestrators: views, OrchestratorPaneID: views[0].PaneID, Purposes: map[string]string{"p3": "レビューの指摘を直す"}}
 }
 
 // withHeadless is state plus a running headless orchestrator, as clientState fills one in

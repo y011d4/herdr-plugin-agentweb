@@ -93,6 +93,8 @@ type server struct {
 	mcp      *mcpHost // their MCP listener (nil: none)
 	// every Home's to-do list for the user (todo.go)
 	todos *todoStore
+	// what each worker is for, as its orchestrator said (purpose.go)
+	purposes *purposeStore
 	// the last claude check (<state>/canary.json; nil: none), read at the start and each minute
 	claudeCheck atomic.Pointer[ClaudeCheck]
 	// the PR watch (pr_watch, prwatch.go): gh's lookup (tests: a stand-in), the look in progress,
@@ -135,12 +137,14 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 	}
 	s.todos = newTodoStore(cfg.StateDir, names)
 	s.todos.onChange = s.broadcastState
+	s.purposes = newPurposeStore(path.Join(cfg.StateDir, "agent-purposes.json"))
+	s.purposes.onChange = s.broadcastState
 	for _, d := range cfg.Orchestrators {
 		if d.Mode != "headless" {
 			continue
 		}
 		h := newHeadlessRunner(d, cfg.StateDir, rules)
-		h.rpc, h.waitRPC, h.profiles, h.todos = s.rpc, client.Wait, cfg.LaunchProfiles, s.todos
+		h.rpc, h.waitRPC, h.profiles, h.todos, h.purposes = s.rpc, client.Wait, cfg.LaunchProfiles, s.todos, s.purposes
 		h.slowRPC = func(method string, params map[string]any) (json.RawMessage, error) {
 			return herdrCall(context.Background(), cfg.SocketPath, method, params, 60*time.Second)
 		}
@@ -260,7 +264,7 @@ func (s *server) clientState(st *State) ClientState {
 			break
 		}
 	}
-	return ClientState{State: st, Orchestrators: views, OrchestratorPaneID: first, ClaudeCheck: s.claudeCheck.Load()}
+	return ClientState{State: st, Orchestrators: views, OrchestratorPaneID: first, ClaudeCheck: s.claudeCheck.Load(), Purposes: s.purposes.Purposes()}
 }
 
 func (s *server) workspaces() []*WorkspaceNode {
