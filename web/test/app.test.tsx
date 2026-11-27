@@ -665,13 +665,18 @@ describe('App', () => {
     });
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/home/personal');
+    const home = $('#screen #screen-pane.screen-home');
+    const log = $('#screen #chat-log');
     await go('#/pane/p1');
     const len = history.length;
+    const homeLooks = transcripts('p4') + reads('p4');
     await act(async () => { sw.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: '#/settings' } })); });
     await settle();
     assert.equal(location.hash, '#/settings');
     assert.equal(history.length, len, "in the drawer's entry");
     assert.ok(!$('.agent-drawer #screen-pane') && $('#screen-settings') && $('#screen #screen-pane.screen-home'), 'over the Home the drawer was over');
+    assert.ok($('#screen #screen-pane.screen-home') === home && $('#screen #chat-log') === log, 'its view waiting under the drawer goes on: nothing drawn afresh');
+    assert.equal(transcripts('p4') + reads('p4'), homeLooks, 'nothing read again');
     assert.equal(store.view.activePaneId, 'p4', 'the Home running again under it');
     assert.equal(watches.at(-1), 'p4:chat');
     await act(async () => { sw.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: '#/pane/p3' } })); });

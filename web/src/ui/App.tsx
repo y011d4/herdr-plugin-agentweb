@@ -371,13 +371,18 @@ function openSettingsRoute(from: string | null): void {
   if (from === null && shown.hash === view.paneBackRoute) return; // drawn again with no hash change: as it is
   let base = nextOverlayBase(from, view.paneBackRoute);
   if (sheet?.open) { // one overlay at a time
-    closePaneView();
+    closePaneView(); // the drawer's
     view.activePaneId = null;
     view.homeMode = false;
     closeSheet();
-    // the drawer's Home under it, its view stopped: running again under Settings
+    // the drawer's Home under it, its view waiting: it goes on under Settings as it was (drawn afresh when
+    // its orchestrator's pane changed meanwhile)
     const o = base.startsWith('#/home/') && shown.hash === base ? homeOf(base, store.appState) : undefined;
-    if (o) showHome(o.name, o.paneId, base);
+    if (o && coveredHome?.hash === base && coveredHome.paneId === o.paneId && resumePaneView()) {
+      view.homeMode = true;
+      view.activePaneId = o.paneId;
+    } else if (o) showHome(o.name, o.paneId, base);
+    coveredHome = null;
   }
   if (shown.hash !== base) {
     closePaneView();
