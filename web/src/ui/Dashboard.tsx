@@ -8,6 +8,7 @@
  * what changed: scrollTop and iOS momentum hold. While a finger is down the list doesn't change at all
  * (a rewrite mid-drag can cancel the scroll); the latest State shows once it lifts.
  */
+import { ActionIcon, Badge, Card, Center, Group, Loader, Text } from '@mantine/core';
 import { useEffect, useRef, useState, useSyncExternalStore, type HTMLAttributes, type TouchEvent } from 'react';
 import { dashboardCards, shownStatus, type DashboardCard } from '../dashboard-group.ts';
 import { openAgent } from '../nav.ts';
@@ -16,6 +17,7 @@ import { findPane, lastHome, store, subscribe } from '../store.ts';
 import type { AppState, OrchestratorView } from '../types.ts';
 import type { Topbar } from './App.tsx';
 import { openNewAgent } from './Modals.tsx';
+import { StatusBadge } from './Status.tsx';
 
 /** A card's label: its tab name (the agent kind if a tab somehow has no label), with a per-tab
  *  index for split-pane agents. */
@@ -71,50 +73,65 @@ export function Dashboard({ hash }: { hash: string }) {
   const [state, hold] = useHeldState();
 
   if (!state) {
-    return <div id="screen-agents" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><span className="loading-spinner"></span></div>;
+    return <Center id="screen-agents" h="100%"><Loader size={20} /></Center>;
   }
   const { workspaces = [] } = state;
   const cards = agentCards(state, agentsScope(hash, state));
+  const empty = (text: string) => <Text className="empty-state" c="dimmed" ta="center" px={24} py={48}>{text}</Text>;
+  // the scroll container: a 640px column from 600px wide up to lg, where the cards fill the width (a grid)
   return (
-    <div id="screen-agents" data-ready="1" {...hold}>
-      {workspaces.length === 0 ? <div className="empty-state">No workspaces found.</div>
-        : cards.length === 0 ? <div className="empty-state">No active agents.</div>
-        : <div className="agent-list">{cards.map((c) => <Card key={c.pane.paneId} card={c} />)}</div>}
+    <div id="screen-agents" data-ready="1" className={SCROLLER} {...hold}>
+      {workspaces.length === 0 ? empty('No workspaces found.')
+        : cards.length === 0 ? empty('No active agents.')
+        : <div className={LIST}>{cards.map((c) => <AgentCard key={c.pane.paneId} card={c} />)}</div>}
     </div>
   );
 }
 
+const SCROLLER = 'flex-1 overflow-y-auto pb-[calc(var(--safe-bottom)+8px)] min-[600px]:max-lg:mx-auto min-[600px]:max-lg:w-full min-[600px]:max-lg:max-w-[640px]';
+// one column of cards, side by side from lg
+const LIST = 'agent-list mt-4 flex flex-col gap-2.5 px-4 min-[600px]:px-6 lg:grid lg:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]';
+
 // One card. The list is flat, so each card names its own workspace; `branch` and the `worktree`
 // chip come from that workspace. pane.title is usually null, so the tab name is the card label.
-function Card({ card }: { card: DashboardCard }) {
+function AgentCard({ card }: { card: DashboardCard }) {
   const { pane, workspaceLabel, branch, isWorktree } = card;
   const { paneId, agent, title } = pane;
   const { displayName, name, customStatus, message, sinceUnixMs } = agent!;
   // The chip shows the stable agent kind, so prefer `name` (raw pane.agent,
   // e.g. "claude"/"codex") over displayName, which can be a richer label.
   const agentKind = name || displayName || 'agent';
-  const statusClass = shownStatus(pane, store.seenDone) || 'unknown';
+  const status = shownStatus(pane, store.seenDone) || 'unknown';
   const meta = customStatus || message || '';
   const relTime = relativeTime(sinceUnixMs);
   return (
-    <div className="agent-card" data-pane-id={paneId} role="button" tabIndex={0} onClick={() => openAgent(paneId)}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openAgent(paneId); }}>
-      <div className="agent-card-header">
-        <span className="agent-name">{cardTitle(card)}</span>
-        {branch ? <span className="card-branch">{branch}</span> : null}
-        <span className={`status-badge ${statusClass}`}>{statusClass}</span>
-      </div>
-      {meta ? <div className="agent-custom-status">{meta}</div> : null}
-      <div className="agent-card-meta">
-        <span className="card-workspace">{workspaceLabel}</span>
-        <span className="agent-kind">{agentKind}</span>
-        {isWorktree ? <span className="card-worktree">worktree</span> : null}
-        {title ? <span className="pane-title">{title}</span> : null}
+    <Card className={CARD} data-pane-id={paneId} role="button" tabIndex={0} withBorder radius={10} padding={0} px={16} py={14}
+      onClick={() => openAgent(paneId)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openAgent(paneId); }}>
+      <Group gap={10} wrap="nowrap" mb={6}>
+        <Text className="agent-name shrink-0" fw={600} maw="50%" truncate>{cardTitle(card)}</Text>
+        {branch ? <Text className="card-branch min-w-0" fz={13} c="dimmed" truncate>{branch}</Text> : null}
+        <span className="ml-auto" />
+        <StatusBadge status={status} />
+      </Group>
+      {meta ? <Text fz={13} c="dimmed" mb={4} truncate>{meta}</Text> : null}
+      <Group gap={12} fz={13} c="dimmed">
+        <Text className="min-w-0" fw={600} c="dark.0" inherit truncate>{workspaceLabel}</Text>
+        <Tag>{agentKind}</Tag>
+        {isWorktree ? <Tag c="working">worktree</Tag> : null}
+        {title ? <Text fz={12} inherit truncate>{title}</Text> : null}
         {relTime ? <span>{relTime}</span> : null}
-      </div>
-    </div>
+      </Group>
+    </Card>
   );
 }
+
+// Mantine's Card on the app's surface (a pressed card, and a hovered one on a PC, the lighter surface-2)
+const CARD = 'agent-card cursor-pointer bg-(--color-surface) [-webkit-tap-highlight-color:transparent] active:bg-(--color-surface-2) lg:hover:bg-(--color-surface-2)';
+
+// a card's small label: the agent kind, or (blue) worktree
+const Tag = ({ c = 'dimmed', children }: { c?: string; children: string }) => (
+  <Badge size="sm" radius="xl" bg="dark.6" c={c} fw={600} tt="none" className="shrink-0">{children}</Badge>
+);
 
 const useAppState = (): AppState | null => useSyncExternalStore(subscribe, () => store.appState);
 
@@ -135,8 +152,13 @@ export const dashboardTopbar = (hash: string): Topbar => ({
   left: <HomeButton hash={hash} />,
   right: (
     <>
-      <button className="topbar-action" id="btn-new-agent" aria-label="New agent" onClick={() => { void openNewAgent(); }}>+</button>
-      <button className="topbar-action" id="btn-settings" aria-label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</button>
+      <TopbarIcon id="btn-new-agent" label="New agent" onClick={() => { void openNewAgent(); }}>+</TopbarIcon>
+      <TopbarIcon id="btn-settings" label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</TopbarIcon>
     </>
   ),
 });
+
+/** A topbar's (or the sidebar's head's) icon button: 44px, dim, the text's color under the pointer. */
+export function TopbarIcon({ label, children, ...rest }: { label: string; children: string; id?: string; onClick: () => void; 'data-action'?: string }) {
+  return <ActionIcon variant="subtle" color="gray" size="xl" fz={20} className="text-(--color-text-dim) hover:text-(--color-text)" aria-label={label} {...rest}>{children}</ActionIcon>;
+}
