@@ -136,7 +136,8 @@ const { view } = store;
 // state push while the pane is open retries. Not while the bridge is cut off from
 // herdr: the pane state shown may be stale.
 function markActivePaneSeen(): void {
-  if (!view.activePaneId || document.hidden || !store.appState?.connected) return;
+  // not a Home under Settings either: out of sight (seen as Settings closes)
+  if (!view.activePaneId || document.hidden || settingsOpen || !store.appState?.connected) return;
   const agent = findPane(view.activePaneId)?.pane.agent;
   if (agent?.status !== 'done' || agent.completionSeq == null || store.seenDone[view.activePaneId] === agent.completionSeq) return;
   markPaneSeen(view.activePaneId);
@@ -297,8 +298,10 @@ function handleRoute(e?: Event): void {
     return;
   }
   if (route.kind !== 'redirect') setSettingsOpen(false);
-  // back from Settings over a Home, which ran on under it: it stays as it is
+  // back from Settings over a Home, which ran on under it: it stays as it is, in sight again
   if (route.kind === 'home' && from === '#/settings' && view.homeMode && view.activePaneId === route.paneId && shown.hash === location.hash) {
+    if (route.paneId) dismissNotificationsForPane(route.paneId);
+    markActivePaneSeen();
     wsSendWatch();
     return;
   }
@@ -358,12 +361,17 @@ const showList = (hash: string): void => show('agents', <Dashboard hash={hash} /
  *  else in front of the list, drawn now. Opened from a pane's drawer, in the drawer's place (it replaced
  *  the drawer's entry: nav.ts's go), over the drawer's screen. */
 function openSettingsRoute(from: string | null): void {
+  setSettingsOpen(true); // first: a Home drawn under it is out of sight (markActivePaneSeen)
+  if (from === null && shown.hash === view.paneBackRoute) return; // drawn again with no hash change: as it is
   let base = nextOverlayBase(from, view.paneBackRoute);
   if (sheet?.open) { // one overlay at a time
     closePaneView();
     view.activePaneId = null;
     view.homeMode = false;
     closeSheet();
+    // the drawer's Home under it, its view stopped: running again under Settings
+    const o = base.startsWith('#/home/') && shown.hash === base ? homeOf(base, store.appState) : undefined;
+    if (o) showHome(o.name, o.paneId, base);
   }
   if (shown.hash !== base) {
     closePaneView();
@@ -374,7 +382,6 @@ function openSettingsRoute(from: string | null): void {
   }
   view.paneOverBase = nextOverlayOverBase(from, base, view.paneOverBase);
   view.paneBackRoute = base;
-  setSettingsOpen(true);
 }
 
 /** #/pane/<id>: the pane in the drawer, over the screen it was opened from (a Home or a list, left as it
@@ -491,7 +498,7 @@ function showHome(name: string, paneId: string | null, hash: string): void {
   view.activePaneId = paneId;
   try { localStorage.setItem(STORAGE_HOME, name); } catch { /* memory-only */ }
   if (paneId) {
-    dismissNotificationsForPane(paneId);
+    if (!settingsOpen) dismissNotificationsForPane(paneId); // under Settings: as it closes
     markActivePaneSeen();
     view.paneViewMode = openingMode(paneId); // as openPaneRoute's
     const actions = { clear: () => { void clearAgentFlow(paneId); }, stop: () => { void stopAgentFlow(paneId); } };
@@ -566,7 +573,7 @@ export function start(): void {
   // re-reads its screen or transcript from its own listener, pane-view.ts)
   document.addEventListener('visibilitychange', () => {
     if (view.paneViewMode !== 'chat') wsSendWatch(); // pause/resume the pane watch
-    if (document.hidden || !view.activePaneId) return;
+    if (document.hidden || !view.activePaneId || settingsOpen) return; // a Home under Settings: as it closes
     // Returning to a pane that's already open (app switch, no route change) won't
     // fire handleRoute, so clear any OS notification raised for it while hidden.
     dismissNotificationsForPane(view.activePaneId);
