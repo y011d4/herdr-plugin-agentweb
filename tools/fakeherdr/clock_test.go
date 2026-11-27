@@ -12,7 +12,9 @@ func TestFakeClock(t *testing.T) {
 	c := NewFakeClock()
 	start := c.Now()
 	var fired []string
-	at := func(name string) func() { return func() { fired = append(fired, name+" "+c.Now().Sub(start).String()) } }
+	at := func(name string) func() {
+		return func() { fired = append(fired, name+" "+c.Now().Sub(start).String()) }
+	}
 	c.AfterFunc(3*time.Second, at("3s"))
 	c.AfterFunc(time.Second, func() {
 		at("1s")()
@@ -39,10 +41,19 @@ func TestFakeClock(t *testing.T) {
 	default:
 	}
 	c.Advance(time.Second)
-	if got := (<-ch).Sub(start); got != 5*time.Second {
-		t.Errorf("After's time %s", got)
+	select {
+	case at := <-ch:
+		if got := at.Sub(start); got != 5*time.Second {
+			t.Errorf("After's time %s", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("After never fired")
 	}
 	done := make(chan struct{})
 	c.AfterFunc(0, func() { close(done) }) // at once, on its own goroutine
-	<-done
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("AfterFunc(0) never ran")
+	}
 }
