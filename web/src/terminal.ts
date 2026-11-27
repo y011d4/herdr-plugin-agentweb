@@ -21,12 +21,14 @@ export interface Terminal {
   render(ansi: string): void;
   /** reads the current screen over HTTP and renders it */
   refresh(): Promise<void>;
-  /** fills #term-history with the scrollback above the screen */
-  loadHistory(): Promise<void>;
+  /** fills #term-history with the scrollback above the screen; true once it did (false: not read, or dropped) */
+  loadHistory(): Promise<boolean>;
   /** after input: re-reads the screen twice, so the echo shows at once */
   echo(): void;
   /** the bridge's app-scroll decision (pane_output / a visible read carry it) */
   setAppScroll(on: boolean): void;
+  /** held (a Home's under a drawer): no reads, and none in flight applies; released by `false` */
+  setHeld(on: boolean): void;
   destroy(): void;
 }
 
@@ -59,6 +61,8 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
   const listeners = new AbortController();
   const { signal } = listeners;
   let destroyed = false;
+  let held = false; // setHeld
+  let holds = 0; // each hold: a scrollback read from before it never applies
 
   // each pane opens fitted to width, scrolled to the bottom
   // null = auto-fit the pane width; a number = font px set by the pinch gesture
@@ -229,7 +233,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
   // ── Wheel forwarding (app-scroll panes) ─────────────────────────────────────
 
   function queuePaneWheel(up: boolean): void {
-    if (!appScrollPane) return; // app-scroll off — never queue SGR wheels for a normal pane
+    if (!appScrollPane || held) return; // app-scroll off — never queue SGR wheels for a normal pane; held: none
     wheelQueue += up ? 1 : -1;
     if (!wheelFlushTimer) {
       wheelFlushTimer = setTimeout(() => { void flushWheelQueue(); }, 70);
@@ -241,6 +245,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
     // app-scroll may have turned off (pane left full-screen) since these were
     // queued — drop them so we don't inject SGR wheel bytes into a normal pane.
     if (!appScrollPane) { wheelQueue = 0; stopFling(); return; }
+    if (held) { wheelQueue = 0; return; }
     if (destroyed || wheelQueue === 0) return;
     const direction = wheelQueue > 0 ? 'up' : 'down';
     const steps = Math.min(30, Math.abs(wheelQueue));
@@ -267,6 +272,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
   }
 
   function startFling(velocityPxMs: number): void {
+    if (held) return; // a gesture ending under a drawer: no fling
     stopFling();
     let v = Math.max(-3, Math.min(3, velocityPxMs));
     if (Math.abs(v) < 0.4) return;
@@ -289,22 +295,24 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
   // Fetch the scrollback and place everything ABOVE the current screen into
   // #term-history. source=recent ends with the lines currently on screen, so
   // the live section's line count is dropped from its tail to avoid the overlap.
-  async function loadHistoryPrefix(): Promise<void> {
+  async function loadHistoryPrefix(): Promise<boolean> {
     // Requires a live screen: source=recent ends with the current screen, and
     // without lastLiveAnsi we can't trim it off, so we'd duplicate it into history.
     // (Bails harmlessly when the first pane read hasn't rendered yet; historyFetchedAt
     // stays 0 so the next above-bottom scroll retries once live output exists.)
-    if (destroyed || historyRefreshing || terminalTouchActive || !lastLiveAnsi) return;
+    if (destroyed || held || historyRefreshing || terminalTouchActive || !lastLiveAnsi) return false;
     historyRefreshing = true;
+    const reqHolds = holds;
     try {
       const data = await apiGet<ReadResponse>(
         `/api/panes/${encodeURIComponent(paneId)}/read?source=recent&lines=${HISTORY_LINES}&format=ansi`
       );
-      if (destroyed) return; // navigated away
+      if (destroyed) return false; // navigated away
+      if (held || reqHolds !== holds) { historyFetchedAt = 0; return false; } // under a drawer since: read again once back
       // A gesture may have started while the fetch was in flight; replacing the
       // history DOM / adjusting scrollTop now would cancel or jump it. Bail and
       // leave the cache dirty so the next above-bottom scroll refetches.
-      if (terminalTouchActive) { historyFetchedAt = 0; return; }
+      if (terminalTouchActive) { historyFetchedAt = 0; return false; }
       const recentLines = (data.ansi ?? data.text ?? '').split('\n');
       const liveLineCount = lastLiveAnsi ? lastLiveAnsi.split('\n').length : 0;
       const prefix = recentLines.slice(0, Math.max(0, recentLines.length - liveLineCount)).join('\n');
@@ -323,10 +331,11 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
       historyFetchedAt = Date.now();
       lastPrefixEmpty = !prefix;
       outputEl.scrollTop = outputEl.scrollHeight - fromBottom - outputEl.clientHeight;
+      return true;
     } catch {
-      // scrollback is best-effort; the live screen keeps working without it
+      return false; // scrollback is best-effort; the live screen keeps working without it
     } finally {
-      historyRefreshing = false;
+      if (reqHolds === holds) historyRefreshing = false; // a hold since freed it already (setHeld)
     }
   }
 
@@ -378,21 +387,21 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
   }
 
   function flushPendingOutput(): void {
-    if (pendingAnsi === null) return;
+    if (pendingAnsi === null || held) return; // held: drawn once released
     const ansi = pendingAnsi;
     pendingAnsi = null;
     renderPaneOutput(ansi); // re-queues itself if still unsafe
   }
 
   async function refreshPaneOutput(): Promise<void> {
-    if (destroyed) return;
+    if (destroyed || held) return;
     const seq = outputSeq;
     const reqId = ++refreshReqSeq;
     try {
       const data = await apiGet<ReadResponse>(
         `/api/panes/${encodeURIComponent(paneId)}/read?source=visible&lines=200&format=ansi`
       );
-      if (destroyed) return; // navigated away
+      if (destroyed || held) return; // navigated away, or under a drawer
       // A later read started while this one was in flight — let the newest win, so
       // an earlier HTTP read can't overwrite a newer one's fresher output.
       if (reqId !== refreshReqSeq) return;
@@ -406,7 +415,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
       renderPaneOutput(data.ansi ?? data.text ?? '');
     } catch (err) {
       const message = (err as Error).message;
-      if (message === '401' || destroyed) return;
+      if (message === '401' || destroyed || held || reqId !== refreshReqSeq) return; // a newer read (or a hold) since
       // transient failures (bridge restart, herdr reconnect) must not wipe the
       // terminal the user is reading — keep the last render and toast instead
       if (lastLiveAnsi) {
@@ -432,6 +441,24 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
       setTimeout(() => { void refreshPaneOutput(); }, 500);
     },
     setAppScroll(on) { appScrollPane = on; },
+    setHeld(on) {
+      held = on;
+      if (on) {
+        refreshReqSeq++; holds++; historyRefreshing = false; // a read in flight now never applies, also once released; nor holds up the next
+        stopFling(); // and no scroll goes on reaching the pane under the drawer
+        wheelQueue = 0;
+        if (wheelFlushTimer) clearTimeout(wheelFlushTimer);
+        wheelFlushTimer = null;
+        // a gesture going on is over: its touchend starts no fling, its tap counts for nothing, and it holds
+        // up no read (the resume's scrollback) nor drawing once released
+        terminalTouchActive = false;
+        singleFingerGesture = false;
+        tapCandidate = false;
+        pinchStartDist = 0;
+        touchVelocity = 0;
+        wheelAccum = 0;
+      } else flushPendingOutput(); // what a gesture deferred, drawn now
+    },
     destroy() {
       destroyed = true;
       listeners.abort();

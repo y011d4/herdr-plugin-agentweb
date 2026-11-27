@@ -85,6 +85,84 @@ describe('terminal', () => {
     assert.ok(live().querySelector('.loading-spinner'), 'no error text either');
   });
 
+  it('held (a Home under a drawer) it reads nothing, and a read in flight never applies, also once released', async () => {
+    const inFlight = term.refresh();
+    term.setHeld(true);
+    await term.refresh();
+    await term.loadHistory();
+    assert.equal(reqs.length, 1, 'no read while held');
+    reads()[0].answer(200, read[1]);
+    await inFlight;
+    term.setHeld(false);
+    await flush();
+    assert.ok(live().querySelector('.loading-spinner'), 'the held read not drawn');
+    const again = term.refresh();
+    reads()[1].answer(200, read[1]);
+    await again;
+    assert.match(live().textContent!, /hello 日本語/, 'released: it reads and draws');
+
+    const history = term.loadHistory(); // a scrollback read in flight across a hold
+    term.setHeld(true);
+    term.setHeld(false);
+    const next = term.loadHistory(); // the resume's own: not held up by the old one
+    const recent = reqs.filter((r) => r.url.includes('source=recent'));
+    assert.equal(recent.length, 2);
+    recent[0].answer(200, { ansi: 'old-1\nold-2\nhello 日本語' });
+    await history;
+    assert.equal(el.querySelector('#term-history')!.textContent, '', 'not applied');
+    recent[1].answer(200, { ansi: `${Array.from({ length: 30 }, (_, i) => `new-${i + 1}`).join('\n')}\n${read[1].ansi ?? read[1].text}` });
+    await next;
+    assert.match(el.querySelector('#term-history')!.textContent!, /new-1/, 'the new one applied');
+
+    const failing = term.refresh(); // a screen read failing after a hold and its release: no error drawn
+    term.setHeld(true);
+    term.setHeld(false);
+    reads().at(-1)!.answer(500, { error: { code: 'x', message: 'boom' } });
+    await failing;
+    await flush();
+    assert.match(live().textContent!, /hello 日本語/, 'the newer screen stays');
+  });
+
+  it('held, it sends no queued app scroll', async () => {
+    vi.useFakeTimers();
+    term.setAppScroll(true);
+    el.dispatchEvent(new WheelEvent('wheel', { deltaY: 90, cancelable: true }));
+    term.setHeld(true);
+    el.dispatchEvent(new WheelEvent('wheel', { deltaY: 90, cancelable: true })); // and none queued while held
+    await vi.advanceTimersByTimeAsync(1000);
+    term.setHeld(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    assert.equal(reqs.filter((r) => r.url.endsWith('/scroll')).length, 0, 'none sent, also once released');
+    vi.useRealTimers();
+  });
+
+  it('a hold ends a gesture going on (no fling after it) and keeps what it deferred until released', async () => {
+    vi.useFakeTimers();
+    term.setAppScroll(true);
+    touch(el, 'touchstart', [[10, 300]]);
+    term.render('deferred under a finger');
+    term.setHeld(true);
+    term.setHeld(false);
+    assert.match(live().textContent!, /deferred under a finger/, 'the gesture ended by the hold holds nothing up once released');
+    void term.loadHistory();
+    assert.equal(reqs.filter((r) => r.url.includes('source=recent')).length, 1, 'nor the scrollback, the finger still down');
+    touch(el, 'touchstart', [[10, 300]]);
+    term.render('second, deferred');
+    term.setHeld(true);
+    touch(el, 'touchend');
+    assert.ok(!/second, deferred/.test(live().textContent!), 'not drawn while held');
+    term.setHeld(false);
+    assert.match(live().textContent!, /second, deferred/, 'drawn once released');
+    touch(el, 'touchstart', [[10, 300]]);
+    term.setHeld(true);
+    term.setHeld(false);
+    for (let y = 280; y > 100; y -= 20) { vi.advanceTimersByTime(16); touch(el, 'touchmove', [[10, y]]); }
+    touch(el, 'touchend');
+    await vi.advanceTimersByTimeAsync(2000);
+    assert.equal(reqs.filter((r) => r.url.endsWith('/scroll')).length, 0, 'the gesture from before the hold scrolls nothing');
+    vi.useRealTimers();
+  });
+
   it('renders a read that lands while it lives', async () => {
     const refreshed = term.refresh();
     reads()[0].answer(200, read[1]);

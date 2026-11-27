@@ -1717,9 +1717,8 @@ async function p11(c: Ctx) {
   const { pg } = c;
   const cl = c.rec.names.claude;
   await ensureTranscript(c);
-  await pg.ev(`localStorage.removeItem('herdr_pane_view')`);
   await pg.goto('#/agents');
-  await pg.goto(`#/pane/${enc(cl)}`);
+  await pg.goto(`#/pane/${enc(cl)}`); // a Claude pane opens on its chat
   const shown = await pg.until(`(() => { const l = document.getElementById('chat-log'); return !!l && l.style.display !== 'none' && l.querySelectorAll('.chat-item').length; })()`, 5000);
   const users0 = await pg.ev(`window.__wcFirst = document.querySelector('#chat-log .chat-item'), document.querySelectorAll('#chat-log .chat-user').length`);
   // a pane's chat is read-only (its composer is the terminal's): the message goes in through the API
@@ -1732,14 +1731,15 @@ async function p11(c: Ctx) {
     const l = document.getElementById('chat-log'); l.scrollTop = l.scrollHeight - l.clientHeight - 200; return [l.querySelectorAll('.chat-item').length, l.scrollTop]; })()`);
   const app = await pg.until(`document.querySelectorAll('#chat-log .chat-item').length > ${items0}`, 90_000, 200);
   const [open, top1] = await pg.ev(`[window.__wcDet.open && document.contains(window.__wcDet), document.getElementById('chat-log').scrollTop]`);
-  // the view toggle is Chat | Term: a tap on each segment
+  // the view toggle is Chat | Term: a tap on each segment, checked by what the drawer shows
+  const shows = (id: string) => `document.querySelector('.agent-drawer #${id}')?.style.display !== 'none'`;
   await pg.tapEl(`document.querySelector('#btn-view-toggle [data-mode="terminal"]')`);
-  const term = await pg.until(`localStorage.getItem('herdr_pane_view') === 'terminal'`, 2000);
+  const term = await pg.until(`${shows('terminal-output')} && !(${shows('chat-log')})`, 2000);
   await pg.tapEl(`document.querySelector('#btn-view-toggle [data-mode="chat"]')`);
-  const chat = await pg.until(`localStorage.getItem('herdr_pane_view') === 'chat'`, 2000);
+  const chat = await pg.until(`${shows('chat-log')} && !(${shows('terminal-output')})`, 2000);
   result(c, !shown.timeout && readOnly && !user.timeout && same && !det.timeout && !app.timeout && open && Math.abs(top1 - top0) <= 1 && !term.timeout && !chat.timeout,
-    'P11', `chat=${ms(shown)},readOnly=${readOnly},userAdded=${ms(user)},firstNodeKept=${same},result=${ms(det)},append=${ms(app)},detailsOpen=${open},scrollDelta=${top1 - top0},toggleSaved=${!term.timeout && !chat.timeout}`,
-    'chat within 5s, no composer in it; a message adds 1 .chat-user, first node kept; an open tool result stays open and scrollTop holds (+-1px) across an append; the view toggle is saved');
+    'P11', `chat=${ms(shown)},readOnly=${readOnly},userAdded=${ms(user)},firstNodeKept=${same},result=${ms(det)},append=${ms(app)},detailsOpen=${open},scrollDelta=${top1 - top0},toggle=${!term.timeout && !chat.timeout}`,
+    'chat within 5s, no composer in it; a message adds 1 .chat-user, first node kept; an open tool result stays open and scrollTop holds (+-1px) across an append; the view toggle switches to the terminal and back');
 }
 
 /** P10-T2: from wc-claude in chat, straight to #/pane/<wc-shell> (no transcript): its server watch is the terminal's,
@@ -1748,7 +1748,6 @@ async function p10t2(c: Ctx) {
   const { pg, rec } = c;
   const { claude: cl, shell } = rec.names;
   await ensureTranscript(c);
-  await pg.ev(`localStorage.removeItem('herdr_pane_view')`); // chat is the default view
   await pg.goto('#/agents');
   await pg.goto(`#/pane/${enc(cl)}`);
   const chat = await pg.until(`(() => { const l = document.getElementById('chat-log'); return !!l && l.style.display !== 'none'; })()`, 5000);

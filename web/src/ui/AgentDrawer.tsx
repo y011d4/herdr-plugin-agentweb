@@ -38,9 +38,10 @@ export function AgentDrawer({ sheet, actions }: { sheet: Sheet | null; actions: 
   // each pane's header as it mounts (keyed): stable, so a re-render doesn't take the focus back
   const focusHead = useCallback((el: HTMLDivElement | null) => { el?.focus({ preventScroll: true }); }, []);
   // A phone's sheet traps the focus and gives it back on close (Mantine). A wide screen's, untrapped, gives
-  // it back here: only when it was in the drawer or lost, not when the user took it to the sidebar. A Home
-  // under it is drawn afresh on close: there, to the new screen's control for the pane it opened on (a
-  // chip), else for the pane on show (a Clear's new pane: the old one has none), if any.
+  // it back here: only when it was in the drawer or lost, not when the user took it to the sidebar: to the
+  // opener (a Home resumed under it keeps it), else, on a screen drawn afresh (a Home whose pane changed,
+  // the list), to its control for the pane it opened on (a chip), else for the pane on show (a Clear's
+  // new pane: the old one has none), if any.
   const content = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
     const a = document.activeElement;
