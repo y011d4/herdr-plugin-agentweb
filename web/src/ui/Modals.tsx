@@ -8,7 +8,7 @@ import { Modal } from '@mantine/core';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { apiGet, apiPost } from '../api.ts';
 import { taskToKeep } from '../kept-tasks.ts';
-import { openAgent } from '../nav.ts';
+import { back, openAgent } from '../nav.ts';
 import { showToast } from '../notify.ts';
 import { keptTasks, store } from '../store.ts';
 import type { AgentStartResponse, ProfilesResponse, RenameResponse } from '../types.ts';
@@ -109,7 +109,7 @@ function showPreview(src: string, alt: string, mark: number): void {
     </>
   ), () => {
     removeEventListener('popstate', close);
-    if (history.state?.imagePreview === mark) history.back();
+    if (history.state?.imagePreview === mark) back();
   }, 'image-preview');
   addEventListener('popstate', close);
 }

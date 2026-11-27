@@ -160,6 +160,22 @@ describe('App', () => {
     await settle(50);
     assert.equal(location.hash, '#/agents');
     assert.ok(!$('#modal-root .image-preview') && !$('.agent-drawer #screen-pane'));
+
+    // the preview closed by hand, its Back still under way, as the pane goes: one Back each, no further.
+    // A browser's Back lands a task later (happy-dom's at once).
+    const realBack = history.back.bind(history);
+    const later = vi.spyOn(history, 'back').mockImplementation(() => { setTimeout(realBack, 0); });
+    await go('#/agents/personal');
+    await go('#/pane/p1');
+    await act(async () => previewImage('data:image/png;base64,AA==', 'shot'));
+    await act(async () => {
+      $('#modal-root .image-preview-close')!.click();
+      push!({ type: 'pane_gone', paneId: 'p1' });
+    });
+    await settle(50);
+    later.mockRestore();
+    assert.equal(location.hash, '#/agents/personal');
+    assert.ok(!$('#modal-root .image-preview') && !$('.agent-drawer #screen-pane'));
   });
 
   it('leaves a pane a State no longer has', async () => {
