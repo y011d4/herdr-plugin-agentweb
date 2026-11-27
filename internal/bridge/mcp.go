@@ -40,6 +40,11 @@ const (
 	askReachWait    = 10 * time.Second        // how soon an AskUserQuestion in the stream must reach approve
 	deliveryWindow  = 1500 * time.Millisecond // herdr refusing a prompt answers within it
 	wakeCoalesce    = 3 * time.Second
+	// how long the end of a turn a worker took up on its own must hold before it is told
+	resumeQuiet = 10 * time.Second
+	// how often a worker after its end is looked at again (a turn may end between a look and
+	// the wait after it)
+	resumeRecheck = time.Minute
 )
 
 // ── the listener ─────────────────────────────────────────────────────────────
@@ -499,6 +504,7 @@ func (r *headlessRunner) watchAsk(toolUseID string) {
 var (
 	untilSettled = []string{"done", "idle", "blocked"}
 	untilMoved   = []string{"working", "idle", "done"} // after blocked
+	untilResumed = []string{"working", "blocked"}      // after its end (done → idle is only a look at its pane)
 )
 
 // hlWatch is a worker the orchestrator waits on (saved with its state, re-armed at start).
@@ -611,9 +617,11 @@ func (r *headlessRunner) dropGone(st *State) {
 	})
 }
 
-// runWatch follows one worker until it settles (done/idle), telling each change. With text,
-// the send is herdr's edge wait; a stalled or a late-broken one, and a re-arm, go on with the
-// level agent.wait and state_change_seq, compared with != (herdr's restart resets it).
+// runWatch follows one worker, telling each change: its end, and after it each turn it takes
+// up on its own (a background task's event, the user in its pane), until the watch is ended
+// (its pane gone, its worktree removed, a newer prompt, a Stop or Clear). With text, the send
+// is herdr's edge wait; a stalled or a late-broken one, and a re-arm, go on with the level
+// agent.wait and state_change_seq, compared with != (herdr's restart resets it).
 func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, first chan<- error) {
 	defer r.recoverAt("a worker's watch")
 	var reported sync.Once
@@ -646,7 +654,10 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 			return
 		}
 		// agent_prompt_stalled (no working within 5 s) or a late failure: on with the level wait
+	} else if w.Status == "done" || w.Status == "idle" { // re-armed after its end
+		until = untilResumed
 	}
+	resumed := false // in a turn of its own: its end is told once it holds (quiet)
 	for ctx.Err() == nil {
 		if w.Startup {
 			raw, err := r.waitRPC(ctx, "agent.wait", map[string]any{"target": w.Pane, "until": untilMoved})
@@ -671,12 +682,38 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 			}
 			continue
 		}
-		raw, err := r.waitRPC(ctx, "agent.wait", map[string]any{"target": w.Pane, "until": until})
+		params := map[string]any{"target": w.Pane, "until": until}
+		if slices.Equal(until, untilResumed) { // a turn of its own that ended unseen (a restart, a broken wait)
+			// ponytail: done only; ended and then looked at (idle) it passes for a look, untold
+			raw, err := r.rpc("agent.get", map[string]any{"target": w.Pane})
+			if err != nil {
+				if !r.retryWatch(ctx, w, err) {
+					return
+				}
+				continue
+			}
+			if status, seq, _ := agentState(raw); status == "done" && seq != w.Seq {
+				if !r.tell(w, "", "working", w.Seq, false) { // its end, told next from working
+					return
+				}
+				until, resumed = untilSettled, true
+				params["until"] = until
+			} else {
+				params["timeout_ms"] = resumeRecheck.Milliseconds() // then looked at again
+			}
+		}
+		raw, err := r.waitRPC(ctx, "agent.wait", params)
+		if herdrCode(err) == "timeout" { // (only the wait for a resume has one)
+			continue
+		}
 		if err != nil {
 			if !r.retryWatch(ctx, w, err) {
 				return
 			}
 			continue
+		}
+		if slices.Equal(until, untilResumed) {
+			resumed = true
 		}
 		status, seq, _ := agentState(raw)
 		if seq == w.Seq && slices.Equal(until, untilSettled) { // the state already known: wait for it to move
@@ -692,30 +729,63 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 			}
 			continue
 		}
+		if resumed {
+			if raw, err = r.quiet(ctx, w, raw); err != nil { // broken: looked at again
+				if !r.retryWatch(ctx, w, err) {
+					return
+				}
+				continue
+			}
+		}
 		if !r.settle(w, raw, &until) {
 			return
 		}
 	}
 }
 
-// settle tells a change the wait answered; false once the watch is over (settled, or ended
-// meanwhile).
+// quiet holds the end (or question) of a turn the worker took up on its own until it has
+// stayed so for resumeQuiet; what it moves to meanwhile takes its place. So a worker flapping
+// between done and working wakes the orchestrator once, as it settles. raw is what the wait
+// answered; the result is the state to tell, or the error of a wait that broke.
+func (r *headlessRunner) quiet(ctx context.Context, w *hlWatch, raw json.RawMessage) (json.RawMessage, error) {
+	for {
+		status, _, _ := agentState(raw)
+		if status == "working" {
+			return raw, nil
+		}
+		next := untilResumed
+		if status == "blocked" {
+			next = untilMoved
+		}
+		moved, err := r.waitRPC(ctx, "agent.wait", map[string]any{"target": w.Pane, "until": next, "timeout_ms": resumeQuiet.Milliseconds()})
+		if herdrCode(err) == "timeout" { // it held
+			return raw, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		raw = moved
+	}
+}
+
+// settle tells a change the wait answered; false once the watch is over (ended meanwhile).
+// After an end it is followed on: a turn it takes up on its own is told too.
 func (r *headlessRunner) settle(w *hlWatch, raw json.RawMessage, until *[]string) bool {
 	status, seq, _ := agentState(raw)
-	if slices.Equal(*until, untilMoved) && status == "working" { // answered: back to waiting for its end
+	if status == "working" { // answered, or a turn of its own: back to waiting for its end
 		*until = untilSettled
 		return r.tell(w, "", "working", seq, false)
 	}
-	end := status != "blocked"
-	if !end {
+	*until = untilResumed
+	if status == "blocked" {
 		*until = untilMoved
 	}
 	// w.Status is only ever changed here, in its own goroutine
 	line := fmt.Sprintf("%s: %s → %s", w.Name, w.Status, status)
-	if end && w.Unsent { // the end of a task of its own, not of the orchestrator's
+	if status != "blocked" && w.Unsent { // the end of a task of its own, not of the orchestrator's
 		line += ", ready, task not sent"
 	}
-	return r.tell(w, line, status, seq, end) && !end
+	return r.tell(w, line, status, seq, false)
 }
 
 // tell is a watch's change, in one save: line (when not "") queued as a wake-up, its status
