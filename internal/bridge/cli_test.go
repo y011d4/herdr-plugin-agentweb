@@ -9,10 +9,25 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/y011d4/herdr-yoicks/tools/fakeherdr"
 )
+
+// A binary built before the web UI (embed.go's placeholder only) doesn't start a bridge.
+func TestServeNeedsTheWebUI(t *testing.T) {
+	t.Setenv("YOICKS_WEB_DIR", "")
+	err := Serve(fstest.MapFS{"dist-placeholder.txt": {}}, "")
+	if err == nil || !strings.Contains(err.Error(), "this binary has no web UI") {
+		t.Fatalf("Serve without index.html: %v, want the no web UI error", err)
+	}
+	// a dev web dir without the build (Vite between its emptying and its writes): that dir named
+	t.Setenv("YOICKS_WEB_DIR", "/w/dist")
+	if err := Serve(fstest.MapFS{}, ""); err == nil || !strings.Contains(err.Error(), "no web UI in YOICKS_WEB_DIR (/w/dist)") {
+		t.Fatalf("Serve with an empty YOICKS_WEB_DIR: %v", err)
+	}
+}
 
 // Only a bridge gets a SIGTERM through a pidfile: yoicks serve|run wherever it is
 // installed; never another yoicks command, such as an orchestrator's background

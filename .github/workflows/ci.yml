@@ -33,7 +33,8 @@ concurrency:
 jobs:
   # The web UI (web/): type checks, the Vite build, the JSON contract with the Go side, and
   # the Vitest tests. Node only builds and tests it (the shipped artifact is the Go binary),
-  # so CI runs the one Node line package.json's engines names, as local builds do.
+  # so CI runs the one Node line package.json's engines names, as local builds do. The one
+  # Go test that needs the built UI, TestWebBuild (embed_test.go), runs here too.
   web:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -73,11 +74,30 @@ jobs:
       - name: Test the web UI
         run: npm test
 
+      # the embedded build's files, its .br/.gz copies and the size budgets; elsewhere
+      # (the bridge jobs) it skips, as there is no web build
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          # its own cache (the build cache of the stdlib this test compiles), keyed apart from
+          # the bridge jobs' (go.sum): sharing the key, whichever job saved first would leave
+          # the other a cache without its packages
+          cache-dependency-path: go.mod
+
+      - name: Check the embedded web build (TestWebBuild)
+        env:
+          YOICKS_REQUIRE_WEB: "1" # a missing web/dist fails instead of skipping
+        run: go test -count=1 -run '^TestWebBuild$' -v .
+
   # The Go side (the bridge and CLI): vet, tests with the race detector, govulncheck.
   # On each released OS/CPU family: linux/amd64 and linux/arm64
   # (supported), macOS on arm64 (experimental: unit tests; the /proc-based parts are refused
-  # there). Same hardening as above: pinned SHAs, no persisted token, no scripts from
-  # dependencies, read-only permissions.
+  # there). No Node: the Go code compiles without the web build (embed.go's placeholder),
+  # and TestWebBuild, which needs it, runs in the web job. So the web build (its platform
+  # packages: esbuild, rollup, Tailwind's oxide) is checked on linux/amd64 only, where the
+  # releases are built; a source build elsewhere (plugin-build.sh) isn't. Same hardening as
+  # above: pinned SHAs, no persisted token, read-only permissions.
   bridge:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -90,16 +110,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      # The Go binary embeds the built web UI (web/dist), so the web build comes first.
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: package.json
-          cache: npm
-
-      - name: Build the web UI
-        run: npm ci --ignore-scripts && npm run build:web
 
       - name: Set up Go
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0

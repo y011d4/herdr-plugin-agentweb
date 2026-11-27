@@ -1,0 +1,3 @@
+embed.go embeds all:web/dist*, which matches this file, so the Go code compiles
+(go vet, go test) before the web UI is built into web/dist (npm run build:web).
+A binary built without web/dist has no web UI: its bridge refuses to start.

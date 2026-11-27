@@ -37,15 +37,17 @@ func TestGoLifecycleCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer fake.Close()
-	for _, d := range []string{"home", "config", "data"} {
+	for _, d := range []string{"home", "config", "data", "web"} {
 		os.MkdirAll(filepath.Join(dir, d), 0o755)
 	}
+	os.WriteFile(filepath.Join(dir, "web", "index.html"), nil, 0o644) // a web UI, so the bridge starts
 	// herdr's own state dir for the plugin (HOME is ours): the old plugin's bridge is
 	// looked for only from there
 	state, port := filepath.Join(dir, "home", ".local", "state", "herdr", "plugins", "y011d4.yoicks"), freePort(t)
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(dir, "home"),
 		"HERDR_PLUGIN_STATE_DIR=" + state, "HERDR_PLUGIN_CONFIG_DIR=" + filepath.Join(dir, "config"),
-		"XDG_DATA_HOME=" + filepath.Join(dir, "data"), "HERDR_YOICKS_PORT=" + port, "HERDR_SOCKET_PATH=" + fake.Path}
+		"XDG_DATA_HOME=" + filepath.Join(dir, "data"), "HERDR_YOICKS_PORT=" + port, "HERDR_SOCKET_PATH=" + fake.Path,
+		"YOICKS_WEB_DIR=" + filepath.Join(dir, "web")}
 	var printed []string // everything the action commands printed
 	ctl := func(args ...string) (int, string) {
 		t.Helper()

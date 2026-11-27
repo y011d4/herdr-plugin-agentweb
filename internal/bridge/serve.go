@@ -4,11 +4,13 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"os/signal"
 	"strconv"
@@ -34,6 +36,14 @@ func herdrVersionText(version string, protocol int) string {
 // keeps a herdr connection. web is the built web UI, rules the bundled
 // orchestrator/rules.md.
 func Serve(web fs.FS, rules string) error {
+	// a binary built before the web UI has only embed.go's placeholder: fail its
+	// start (and with it a redeploy) instead of serving a phone nothing
+	if _, err := fs.Stat(web, "index.html"); err != nil {
+		if dir := os.Getenv("YOICKS_WEB_DIR"); dir != "" { // main.go's: the web UI comes from there
+			return fmt.Errorf("no web UI in YOICKS_WEB_DIR (%s): it has no index.html (npm run build:web)", dir)
+		}
+		return errors.New("this binary has no web UI: build it first (npm run build:web), then go build ./cmd/yoicks; or set YOICKS_WEB_DIR")
+	}
 	log.SetFlags(0) // the lines go to bridge.log as they are, like console.error's
 	cfg := loadConfig()
 
