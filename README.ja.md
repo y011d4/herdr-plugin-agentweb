@@ -2,8 +2,7 @@
 
 [English](./README.md) | **日本語**
 
-*Yoicks* は、狩人が猟犬の群れを先へ駆り立てる掛け声です。以前の名前は `herdr-plugin-agentweb` です
-([agentweb からの改名](#agentweb-からの改名) を参照)。
+*Yoicks* は、狩人が猟犬の群れを先へ駆り立てる掛け声です。
 
 [herdr](https://herdr.dev) で動いているすべてのコーディングエージェントを、スマホから
 モニタリング・操作するための herdr プラグインです。小さなローカルブリッジサーバー
@@ -75,42 +74,6 @@ herdr plugin action invoke y011d4.yoicks.start
 
 続いて、動いている orchestrator をそれぞれ起動し直します (Home の **Clear**)。bridge は起動のときに
 rules と許可リストを新しい `yoicks` のパスに書き直しますが、動いている orchestrator は古いパスを呼び続けます。
-以前の、管理されない orchestrator のディレクトリ (`orchestrator_dir`、または古い `dispatcher`) は利用者のもので、
-書き直されません。その `CLAUDE.md` と `.claude/settings.json` の古いパス (改名より前なら
-`…/bin/agentwebctl`、Go の bridge より前なら `node …/dist/bin/agentwebctl.js`) を
-`<plugin dir>/bin/yoicks` に自分で直すか、管理される `orchestrators` に移ってください。
-
-### agentweb からの改名
-
-v0.1.0 より前、このプラグインの ID は `y011d4.agentweb`、バイナリは `agentwebctl` でした。herdr は
-新しい ID を別のプラグインとして扱うので、改名より前のインストールは手で移します:
-
-1. 古いブリッジを止め、終わるまで待つ: `herdr plugin action invoke y011d4.agentweb.stop`
-2. この版をインストール (またはリンク) する。`config.json` を `herdr plugin config-dir y011d4.agentweb`
-   から `herdr plugin config-dir y011d4.yoicks` へ、`token` と `pane-profiles.json` を
-   `~/.local/state/herdr/plugins/y011d4.agentweb/` から `~/.local/state/herdr/plugins/y011d4.yoicks/`
-   へコピーする (`$XDG_STATE_HOME` があれば、どちらも `$XDG_STATE_HOME/herdr/plugins/` の下)。
-   トークンを移せば、ペアリング済みのスマホは同じ URL のまま使えます。
-3. 起動し (`herdr plugin action invoke y011d4.yoicks.start`)、動いている orchestrator を Clear して
-   から、`herdr plugin uninstall y011d4.agentweb` (または `unlink`) する。
-
-`~/.local/share/herdr-agentweb` は、あるあいだ使い続けます。orchestrator のディレクトリが動かないので、
-Claude Code のメモリ、会話の履歴、フォルダの信頼設定もそのまま残ります。新しい `status` と `stop` は、
-古いプラグインが起動したブリッジ (`agentwebctl`。pid ファイルは古い state ディレクトリにある) も見つけ、
-`start` はそれが動いているあいだは起動を断ります。手順 1 を飛ばしても、古いブリッジが動き続けることはありません。`HERDR_AGENTWEB_HOST`/`_PORT` は
-`HERDR_YOICKS_HOST`/`_PORT` になりました。
-
-`herdr-yoicks` に移す場合 (任意) は、すべての orchestrator とブリッジを止めてから、
-`~/.local/share/herdr-agentweb` を `~/.local/share/herdr-yoicks` に移します。各 orchestrator の Claude
-アカウント (`~/.claude/projects`、または `$CLAUDE_CONFIG_DIR/projects`) にあるプロジェクトのディレクトリも
-移してください。名前は古いパスの `/`、`.`、`_` を `-` にしたもの
-(`-home-me--local-share-herdr-agentweb-orchestrators-personal`) で、移し先はその `herdr-agentweb` を
-`herdr-yoicks` にした名前です。どれも、まだない名前にだけ移します。こちらを移さなくても headless の
-orchestrator は古いディレクトリから会話を再開します。ただ、古いほうのメモリは読まれなくなり、メモリと
-Clear 後の新しい会話は新しいほうに入ります。
-最後にブリッジを起動します。`bridge.log` に、headless の orchestrator ごとに `started … (--resume)` が
-出ます。TUI の orchestrator は、新しいディレクトリで一度だけフォルダの信頼を尋ねます。既定は
-"No, exit" なので、"Yes, I trust this folder" を選んでください。
 
 ### 前の版に戻す
 
@@ -142,7 +105,7 @@ herdr plugin uninstall y011d4.yoicks
 - state ディレクトリ `~/.local/state/herdr/plugins/y011d4.yoicks` (`$XDG_STATE_HOME` があればその下):
   アクセストークン、`bridge.log`、`pane-profiles.json`
 - 上で控えた config ディレクトリ (`config.json`)
-- `~/.local/share/herdr-yoicks` (改名より前からなら `herdr-agentweb`。`$XDG_DATA_HOME` があればその下):
+- `~/.local/share/herdr-yoicks` (`$XDG_DATA_HOME` があればその下):
   orchestrator のディレクトリ。
   自分で書いた `local.md` も含みます
 

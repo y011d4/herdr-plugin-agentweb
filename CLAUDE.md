@@ -117,11 +117,9 @@ All in `internal/bridge/` (one package):
   and app.css's `@theme`; `web/test/theme.test.ts` checks them and the colors against the CSS.
   Mantine's portals go into `#modal-root` (the theme's Portal default). Tests render under
   `render.ts`'s `mantine()` (`env="test"`: no transitions, a portal stays in place)
-- **Orchestrator homes**: config `orchestrators: [{name,label,env}]` — each is *managed*:
+- **Orchestrator homes**: config `orchestrators: [{name,label,env}]`, each in its own dir:
   `orchestrator.go` writes `<data>/orchestrators/<name>/` (data = `$XDG_DATA_HOME` or
-  `~/.local/share`, + `herdr-yoicks`; `herdr-agentweb`, the dir from before the rename, while it
-  exists, so the orchestrators' cwds and with them Claude Code's memory/transcripts/folder trust
-  never move: `dataDir`; moving it is by hand, README "Renamed from agentweb") at bridge start and before each start: CLAUDE.md
+  `~/.local/share`, + `herdr-yoicks`: `dataDir`) at bridge start and before each start: CLAUDE.md
   (imports rules.md, then the user's local.md, which is created once and never overwritten),
   rules.md (the bundled `orchestrator/rules.md` with the real yoicks command filled in) and
   `.claude/settings.json` (dontAsk allowlist). It starts (phone Start button →
@@ -129,9 +127,7 @@ All in `internal/bridge/` (one package):
   workspace whose shell gets the entry's `env` (herdr `workspace.create`/`tab.create`/`pane.split`
   take `env`; `worktree.create` does not), and the started agent's account is checked against it.
   Clear relaunches with the old agent's account (`accountEnv` → `clearAgent`'s `envFor`). Without
-  `orchestrators`, the legacy single `orchestrator_dir`, else the old default dir
-  `<data>/dispatcher` when it exists, is one *unmanaged* orchestrator named `default` (the plugin
-  never writes there); with neither, a managed `default`.
+  `orchestrators`, there is one named `default`.
   The agent running in each dir is that orchestrator, identified by the pane shell's cwd
   (`launchCwd`, not the mutable foreground cwd; nested dirs: the deepest wins), since herdr's
   snapshot has no agent names (`findOrchestrators`, sent as state `orchestrators[]`, plus
@@ -157,8 +153,8 @@ All in `internal/bridge/` (one package):
   `pane.agent_detected` (fires on detect *and* release) is rebuild-triggering, so agent presence and
   `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `yoicks agent …`, waking on background
   `agent prompt --wait`) lives in that dir's `CLAUDE.md`, not in this repo.
-- **Headless orchestrators** (built through S5; the pilot and the switch, S6, in `.omc/plans/headless-orchestrator/`): a managed entry
-  with `"mode": "headless"` (an unmanaged one stays tui, logged) runs as the bridge's own child,
+- **Headless orchestrators** (built through S5; the pilot and the switch, S6, in `.omc/plans/headless-orchestrator/`): an entry
+  with `"mode": "headless"` runs as the bridge's own child,
   `claude -p` over stream-json, instead of an agent in a pane. `headless.go`: one `headlessRunner` per
   such entry (start with the billing checks and the orphan scan; send, also mid-turn; interrupt as a
   `control_request`, no answer in 2 s → kill + `--resume`; stop = interrupt, close stdin, 1.5 s, SIGTERM
@@ -246,11 +242,7 @@ start). Any failure after the stop puts the old binary back and starts it. It pr
 and `CACHE` that Settings → App version should show on the phone. A commit from before the script
 (before the Vite build) has no copy: `t=$(mktemp) && git show main:scripts/redeploy.sh > "$t" && sh
 "$t" main`. The binary path doesn't change, so the orchestrators' allowlists still match; Clear them
-when `orchestrator/rules.md` differs between the versions. (The last Node bridge is `423f49d`;
-going back there takes `npm ci && npm run build`, re-linking, and Clearing the orchestrators.) A
-commit from before the rename to yoicks is the plugin `y011d4.agentweb` with `bin/agentwebctl`:
-going back across it means the README "Renamed from agentweb" steps in reverse (stop, re-link,
-its own config/state dirs, Clear); the data dir is the same `herdr-agentweb` on both sides.
+when `orchestrator/rules.md` differs between the versions.
 
 **Service worker cache**: the build generates `CACHE_VERSION` (`herdr-yoicks-` + 8 hex of a hash
 over every built file's name and content) and the SW's asset list: never bump or edit them by

@@ -164,7 +164,7 @@ func startHeadless(t *testing.T, stateDir string, env map[string]string, tweak f
 		}
 	}
 	name := firstNonEmpty(os.Getenv("HLNAME"), "h1")
-	def := OrchestratorDef{Name: name, Label: "H1", Dir: filepath.Join(home, "orchestrators", name), Env: env, Managed: true, Mode: "headless"}
+	def := OrchestratorDef{Name: name, Label: "H1", Dir: filepath.Join(home, "orchestrators", name), Env: env, Mode: "headless"}
 	clock := fakeherdr.NewFakeClock()
 	b := startBridge(t, Config{StateDir: stateDir, Orchestrators: []OrchestratorDef{def}}, nil, func(s *server) {
 		h := s.headless[name]
@@ -919,7 +919,7 @@ func TestHeadlessHasNoPane(t *testing.T) {
 // No headless entry, no headless anything: no runner, no child, no log line.
 func TestNoHeadlessWithoutAHeadlessEntry(t *testing.T) {
 	log, home := fakeClaudeEnv(t)
-	def := OrchestratorDef{Name: "t1", Dir: filepath.Join(home, "orchestrators", "t1"), Env: map[string]string{}, Managed: true}
+	def := OrchestratorDef{Name: "t1", Dir: filepath.Join(home, "orchestrators", "t1"), Env: map[string]string{}}
 	b := startBridge(t, Config{Orchestrators: []OrchestratorDef{def}}, nil, nil)
 	b.srv.startHeadless()
 	b.srv.shutdownHeadless()
@@ -1077,7 +1077,7 @@ func TestHeadlessClaudeCheck(t *testing.T) {
 	clock := fakeherdr.NewFakeClock()
 	var shown sync.Mutex
 	var alerts []string
-	def := OrchestratorDef{Name: "h1", Dir: filepath.Join(home, "orchestrators", "h1"), Managed: true, Mode: "headless",
+	def := OrchestratorDef{Name: "h1", Dir: filepath.Join(home, "orchestrators", "h1"), Mode: "headless",
 		Env: map[string]string{"FAKECLAUDE_LOG": log, "FAKECLAUDE_VERSION": "2.1.330"}}
 	tb := startBridge(t, Config{StateDir: state, Orchestrators: []OrchestratorDef{def}}, func(m string, p json.RawMessage) (fakeherdr.Reply, bool) {
 		if m == "notification.show" && strings.Contains(string(p), "claude check failed") {
@@ -1165,7 +1165,7 @@ func TestHeadlessClaudeCheck(t *testing.T) {
 func TestHeadlessHasTranscript(t *testing.T) {
 	cfg, outside := filepath.Join(t.TempDir(), "cfg-[w]*"), t.TempDir()
 	def := func(dir, cfg string) OrchestratorDef {
-		return OrchestratorDef{Name: "h1", Dir: dir, Env: map[string]string{"CLAUDE_CONFIG_DIR": cfg}, Managed: true, Mode: "headless"}
+		return OrchestratorDef{Name: "h1", Dir: dir, Env: map[string]string{"CLAUDE_CONFIG_DIR": cfg}, Mode: "headless"}
 	}
 	r := newHeadlessRunner(def(filepath.Join(t.TempDir(), "moved"), cfg), t.TempDir(), "")
 	r.sessionID = newUUID()

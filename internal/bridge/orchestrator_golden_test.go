@@ -18,7 +18,7 @@ func TestTUIOrchestratorGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	def := OrchestratorDef{Name: "personal", Label: "Personal", Dir: "/home/u/.local/share/herdr-yoicks/orchestrators/personal",
-		Env: map[string]string{}, Managed: true}
+		Env: map[string]string{}}
 	files := orchestratorFiles(def, string(rules), "/home/u/herdr-yoicks/bin/yoicks")
 	if len(files) != 3 {
 		t.Fatalf("files %d, want 3", len(files))

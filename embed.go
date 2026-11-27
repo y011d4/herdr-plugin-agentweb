@@ -12,7 +12,7 @@ import "embed"
 //go:embed all:web/dist
 var Web embed.FS
 
-// Rules is orchestrator/rules.md, written into each managed orchestrator's dir.
+// Rules is orchestrator/rules.md, written into each orchestrator's dir.
 //
 //go:embed orchestrator/rules.md
 var Rules string

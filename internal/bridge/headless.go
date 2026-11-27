@@ -1,6 +1,6 @@
 package bridge
 
-// Headless orchestrators (config orchestrators[].mode "headless", managed entries only):
+// Headless orchestrators (config orchestrators[].mode "headless"):
 // the bridge runs the orchestrator itself, as `claude -p` over stream-json, instead of an
 // agent in a herdr pane. One headlessRunner per such entry: start (the billing checks and
 // the orphan scan first), send, interrupt, stop, clear, restarts after a crash, and the
