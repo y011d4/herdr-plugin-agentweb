@@ -37,7 +37,7 @@ func TestHeadlessArgv(t *testing.T) {
 	want := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
 		"--session-id", "s-1", "--mcp-config", "/st/headless/h.mcp.json", "--strict-mcp-config",
 		"--permission-prompt-tool", "mcp__yoicks__approve", "--permission-mode", "manual", "--tools", "AskUserQuestion",
-		"--allowedTools", "mcp__yoicks__overview,mcp__yoicks__agent_get,mcp__yoicks__agent_read,mcp__yoicks__agent_prompt,mcp__yoicks__agent_start,mcp__yoicks__worktree_remove"}
+		"--allowedTools", "mcp__yoicks__overview,mcp__yoicks__agent_get,mcp__yoicks__agent_read,mcp__yoicks__agent_prompt,mcp__yoicks__agent_start,mcp__yoicks__worktree_remove,mcp__yoicks__todo"}
 	if !slices.Equal(got, want) {
 		t.Errorf("new: %v", got)
 	}

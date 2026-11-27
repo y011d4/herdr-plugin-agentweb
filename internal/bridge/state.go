@@ -431,7 +431,7 @@ func findOrchestrators(s *State, defs []OrchestratorDef, accounts map[string]*st
 		if account != nil && *account != "" {
 			agents = agentsOfAccount(s, accounts, *account)
 		}
-		views[i] = OrchestratorView{Name: d.Name, Label: d.Label, PaneID: paneIDs[i], Agents: agents, Mode: firstNonEmpty(d.Mode, "tui")}
+		views[i] = OrchestratorView{Name: d.Name, Label: d.Label, PaneID: paneIDs[i], Agents: agents, Mode: firstNonEmpty(d.Mode, "tui"), Todos: []TodoItem{}}
 	}
 	return views
 }

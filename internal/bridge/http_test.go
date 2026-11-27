@@ -170,7 +170,7 @@ func (b *testBridge) dial(t *testing.T, opts *websocket.DialOptions) (*websocket
 var apiRoutes = []struct{ method, path string }{
 	{"GET", "/api/state"}, {"GET", "/api/profiles"}, {"POST", "/api/agents"}, {"POST", "/api/worktrees"},
 	{"POST", "/api/orchestrators/x/start"}, {"POST", "/api/orchestrators/x/send"}, {"POST", "/api/orchestrators/x/interrupt"},
-	{"POST", "/api/orchestrators/x/clear"}, {"POST", "/api/orchestrators/x/stop"}, {"DELETE", "/api/panes/p1"}, {"GET", "/api/panes/p1/read"},
+	{"POST", "/api/orchestrators/x/clear"}, {"POST", "/api/orchestrators/x/stop"}, {"DELETE", "/api/orchestrators/x/todos/abc123"}, {"DELETE", "/api/panes/p1"}, {"GET", "/api/panes/p1/read"},
 	{"POST", "/api/panes/p1/input"}, {"POST", "/api/panes/p1/focus"}, {"POST", "/api/panes/p1/scroll"},
 	{"GET", "/api/panes/p1/transcript"}, {"POST", "/api/panes/p1/rename"}, {"POST", "/api/agents/p1/send"},
 	{"POST", "/api/agents/p1/clear"}, {"GET", "/api/nope"},

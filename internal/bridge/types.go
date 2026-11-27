@@ -152,6 +152,8 @@ type OrchestratorView struct {
 	Mode string `json:"mode"`
 	// a headless orchestrator's state; null for tui
 	Headless *HeadlessView `json:"headless"`
+	// the user's to-do list on its Home, oldest first (todo.go; never null)
+	Todos []TodoItem `json:"todos"`
 }
 
 // HeadlessView is a headless orchestrator's state (headless.go, headless_state.go).

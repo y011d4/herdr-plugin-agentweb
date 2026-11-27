@@ -190,7 +190,8 @@
     "p4"
    ],
    "mode": "tui",
-   "headless": null
+   "headless": null,
+   "todos": []
   },
   {
    "name": "work",
@@ -198,7 +199,8 @@
    "paneId": null,
    "agents": null,
    "mode": "tui",
-   "headless": null
+   "headless": null,
+   "todos": []
   }
  ],
  "orchestratorPaneId": "p4",

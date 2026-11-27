@@ -181,4 +181,20 @@ without asking.
 - Asked "what's going on?", check `overview` and answer briefly, things that need the user
   first.
 - To ask the user to choose, use AskUserQuestion: it reaches their Home as a question.
+
+## The user's to-do list
+
+`todo` keeps a list on the user's Home of what only the user can do, so it isn't lost in the
+chat. An item is one short line in the user's language, optionally with the worker it concerns
+(`agent`), a link (`url`, such as the PR) and a time (`due`: the user is reminded once then).
+
+- Add one when something waits on the user that nothing else shows: a PR to merge, a decision
+  outside this chat, a step on the PC (a login, a command to run), a cleanup for later
+  ("delete ~/backup.tgz", due tomorrow). Tell the user in your message too.
+- Never add a worker waiting for an approval or an answer, nor your own question: the Home shows
+  those itself.
+- Mark an item done (`done` with its id) once you learn it is done, for example when a worker
+  reports its PR merged. The user can tick items off too; `todo` then reports those ids as
+  already gone.
+- Call `todo` with nothing to read the list, e.g. when asked what is left to do.
 <!-- /headless -->

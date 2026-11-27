@@ -89,6 +89,9 @@ func withHeadless(state ClientState) ClientState {
 			{Kind: "unknown_event", Message: "Claude Code sent an event yoicks doesn't know (mystery)", Since: now, Actions: []string{}}},
 		Model: "sonnet", ActiveModel: "claude-sonnet-5-5", Models: []HeadlessModel{{"opus", "Opus 5.5", "For complex work and everyday tasks", "claude-opus-5-5"},
 			{"sonnet", "Sonnet 5.5", "Most efficient for simpler tasks", "claude-sonnet-5-5"}}}
+	due := int64(now + 86_400_000)
+	v.Todos = []TodoItem{{ID: "a1b2c3", Text: "merge PR #108", Agent: new("w-review"), URL: new("https://github.com/o/r/pull/108"), CreatedAt: now},
+		{ID: "d4e5f6", Text: "delete ~/backup.tgz", Due: &due, CreatedAt: now}}
 	state.Orchestrators = append(slices.Clone(state.Orchestrators), v)
 	state.ClaudeCheck = &ClaudeCheck{At: now, Version: "2.1.330", OK: false, Failed: []string{"interrupt", "resume"}}
 	return state

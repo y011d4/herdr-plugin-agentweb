@@ -1,7 +1,7 @@
 package bridge
 
 // The MCP server a headless orchestrator's child talks to (go-sdk, streamable HTTP): its
-// six tools (the CLI's orchestrator commands, as functions), the permission tool approve
+// tools (the CLI's orchestrator commands, as functions, and the user's to-do list), the permission tool approve
 // (AskUserQuestion becomes the Home's question; anything else is denied unasked), and the
 // wake-ups: each worker it prompts is watched through herdr's waits (S0 row 15: agent.prompt's
 // wait is edge, agent.wait level), and a change to done, idle or blocked comes back to it as a
@@ -31,7 +31,7 @@ import (
 )
 
 // the tools a headless child may use without asking (approve is the permission tool itself)
-var yoicksTools = []string{"overview", "agent_get", "agent_read", "agent_prompt", "agent_start", "worktree_remove"}
+var yoicksTools = []string{"overview", "agent_get", "agent_read", "agent_prompt", "agent_start", "worktree_remove", "todo"}
 
 const (
 	// how often a held approve tells the client it waits: under MCP's 60 s call timeout and
@@ -144,6 +144,11 @@ type startIn struct {
 
 type removeIn struct {
 	Path string `json:"path" jsonschema:"the worktree's checkout path"`
+}
+
+type todoIn struct {
+	Add  []todoAdd `json:"add,omitempty" jsonschema:"items to add"`
+	Done []string  `json:"done,omitempty" jsonschema:"the ids of items that are done"`
 }
 
 type approveIn struct {
@@ -294,6 +299,17 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 			dir, _ := filepath.Abs(in.Path)
 			r.unwatch(func(w *hlWatch) bool { return w.Cwd == dir || strings.HasPrefix(w.Cwd, dir+"/") })
 			return textResult(removed, false), nil, nil
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "todo", Description: "The user's to-do list, shown on their Home: what only the user can do and nothing else shows them " +
+		"(merge a PR, a decision outside this chat, a step on the PC, a login, a cleanup later on). Add items, mark items done by id, " +
+		"or call it with nothing to read the list; it returns the list. A worker waiting for an approval and your own questions show on their own: never add those."},
+		func(ctx context.Context, req *mcp.CallToolRequest, in todoIn) (*mcp.CallToolResult, any, error) {
+			r.log("tool todo +%d -%d", len(in.Add), len(in.Done))
+			items, gone, err := r.todos.Apply(r.def.Name, in.Add, in.Done, nowMs())
+			if err != nil {
+				return errResult(err)
+			}
+			return textResult(todoText(items, gone, r.todos.loc), false), nil, nil
 		})
 	return s
 }

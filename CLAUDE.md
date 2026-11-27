@@ -205,7 +205,12 @@ All in `internal/bridge/` (one package):
   start, Stop and Clear, and a watch or question it registers once that child is replaced is
   refused; the workers' generation, which a restart keeps, is separate). Its tools
   are the CLI's orchestrator commands as functions (`overview`, `agent_get`, `agent_read`, `agent_prompt`, `agent_start`,
-  `worktree_remove`), confined to the account its child runs under; `approve` is the child's
+  `worktree_remove`), confined to the account its child runs under, and `todo`, its Home's to-do list for the user
+  (`todo.go`: one list per orchestrator in `<state>/todos/<name>.json`, kept across Stop, Clear and restarts; an item
+  `{id, text, agent, url (http(s) only), due, createdAt}`, sent as state `orchestrators[].todos`; the user ticks one off with
+  `DELETE /api/orchestrators/:name/todos/:id`; the items come due are reminded once from the bridge's minute tick, in one
+  `orchestrator_alert` of kind `todo` per Home (the phone tags notifications by Home), ntfy and `notification.show`; blocked workers and the Home's question are not
+  items: the web shows those from the State); `approve` is the child's
   `--permission-prompt-tool`: AskUserQuestion becomes state `headless.pending` (answered by
   `POST …/answer`: the panel's "Type something." is a question's own answer, its "Chat about this" (`{chat}`) refuses it with Claude Code's words; a `/send` meanwhile is written, then refuses it the same way), held open with progress, anything
   else is denied unasked. `agent_prompt` watches the worker (one goroutine, herdr's waits on a
