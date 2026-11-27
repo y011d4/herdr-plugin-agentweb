@@ -370,7 +370,7 @@ describe('read-only chat', () => {
 
   it("a pane's chat has no composer or keys, its terminal has both; while it works ■ Interrupt sends Esc", async () => {
     await show('p1'); // claude, working
-    assert.equal(bar().style.display, 'none', 'hidden until the view reports its mode');
+    assert.equal(bar().style.display, '', 'shown until the view is in chat (a terminal scrolled to its bottom stays so)');
     await answer('/read?source=visible', read[1]);
     await answer('/transcript', transcript[0]);
     assert.equal(bar().style.display, 'none', 'chat: read-only');

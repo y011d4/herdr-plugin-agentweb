@@ -134,9 +134,10 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
   // "doing now": only while the orchestrator works — its latest tool call, or "thinking…" between them
   const working = findPane(paneId)?.pane?.agent?.status === 'working';
   // A pane's chat is for reading: typing and keys are its terminal's (one tap away), but for a first
-  // task New agent couldn't deliver (decided as it opens). Until its view reports a mode, too.
+  // task New agent couldn't deliver (decided as it opens). Shown until the view is in chat: a bar
+  // showing up later would shrink a terminal already scrolled to its bottom (hiding one grows the chat).
   const [kept] = useState(() => keptTasks.draft(paneId) !== null);
-  const readOnly = !home && mode !== 'terminal' && !kept;
+  const readOnly = !home && mode === 'chat' && !kept;
   const hl = headlessName(paneId);
   const pending = hl ? state?.orchestrators?.find((o) => o.name === hl)?.headless?.pending : null;
   return (
