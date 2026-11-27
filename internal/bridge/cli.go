@@ -260,7 +260,8 @@ func scrubTokenFromLog(logPath string) error {
 	} else if err != nil {
 		return err
 	}
-	return writeFile0600(logPath, bytes.ReplaceAll(text, []byte(token), []byte("<redacted>")))
+	// in place, not renamed over: a `tail -f` of the log keeps following it
+	return os.WriteFile(logPath, bytes.ReplaceAll(text, []byte(token), []byte("<redacted>")), 0o600)
 }
 
 func notify(title, body string) {
