@@ -21,6 +21,19 @@ describe('Token', () => {
     await unmount();
   });
 
+  it('shows the token from its eye, which the keyboard reaches and works', async () => {
+    const { container, unmount } = await render(<Token onToken={() => {}} />);
+    const input = container.querySelector<HTMLInputElement>('#token-input')!;
+    const eye = container.querySelector<HTMLButtonElement>('button[aria-label="Toggle password visibility"]')!;
+    assert.equal(eye.tabIndex, 0);
+    assert.equal(input.type, 'password');
+    await fire(() => eye.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    assert.equal(input.type, 'text');
+    await fire(() => eye.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })));
+    assert.equal(input.type, 'password');
+    await unmount();
+  });
+
   it("takes the theme's touch target (theme.ts): the field, a PasswordInput, and Connect", async () => {
     const { container, unmount } = await render(<Token onToken={() => {}} />);
     const height = (el: Element | null, prop: string): string => (el as HTMLElement | null)?.style.getPropertyValue(prop) ?? 'none';
