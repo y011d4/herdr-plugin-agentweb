@@ -615,12 +615,17 @@ const expectedCards = (st: any, scopeName?: string): number => {
 async function p1(c: Ctx) {
   const m = await fetch(`${c.base}/manifest.webmanifest`);
   const ct = m.headers.get('content-type') ?? '';
-  const icons = ((await m.json()).icons ?? []).map((i: any) => i.src);
-  const got = await Promise.all(icons.map(async (s: string) => { const r = await fetch(new URL(s, `${c.base}/`)); return `${r.status}:${r.headers.get('content-type')}`; }));
+  const icons: any[] = (await m.json()).icons ?? [];
+  const fetchType = async (u: string) => { const r = await fetch(new URL(u, `${c.base}/`)); return `${r.status}:${r.headers.get('content-type')}`; };
+  const got = await Promise.all(icons.map((i) => fetchType(i.src)));
+  const maskable = icons.filter((i) => i.purpose === 'maskable').length;
   const dom = await c.pg.ev(`[document.querySelectorAll('link[rel=manifest]').length, document.querySelectorAll('meta[name=apple-mobile-web-app-capable]').length]`);
-  result(c, m.status === 200 && ct.startsWith('application/manifest+json') && got.length === 2 && got.every((g) => g === '200:image/png') && dom.join() === '1,1',
-    'P1', `manifest=${m.status}:${ct},icons=${got.join('+')},link/meta=${dom.join('/')}`,
-    'manifest 200 application/manifest+json; 2 icons 200 image/png; 1 link[rel=manifest], 1 apple-mobile-web-app-capable');
+  const links: string[] = await c.pg.ev(`[...document.querySelectorAll('link[rel~=icon], link[rel=apple-touch-icon]')].map((l) => l.href)`);
+  const linked = await Promise.all(links.map(fetchType));
+  result(c, m.status === 200 && ct.startsWith('application/manifest+json') && got.length === 3 && got.every((g) => g === '200:image/png') && maskable === 1 &&
+    dom.join() === '1,1' && linked.length === 3 && linked.every((g) => g.startsWith('200:image/')),
+    'P1', `manifest=${m.status}:${ct},icons=${got.join('+')},maskable=${maskable},link/meta=${dom.join('/')},links=${linked.join('+')}`,
+    'manifest 200 application/manifest+json; 3 icons 200 image/png, 1 maskable; 1 link[rel=manifest], 1 apple-mobile-web-app-capable; 3 icon links (ico, svg, apple-touch) 200 image/*');
 }
 
 async function p2(c: Ctx) {
