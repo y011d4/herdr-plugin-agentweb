@@ -2524,19 +2524,34 @@ async function shots(o: Record<string, any>): Promise<number> {
         await c.send('Target.disposeBrowserContext', { browserContextId }).catch(() => {});
       }
     };
-    const diff = async (before: Buffer, after: Buffer): Promise<{ pixels: number; png: Buffer }> => {
+    /** An expression's value in a blank page of its own. */
+    const inPage = async (expression: string) => {
       const { browserContextId } = await c.send('Target.createBrowserContext');
       try {
         const { targetId } = await c.send('Target.createTarget', { url: 'about:blank', browserContextId });
         const { sessionId } = await c.send('Target.attachToTarget', { targetId, flatten: true });
-        const r = await c.send('Runtime.evaluate', { expression: `(${DIFF_JS})(${js(before.toString('base64'))}, ${js(after.toString('base64'))})`,
-          returnByValue: true, awaitPromise: true }, sessionId);
-        if (!r.result?.value) throw new Error(`diff: ${r.exceptionDetails?.exception?.description ?? 'no result'}`);
-        return { pixels: r.result.value.pixels, png: Buffer.from(r.result.value.png, 'base64') };
+        const r = await c.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, sessionId);
+        if (!r.result?.value) throw new Error(`in page: ${r.exceptionDetails?.exception?.description ?? 'no result'}`);
+        return r.result.value;
       } finally {
         await c.send('Target.disposeBrowserContext', { browserContextId }).catch(() => {});
       }
     };
+    const diff = async (before: Buffer, after: Buffer): Promise<{ pixels: number; png: Buffer }> => {
+      const v = await inPage(`(${DIFF_JS})(${js(before.toString('base64'))}, ${js(after.toString('base64'))})`);
+      return { pixels: v.pixels, png: Buffer.from(v.png, 'base64') };
+    };
+    // the diff's own check, each run: two 8x8 PNGs one level apart at (1,1) give 1 pixel, magenta to (3,3), not (4,4)
+    const probe = await inPage(`(async () => {
+      const png = (c1) => { const c = document.createElement('canvas'); c.width = c.height = 8; const g = c.getContext('2d');
+        g.fillStyle = '#123456'; g.fillRect(0, 0, 8, 8); g.fillStyle = c1; g.fillRect(1, 1, 1, 1); return c.toDataURL('image/png').slice(22); };
+      const r = await (${DIFF_JS})(png('#123456'), png('#123457'));
+      const i = new Image(); i.src = 'data:image/png;base64,' + r.png; await i.decode();
+      const c = document.createElement('canvas'); c.width = c.height = 8; const g = c.getContext('2d'); g.drawImage(i, 0, 0);
+      const at = (x, y) => [...g.getImageData(x, y, 1, 1).data.slice(0, 3)].join(',');
+      return { pixels: r.pixels, near: at(3, 3), far: at(4, 4) };
+    })()`);
+    if (probe.pixels !== 1 || probe.near !== '255,0,255' || probe.far === '255,0,255') throw new Error(`the diff is broken: ${js(probe)}`);
     const manifest: Array<{ name: string; changed: boolean | null; notReady: string[]; pixels: number | null }> = [];
     for (const scene of picked) for (const size of SIZES) {
       const name = `${scene.name}-${size.id}`;
