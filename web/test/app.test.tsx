@@ -537,6 +537,31 @@ describe('App', () => {
     assert.equal(history.length, before + 1, 'the close went back');
   });
 
+  it("a Home under Settings follows its orchestrator: replaced or stopped, it is drawn afresh under it", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/home/personal');
+    await click($('#btn-settings'));
+    const s = fresh();
+    s.orchestrators[0].paneId = 'p1'; // the replacement (a pane the recorded State has)
+    await act(async () => push!({ type: 'state', state: s }));
+    await settle();
+    assert.equal(location.hash, '#/settings');
+    assert.ok($('#screen-settings'), 'Settings stays');
+    assert.equal(store.view.activePaneId, 'p1');
+    assert.equal(watches.at(-1), 'p1:terminal', 'the watch follows');
+    const home = $('#screen #screen-pane.screen-home');
+    s.orchestrators[0].paneId = null;
+    await act(async () => push!({ type: 'state', state: structuredClone(s) }));
+    await settle();
+    assert.ok($('#screen #screen-home-stopped') && $('#screen-settings'), 'stopped, under it');
+    assert.ok(home !== $('#screen #screen-pane.screen-home'));
+    await click($('#btn-settings-close'));
+    assert.equal(location.hash, '#/home/personal');
+    assert.ok($('#screen #screen-home-stopped'));
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await settle();
+  });
+
   it('Escape closes Settings; opened afresh (no list or Home before it) it is in front of the list and closes in its place', async () => {
     await go('#/agents');
     const list = $('#screen #screen-agents');

@@ -224,6 +224,13 @@ function onStateUpdate(): void {
     markActivePaneSeen(); // the orchestrator may have just finished while on screen
     paneViewOnState();
   } else if (hash === '#/settings' && view.homeMode) { // a Home running on under Settings
+    const o = homeOf(view.paneBackRoute, store.appState);
+    if (o && o.paneId !== view.activePaneId) { // its orchestrator started, stopped or replaced: drawn afresh under it
+      closePaneView();
+      showHome(o.name, o.paneId, view.paneBackRoute);
+      wsSendWatch();
+      return;
+    }
     markActivePaneSeen();
     paneViewOnState();
   }
@@ -336,17 +343,7 @@ function handleRoute(e?: Event): void {
     routeRendered = false;
     show('loading', <Center flex={1}><Loader size={20} /></Center>, BARE);
   } else if (route.kind === 'home') {
-    view.homeMode = true;
-    view.activePaneId = route.paneId;
-    try { localStorage.setItem(STORAGE_HOME, route.name); } catch { /* memory-only */ }
-    if (route.paneId) {
-      dismissNotificationsForPane(route.paneId);
-      markActivePaneSeen();
-      renderHome(route.paneId, route.name);
-    } else {
-      // a headless one's warnings offer Clear while stopped too (a fresh session)
-      show('pane', <StoppedHome name={route.name} clear={() => { void clearAgentFlow(`hl:${route.name}`); }} />, stoppedHomeTopbar(route.name), location.hash);
-    }
+    showHome(route.name, route.paneId, location.hash);
   } else {
     // back from an overlay over it, the list stays as it was: where it was scrolled to
     if (shown.hash !== location.hash) showList(location.hash);
@@ -488,10 +485,21 @@ async function stopAgentFlow(paneId: string): Promise<void> {
 
 // ── A running Home ────────────────────────────────────────────────────────────
 
-function renderHome(paneId: string, name: string): void {
-  view.paneViewMode = openingMode(paneId); // as openPaneRoute's
-  const actions = { clear: () => { void clearAgentFlow(paneId); }, stop: () => { void stopAgentFlow(paneId); } };
-  show('pane', <Pane paneId={paneId} home actions={actions} name={name} />, homeTopbar(paneId), location.hash);
+/** The Home `hash` (#/home/<name>): its orchestrator's pane running (`paneId`), else stopped. */
+function showHome(name: string, paneId: string | null, hash: string): void {
+  view.homeMode = true;
+  view.activePaneId = paneId;
+  try { localStorage.setItem(STORAGE_HOME, name); } catch { /* memory-only */ }
+  if (paneId) {
+    dismissNotificationsForPane(paneId);
+    markActivePaneSeen();
+    view.paneViewMode = openingMode(paneId); // as openPaneRoute's
+    const actions = { clear: () => { void clearAgentFlow(paneId); }, stop: () => { void stopAgentFlow(paneId); } };
+    show('pane', <Pane paneId={paneId} home actions={actions} name={name} />, homeTopbar(paneId), hash);
+  } else {
+    // a headless one's warnings offer Clear while stopped too (a fresh session)
+    show('pane', <StoppedHome name={name} clear={() => { void clearAgentFlow(`hl:${name}`); }} />, stoppedHomeTopbar(name), hash);
+  }
 }
 
 // ── Startup ───────────────────────────────────────────────────────────────────
