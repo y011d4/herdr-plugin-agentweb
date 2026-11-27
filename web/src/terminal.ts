@@ -129,7 +129,10 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
   let lastTouchY = 0;
   let wheelAccum = 0;
   let touchVelocity = 0; // px/ms, positive = finger moving down (scroll up)
+  // when the finger last moved, by the event's own time (timeStamp), not when the page got to it: a page busy
+  // drawing handles a swipe's events late, and the lift then looked like a pause (no fling: webcheck P10.app-fling)
   let lastMoveAt = 0;
+  const inputAt = (e: Event): number => e.timeStamp || performance.now();
   // Forward app-scroll wheel steps only for a gesture that began as a single
   // finger and never became a pinch. Dropping from two fingers to one leaves
   // lastTouchY stale, so forwarding then would send a large scroll burst.
@@ -153,7 +156,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
       lastTouchY = e.touches[0].clientY;
       wheelAccum = 0;
       touchVelocity = 0;
-      lastMoveAt = performance.now();
+      lastMoveAt = inputAt(e);
       stopFling();
     }
   }, { passive: true, signal });
@@ -172,7 +175,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
         e.preventDefault();
         const y = e.touches[0].clientY;
         const dy = y - lastTouchY;
-        const now = performance.now();
+        const now = inputAt(e);
         const dt = now - lastMoveAt;
         if (dt > 0 && dt < 200) {
           touchVelocity = 0.7 * touchVelocity + 0.3 * (dy / dt);
@@ -216,7 +219,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
     if (appScrollPane && singleFingerGesture) {
       // A pause before lifting means the last recorded velocity is stale — don't
       // fling off an earlier fast move the user has already stopped.
-      if (performance.now() - lastMoveAt > 100) touchVelocity = 0;
+      if (inputAt(e) - lastMoveAt > 100) touchVelocity = 0;
       startFling(touchVelocity);
     }
     flushPendingOutput();
