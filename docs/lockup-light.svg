@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 214 64"><defs><linearGradient id="tip" gradientUnits="userSpaceOnUse" x1="5" y1="57" x2="33" y2="44">
+<stop offset="0" stop-color="#111318"/><stop offset=".4" stop-color="#111318"/><stop offset=".4" stop-color="#f47c2a"/><stop offset="1" stop-color="#f47c2a"/>
+</linearGradient></defs>
+<path stroke="#f47c2a" stroke-width="9" stroke-linecap="round" d="M14.5 10 L31 35"/>
+<path fill="url(#tip)" d="M45.1 7.8 A4.5 4.5 0 0 1 52.9 12.2 L37.5 39.5 C42 57 28 66 4 56 C12 52.5 22 48 28.6 35.6 Z"/><g transform="translate(83 5.75) scale(.75)"><g fill="none" stroke="#111318" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+<path d="M0 20 L13 50 M26 20 L7.8 62"/><circle cx="47" cy="35" r="15"/>
+<path d="M71 20 L71 50"/><circle cx="71" cy="7" r="4.2" stroke="none" fill="#111318"/>
+<path d="M106.5 25.4 A15 15 0 1 0 106.5 44.6"/><path d="M117 4 L117 50 M137 20 L118 37 M126 30 L138.5 50"/>
+<path d="M167 24.5 C165 21 162 20 158.5 20 C153 20 150.5 23 150.5 27 C150.5 31.5 154.5 33 158.5 34.5 C163 36 167 38 167 43 C167 47.5 163.5 50 158.5 50 C154.5 50 151.5 48.5 149.5 45.5"/></g></g></svg>
