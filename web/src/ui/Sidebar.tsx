@@ -1,8 +1,8 @@
 /**
  * ui/Sidebar.tsx — the PC sidebar, beside every screen but the token one on a wide screen
  * (WIDE_QUERY: ui/App.tsx draws it only then). Each orchestrator's Home is a heading over its
- * account's agents (homeGroups), then Other; above them All agents (#/agents), New agent and
- * Settings. A heading opens its Home, an agent its pane the list's way (nav.ts's openAgent: its drawer). The Home or the
+ * account's agents (homeGroups), then Other; above them All agents (#/agents). Settings is the
+ * topbar's ⚙, at the screen's top right. A heading opens its Home, an agent its pane the list's way (nav.ts's openAgent: its drawer). The Home or the
  * agent on show, from the hash, is marked (aria-current).
  *
  * Like the agents list it gets every State push: it holds still while a finger is down
@@ -12,11 +12,10 @@
 import { NavLink, Text } from '@mantine/core';
 import { useSyncExternalStore } from 'react';
 import { homeGroups, orchestratorStatus, shownStatus, type DashboardCard, type HomeGroup } from '../dashboard-group.ts';
-import { go, openAgent } from '../nav.ts';
+import { openAgent } from '../nav.ts';
 import { homeHash } from '../routes.ts';
 import { findPane, store } from '../store.ts';
-import { TopbarIcon, agentCards, cardLocation, cardTitle, orchestratorLabel, useHeldState } from './Dashboard.tsx';
-import { openNewAgent } from './Modals.tsx';
+import { agentCards, cardLocation, cardTitle, orchestratorLabel, useHeldState } from './Dashboard.tsx';
 import { StatusBadge, StatusDot } from './Status.tsx';
 import { NeedsBadge, needsYou, useMinute } from './Todos.tsx';
 
@@ -44,10 +43,8 @@ export function Sidebar() {
   return (
     <aside id="sidebar" aria-label="Homes and agents" {...hold}>
       {/* the topbar's height, kept in view over the list */}
-      <div className="sticky top-0 z-1 -mx-2 mb-2 flex h-[52px] items-center gap-1 border-b border-(--color-border) bg-(--color-surface) pr-2 pl-4">
-        <Text flex={1} fw={700} fz={16}>Yoicks</Text>
-        <TopbarIcon data-action="new-agent" label="New agent" onClick={() => { void openNewAgent(); }}>+</TopbarIcon>
-        <TopbarIcon data-action="settings" label="Settings" onClick={() => go('#/settings')}>&#9881;</TopbarIcon>
+      <div className="sticky top-0 z-1 -mx-2 mb-2 flex h-[52px] items-center border-b border-(--color-border) bg-(--color-surface) px-4">
+        <Text fw={700} fz={16}>Yoicks</Text>
       </div>
       <NavLink href="#/agents" className="sidebar-all rounded-lg" label="All agents" rightSection={cards.length}
         active={hash === '#/agents'} aria-current={current(hash === '#/agents')} />

@@ -138,14 +138,13 @@ func TestAgentLifecycle(t *testing.T) {
 
 	t.Run("parseLaunchProfiles: adds new profiles and keeps the defaults", func(t *testing.T) {
 		p := parseLaunchProfiles(fromJSON(t, `{"claude-danger": {"argv": ["claude", "--dangerously-skip-permissions"], "label": "Claude (yolo)"}}`))
-		eq(t, p["claude-danger"], LaunchProfile{Argv: []string{"claude", "--dangerously-skip-permissions"}, Label: "Claude (yolo)"})
-		eq(t, p["claude"], defaultLaunchProfiles["claude"]) // defaults preserved
+		eq(t, p["claude-danger"], LaunchProfile{Argv: []string{"claude", "--dangerously-skip-permissions"}}) // its label is ignored
+		eq(t, p["claude"], defaultLaunchProfiles["claude"])                                                  // defaults preserved
 	})
 
-	t.Run("parseLaunchProfiles: overrides a default argv and defaults the label to the key", func(t *testing.T) {
+	t.Run("parseLaunchProfiles: overrides a default argv", func(t *testing.T) {
 		p := parseLaunchProfiles(fromJSON(t, `{"codex": {"argv": ["codex", "--full-auto"]}}`))
 		eq(t, p["codex"].Argv, []string{"codex", "--full-auto"})
-		eq(t, p["codex"].Label, "codex") // label falls back to the profile key
 	})
 
 	t.Run(`parseLaunchProfiles: a "__proto__" key does not corrupt the map or pollute Object.prototype`, func(t *testing.T) {
@@ -174,7 +173,7 @@ func TestAgentLifecycle(t *testing.T) {
 				t.Errorf("%s should be dropped", bad)
 			}
 		}
-		eq(t, p["good"], LaunchProfile{Argv: []string{"ok"}, Label: "good"})
+		eq(t, p["good"], LaunchProfile{Argv: []string{"ok"}})
 		if _, ok := p["claude"]; !ok {
 			t.Error("defaults still present")
 		}

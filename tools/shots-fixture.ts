@@ -6,7 +6,7 @@
  * A new screen: one line in `scenes` (and the data it needs here). `ready` is a JS expression, true once the
  * screen has drawn what it shows; shots waits for it, then for the fonts and two frames.
  */
-import type { AppState, ProfilesResponse } from '../web/src/types.ts';
+import type { AppState } from '../web/src/types.ts';
 import type { TimelineItem } from '../web/src/transcript.ts';
 
 /** The fixture's "now" (ms); the browser's clock is frozen 30s after it. */
@@ -63,8 +63,6 @@ export const state: AppState = {
   // the workers' (p3, an agent the user runs, has none: its name shows)
   purposes: { p1: 'Review PR #119 before it merges', p2: 'Find why the sidebar test flakes', p5: 'Paste images into the Home chat' },
 };
-
-export const profiles: ProfilesResponse = { profiles: [{ name: 'claude', label: 'Claude Code' }, { name: 'codex', label: 'Codex' }] };
 
 type Item = TimelineItem;
 const user = (text: string, images?: string[]): Item => ({ kind: 'user', text, ...(images ? { images } : {}), sidechain: false, ts: T0 });
@@ -142,6 +140,7 @@ const items = (scope: string) => `document.querySelectorAll(${JSON.stringify(`${
 /** Each one is shot on a phone and on a PC. */
 export const scenes: Scene[] = [
   { name: 'agents', hash: '#/agents', ready: "!!document.querySelector('#screen-agents[data-ready]')" },
+  { name: 'agents-home', hash: '#/agents/personal', ready: "!!document.querySelector('#screen-agents[data-ready]')" },
   { name: 'home', hash: '#/home/personal', ready: items('') },
   { name: 'home-headless', hash: '#/home/work', ready: `${items('')} && !!document.querySelector('.ask-opt')` },
   { name: 'home-stopped', hash: '#/home/side', ready: "!!document.querySelector('#screen-home-stopped')" },

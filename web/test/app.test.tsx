@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { StrictMode, act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { apiGet } from '../src/api.ts';
 import { openAgent, openAgentNamed } from '../src/nav.ts';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { emit, setAppState, store } from '../src/store.ts';
@@ -136,7 +137,8 @@ describe('App', () => {
     await go('#/agents/personal');
     const ids = [...document.querySelectorAll<HTMLElement>('#screen-agents .agent-card')].map((c) => c.dataset.paneId).sort();
     assert.deepEqual(ids, ['p1', 'p3'], 'its account, never the orchestrator');
-    assert.match($('#topbar-title')!.textContent!, /Agents.*Personal/);
+    assert.equal($('#topbar-title')!.textContent, 'Agents');
+    assert.equal($('#topbar-left')!.textContent, '← Personal', 'the way back names its Home');
     const list = $('#screen #screen-agents');
     const before = history.length;
     await click($('.agent-card[data-pane-id="p1"]'));
@@ -279,7 +281,7 @@ describe('App', () => {
     await click($('#screen [data-pane-id="p1"]')); // the list's card
     await settle();
     const before = history.length;
-    await act(async () => openAgent('p2')); // the sidebar's (and New agent's, Clear's)
+    await act(async () => openAgent('p2')); // the sidebar's (and Clear's)
     await settle();
     await act(async () => openAgentNamed('w-review')); // a [yoicks] notice's worker: p3
     await settle();
@@ -712,7 +714,7 @@ describe('App', () => {
     await settle();
   });
 
-  it("Settings from a pane's drawer (the sidebar's ⚙, a notification) takes the drawer's place; a pane from Settings takes its", async () => {
+  it("Settings from a pane's drawer (a notification) takes the drawer's place; a pane from Settings takes its", async () => {
     const replace = vi.spyOn(location, 'replace').mockImplementation((url: string | URL) => { // as a browser's
       const oldURL = location.href;
       history.replaceState(history.state, '', String(url));
@@ -853,8 +855,8 @@ describe('App', () => {
     store.wsConnected = false;
     await act(async () => emit()); // the link is down
     assert.equal($('#reconnect-banner')!.classList.contains('visible'), true);
-    await click($('#btn-new-agent'));
-    await answer('GET /api/profiles', {}, 401);
+    void apiGet('/api/state').catch(() => {}); // any request
+    await answer('GET /api/state', {}, 401);
     assert.equal($('#screen #screen-login .login-subtitle')!.textContent, 'Session expired or token invalid. Please enter your token.');
     assert.equal(localStorage.getItem('herdr_token'), null);
     assert.equal($('#topbar')!.style.display, 'none');
