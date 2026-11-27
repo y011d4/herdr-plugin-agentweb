@@ -75,19 +75,19 @@ function Group({ group: { home, cards }, hash, needs }: { group: HomeGroup; hash
   );
 }
 
-// An agent as its card in the list has it: the name, its purpose (two lines at most, all of it on hover),
-// the location and branch, its status.
+// An agent as its card in the list has it: the name and its status at the line's right end, then over the
+// row's whole width its purpose (two lines at most, all of it on hover) and the location and branch.
 function Agent({ card, on }: { card: DashboardCard; on: boolean }) {
   const { paneId } = card.pane;
   const { purpose } = card;
   const st = shownStatus(card.pane, store.seenDone) || 'unknown';
   return (
     <NavLink component="button" className="rounded-lg" data-sidebar-pane={paneId} noWrap pl={28}
-      label={cardTitle(card)}
+      label={<span className="flex items-center gap-2"><span className="min-w-0 truncate">{cardTitle(card)}</span><span className="ml-auto" /><StatusBadge status={st} small /></span>}
       // spans (a button holds no <p>), each a line of its own; the purpose wraps, under the row's noWrap
       description={<>{purpose ? <Text span className="card-purpose my-0.5 whitespace-normal text-(--color-text)" fz={13} lh={1.3} lineClamp={2} title={purpose}>{purpose}</Text> : null}
         <CardWhere card={card} /></>}
-      rightSection={<StatusBadge status={st} small />} active={on} aria-current={current(on)}
+      active={on} aria-current={current(on)}
       onClick={() => openAgent(paneId)} />
   );
 }
