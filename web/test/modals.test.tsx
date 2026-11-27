@@ -83,6 +83,42 @@ describe('Confirm', () => {
     assert.equal($('.modal-title').textContent, 'c');
     await fire(() => $('#cf-cancel').click());
   });
+
+  it('gives the focus back to its opener on close', async () => {
+    const opener = document.body.appendChild(document.createElement('button'));
+    for (const dismiss of [() => $('#cf-cancel').click(), () => $('#cf-ok').click(), escape]) {
+      opener.focus();
+      void confirmModal('a', 'b', 'OK', false);
+      await settle();
+      $('#cf-ok').focus(); // where Mantine's focus trap puts it
+      await fire(dismiss);
+      assert.ok(!open());
+      assert.ok(document.activeElement === opener);
+    }
+    // another modal taking its place keeps the focus, and gives it back to the first one's opener
+    opener.focus();
+    void confirmModal('a', 'b', 'OK', false);
+    await settle();
+    $('#cf-ok').focus();
+    await fire(() => previewImage('data:image/png;base64,iVBORw0KGgo=', 'x'));
+    assert.ok(document.activeElement === $('.image-preview-close'));
+    await fire(() => $('.image-preview-close').click());
+    assert.ok(!open());
+    assert.ok(document.activeElement === opener);
+    opener.remove();
+  });
+
+  it("from a ⋮ item (gone once picked): back to the ⋮", async () => {
+    const { unmount } = await render(paneTopbar('p1', false, '#/agents', { rename: vi.fn(), clear: vi.fn(), stop: () => { void confirmModal('a', 'b', 'Stop', true); } }).right);
+    await fire(() => $('#btn-agent-menu').click());
+    $('#am-stop').focus(); // a click focuses the button it lands on (Chrome)
+    await fire(() => $('#am-stop').click());
+    await settle();
+    assert.ok(open() && !$('#am-stop'));
+    await fire(() => $('#cf-cancel').click());
+    assert.ok(document.activeElement === $('#btn-agent-menu'));
+    await unmount();
+  });
 });
 
 describe('Agent actions (the ⋮) and Rename', () => {

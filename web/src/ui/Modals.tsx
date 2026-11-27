@@ -12,8 +12,9 @@ import { showToast } from '../notify.ts';
 import { keptTasks, store } from '../store.ts';
 import type { AgentStartResponse, ProfilesResponse, RenameResponse } from '../types.ts';
 
-// mantine: drawn by Mantine's Modal (the confirm), else by Overlay below
-interface Open { id: number; render: (close: () => void) => ReactNode; close: () => void; className: string; mantine: boolean }
+// mantine: drawn by Mantine's Modal (the confirm), else by Overlay below. opener: where the focus goes
+// back on close.
+interface Open { id: number; render: (close: () => void) => ReactNode; close: () => void; className: string; mantine: boolean; opener: HTMLElement | null }
 
 let current: Open | null = null;
 let seq = 0;
@@ -21,8 +22,18 @@ const listeners = new Set<() => void>();
 const changed = (): void => { for (const fn of listeners) fn(); };
 const subscribe = (fn: () => void): (() => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
 
-/** Shows a modal (closing the one on show); returns its close(). */
+/** What has the focus, but for a Mantine menu's item (gone once picked): that menu's button. */
+function focused(): HTMLElement | null {
+  const active = document.activeElement as HTMLElement | null;
+  const menu = active?.closest('[data-menu-dropdown]');
+  return menu ? document.getElementById(menu.getAttribute('aria-labelledby') ?? '') : active;
+}
+
+/** Shows a modal (closing the one on show); returns its close(). On close the focus goes back to what
+ *  had it on open; a modal that takes another's place takes over that one's opener instead (the one
+ *  before gives it back first, and the new one takes it as it mounts). */
 function showModal(render: (close: () => void) => ReactNode, onClose?: () => void, className = 'modal', mantine = false): () => void {
+  const opener = current ? current.opener : focused();
   current?.close();
   const id = ++seq;
   let closed = false;
@@ -31,8 +42,9 @@ function showModal(render: (close: () => void) => ReactNode, onClose?: () => voi
     closed = true;
     if (current?.id === id) { current = null; changed(); }
     onClose?.();
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
   };
-  current = { id, render, close, className, mantine };
+  current = { id, render, close, className, mantine, opener };
   changed();
   return close;
 }
@@ -45,7 +57,8 @@ export function Modals() {
 }
 
 // Overlay's look on Mantine's Modal: the same backdrop, fade and width, and above the toasts (z 1000).
-// Mantine closes it on Escape and a backdrop tap, traps the focus and gives it back on close.
+// Mantine closes it on Escape and a backdrop tap and traps the focus. (Its own focus return needs
+// `opened` to turn false; this one unmounts, and showModal gives the focus back.)
 function MantineDialog({ close, className, children }: { close: () => void; className: string; children: ReactNode }) {
   return (
     <Modal.Root opened onClose={close} centered zIndex={2000} size="min(92vw, 420px)" xOffset={16} yOffset={16}
@@ -88,7 +101,6 @@ export function previewImage(src: string, alt: string): void {
 }
 
 function showPreview(src: string, alt: string, mark: number): void {
-  const opener = document.activeElement as HTMLElement | null;
   const close = showModal((close) => (
     <>
       <img src={src} alt={alt} onClick={close} />
@@ -97,7 +109,6 @@ function showPreview(src: string, alt: string, mark: number): void {
   ), () => {
     removeEventListener('popstate', close);
     if (history.state?.imagePreview === mark) history.back();
-    opener?.focus();
   }, 'image-preview');
   addEventListener('popstate', close);
 }
