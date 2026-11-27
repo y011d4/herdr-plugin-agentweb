@@ -87,15 +87,11 @@ func jsonFields(t reflect.Type) []string {
 	return out
 }
 
-// notInProtocol22 are fields the bridge reads (ported from the TypeScript) that
-// herdr 0.9.5 doesn't send: absent, they leave their part of the state empty.
-var notInProtocol22 = []string{"custom_status", "agent_message"}
-
 func checkFields(t *testing.T, what string, fields []string, d jsonSchema) {
 	t.Helper()
 	props := properties(d)
 	for _, f := range fields {
-		if _, ok := props[f]; !ok && !slices.Contains(notInProtocol22, f) {
+		if _, ok := props[f]; !ok {
 			t.Errorf("%s reads %q, which the schema doesn't have", what, f)
 		}
 	}
@@ -196,7 +192,7 @@ func TestHerdrSchemaSubscriptions(t *testing.T) {
 func TestHerdrSchemaEventFields(t *testing.T) {
 	s := loadHerdrSchema(t)
 	checkFields(t, "pane.agent_status_changed",
-		[]string{"pane_id", "agent_status", "agent", "display_agent", "custom_status", "title"},
+		[]string{"pane_id", "agent_status", "agent", "display_agent", "title"},
 		schemaDef(t, s, "subscription_event", "PaneAgentStatusChangedEvent"))
 	data := schemaDef(t, s, "event", "EventData")
 	for event, fields := range map[string][]string{

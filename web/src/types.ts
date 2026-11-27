@@ -12,8 +12,6 @@ export interface AgentInfo {
   name: string | null;
   displayName: string | null;
   status: AgentStatus;
-  customStatus: string | null;
-  message: string | null;
   sinceUnixMs: number;
   /** herdr's completion_seq: which completion this idle/done status is (null until the bridge fetches it) */
   completionSeq: number | null;

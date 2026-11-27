@@ -45,7 +45,7 @@ func contractState() ClientState {
 				Cwd: "/home/u/repo", ForegroundCwd: "/home/u/repo/sub", Title: "one"},
 			{PaneID: "p2", TabID: "t2", WorkspaceID: "w1", Cwd: "/home/u/repo"},
 			{PaneID: "p3", TabID: "t3", WorkspaceID: "w2", Agent: "claude", DisplayAgent: "Claude Code", AgentStatus: "done",
-				CustomStatus: "reviewing", Cwd: "/home/u/repo-wt-feat"},
+				Cwd: "/home/u/repo-wt-feat"},
 			{PaneID: "p4", TabID: "t1", WorkspaceID: "w1", Agent: "claude", AgentStatus: "idle",
 				Cwd: "/home/u/.local/share/herdr-yoicks/orchestrators/personal"},
 			{PaneID: "p5", TabID: "t4", WorkspaceID: "w3"},

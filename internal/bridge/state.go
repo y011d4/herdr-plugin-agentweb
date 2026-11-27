@@ -46,12 +46,9 @@ func normalizeAgent(p RawPane, now int64) *AgentInfo {
 		return nil
 	}
 	return &AgentInfo{
-		Name:         strp(p.Agent),
-		DisplayName:  strp(firstNonEmpty(p.DisplayAgent, p.Agent)),
-		Status:       firstNonEmpty(p.AgentStatus, "unknown"),
-		CustomStatus: strp(p.CustomStatus),
-		// snapshots carry no message; only events fill it in
-		Message:     strp(p.AgentMessage),
+		Name:        strp(p.Agent),
+		DisplayName: strp(firstNonEmpty(p.DisplayAgent, p.Agent)),
+		Status:      firstNonEmpty(p.AgentStatus, "unknown"),
 		SinceUnixMs: now,
 		// completionSeq and stateChangeSeq are not in snapshots: applyCompletionSeqs
 	}
@@ -233,9 +230,6 @@ func applyEvent(s *State, name string, data map[string]any, now int64) (*State, 
 			agent.DisplayName = &da
 		} else if v, ok := str(data, "agent"); ok {
 			agent.DisplayName = &v
-		}
-		if v, ok := str(data, "custom_status"); ok {
-			agent.CustomStatus = &v
 		}
 		updated := *pane
 		if v, ok := str(data, "title"); ok {
