@@ -1,21 +1,16 @@
 /**
  * store.ts — the app's shared state: the last State, the WebSocket link, what is on
- * screen (`view`), the done panes seen on this phone and the kept first tasks. Plain module
+ * screen (`view`) and the done panes seen on this phone. Plain module
  * state, mutated in place (`store.view` is never replaced); emit() tells subscribers
  * something changed. Also the lookups over it that more than one screen needs.
  */
 import { markSeen } from './dashboard-group.ts';
 import { pruneDrafts } from './drafts.ts';
 import type { SeenDone } from './dashboard-group.ts';
-import { KeptTasks } from './kept-tasks.ts';
 import type { AgentStatus, AppState, PaneNode, WorkspaceNode } from './types.ts';
 
 const STORAGE_SEEN = 'herdr_seen_done'; // done panes already opened on this phone (SeenDone)
 export const STORAGE_HOME = 'herdr_home'; // the orchestrator whose Home was opened last
-
-/** First tasks the bridge couldn't deliver to a just-started agent (New agent keeps them);
- *  each pane's composer keeps its task, with the user's edits, until it is sent. */
-export const keptTasks = new KeptTasks();
 
 export interface View {
   /** what #screen shows */
@@ -68,7 +63,7 @@ export function lastHome(): string | null {
 
 /** A running headless orchestrator (its paneId is hl:<name>) as a pane, the only place one is made:
  *  it has no herdr pane, but the views of a pane (findPane, markPaneSeen) take it like one. Never in
- *  appState.workspaces: New agent's directories and the list's "No workspaces found" go by those. */
+ *  appState.workspaces: the list's "No workspaces found" goes by those. */
 function headlessWorkspaces(state: AppState): WorkspaceNode[] {
   return (state.orchestrators ?? []).flatMap((o) => {
     const h = o.headless;

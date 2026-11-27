@@ -200,12 +200,12 @@ describe('Dashboard topbar', () => {
     assert.equal(c.querySelector('.orch-start, .orch-start-btn'), null);
   });
 
-  it('+ (New agent) and ⚙ (Settings)', async () => {
+  it('⚙ (Settings) alone at the right', async () => {
     const c = await bar('#/agents', fresh());
     const btns = [...c.querySelectorAll<HTMLElement>('#r button')];
     assert.deepEqual(btns.map((b) => [b.id, b.classList.contains('mantine-ActionIcon-root'), b.getAttribute('aria-label'), b.textContent]),
-      [['btn-new-agent', true, 'New agent', '+'], ['btn-settings', true, 'Settings', '⚙']]);
-    await fire(() => btns[1].click());
+      [['btn-settings', true, 'Settings', '⚙']]);
+    await fire(() => btns[0].click());
     assert.equal(location.hash, '#/settings');
   });
 });

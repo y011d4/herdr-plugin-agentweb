@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { act } from 'react';
 import { clearToasts, getToasts } from '../src/notify.ts';
-import { keptTasks, setAppState } from '../src/store.ts';
-import { confirmModal, Modals, openNewAgent, openRename, previewImage } from '../src/ui/Modals.tsx';
+import { setAppState } from '../src/store.ts';
+import { confirmModal, Modals, openRename, previewImage } from '../src/ui/Modals.tsx';
 import { AgentMenu } from '../src/ui/Pane.tsx';
-import { agentStart, errors, profiles, rename, state } from './contract.gen.ts';
+import { errors, rename, state } from './contract.gen.ts';
 import { fire, render } from './render.ts';
 
 // The bridge, answering with the wire recordings (contract.gen.ts); every request is logged.
@@ -188,96 +188,9 @@ describe('Agent actions (the ⋮) and Rename', () => {
     await fire(() => openRename('p1', 'claude'));
     await fire(() => $('#rn-save').click());
     await settle();
-    assert.equal($('#rn-error').textContent, 'unknown profile: bash');
+    assert.equal($('#rn-error').textContent, 'invalid source: bogus');
     assert.equal($<HTMLButtonElement>('#rn-save').disabled, false);
     assert.deepEqual(toastsShown(), []);
-  });
-});
-
-describe('New agent', () => {
-  beforeEach(() => { setAppState(state); });
-
-  async function openIt(post: { status?: number; body: unknown }): Promise<void> {
-    bridge({ 'GET /api/profiles': { body: profiles[0] }, 'POST /api/agents': post });
-    await act(async () => { await openNewAgent(); });
-  }
-  const start = async (): Promise<void> => { await fire(() => $('#na-start').click()); await settle(); };
-  const posted = () => reqs.filter((r) => r.method === 'POST').map((r) => r.body);
-
-  it('lists the profiles and the open workspaces, the focused one picked', async () => {
-    await openIt({ body: agentStart[0] });
-    assert.deepEqual([...$<HTMLSelectElement>('#na-profile').options].map((o) => [o.value, o.text]),
-      [['claude', 'Claude Code'], ['codex', 'Codex'], ['opencode', 'opencode']]);
-    const dir = $<HTMLSelectElement>('#na-dir');
-    assert.deepEqual([...dir.options].map((o) => [o.value, o.text]),
-      [['/home/u/repo', 'repo · main'], ['/home/u/repo-wt-feat', 'repo-wt-feat (worktree)'], ['__custom__', 'Custom path…']]);
-    assert.equal(dir.value, '/home/u/repo');
-    assert.equal($('#na-cwd-wrap').style.display, 'none');
-    assert.equal($('#na-wt-wrap').style.display, 'none');
-  });
-
-  it("starts in a picked workspace: its cwd and id, the name and task; then opens the pane", async () => {
-    await openIt({ body: agentStart[1] });
-    await type($('#na-dir'), '/home/u/repo-wt-feat');
-    await type($('#na-name'), ' w-tab ');
-    await type($('#na-task'), 'do it\n');
-    await start();
-    assert.deepEqual(posted(), [{ profile: 'claude', name: 'w-tab', task: 'do it', cwd: '/home/u/repo-wt-feat', workspace: 'w2' }]);
-    assert.ok(!open());
-    assert.deepEqual(toastsShown(), ['Agent started: Started w-tab']);
-    assert.equal(location.hash, '#/pane/p10');
-    assert.equal(keptTasks.draft('p10'), null); // delivered
-  });
-
-  it('a new worktree: branched from the picked directory, with no cwd or workspace', async () => {
-    await openIt({ body: agentStart[2] });
-    await type($('#na-profile'), 'codex');
-    await fire(() => $('#na-wt-toggle').click());
-    assert.equal($('#na-wt-wrap').style.display, '');
-    await type($('#na-wt-branch'), 'feat/x');
-    await type($('#na-wt-base'), ' origin/main ');
-    await start();
-    assert.deepEqual(posted(), [{ profile: 'codex', worktree: { repo: '/home/u/repo', branch: 'feat/x', base: 'origin/main' } }]);
-    assert.equal(location.hash, '#/pane/p12');
-  });
-
-  it('a custom path: its cwd, no workspace; a worktree needs one', async () => {
-    await openIt({ body: agentStart[0] });
-    await type($('#na-dir'), '__custom__');
-    assert.equal($('#na-cwd-wrap').style.display, '');
-    await fire(() => $('#na-wt-toggle').click());
-    await start();
-    assert.equal($('#na-error').textContent, 'Pick a working directory (or a custom path) to branch the worktree from.');
-    assert.deepEqual(posted(), []);
-    assert.equal($<HTMLButtonElement>('#na-start').disabled, false);
-    await fire(() => $('#na-wt-toggle').click());
-    await type($('#na-cwd'), ' /tmp/x ');
-    await start();
-    assert.deepEqual(posted(), [{ profile: 'claude', cwd: '/tmp/x' }]);
-  });
-
-  it('keeps a task the agent was not ready for, for its composer', async () => {
-    await openIt({ body: { ...agentStart[1], taskDelivered: false } });
-    await type($('#na-task'), 'review the diff');
-    await start();
-    assert.equal(keptTasks.draft('p10'), 'review the diff');
-    assert.deepEqual(toastsShown(), ["Agent started: Started w-tab. The task wasn't sent yet — it's in the composer, tap Send when the agent is ready"]);
-  });
-
-  it('an error stays in the modal, Start enabled again', async () => {
-    await openIt({ status: 400, body: errors[0] });
-    await start();
-    assert.ok(open());
-    assert.equal($('#na-error').textContent, 'unknown profile: bash');
-    assert.equal($<HTMLButtonElement>('#na-start').disabled, false);
-    assert.equal(location.hash, '');
-  });
-
-  it('no modal without profiles: a toast says why', async () => {
-    bridge({ 'GET /api/profiles': { body: { profiles: [] } } });
-    await act(async () => { await openNewAgent(); });
-    assert.ok(!open());
-    assert.deepEqual(toastsShown(), ['No launch profiles: Configure launch_profiles in the bridge config.']);
   });
 });
 

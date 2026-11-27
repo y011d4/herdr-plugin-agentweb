@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { act, useState } from 'react';
 import { draftKey, setDraft } from '../src/drafts.ts';
 import { clearToasts, getToasts } from '../src/notify.ts';
-import { keptTasks, setAppState, store } from '../src/store.ts';
+import { setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
 import { orchestratorOfPane } from '../src/routes.ts';
 import { WIDE_QUERY } from '../src/theme.ts';
@@ -139,26 +139,6 @@ describe('composer', () => {
     await answer('POST /api/panes/p2/input', { error: { code: 'x', message: 'boom' } }, 500);
     assert.equal(ta().value, 'bad');
     assert.deepEqual(getToasts().map((t) => `${t.title}: ${t.body}`), ['Send failed: boom']);
-  });
-
-  it('shows a kept task, locks it while it is sent, shows it again on failure and drops it on success', async () => {
-    keptTasks.keep('p2', 'first task');
-    await show('p2');
-    assert.equal(ta().value, 'first task');
-    await type('first task, edited');
-    await key({});
-    assert.equal(ta().disabled, true);
-    await unmount(); // left and reopened while it is sent: still locked, empty
-    await show('p2');
-    assert.equal(ta().disabled, true);
-    assert.equal(ta().value, '');
-    await answer('POST /api/panes/p2/input', { error: { code: 'x', message: 'boom' } }, 500);
-    assert.equal(ta().disabled, false);
-    assert.equal(ta().value, 'first task, edited');
-    await key({});
-    await answer('POST /api/panes/p2/input', { ok: true });
-    assert.equal(ta().value, '');
-    assert.equal(keptTasks.draft('p2'), null);
   });
 
   it('keeps an unsent draft per pane and per Home across leaving and reopening (stored: a reload too) until it is sent', async () => {
@@ -414,19 +394,11 @@ describe('read-only chat', () => {
     assert.ok($('#btn-pane-interrupt'));
   });
 
-  it('a pane without a transcript (its terminal) has them; so has a chat with a kept first task', async () => {
+  it('a pane without a transcript (its terminal) has them', async () => {
     await show('p2'); // a shell
     await answer('/read?source=visible', read[1]);
     await answer('/transcript', { available: false });
     assert.equal(bar().style.display, '');
-    await unmount();
-    keptTasks.keep('p1', 'first task');
-    await show('p1');
-    await answer('/transcript', transcript[0]);
-    assert.equal(bar().style.display, '', 'chat, with the task to send');
-    assert.equal(ta().value, 'first task');
-    keptTasks.beginSend('p1', 'first task'); // sent: no longer kept, for the tests after this one
-    keptTasks.finishSend('p1', true);
   });
 });
 

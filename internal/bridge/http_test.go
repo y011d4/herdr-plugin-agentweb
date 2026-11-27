@@ -168,7 +168,7 @@ func (b *testBridge) dial(t *testing.T, opts *websocket.DialOptions) (*websocket
 }
 
 var apiRoutes = []struct{ method, path string }{
-	{"GET", "/api/state"}, {"GET", "/api/profiles"}, {"POST", "/api/agents"}, {"POST", "/api/worktrees"},
+	{"GET", "/api/state"}, {"POST", "/api/agents"},
 	{"POST", "/api/orchestrators/x/start"}, {"POST", "/api/orchestrators/x/send"}, {"POST", "/api/orchestrators/x/interrupt"},
 	{"POST", "/api/orchestrators/x/clear"}, {"POST", "/api/orchestrators/x/stop"}, {"DELETE", "/api/orchestrators/x/todos/abc123"}, {"DELETE", "/api/panes/p1"}, {"GET", "/api/panes/p1/read"},
 	{"POST", "/api/panes/p1/input"}, {"POST", "/api/panes/p1/focus"}, {"POST", "/api/panes/p1/scroll"},
@@ -717,7 +717,7 @@ func TestClearRefusesAnAgentOfUnknownAccount(t *testing.T) {
 func TestStartAgentRunsOnlyTheProfilesProgram(t *testing.T) {
 	var mu sync.Mutex
 	var started map[string]any
-	b := startBridge(t, Config{LaunchProfiles: map[string]LaunchProfile{"claude": {Argv: []string{"claude", "--flag"}, Label: "C"}}},
+	b := startBridge(t, Config{LaunchProfiles: map[string]LaunchProfile{"claude": {Argv: []string{"claude", "--flag"}}}},
 		func(m string, p json.RawMessage) (fakeherdr.Reply, bool) {
 			switch m {
 			case "tab.create":
@@ -751,30 +751,6 @@ func toStrings(v any) []string {
 		out = append(out, x.(string))
 	}
 	return out
-}
-
-// The New agent picker preselects the first profile, so /api/profiles must keep the
-// TS's localeCompare order. The want order is Node's (en-US) for these names.
-func TestProfilesSortLikeLocaleCompare(t *testing.T) {
-	want := []string{"a b", "a_b", "a-b", "ab", "aB", "Ab", "AB", "ab-", "Ab-", "b10", "B2", "claude", "Claude",
-		"claude_fast", "claude-yolo", "codex", "opencode", "x.y", "z10", "z9", "Zoo"}
-	got := slices.Clone(want)
-	for i := range got { // a fixed shuffle
-		j := (i*7 + 3) % len(got)
-		got[i], got[j] = got[j], got[i]
-	}
-	slices.SortFunc(got, func(a, b string) int {
-		if localeLess(a, b) {
-			return -1
-		}
-		if localeLess(b, a) {
-			return 1
-		}
-		return 0
-	})
-	if !slices.Equal(got, want) {
-		t.Errorf("got  %q\nwant %q", got, want)
-	}
 }
 
 // A stopped orchestrator's Home lists the agents of the account it would run under: once
