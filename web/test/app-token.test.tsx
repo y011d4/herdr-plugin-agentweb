@@ -8,7 +8,7 @@ import { createRoot } from 'react-dom/client';
 import { emit, store } from '../src/store.ts';
 import { App, start } from '../src/ui/App.tsx';
 import { state } from './contract.gen.ts';
-import './render.ts'; // the act environment
+import { mantine } from './render.ts'; // and the act environment
 
 vi.mock('../src/ws.ts', () => ({ onWsMessage: () => () => {}, wsConnect: () => {}, wsSendWatch: () => {} }));
 
@@ -36,7 +36,7 @@ describe('App without a token', () => {
     document.body.innerHTML = '<div id="app"></div><div id="modal-root"></div>';
     location.hash = '#/agents';
     start();
-    await act(async () => { createRoot(document.getElementById('app')!).render(<StrictMode><App /></StrictMode>); });
+    await act(async () => { createRoot(document.getElementById('app')!).render(<StrictMode>{mantine(<App />)}</StrictMode>); });
     assert.ok($('#screen #screen-login'));
     assert.match($('.login-subtitle')!.textContent!, /Enter the access token/);
     assert.equal($('#topbar')!.style.display, 'none');
