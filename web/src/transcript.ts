@@ -1,7 +1,8 @@
 /**
- * transcript.ts — render Claude Code transcript TimelineItems to HTML for the
- * chat view. Pure string-building; no DOM state. pane-view.ts owns the container and
- * live updates.
+ * transcript.ts — Claude Code's transcript items (TimelineItem) for the chat view, pure: the markdown
+ * of its prose as escaped HTML (renderMarkdown, inlineMarkdown), the [yoicks] notices of a user turn,
+ * and what a Home's chat keeps (conversationItems, latestActivity). ui/ChatLog.tsx draws the items;
+ * pane-view.ts owns the container and its live updates.
  *
  * TimelineItem mirrors the Go bridge's (internal/bridge/types.go): the two share
  * only the wire contract (same rule as types.ts). Keep the two in sync.
@@ -105,8 +106,8 @@ function renderInline(raw: string): string {
   return out;
 }
 
-// Inline-only markdown that preserves line breaks (for the thinking block).
-function inlineMd(s: string): string {
+/** Inline-only markdown that preserves line breaks (the thinking block), as HTML: escaped, as renderMarkdown's. */
+export function inlineMarkdown(s: string): string {
   return renderInline(s).replace(/\n/g, '<br>');
 }
 
@@ -258,44 +259,12 @@ export function renderMarkdown(src: string): string {
   return html;
 }
 
-const TODO_MARK: Record<string, string> = { completed: '&#10003;', in_progress: '&#9656;', pending: '&#9675;' };
-
-function renderTodos(todos: TodoEntry[]): string {
-  const rows = todos
-    .map((t) => `<li class="todo-${escapeHtml(t.status)}"><span class="todo-mark">${TODO_MARK[t.status] ?? '&#9675;'}</span>${escapeHtml(t.content)}</li>`)
-    .join('');
-  return `<ul class="chat-todos">${rows}</ul>`;
-}
-
-// Render AskUserQuestion questions + options read-only, for transcript history.
-// Interactive answering (buttons) is owned by the answer panel (ui/PromptPanel.tsx), which
-// unifies AskUserQuestion options and options parsed from a live TUI prompt.
-export function renderAskQuestions(ask: AskQuestion[]): string {
-  return ask.map((q) => {
-    const header = q.header ? `<span class="ask-q-header">${escapeHtml(q.header)}</span>` : '';
-    const opts = q.options.map((op, oi) => {
-      const num = `<span class="ask-opt-num">${oi + 1}</span>`;
-      const label = `<span class="ask-opt-label">${escapeHtml(op.label)}</span>`;
-      const desc = op.description ? `<span class="ask-opt-desc">${escapeHtml(op.description)}</span>` : '';
-      return `<li class="ask-opt-static">${num}${label}${desc}</li>`;
-    }).join('');
-    return `<div class="ask-q">${header}<div class="ask-q-text">${escapeHtml(q.question)}</div><ul class="ask-opts-static">${opts}</ul></div>`;
-  }).join('');
-}
-
 // the bridge writes each of its lines at a line's start: an indented one is the user's (a list item's, a quote's)
 const YOICKS_NOTICE = /^\[yoicks\] /;
 // a notice about a worker, named as herdr names agents: its status change (`<name>: <from> → <to>`) or start
-// (`started <name> (pane …`); the name is a button that opens it (ui/Pane.tsx)
-const WORKER_NOTICE = /^(\[yoicks\] (?:started )?)([a-z][a-z0-9_-]{0,31})((?:: | \(pane ).*)$/s;
-
-/** A notice line as HTML: escaped, a worker's name a button (data-agent) that opens it. */
-export function noticeHtml(line: string): string {
-  const m = WORKER_NOTICE.exec(line);
-  if (!m) return escapeHtml(line);
-  const name = escapeHtml(m[2]);
-  return `${escapeHtml(m[1])}<button type="button" class="chat-notice-agent" data-agent="${name}">${name}</button>${escapeHtml(m[3])}`;
-}
+// (`started <name> (pane …`); the name is a button that opens it (ui/ChatLog.tsx's Notice): [1] what comes before
+// it, [2] the name, [3] the rest
+export const WORKER_NOTICE = /^(\[yoicks\] (?:started )?)([a-z][a-z0-9_-]{0,31})((?:: | \(pane ).*)$/s;
 
 /**
  * A user turn's leading and trailing `[yoicks] …` lines (the bridge's own word to a headless
@@ -311,53 +280,6 @@ export function splitNotices(text: string): { before: string[]; body: string; af
   while (b > a && edge(lines[b - 1])) b--;
   const notices = (ls: string[]): string[] => ls.filter((l) => YOICKS_NOTICE.test(l)).map((l) => l.trim());
   return { before: notices(lines.slice(0, a)), body: lines.slice(a, b).join('\n'), after: notices(lines.slice(b)) };
-}
-
-/** Render a single TimelineItem to a self-contained HTML block (safe to append). */
-export function renderItem(item: TimelineItem): string {
-  // the images sent with a user turn: under its words, or alone (the bridge sends only data: URLs)
-  if (item.kind === 'user' && item.images?.length) {
-    const { images, ...words } = item;
-    const imgs = images.map((src) => `<button type="button" class="chat-image-open" aria-label="View image"><img class="chat-image" src="${escapeHtml(src)}" alt="image"></button>`).join('');
-    return (words.text.trim() ? renderItem(words) : '') + `<div class="chat-item chat-user chat-images${item.sidechain ? ' chat-sidechain' : ''}">${imgs}</div>`;
-  }
-  const sub = item.sidechain ? ' chat-sidechain' : '';
-  const subTag = item.sidechain ? '<span class="chat-sub-tag">subagent</span>' : '';
-  switch (item.kind) {
-    case 'user': {
-      const bubble = (text: string): string => `<div class="chat-item chat-user${sub}">${subTag}<div class="chat-bubble chat-md">${renderMarkdown(text)}</div></div>`;
-      const { before, body, after } = splitNotices(item.text);
-      if (!before.length && !after.length) return bubble(item.text);
-      // the bridge's notices: dim lines, not the user's
-      const notices = (ls: string[]): string => ls.map((l) => `<div class="chat-item chat-notice${sub}">${noticeHtml(l)}</div>`).join('');
-      return notices(before) + (body ? bubble(body) : '') + notices(after);
-    }
-    case 'assistant':
-      return `<div class="chat-item chat-assistant${sub}">${subTag}<div class="chat-md">${renderMarkdown(item.text)}</div></div>`;
-    case 'thinking':
-      return `<div class="chat-item chat-thinking-wrap${sub}"><details class="chat-thinking"><summary>Thinking</summary><div class="chat-thinking-body">${inlineMd(item.text)}${item.truncated ? '<span class="chat-more">…</span>' : ''}</div></details></div>`;
-    case 'tool_use': {
-      // AskUserQuestion renders as a labelled question card (read-only in
-      // history; the pending prompt gets interactive buttons via the prompt panel).
-      if (item.name === 'AskUserQuestion' && item.ask && item.ask.length) {
-        return `<div class="chat-item chat-tool chat-ask${sub}"><div class="chat-tool-head"><span class="chat-tool-name">Question</span></div>${renderAskQuestions(item.ask)}</div>`;
-      }
-      const todos = item.name === 'TodoWrite' && item.todos ? renderTodos(item.todos) : '';
-      const summary = item.summary ? `<span class="chat-tool-summary">${escapeHtml(item.summary)}</span>` : '';
-      return `<div class="chat-item chat-tool${sub}"><div class="chat-tool-head"><span class="chat-tool-name">${escapeHtml(item.name)}</span>${summary}</div>${todos}</div>`;
-    }
-    case 'tool_result': {
-      const err = item.isError ? ' chat-result-error' : '';
-      const more = item.truncated ? '\n… (truncated)' : '';
-      const label = item.isError ? 'Error' : 'Result';
-      return `<div class="chat-item chat-result-wrap${sub}"><details class="chat-result${err}"><summary>${label}</summary><pre class="chat-result-body">${escapeHtml(item.text + more)}</pre></details></div>`;
-    }
-  }
-}
-
-/** Render a list of items to a single HTML string. */
-export function renderItems(items: TimelineItem[]): string {
-  return items.map(renderItem).join('');
 }
 
 // User turns Claude Code writes itself: background-task wakeups, reminders, slash

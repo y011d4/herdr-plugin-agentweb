@@ -1,9 +1,12 @@
 // Component tests without Testing Library: React 19's act + createRoot (happy-dom).
 import { MantineProvider } from '@mantine/core';
-import { act, createElement, type ReactNode } from 'react';
+import { Fragment, act, createElement, type ReactElement, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { vi } from 'vitest';
 import { createRoot } from 'react-dom/client';
 import { theme } from '../src/theme.ts';
+import type { TimelineItem } from '../src/transcript.ts';
+import { ChatItem } from '../src/ui/ChatLog.tsx';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -54,3 +57,17 @@ export const settle = (ms = 20): Promise<void> => act(async () => {
     await vi.advanceTimersByTimeAsync(first ? ms : 0);
   }
 });
+
+/** What `node` draws, as HTML: React, synchronously, into a node of its own (then unmounted). */
+export function htmlOf(node: ReactElement): string {
+  const el = document.createElement('div');
+  const root = createRoot(el);
+  flushSync(() => root.render(node));
+  const h = el.innerHTML;
+  root.unmount();
+  return h;
+}
+
+/** What a chat log (ui/ChatLog.tsx) draws for `items`, as HTML. */
+export const chatHtml = (...items: TimelineItem[]): string =>
+  htmlOf(createElement(Fragment, null, ...items.map((item, i) => createElement(ChatItem, { key: i, item }))));

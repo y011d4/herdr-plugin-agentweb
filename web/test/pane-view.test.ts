@@ -99,6 +99,7 @@ describe('pane view: chat', () => {
     push({ type: 'transcript_items', paneId: 'p1', available: true, sessionId: 'new-session', items: more, cursor: 10, reset: true });
     assert.equal(chatLog().querySelectorAll('.chat-item').length, 1);
     assert.match(chatLog().textContent!, /and more/);
+    assert.ok(chatLog().firstElementChild !== first, 'a reset draws the log afresh (ui/ChatLog.tsx: no node, nor an open <details>, carries over)');
   });
 
   it('a tap on a link while chat text is selected only ends the selection', async () => {
