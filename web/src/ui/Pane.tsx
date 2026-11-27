@@ -510,7 +510,7 @@ export function PaneTitle({ paneId, home }: { paneId: string; home: boolean }) {
       const sub = st === 'working' ? 'working…' : st === 'blocked' ? 'needs you' : 'ready';
       last.current = <>{orchestratorLabel(orchestratorOfPane(state, paneId))}<Subtitle className="home-state" c={st === 'working' || st === 'blocked' ? st : undefined}>{`· ${sub}`}</Subtitle></>;
     } else {
-      const label = found?.pane?.agent?.displayName || found?.pane?.agent?.name || found?.pane?.title || paneId;
+      const label = found?.pane?.agent?.herdrName || found?.pane?.agent?.displayName || found?.pane?.agent?.name || found?.pane?.title || paneId;
       const context = found ? `${found.ws.label} / ${found.tab.label}` : '';
       last.current = <>{label}{context ? <Subtitle>{`· ${context}`}</Subtitle> : null}</>;
     }

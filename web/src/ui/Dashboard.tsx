@@ -19,11 +19,23 @@ import type { Topbar } from './App.tsx';
 import { openNewAgent } from './Modals.tsx';
 import { StatusBadge } from './Status.tsx';
 
-/** A card's label: its tab name (the agent kind if a tab somehow has no label), with a per-tab
- *  index for split-pane agents. */
-export function cardTitle({ pane, tabLabel, tabAgentIndex, tabAgentCount }: DashboardCard): string {
+/** A card's tab: its name (the agent kind if a tab somehow has no label), with a per-tab index for
+ *  split-pane agents. */
+function tabTitle({ pane, tabLabel, tabAgentIndex, tabAgentCount }: DashboardCard): string {
   const base = tabLabel || pane.agent?.name || pane.agent?.displayName || 'agent';
   return tabAgentCount > 1 ? `${base} #${tabAgentIndex}` : base;
+}
+
+/** A card's label: herdr's name for the agent (the one `[yoicks]` notices use), else its tab (an
+ *  agent the user runs directly has no name). */
+export function cardTitle(card: DashboardCard): string {
+  return card.pane.agent?.herdrName || tabTitle(card);
+}
+
+/** Where a card's agent runs, as far as its label doesn't say: the workspace › the tab. */
+export function cardLocation(card: DashboardCard): string {
+  const tab = tabTitle(card);
+  return tab === cardTitle(card) ? card.workspaceLabel : `${card.workspaceLabel} › ${tab}`;
 }
 
 /** The agents a list or a Home shows, most recent status change first: never the orchestrators,
@@ -92,10 +104,10 @@ const SCROLLER = 'flex-1 overflow-y-auto pb-[calc(var(--safe-bottom)+8px)] min-[
 // one column of cards, side by side from lg
 const LIST = 'agent-list mt-4 flex flex-col gap-2.5 px-4 min-[600px]:px-6 lg:grid lg:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]';
 
-// One card. The list is flat, so each card names its own workspace; `branch` and the `worktree`
-// chip come from that workspace. pane.title is usually null, so the tab name is the card label.
+// One card. The list is flat, so each card names its own location; `branch` and the `worktree`
+// chip come from that workspace.
 function AgentCard({ card }: { card: DashboardCard }) {
-  const { pane, workspaceLabel, branch, isWorktree } = card;
+  const { pane, branch, isWorktree } = card;
   const { paneId, agent, title } = pane;
   const { displayName, name, customStatus, message, sinceUnixMs } = agent!;
   // The chip shows the stable agent kind, so prefer `name` (raw pane.agent,
@@ -115,7 +127,7 @@ function AgentCard({ card }: { card: DashboardCard }) {
       </Group>
       {meta ? <Text fz={13} c="dimmed" mb={4} truncate>{meta}</Text> : null}
       <Group gap={12} fz={13} c="dimmed">
-        <Text className="min-w-0" fw={600} c="dark.0" inherit truncate>{workspaceLabel}</Text>
+        <Text className="card-location min-w-0" inherit truncate>{cardLocation(card)}</Text>
         <Tag>{agentKind}</Tag>
         {isWorktree ? <Tag c="working">worktree</Tag> : null}
         {title ? <Text fz={12} inherit truncate>{title}</Text> : null}

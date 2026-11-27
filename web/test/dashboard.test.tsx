@@ -50,6 +50,20 @@ describe('Dashboard cards', () => {
     await fire(() => card.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true })));
     assert.equal(location.hash, '#/agents');
   });
+
+  it("names a card by herdr's name for its agent, else by its tab; below, the location its name doesn't say", async () => {
+    const s = fresh();
+    const tab = s.workspaces[0].tabs.find((t) => t.panes.some((p) => p.paneId === 'p7'))!;
+    tab.label = 'fix-auth';
+    tab.panes.find((p) => p.paneId === 'p7')!.agent!.herdrName = 'fix-auth'; // agent start's tab is labelled by the name
+    const c = await show('#/agents', s);
+    const card = (id: string): string[] => ['.agent-name', '.card-location']
+      .map((sel) => c.querySelector(`.agent-card[data-pane-id="${id}"] ${sel}`)!.textContent!);
+    assert.deepEqual(card('p3'), ['w-review', 'repo-wt-feat › feat #1']);
+    assert.deepEqual(card('p7'), ['fix-auth', 'repo']);
+    assert.deepEqual(card('p6'), ['feat #2', 'repo-wt-feat']); // no name: the tab
+    assert.deepEqual(card('p1'), ['one #1', 'repo']);
+  });
 });
 
 describe('Dashboard list', () => {
