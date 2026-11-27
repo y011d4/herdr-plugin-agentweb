@@ -12,7 +12,7 @@ export function Token({ message, onToken }: { message?: string; onToken: (token:
   return (
     <Stack id="screen-login" align="center" justify="center" gap={24} px={24} py={32} h="100%" style={{ overflowY: 'auto' }}>
       <Image src="/icons/lockup.svg" alt="Yoicks" h={64} w="auto" />
-      <Text className="login-subtitle" size="sm" c="dimmed" ta="center" maw={320}>{message || 'Enter the access token shown when the bridge server started.'}</Text>
+      <Text className="login-subtitle" size="sm" c="dimmed" ta="center" maw={320}>{message || 'Enter the access token the bridge printed when it started.'}</Text>
       <form id="token-form" className="w-full max-w-[360px]" onSubmit={submit}>
         <Stack gap={12}>
           {/* the eye shows what was pasted; Tab reaches it (Mantine's default leaves it out) */}
