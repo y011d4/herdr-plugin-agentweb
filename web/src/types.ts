@@ -115,6 +115,19 @@ export interface HeadlessView {
   usage: HeadlessUsage | null;
   /** what went wrong, kept until the next start or clear */
   warnings: HeadlessWarning[];
+  /** the model it runs on: one of models' values ('default': Claude Code's own); POST /api/orchestrators/:name/model sets it */
+  model: string;
+  /** the models Claude Code offers the account, as its /model lists them; [] until a child of this bridge has said */
+  models: HeadlessModel[];
+}
+
+export interface HeadlessModel {
+  /** an alias (opus, default) or a model id */
+  value: string;
+  displayName: string;
+  description: string;
+  /** the model id it stands for now */
+  resolvedModel: string;
 }
 
 export interface UsageWindow {

@@ -172,8 +172,28 @@ func TestHeadlessStream(t *testing.T) {
 
 	t.Run("a control_response names the request it answers", func(t *testing.T) {
 		m := hlModel{}
-		if st := m.apply([]byte(lineIntAck), 0); st.Acked != "yoicks-interrupt-1" {
+		if st := m.apply([]byte(lineIntAck), 0); st.Acked != "yoicks-interrupt-1" || st.AckError != "" {
 			t.Errorf("%+v", st)
+		}
+		// set_model's refusal, as 2.1.322 answers an unknown model
+		if st := m.apply([]byte(`{"type":"control_response","response":{"subtype":"error","request_id":"yoicks-model-2","error":"Model 'x' not found","error_code":"not_found","model":"claude-haiku-5-5"}}`), 0); st.Acked != "yoicks-model-2" || st.AckError != "Model 'x' not found" {
+			t.Errorf("%+v", st)
+		}
+	})
+
+	t.Run("the initialize answer lists the models (values fit for --model only); no other answer does", func(t *testing.T) {
+		m := hlModel{}
+		models := `"models":[{"value":"default","resolvedModel":"claude-opus-5-5","displayName":"Default (recommended)","description":"Opus 5.5 · Best for everyday, complex tasks","supportsEffort":true},` +
+			`{"value":"--dangerously-skip-permissions","displayName":"x"},{"value":"claude-haiku-4-5-20251001","resolvedModel":"claude-haiku-4-5-20251001","displayName":"Haiku 4.5","description":"Fastest"}]`
+		m.apply([]byte(`{"type":"control_response","response":{"subtype":"success","request_id":"other","response":{`+models+`}}}`), 0)
+		if m.models != nil {
+			t.Errorf("another answer: %+v", m.models)
+		}
+		m.apply([]byte(`{"type":"control_response","response":{"subtype":"success","request_id":"yoicks-init","response":{"commands":[],`+models+`,"account":{"email":"someone@example.com"}}}}`), 0)
+		want := []HeadlessModel{{"default", "Default (recommended)", "Opus 5.5 · Best for everyday, complex tasks", "claude-opus-5-5"},
+			{"claude-haiku-4-5-20251001", "Haiku 4.5", "Fastest", "claude-haiku-4-5-20251001"}}
+		if !slices.Equal(m.models, want) {
+			t.Errorf("models %+v", m.models)
 		}
 	})
 

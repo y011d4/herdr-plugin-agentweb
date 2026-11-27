@@ -321,6 +321,36 @@ describe("a headless orchestrator's Home", () => {
     assert.deepEqual(posts('interrupt'), [{}]);
   });
 
+  it('shows its model (default named by what it stands for) and switches it, but not mid-turn; none without a list', async () => {
+    await home(withPilot()); // blocked: its turn runs
+    const select = () => $<HTMLSelectElement>('#home-model');
+    assert.deepEqual([...select().options].map((o) => `${o.value}:${o.text}`), ['default:Default (Opus 5.5 · Best for everyday, complex tasks)', 'sonnet:Sonnet 5.5']);
+    assert.equal(select().value, 'sonnet');
+    assert.equal(select().disabled, true);
+    await unmount();
+    await home(withPilot((p) => {
+      idle(p);
+      p.headless!.models.push({ value: 'opus', displayName: 'Opus 5.5', description: 'For complex work', resolvedModel: 'claude-opus-5-5' });
+    }));
+    assert.equal(select().options[0].text, 'Default (Opus 5.5)');
+    assert.equal(select().disabled, false);
+    const change = (v: string) => fire(() => { select().value = v; select().dispatchEvent(new Event('change', { bubbles: true })); });
+    await change('default');
+    assert.deepEqual(posts('model'), [{ model: 'default' }]);
+    await answer('POST /api/orchestrators/pilot/model', { error: { code: 'busy', message: 'it is working: change the model once its turn has ended' } }, 409);
+    assert.deepEqual(getToasts().map((t) => `${t.title}: ${t.body}`), ['Model not changed: it is working: change the model once its turn has ended']);
+    await change('opus');
+    await answer('POST /api/orchestrators/pilot/model', { error: { code: 'model_pending', message: "Claude Code hasn't answered within 10s" } }, 504);
+    assert.equal(getToasts().at(-1)!.title, 'Model change pending');
+    await unmount();
+    await home(withPilot((p) => { idle(p); p.headless!.model = 'claude-gone-1'; })); // saved, no longer listed
+    assert.deepEqual([...select().options].map((o) => o.value), ['claude-gone-1', 'default', 'sonnet']);
+    assert.equal(select().value, 'claude-gone-1');
+    await unmount();
+    await home(withPilot((p) => { idle(p); p.headless!.models = []; }));
+    assert.ok(container.querySelector('#home-model') === null);
+  });
+
   it('shows its usage (old limits dimmed, the missing left out) and its warnings with what they offer', async () => {
     let cleared = 0;
     await home(withPilot((p) => {

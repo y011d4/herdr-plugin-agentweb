@@ -162,6 +162,18 @@ type HeadlessView struct {
 	Pending  *HeadlessPending  `json:"pending"`
 	Usage    *HeadlessUsage    `json:"usage"`
 	Warnings []HeadlessWarning `json:"warnings"`
+	// the model it runs on (set with /model): one of models' values, "default" = Claude Code's own
+	Model string `json:"model"`
+	// the models Claude Code offers the account, as its /model lists them; [] until a child of
+	// this bridge has said
+	Models []HeadlessModel `json:"models"`
+}
+
+type HeadlessModel struct {
+	Value         string `json:"value"` // an alias (opus, default) or a model id
+	DisplayName   string `json:"displayName"`
+	Description   string `json:"description"`
+	ResolvedModel string `json:"resolvedModel"` // the model id it stands for now
 }
 
 type HeadlessPending struct {

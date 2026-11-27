@@ -472,6 +472,119 @@ func TestHeadlessResumesAcrossBridgeRestarts(t *testing.T) {
 	}
 }
 
+// The model: the models come from the child's initialize answer; a running child switches in place
+// between turns (refused mid-turn), a stopped one starts on it (--model), and the choice is kept
+// across Clear and a bridge restart.
+func TestHeadlessModel(t *testing.T) {
+	state := t.TempDir()
+	b := startHeadless(t, state, nil, nil)
+	model := func(m string) (int, string) { return b.post(t, "model", `{"model":"`+m+`"}`) }
+	if status, _ := model("fake-big"); status != 400 { // no list yet: nothing to pick from
+		t.Errorf("before any child: %d", status)
+	}
+	b.start(t)
+	v := b.waitFor(t, "the models", func(v OrchestratorView) bool { return len(v.Headless.Models) == 4 })
+	if v.Headless.Model != "default" || v.Headless.Models[2] != (HeadlessModel{"fake-big", "Fake Big", "For hard work", "fake-big-1"}) {
+		t.Fatalf("%+v", v.Headless)
+	}
+	if status, body := model("fake-big"); status != 200 || b.view(t).Headless.Model != "fake-big" {
+		t.Fatalf("switch: %d %s", status, body)
+	}
+	b.waitStdin(t, `"request":{"model":"fake-big","subtype":"set_model"}`)
+	for m, want := range map[string]int{"opus": 400, "": 400} {
+		if status, _ := model(m); status != want {
+			t.Errorf("%q: %d, want %d", m, status, want)
+		}
+	}
+	b.send(t, "hang")
+	b.waitStatus(t, "working")
+	if status, body := model("default"); status != 409 || !strings.Contains(body, "once its turn has ended") {
+		t.Errorf("mid-turn: %d %s", status, body)
+	}
+	b.release(t)
+	b.waitStatus(t, "done")
+
+	// a switch waiting for its answer holds a message back, and a second switch; unanswered within
+	// 10 s it is a 504 and the message goes; the late answer is kept
+	held := make(chan int, 1)
+	go func() { status, _ := model("fake-held"); held <- status }()
+	b.waitStdin(t, `"model":"fake-held"`)
+	b.waiting(t, "the switch's answer", 10*time.Second)
+	sent := make(chan int, 1)
+	go func() { status, _ := b.post(t, "send", `{"text":"held back"}`); sent <- status }()
+	select {
+	case <-sent:
+		t.Fatal("a message went out while a switch waited for its answer")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if status, body := model("default"); status != 409 || !strings.Contains(body, "still waiting") {
+		t.Errorf("a second switch: %d %s", status, body)
+	}
+	b.pass(t, "the switch's answer", 10*time.Second)
+	if status := <-held; status != 504 {
+		t.Errorf("unanswered: %d", status)
+	}
+	if status := <-sent; status != 200 {
+		t.Errorf("the message held back: %d", status)
+	}
+	b.waitStatus(t, "done")
+	b.release(t)
+	b.waitFor(t, "the late answer kept", func(v OrchestratorView) bool { return v.Headless.Model == "fake-held" })
+	if status, body := model("fake-big"); status != 200 {
+		t.Fatalf("back: %d %s", status, body)
+	}
+
+	// Clear: the fresh session starts on it; then the bridge restarts
+	if status, body := b.post(t, "clear", ""); status != 200 {
+		t.Fatalf("clear: %d %s", status, body)
+	}
+	var runs []procArgs
+	waitUntil(t, 5*time.Second, "the fresh run", func() bool { runs, _ = b.runs(t); return len(runs) == 2 })
+	if slices.Contains(runs[0].argv, "--model") || !slices.Equal(runs[1].argv[len(runs[1].argv)-2:], []string{"--model", "fake-big"}) {
+		t.Fatalf("runs %v", runs)
+	}
+	b.waitFor(t, "the models again", func(v OrchestratorView) bool { return len(v.Headless.Models) == 4 })
+	b.srv.shutdownHeadless()
+	b2 := startHeadless(t, state, nil, nil)
+	if v := b2.view(t); v.Headless.Model != "fake-big" {
+		t.Errorf("after the restart: %q", v.Headless.Model)
+	}
+	b2.srv.startHeadless()
+	b2.waitStatus(t, "idle")
+	if status, body := b2.post(t, "stop", ""); status != 200 {
+		t.Fatalf("stop: %d %s", status, body)
+	}
+	// stopped: kept for its next start, where default means no --model
+	if status, body := b2.post(t, "model", `{"model":"default"}`); status != 200 {
+		t.Fatalf("stopped: %d %s", status, body)
+	}
+	b2.start(t)
+	waitUntil(t, 5*time.Second, "the run after", func() bool { runs, _ = b2.runs(t); return len(runs) == 4 })
+	if slices.Contains(runs[3].argv, "--model") || !slices.Contains(runs[2].argv, "fake-big") {
+		t.Errorf("runs %v", runs)
+	}
+}
+
+// set_model's answer keeps the choice whenever it comes (after SetModel gave up waiting too); a
+// refusal keeps nothing.
+func TestHeadlessModelAnswer(t *testing.T) {
+	r := newHeadlessRunner(OrchestratorDef{Name: "h1", Dir: t.TempDir(), Mode: "headless"}, t.TempDir(), "")
+	c := &hlChild{}
+	r.child, r.switches["yoicks-model-1"], r.switches["yoicks-model-2"] = c, "fake-big", "other"
+	r.model.models = []HeadlessModel{{Value: "fake-big"}}
+	if err, _ := r.SetModel("fake-big").(*LifecycleError); err == nil || err.Code != "model_pending" { // never a wait holding op
+		t.Errorf("a second switch: %v", err)
+	}
+	r.onLine(c, []byte(`{"type":"control_response","response":{"subtype":"error","request_id":"yoicks-model-2","error":"Model 'other' not found"}}`))
+	if v, _ := r.view(); v.Model != "default" {
+		t.Errorf("after the refusal: %q", v.Model)
+	}
+	r.onLine(c, []byte(`{"type":"control_response","response":{"subtype":"success","request_id":"yoicks-model-1","response":{"model":"fake-big-1"}}}`))
+	if v, _ := r.view(); v.Model != "fake-big" || len(r.switches) != 0 {
+		t.Errorf("after the answer: %q, %v", v.Model, r.switches)
+	}
+}
+
 // A session that never got a message has no transcript, and Claude Code (as the fake) can't resume
 // it: a Stop and Start, or a restart, begins it again under the same id instead of crash-looping.
 func TestHeadlessRestartsASessionWithNoMessage(t *testing.T) {
