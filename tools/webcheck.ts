@@ -16,8 +16,9 @@
  * web/dist), shoots each scene on a phone and a PC, before and after, and writes <scene>-<phone|pc>.<side>.png and
  * manifest.json (which changed: the PNGs' bytes differ) into --out. Each shot gets a browser context of its own
  * (the app keeps seen-done, the last Home, drafts in localStorage), a frozen clock (the fixture's T0 + 30s), UTC,
- * en-US, and no animations, so the same build shoots the same bytes. CI (.github/workflows/screenshots.yml) posts
- * the changed ones on the PR.
+ * en-US, no animations (CSS transitions off: Mantine's JS-timed ones then show their end state two frames in), and
+ * its images decoded, so the same build shoots the same bytes. CI (.github/workflows/screenshots.yml) posts the
+ * changed ones on the PR and fails its `screens` check until the user approves them with the ui-change label.
  *
  * A preview is a throwaway bridge (state/config under $WC_ROOT/preview-<port>, `env -u HERDR_BIN_PATH`)
  * over the REAL herdr, which production also shows, unless the root has a private herdr: `herdr start` runs a
@@ -2379,6 +2380,8 @@ function block(): number {
 
 // ── shots: the PR screenshots (tools/shots-fixture.ts's scenes; see the header) ──────────────────────
 
+const SHOTS_PORT = 8397;
+
 const SIZES = [
   { id: 'phone', metrics: { width: 390, height: 844, deviceScaleFactor: 2, mobile: true } },
   { id: 'pc', metrics: { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false } },
@@ -2386,7 +2389,7 @@ const SIZES = [
 
 /** A bridge's stand-in over the fixture, loopback only: its reads, a /ws that sends the State once, and the web build
  *  use() last chose (but sw.js: a service worker would only add a step). Writes answer ok and change nothing. One
- *  server for both builds: the origin shows on screen (Settings' Bridge URL). */
+ *  server for both builds, on SHOTS_PORT in every run: the origin shows on screen (Settings' Bridge URL). */
 async function fixtureServer(): Promise<{ url: string; use: (dist: string) => void; close: () => void }> {
   const f = await import('./shots-fixture.ts');
   let root = '';
@@ -2433,7 +2436,10 @@ async function fixtureServer(): Promise<{ url: string; use: (dist: string) => vo
     sock.on('data', () => {});
     sock.on('error', () => {});
   });
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  // a fixed port: the origin is on screen, and the gate compares a screen's bytes across runs (the digest the
+  // comment shows against the one the label's run gets), so a port of the run's own would change them
+  await new Promise<void>((r, j) => { server.once('error', j); server.listen(SHOTS_PORT, '127.0.0.1', r); })
+    .catch((e) => { throw env(`shots: 127.0.0.1:${SHOTS_PORT}: ${e.code ?? e} (another shots run?)`); });
   return {
     url: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
     use: (dist) => { root = path.resolve(dist); },
@@ -2485,7 +2491,8 @@ async function shots(o: Record<string, any>): Promise<number> {
         await S('Emulation.setTouchEmulationEnabled', size.metrics.mobile ? { enabled: true, maxTouchPoints: 5 } : { enabled: false });
         await S('Page.navigate', { url: `${server.url}/${scene.token === false ? '' : '?token=shots'}${scene.hash}` });
         const ready = !(await waitFn(() => ev(`(() => { try { return !!(${scene.ready}); } catch { return false; } })()`), 10_000)).timeout;
-        await ev('document.fonts.ready.then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))');
+        await ev(`document.fonts.ready.then(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))))
+          .then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))`);
         await sleep(300);
         const { data } = await S('Page.captureScreenshot', { format: 'png' });
         return { png: Buffer.from(data, 'base64'), ready };
