@@ -72,9 +72,10 @@ export function PromptPanel({ paneId, prompt, view }: { paneId: string; prompt: 
     // "Type something." opens a text field in the prompt, no answer yet (nothing to confirm). Both wait
     // for typing, which is the terminal's (a pane's chat is read-only): it opens once the press lands.
     const chat = /^Chat about this/i.test(o.label);
-    const typing = /^Type something/i.test(o.label);
+    const typing = /^(?:\[.\] )?Type something/i.test(o.label); // a multi-select's has its box: "[ ] Type something"
     if (!typing) view.answered(id, chat, post);
-    if (chat || typing) post.then(() => { if (alive.current) view.setMode('terminal', false); }, () => {});
+    // the view's to do, not the panel's: the pane may leave `blocked` (the panel gone) before the press answers
+    if (chat || typing) post.then(() => view.setMode('terminal', false), () => {});
     try {
       await post;
       if (!alive.current || mine !== gen.current) return;

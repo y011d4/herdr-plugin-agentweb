@@ -483,6 +483,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
 
   return {
     setMode(mode, persist) {
+      if (destroyed) return; // a late caller (an answer landing after the pane was left)
       if (mode === 'chat') switchToChat(undefined, persist); else switchToTerminal(persist);
     },
     onState() {

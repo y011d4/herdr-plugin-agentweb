@@ -138,6 +138,10 @@ describe('pane view: chat', () => {
     assert.equal(chatLog().style.display, 'none');
     assert.equal(chatLog().innerHTML, '');
     assert.equal(wsListeners.size, 0, 'unsubscribed from the socket');
+    store.view.paneViewMode = 'chat';
+    view.setMode('terminal', true); // a late caller: an answer landing after the pane was left
+    assert.equal(store.view.paneViewMode, 'chat', 'the next pane\'s mode untouched');
+    assert.equal(localStorage.getItem('herdr_pane_view'), null);
   });
 });
 
