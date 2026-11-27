@@ -634,6 +634,14 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
   flex-shrink: 0;
 }
 .agent-drawer-head:focus { outline: none; } /* the start of the focus (ui/AgentDrawer.tsx), not a control */
+/* ── Settings sheet (ui/SettingsSheet.tsx: Mantine's Modal) ──
+   A phone's: the whole screen, its header below the notch; Settings' own column scrolls in it. */
+.settings-sheet { background: var(--color-bg); }
+.settings-sheet-head { padding-top: calc(var(--safe-top) + 12px); background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
+.settings-sheet-body { padding: 0; }
+.settings-sheet-title { font-weight: 600; font-size: 16px; } /* the topbar's */
+.settings-sheet-start:focus { outline: none; } /* where the focus starts, not a control */
+
 
 /* ── Home (the orchestrator's chat as the main screen) ── */
 /* the orchestrator's replies as left bubbles, opposite the user's */
@@ -719,5 +727,6 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
   /* an agent's drawer from the right, over the main column (right of the sidebar, if any) */
   .agent-drawer { --drawer-size: min(900px, calc((100vw - var(--sidebar-w, 0px)) * 0.65)); }
   .agent-drawer-content { border-radius: 0; }
+  .settings-sheet-head { padding-top: 12px; } /* a centered dialog: no notch */
   body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 56px); } /* below its header, at the top */
 }
