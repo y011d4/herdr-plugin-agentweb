@@ -93,7 +93,9 @@ All in `internal/bridge/` (one package):
   (manifest, icons) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one
   JS and one CSS file under `assets/`, named by content hash (no code splitting: an open PWA would
   ask for a deleted chunk after a deploy). The bridge serves `assets/*` as `immutable`,
-  `index.html` and `sw.js` as `no-cache`; `embed_test.go` checks the build and its size budget
+  `index.html` and `sw.js` as `no-cache`, and the text files gzipped to a client that accepts it
+  (each encoding its own ETag); `embed_test.go` checks the build and its size budgets (a cold open
+  gzipped, the JS raw)
 - **Orchestrator homes**: config `orchestrators: [{name,label,env}]` — each is *managed*:
   `orchestrator.go` writes `<data>/orchestrators/<name>/` (data = `$XDG_DATA_HOME` or
   `~/.local/share`, + `herdr-yoicks`; `herdr-agentweb`, the dir from before the rename, while it
