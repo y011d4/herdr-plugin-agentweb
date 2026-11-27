@@ -673,8 +673,14 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   No herdr, no bridge: a stand-in serves `tools/shots-fixture.ts` (made-up data, typed as the web's
   `State`, so `npm run check:contract` fails when it goes stale; the shots are public, so never real
   data in it). A new screen is a line in its `scenes`. The same build shoots the same bytes: a browser
-  context per shot, a frozen clock, UTC, no animations, one origin for both builds, the entry script
-  under a fixed name (the app shows its hash). By hand, for a quick look before pushing:
+  context per shot, a frozen clock, UTC, no animations (reduced motion: the theme's `respectReducedMotion` makes
+  Mantine's JS-timed transitions 0 ms), images decoded, one origin for both builds, the entry script
+  under a fixed name (the app shows its hash). Its `screens` job is a **gate** (a required check): it fails while
+  a screen's bytes differ from main's and the user hasn't approved exactly those pixels with the **`ui-change`
+  label** (the comment's first line keeps the digest it shows and the one approved; a label added while it shows
+  other pixels approves nothing, a push that changes them again takes the label off), and whenever a screen isn't
+  ready on the PR's side. No threshold, no masks: both sides render on one machine, in one Chrome. By hand, for a
+  quick look before pushing:
   ```bash
   git worktree add "$T/before" main && (cd "$T/before" && npm ci --ignore-scripts && npx vite build)
   npx vite build && node tools/webcheck.ts shots --before "$T/before/web/dist" --after web/dist --out "$T/shots"
@@ -683,6 +689,11 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
 ## Conventions
 
 - Lowercase conventional commits, no emojis, no AI co-author lines.
+- **Only the user adds or removes the `ui-change` label** (it approves a PR's changed screens: PR screenshots,
+  above). A worker never does, by any means (`gh pr create --label`, `gh pr edit`, the API): workers share the
+  user's GitHub account, so GitHub can't tell them apart, and this rule is the only thing keeping the approval
+  the user's. A failing `screens` check over intended changes is reported to the user, not worked around (no edit
+  to the fixture, a scene or the workflow to make it pass).
 - TS sources use explicit `.ts` relative-import extensions (`node` runs `tools/vectors/*.ts`
   on them directly; Vite bundles them). No raw control bytes in
   source — write ESC as the literal six characters `\u001b` in string escapes.
