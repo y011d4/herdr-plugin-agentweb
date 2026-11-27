@@ -841,9 +841,10 @@ func (r *headlessRunner) notice(line string) {
 }
 
 // tickedOff wakes it with an item the user ticked off its to-do list, so it can take up what
-// follows; several ticked off within wakeCoalesce come in one message. A Home stopped (by the
-// user or by its crashes) isn't told, not even at its next start: the user did it themselves,
-// and the list it reads shows it gone.
+// follows; several ticked off within wakeCoalesce come in one message. A Home the user stopped,
+// or its crashes did (error), isn't told, not even at its next start: the user did it themselves,
+// and the list it reads shows it gone. One between a crash and its restart (wanted, stopped for
+// 2–30 s) is told once it is back, as a worker's wake-ups are: nobody stopped it.
 func (r *headlessRunner) tickedOff(it TodoItem) {
 	line := "to-do done by the user: " + it.Text
 	var extra []string
