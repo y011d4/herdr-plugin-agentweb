@@ -114,26 +114,34 @@ func ownAccount() string {
 // agent the shell launched. A pane whose shell is in the foreground (no agent) is
 // unknown: the shell's own environ predates direnv, so it would misreport.
 func paneAccount(rpc Rpc, paneID string) (string, error) {
-	raw, err := rpc("pane.process_info", map[string]any{"pane_id": paneID})
-	if err != nil {
+	fg, shell, err := paneProcessInfo(rpc, paneID)
+	if err != nil || fg == 0 || fg == shell {
 		return "", err
 	}
+	return projectsRootForPid(fg), nil
+}
+
+// paneProcessInfo is a pane's foreground process group id and its shell's pid
+// (pane.process_info), 0 for one that isn't a pid /proc could name.
+func paneProcessInfo(rpc Rpc, paneID string) (fg, shell int, err error) {
+	raw, err := rpc("pane.process_info", map[string]any{"pane_id": paneID})
+	if err != nil {
+		return 0, 0, err
+	}
 	var res struct {
-		ProcessInfo *struct {
+		ProcessInfo struct {
 			ForegroundProcessGroupID *float64 `json:"foreground_process_group_id"`
 			ShellPid                 *float64 `json:"shell_pid"`
 		} `json:"process_info"`
 	}
-	json.Unmarshal(raw, &res) // anything else: no number below, so unknown
-	info := res.ProcessInfo
-	if info == nil || info.ForegroundProcessGroupID == nil {
-		return "", nil
+	json.Unmarshal(raw, &res) // anything else: no number below, so 0
+	pid := func(v *float64) int {
+		if v == nil || *v != math.Trunc(*v) || *v <= 0 || *v > math.MaxInt32 {
+			return 0
+		}
+		return int(*v)
 	}
-	pid := *info.ForegroundProcessGroupID
-	if info.ShellPid != nil && pid == *info.ShellPid || pid != math.Trunc(pid) || math.Abs(pid) > math.MaxInt32 {
-		return "", nil // not a pid /proc could name
-	}
-	return projectsRootForPid(int(pid)), nil
+	return pid(res.ProcessInfo.ForegroundProcessGroupID), pid(res.ProcessInfo.ShellPid), nil
 }
 
 // PaneAccountCache is each agent pane's account, for the per-orchestrator lists.
