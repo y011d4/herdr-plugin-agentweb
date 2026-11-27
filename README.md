@@ -2,8 +2,7 @@
 
 **English** | [日本語](./README.ja.md)
 
-*Yoicks* is the huntsman's cry that sends the pack on. Formerly `herdr-plugin-agentweb`:
-see [Renamed from agentweb](#renamed-from-agentweb).
+*Yoicks* is the huntsman's cry that sends the pack on.
 
 Monitor and control every coding agent running in [herdr](https://herdr.dev) from your
 phone. A herdr plugin that runs a small local bridge server (a Go binary) and serves a
@@ -85,31 +84,6 @@ herdr plugin action invoke y011d4.yoicks.start
 
 Then restart each running orchestrator (**Clear** on its Home). The bridge rewrites their rules and
 allowlists with the new `yoicks` path when it starts, and a running orchestrator still calls the old one.
-An older unmanaged orchestrator directory (`orchestrator_dir`, or the old `dispatcher`) is yours and
-is never rewritten: change its old path (`…/bin/agentwebctl` from before the rename, or
-`node …/dist/bin/agentwebctl.js` from before the Go bridge) to `<plugin dir>/bin/yoicks` in its
-`CLAUDE.md` and `.claude/settings.json` yourself, or move to managed `orchestrators`.
-
-### Renamed from agentweb
-
-Before v0.1.0 this plugin was `y011d4.agentweb`, its binary `agentwebctl`. herdr sees the new id
-as another plugin, so an install from before the rename moves over by hand:
-
-1. Stop the old bridge and wait until it has finished:
-   `herdr plugin action invoke y011d4.agentweb.stop`.
-2. Install (or link) this version. Copy `config.json` from `herdr plugin config-dir y011d4.agentweb`
-   into `herdr plugin config-dir y011d4.yoicks`, and `token` and `pane-profiles.json` from
-   `~/.local/state/herdr/plugins/y011d4.agentweb/` into `~/.local/state/herdr/plugins/y011d4.yoicks/`
-   (both under `$XDG_STATE_HOME/herdr/plugins/` when that is set). With the token, paired phones
-   keep working, at the same URL.
-3. Start it (`herdr plugin action invoke y011d4.yoicks.start`), Clear the running orchestrators,
-   then `herdr plugin uninstall y011d4.agentweb` (or `unlink`).
-
-`~/.local/share/herdr-agentweb` stays in use while it exists, so the orchestrators' directories,
-and with them Claude Code's memory, transcripts and folder trust, don't move. The new `status` and
-`stop` also find a bridge the old plugin started (`agentwebctl`, its pidfile in the old state dir),
-and `start` refuses while one runs, so a missed step 1 can't leave the old one serving. `HERDR_AGENTWEB_HOST`/`_PORT` are now
-`HERDR_YOICKS_HOST`/`_PORT`.
 
 ### Rolling back
 
@@ -142,8 +116,8 @@ herdr plugin uninstall y011d4.yoicks
 - the state dir, `~/.local/state/herdr/plugins/y011d4.yoicks` (under `$XDG_STATE_HOME` when
   set): the access token, `bridge.log`, `pane-profiles.json`
 - the config dir printed above (`config.json`)
-- `~/.local/share/herdr-yoicks` (`herdr-agentweb` from before the rename; under `$XDG_DATA_HOME`
-  when set): the orchestrator directories, including your own `local.md` files
+- `~/.local/share/herdr-yoicks` (under `$XDG_DATA_HOME` when set): the orchestrator directories,
+  including your own `local.md` files
 
 ### Starting
 
@@ -365,8 +339,7 @@ default.
 ### Orchestrators
 
 For each entry of `orchestrators`, the plugin keeps a directory,
-`~/.local/share/herdr-yoicks/orchestrators/<name>/` (under `$XDG_DATA_HOME` when set;
-`herdr-agentweb` in place of `herdr-yoicks` while that one, from before the rename, exists), writing
+`~/.local/share/herdr-yoicks/orchestrators/<name>/` (under `$XDG_DATA_HOME` when set), writing
 it when the bridge starts and again each time it starts that orchestrator:
 
 - `CLAUDE.md` — names the orchestrator and imports the two files below.
@@ -420,19 +393,6 @@ usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable) and what w
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
 fresh session); the Home's warnings and Settings show the same steps.
-
-**Older setups.** Without `orchestrators`, nothing changes. The single `"orchestrator_dir": "<dir>"`,
-or else the old default `~/.local/share/herdr-agentweb/dispatcher` if it exists, is still the one
-orchestrator, named `default`. It runs your own `CLAUDE.md` from that directory, which the plugin
-never writes to. If its `.claude/settings.json` has `blockReadsOutsideWorkingDirectories` (an
-earlier README suggested it), remove it, since it refuses every `yoicks` call, and deny the
-listers above instead. To move to managed orchestrators:
-
-1. Add `orchestrators` to the config and restart the bridge. The plugin creates their directories.
-2. Put anything from your old `CLAUDE.md` that is still yours into each `local.md`. The bundled
-   rules replace the parts about driving herdr.
-3. Start them (phone or `<plugin dir>/bin/yoicks orchestrator start <name>`) and answer the folder-trust
-   question once. Then end the old orchestrator and delete its directory.
 
 ## Security model
 
@@ -506,7 +466,7 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   (`[{ name, label, paneId, agents, mode, headless }]` in config order; `paneId` is the agent running in its dir, or
   `null`; `agents` the agent panes of its Claude account, itself included, or `null` when unknown;
   `mode` is `"tui"`, or `"headless"` for one the bridge runs itself as `claude -p` (config
-  `"mode": "headless"`, managed entries only), whose `paneId` is `"hl:<name>"` while it runs and whose
+  `"mode": "headless"`), whose `paneId` is `"hl:<name>"` while it runs and whose
   `headless` is `{ status: stopped|idle|working|blocked|done|error, completionSeq, pending: { id, questions } | null,
   usage: { fiveHour, sevenDay, fable: { utilization (0–1), resetsAt (ms) } | null, contextPct | null, at } | null,
   warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }] }`, `null` for a tui one)

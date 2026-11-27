@@ -67,8 +67,8 @@ func contractState() ClientState {
 	}
 	account := "/home/u/.claude/projects"
 	defs := []OrchestratorDef{
-		{Name: "personal", Label: "Personal", Dir: "/home/u/.local/share/herdr-yoicks/orchestrators/personal", Managed: true},
-		{Name: "work", Label: "", Dir: "/home/u/.local/share/herdr-yoicks/orchestrators/work", Managed: true},
+		{Name: "personal", Label: "Personal", Dir: "/home/u/.local/share/herdr-yoicks/orchestrators/personal"},
+		{Name: "work", Label: "", Dir: "/home/u/.local/share/herdr-yoicks/orchestrators/work"},
 	}
 	views := findOrchestrators(s, defs, map[string]*string{"p1": &account, "p3": &account, "p4": &account})
 	return ClientState{State: s, Orchestrators: views, OrchestratorPaneID: views[0].PaneID}
@@ -78,7 +78,7 @@ func contractState() ClientState {
 // from its runner (a state message of its own, so the web tests' state stays as it is).
 func withHeadless(state ClientState) ClientState {
 	const now = 1795478400000
-	def := OrchestratorDef{Name: "pilot", Label: "Pilot", Dir: "/home/u/.local/share/herdr-yoicks/orchestrators/pilot", Managed: true, Mode: "headless"}
+	def := OrchestratorDef{Name: "pilot", Label: "Pilot", Dir: "/home/u/.local/share/herdr-yoicks/orchestrators/pilot", Mode: "headless"}
 	v := findOrchestrators(state.State, []OrchestratorDef{def}, nil)[0]
 	v.PaneID, v.Agents = new("hl:pilot"), []string{"p1", "p3", "p4"}
 	v.Headless = &HeadlessView{Status: "blocked", CompletionSeq: 3, Pending: &HeadlessPending{ID: "1a2b3c4d", Questions: []AskQuestion{{

@@ -65,7 +65,7 @@ func TestClaudeLive(t *testing.T) {
 		}
 	}
 	dir := filepath.Join(t.TempDir(), "orch")
-	def := OrchestratorDef{Name: "live", Label: "Live", Dir: dir, Managed: true, Mode: "headless"}
+	def := OrchestratorDef{Name: "live", Label: "Live", Dir: dir, Mode: "headless"}
 	tb := startBridge(t, Config{StateDir: t.TempDir(), Orchestrators: []OrchestratorDef{def}}, nil, func(s *server) {
 		h = s.headless["live"]
 		h.extraArgs, h.lineHook = []string{"--model", "haiku"}, hook

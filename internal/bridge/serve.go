@@ -29,7 +29,7 @@ func herdrVersionText(version string, protocol int) string {
 	return text
 }
 
-// Serve runs the bridge until SIGINT or SIGTERM: it writes the managed orchestrators'
+// Serve runs the bridge until SIGINT or SIGTERM: it writes the orchestrators'
 // dirs, reads (or makes) the token, serves HTTP + WS on the configured address and
 // keeps a herdr connection. web is the built web UI, rules the bundled
 // orchestrator/rules.md.
@@ -37,12 +37,9 @@ func Serve(web fs.FS, rules string) error {
 	log.SetFlags(0) // the lines go to bridge.log as they are, like console.error's
 	cfg := loadConfig()
 
-	// managed orchestrators' dirs exist from the start, so their local.md can be
+	// the orchestrators' dirs exist from the start, so their local.md can be
 	// edited before the first start (each start writes them again)
 	for _, def := range cfg.Orchestrators {
-		if !def.Managed {
-			continue
-		}
 		if err := ensureOrchestratorDir(def, rules); err != nil {
 			log.Printf("orchestrator %s: could not write %s: %s", def.Name, def.Dir, err)
 		}

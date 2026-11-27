@@ -49,7 +49,7 @@ compares:
 - the HTTP exchange and WS messages as JSON values (key order doesn't count; WS
   messages received as a set);
 - the CLI's arguments, exit code, stdout and stderr exactly, and the fake
-  `herdr`/`gh` calls. Usage lines recorded from the TypeScript say `yoicks.js` (renamed from `agentwebctl.js`)
+  `herdr`/`gh` calls. Usage lines recorded from the TypeScript say `yoicks.js`
   where the Go ones say `yoicks`; `status`'s trailing troubleshooting lines and its
   `ping` aren't compared (they depend on the machine);
 - the herdr requests in order. A run of the same method counts as a set (a fan-out

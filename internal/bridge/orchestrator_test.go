@@ -12,7 +12,7 @@ import (
 )
 
 func testOrchestratorDef(over func(*OrchestratorDef)) OrchestratorDef {
-	d := OrchestratorDef{Name: "work", Label: "Work", Dir: "/data/orchestrators/work", Env: map[string]string{}, Managed: true}
+	d := OrchestratorDef{Name: "work", Label: "Work", Dir: "/data/orchestrators/work", Env: map[string]string{}}
 	if over != nil {
 		over(&d)
 	}
@@ -146,14 +146,6 @@ func TestStartOrchestrator(t *testing.T) {
 			if !slices.Equal(calls, []string{"agent.list"}) {
 				t.Errorf("calls %v", calls)
 			}
-		})
-
-		t.Run("refuses a legacy (unmanaged) dir that does not exist, without writing anything", func(t *testing.T) {
-			var calls []string
-			_, _, err := startOrchestrator(rpcWith(`[]`, &calls), testOrchestratorDef(func(d *OrchestratorDef) {
-				d.Managed, d.Dir = false, "/nonexistent/orch"
-			}), "")
-			lifecycleError(t, err, 404)
 		})
 	})
 }
