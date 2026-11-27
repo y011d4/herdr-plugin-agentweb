@@ -136,6 +136,26 @@ describe('terminal', () => {
     vi.useRealTimers();
   });
 
+  it('a hold ends a gesture going on (no fling after it) and keeps what it deferred until released', async () => {
+    vi.useFakeTimers();
+    term.setAppScroll(true);
+    touch(el, 'touchstart', [[10, 300]]);
+    term.render('deferred under a finger');
+    term.setHeld(true);
+    touch(el, 'touchend');
+    assert.ok(!/deferred under a finger/.test(live().textContent!), 'not drawn while held');
+    term.setHeld(false);
+    assert.match(live().textContent!, /deferred under a finger/, 'drawn once released');
+    touch(el, 'touchstart', [[10, 300]]);
+    term.setHeld(true);
+    term.setHeld(false);
+    for (let y = 280; y > 100; y -= 20) { vi.advanceTimersByTime(16); touch(el, 'touchmove', [[10, y]]); }
+    touch(el, 'touchend');
+    await vi.advanceTimersByTimeAsync(2000);
+    assert.equal(reqs.filter((r) => r.url.endsWith('/scroll')).length, 0, 'the gesture from before the hold scrolls nothing');
+    vi.useRealTimers();
+  });
+
   it('renders a read that lands while it lives', async () => {
     const refreshed = term.refresh();
     reads()[0].answer(200, read[1]);
