@@ -7,6 +7,7 @@ import { clearToasts, getToasts } from '../src/notify.ts';
 import { keptTasks, setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
 import { orchestratorOfPane } from '../src/routes.ts';
+import { WIDE_QUERY } from '../src/theme.ts';
 import { AgentDrawer } from '../src/ui/AgentDrawer.tsx';
 import { homeTopbar, Pane, paneViewOnState } from '../src/ui/Pane.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
@@ -295,6 +296,15 @@ describe('quick keys', () => {
 });
 
 describe('pane header', () => {
+  it("is a modal sheet on a phone; on a wide screen no modal (the sidebar beside it is usable)", async () => {
+    await show('p2');
+    assert.equal($('[role="dialog"]').getAttribute('aria-modal'), 'true');
+    await unmount();
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === WIDE_QUERY, addEventListener() {}, removeEventListener() {} }));
+    await show('p2');
+    assert.equal($('[role="dialog"]').getAttribute('aria-modal'), 'false');
+  });
+
   it('names the agent and where it is, keeps that while the pane is gone, and ✕ closes it', async () => {
     location.hash = '#/pane/p1'; // opened afresh: its close replaces it with the screen under it
     await show('p1', false, '#/agents/personal');
