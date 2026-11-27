@@ -2353,6 +2353,8 @@ function block(): number {
 
 // ── shots: the PR screenshots (tools/shots-fixture.ts's scenes; see the header) ──────────────────────
 
+const SHOTS_PORT = 8397;
+
 const SIZES = [
   { id: 'phone', metrics: { width: 390, height: 844, deviceScaleFactor: 2, mobile: true } },
   { id: 'pc', metrics: { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false } },
@@ -2360,7 +2362,7 @@ const SIZES = [
 
 /** A bridge's stand-in over the fixture, loopback only: its reads, a /ws that sends the State once, and the web build
  *  use() last chose (but sw.js: a service worker would only add a step). Writes answer ok and change nothing. One
- *  server for both builds: the origin shows on screen (Settings' Bridge URL). */
+ *  server for both builds, on SHOTS_PORT in every run: the origin shows on screen (Settings' Bridge URL). */
 async function fixtureServer(): Promise<{ url: string; use: (dist: string) => void; close: () => void }> {
   const f = await import('./shots-fixture.ts');
   let root = '';
@@ -2407,7 +2409,10 @@ async function fixtureServer(): Promise<{ url: string; use: (dist: string) => vo
     sock.on('data', () => {});
     sock.on('error', () => {});
   });
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  // a fixed port: the origin is on screen, and the gate compares a screen's bytes across runs (the digest the
+  // comment shows against the one the label's run gets), so a port of the run's own would change them
+  await new Promise<void>((r, j) => { server.once('error', j); server.listen(SHOTS_PORT, '127.0.0.1', r); })
+    .catch((e) => { throw env(`shots: 127.0.0.1:${SHOTS_PORT}: ${e.code ?? e} (another shots run?)`); });
   return {
     url: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
     use: (dist) => { root = path.resolve(dist); },
