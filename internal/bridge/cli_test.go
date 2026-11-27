@@ -6,6 +6,7 @@ package bridge
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -257,18 +258,26 @@ func TestRemoveOwnWorktree(t *testing.T) {
 		eq(t, out, "removed "+wt+" (no branch deleted: its reflog and name show no local branch it was made for)")
 		eq(t, gone(wt), true)
 	})
-	t.Run("detached, made for feat/x, now gone: a merged feat-x, named alike and checked out in it later, stays", func(t *testing.T) {
-		repo, wt, rpc, slow := setup(t, "feat/x")
-		mergeAndDetach(t, repo, wt, "feat/x")
-		gitT(t, "-C", repo, "branch", "-q", "feat-x", "origin/main")
-		gitT(t, "-C", wt, "checkout", "-q", "feat-x")
-		gitT(t, "-C", wt, "checkout", "-q", "--detach")
-		gitT(t, "-C", repo, "branch", "-q", "-D", "feat/x")
-		out, err := removeOwnWorktree(rpc, slow, own, wt)
-		eq(t, err, nil)
-		eq(t, out, "removed "+wt+" (no branch deleted: its reflog and name show no local branch it was made for)")
-		eq(t, hasBranch(repo, "feat-x"), true)
-	})
+	for _, expired := range []bool{false, true} {
+		t.Run(fmt.Sprintf("detached, made for feat/x, now gone: a merged feat-x, named alike and checked out in it later, stays (reflog expired up to it: %v)", expired), func(t *testing.T) {
+			repo, wt, rpc, slow := setup(t, "feat/x")
+			mergeAndDetach(t, repo, wt, "feat/x")
+			gitT(t, "-C", repo, "branch", "-q", "feat-x", "origin/main")
+			gitT(t, "-C", wt, "checkout", "-q", "feat-x")
+			gitT(t, "-C", wt, "checkout", "-q", "--detach")
+			gitT(t, "-C", repo, "branch", "-q", "-D", "feat/x")
+			if expired { // only the newest entry, leaving feat-x, is left
+				for i := strings.Count(gitT(t, "-C", wt, "reflog", "--format=%gs", "HEAD"), "\n") - 1; i > 0; i-- {
+					gitT(t, "-C", wt, "reflog", "delete", fmt.Sprintf("HEAD@{%d}", i))
+				}
+				eq(t, gitT(t, "-C", wt, "reflog", "--format=%gs", "HEAD")[:31], "checkout: moving from feat-x to")
+			}
+			out, err := removeOwnWorktree(rpc, slow, own, wt)
+			eq(t, err, nil)
+			eq(t, out, "removed "+wt+" (no branch deleted: its reflog and name show no local branch it was made for)")
+			eq(t, hasBranch(repo, "feat-x"), true)
+		})
+	}
 	t.Run("detached at a commit not in origin/main: refused", func(t *testing.T) {
 		repo, wt, rpc, slow := setup(t, "ahead")
 		gitT(t, "-C", wt, "checkout", "-q", "--detach")

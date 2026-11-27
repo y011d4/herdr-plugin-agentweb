@@ -933,10 +933,15 @@ func removeOwnWorktree(rpc, slow Rpc, own, path string) (string, error) {
 			return refuse("its HEAD is detached at a commit not in " + upstream)
 		}
 		log, _ := git("reflog", "--format=%gs", "HEAD")
+		lines := strings.Split(jsTrim(log), "\n") // newest first
 		first := ""
-		for _, l := range strings.Split(log, "\n") { // newest first
-			if from, ok := strings.CutPrefix(l, "checkout: moving from "); ok {
-				first, _, _ = strings.Cut(from, " ")
+		// only a reflog back to `git worktree add`'s own entry: with older ones expired,
+		// the oldest checkout left needn't be the first
+		if lines[len(lines)-1] == "reset: moving to HEAD" {
+			for _, l := range lines {
+				if from, ok := strings.CutPrefix(l, "checkout: moving from "); ok {
+					first, _, _ = strings.Cut(from, " ")
+				}
 			}
 		}
 		name, named := strings.CutPrefix(filepath.Base(dir), filepath.Base(ws.Worktree.RepoRoot)+"-wt-")
