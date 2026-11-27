@@ -315,6 +315,9 @@ func (r *headlessRunner) approve(ctx context.Context, req *mcp.CallToolRequest, 
 		r.log("approve %s: denied", in.ToolName)
 		return textResult(`{"behavior":"deny","message":"yoicks allows no tool but its own"}`, false), nil, nil
 	}
+	if r.approveHook != nil {
+		r.approveHook()
+	}
 	p := r.ask(in.Input, epochOf(ctx))
 	if p == nil {
 		return textResult(`{"behavior":"deny","message":"this orchestrator's session has ended"}`, false), nil, nil
@@ -324,6 +327,9 @@ func (r *headlessRunner) approve(ctx context.Context, req *mcp.CallToolRequest, 
 	for n := 1.0; ; n++ {
 		select {
 		case res := <-p.reply:
+			if r.approveHook != nil {
+				r.approveHook()
+			}
 			b, _ := json.Marshal(res)
 			return textResult(string(b), false), nil, nil
 		case <-ctx.Done(): // the call was cancelled (an interrupt) or its session ended
