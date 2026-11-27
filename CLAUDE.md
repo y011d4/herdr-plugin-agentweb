@@ -605,13 +605,24 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   changed" is not proof by itself on a busy pane — assert on content moving
   to *older* lines and on the composer staying clean.
 - **webcheck** (`tools/webcheck.ts`: headless Chrome over CDP, no dependencies) is the gate before
-  deploying a web change: all of Tier 1 passes.
+  deploying a web change: all of Tier 1 passes. CI's `webcheck` job runs Tier 1 on every PR, over a
+  private herdr (the release binary of `HERDR_VERSION`, pinned by SHA-256 in ci.yml). By hand, the same,
+  in a root of your own (its own lock: no other worker's run to wait for) and nowhere production shows:
   ```bash
+  export WEBCHECK_ROOT=$(mktemp -d /tmp/wc-XXXX)  # short: the private herdr's socket lives under it
   go build -o "$FC/claude" ./tools/fakeclaude   # FC: any dir; the H items' wc-h1 runs it
-  node tools/webcheck.ts preview start --bin bin/yoicks --port 8395 --fake-claude "$FC/claude"  # throwaway bridge over the real herdr
-  node tools/webcheck.ts check --base http://127.0.0.1:8395 --tier 1  # lock, setup, checks, teardown
-  node tools/webcheck.ts preview stop --port 8395
+  node tools/webcheck.ts herdr start            # a private headless herdr for this root
+  node tools/webcheck.ts preview start --bin bin/yoicks --port 8396 --fake-claude "$FC/claude"  # a port of your own
+  node tools/webcheck.ts check --base http://127.0.0.1:8396 --tier 1  # lock, setup, checks, teardown
+  node tools/webcheck.ts preview stop --port 8396 && node tools/webcheck.ts herdr stop
   ```
+  The private herdr (`herdr server` under `$WC_ROOT/herdr` as its HOME and XDG dirs: none of the
+  desktop herdr's config, so not its plugins, which would start a second yoicks) takes every herdr call
+  of that root and its previews while `$WC_ROOT/herdr` exists; stopped, they fail rather than reach the
+  desktop's. A preview and a run stay on the herdr they began on: `herdr start|stop` refuse while the root
+  has a preview or an unfinished run, a run refuses a preview of the other herdr, and the default root
+  (every worker's) gets none. Without `herdr start` (Tier 2, which needs the desktop's HOME and direnv),
+  the preview is a throwaway bridge over the real herdr.
   Each check prints `PASS|FAIL <id> <measured> <condition>`; the exit code is the failure count.
   `--only P10,P12` picks checks; `--profile DIR` reuses a Chrome profile, for the old-SW round trip
   (`P2.old` → `P2.upgrade` → `P2.downgrade`, the old build served with `preview start --web-dir`).
@@ -628,8 +639,8 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
     them); Tier 2's H-T2 the real `wc-h2`, which a preview *without* `--fake-claude` (and with the
     `.envrc`) has, answering on haiku (its dir's `settings.local.json`; H-T2 stops if the transcript
     says another model). Both with `YOICKS_HEADLESS_NO_TOOLS=1`; a run stops the ones it started.
-  - Safety: the preview controls the real herdr, and production (so the phone, notifications
-    included) sees the scratch agents: say so before a run. It mutates only what the run created
+  - Safety: over the real herdr (no `herdr start`), the preview controls it, and production (so the
+    phone, notifications included) sees the scratch agents: say so before such a run. It mutates only what the run created
     and recorded whose live tab or workspace label starts with `wc-` (one guard, which the page's
     own API requests pass too), and refuses port 8390. Runs and `preview start`/`stop` take turns
     on `$WC_ROOT/lock`, held by a separate `flock` process the bridge and Chrome never inherit.
