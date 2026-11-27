@@ -27,6 +27,7 @@ type purposeStore struct {
 	path     string
 	mu       sync.Mutex
 	m        map[string]purposeEntry // by pane id
+	last     *State                  // the last connected State Prune saw (nil: none yet)
 	onChange func()
 }
 
@@ -59,14 +60,14 @@ func checkPurpose(p string) (string, error) {
 	return p, nil
 }
 
-// Set makes purpose (checkPurpose's) the agent in paneID's; "" removes it. seen: the agent has
-// been there a while (a re-task), so the State has it; false for one just started.
-func (s *purposeStore) Set(paneID, purpose string, seen bool) {
+// Set makes purpose (checkPurpose's) the agent in paneID's; "" removes it. The entry starts seen
+// when the last State already has that agent (a re-task: an exit meanwhile still prunes it).
+func (s *purposeStore) Set(paneID, purpose string) {
 	s.mu.Lock()
 	if purpose == "" {
 		delete(s.m, paneID)
 	} else {
-		s.m[paneID] = purposeEntry{Purpose: purpose, Seen: seen}
+		s.m[paneID] = purposeEntry{Purpose: purpose, Seen: s.last != nil && hasAgent(s.last, paneID)}
 	}
 	s.persist()
 	s.mu.Unlock()
@@ -94,10 +95,10 @@ func (s *purposeStore) Prune(st *State) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.last = st
 	changed := false
 	for id, e := range s.m {
-		p := st.Pane(id)
-		switch live := p != nil && p.Agent != nil; {
+		switch live := hasAgent(st, id); {
 		case live && !e.Seen:
 			e.Seen = true
 			s.m[id] = e
@@ -118,4 +119,9 @@ func (s *purposeStore) persist() {
 	if os.MkdirAll(filepath.Dir(s.path), 0o700) == nil {
 		writeFile0600(s.path, b)
 	}
+}
+
+func hasAgent(st *State, paneID string) bool {
+	p := st.Pane(paneID)
+	return p != nil && p.Agent != nil
 }

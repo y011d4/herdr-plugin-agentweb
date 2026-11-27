@@ -44,11 +44,12 @@ func TestPurposeStore(t *testing.T) {
 	}
 	shell := func(id string) RawPane { return RawPane{PaneID: id, TabID: "t1", WorkspaceID: "w1"} }
 
-	s.Set("p1", "テストを直す", false)
-	s.Set("p2", "docs", false)
-	s.Set("p3", "gone", false)
-	s.Set("p3", "", false)      // none: removed
-	s.Set("p4", "retask", true) // a re-task: its agent was there, and has exited since
+	s.Prune(state(true, agent("p4")))
+	s.Set("p1", "テストを直す")
+	s.Set("p2", "docs")
+	s.Set("p3", "gone")
+	s.Set("p3", "")       // none: removed
+	s.Set("p4", "retask") // a re-task of an agent the State has: an exit before the next push still prunes it
 	if changes != 5 {
 		t.Errorf("%d changes", changes)
 	}
