@@ -13,9 +13,10 @@ import { createRoot } from 'react-dom/client';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { emit, setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
+import { WIDE_QUERY } from '../src/theme.ts';
 import { App, start } from '../src/ui/App.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
-import { mantine } from './render.ts'; // and the act environment
+import { fakeMedia, mantine } from './render.ts'; // and the act environment
 
 // The socket: the shell's message handler (the first to subscribe; pane views come later), and each
 // watch sent (the pane, its mode, hidden).
@@ -33,6 +34,8 @@ const reqs: Req[] = [];
 vi.stubGlobal('fetch', (url: string, init: RequestInit = {}) => new Promise((res) => {
   reqs.push({ method: init.method ?? 'GET', url, answered: false, answer: (status, body) => res({ ok: status < 400, status, json: async () => body }) });
 }));
+// A phone's width until a test says otherwise: no PC sidebar.
+const setWide = fakeMedia(WIDE_QUERY, false);
 const settle = (ms = 20): Promise<void> => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
 /** Answers every open request `${method} ${url}` containing `match` (StrictMode starts a pane's view twice). */
 async function answer(match: string, body: unknown, status = 200): Promise<void> {
@@ -391,8 +394,25 @@ describe('App', () => {
     assert.equal(store.view.activePaneId, 'hl:pilot');
   });
 
-  it('a 401 shows the token screen with its message, without the topbar or the banner', async () => {
+  it("draws the PC sidebar on a wide screen only, before the shell's elements, which stay as it comes and goes", async () => {
     await go('#/agents');
+    const shell = (): Array<HTMLElement | null> => ['#topbar', '#reconnect-banner', '#screen'].map($);
+    const before = shell();
+    const list = $('#screen-agents');
+    assert.ok(!$('#sidebar'), 'no sidebar');
+    await setWide(true);
+    assert.ok($('#app > #sidebar')!.nextElementSibling === before[0], 'first in #app, before #topbar');
+    assert.ok($('#sidebar [data-home="personal"]'), 'its Homes');
+    await setWide(false);
+    assert.ok(!$('#sidebar'), 'no sidebar');
+    await setWide(true); // and the 401 below goes to the token screen with it wide
+    assert.ok(shell().every((el, i) => el === before[i]), '#topbar, #reconnect-banner and #screen are the same elements');
+    assert.ok($('#screen-agents') === list, 'the screen on show stays');
+  });
+
+  it('a 401 shows the token screen with its message, without the topbar or the banner (or the PC sidebar)', async () => {
+    await go('#/agents');
+    assert.ok($('#sidebar'), 'wide, from the test before');
     store.wsConnected = false;
     await act(async () => emit()); // the link is down
     assert.equal($('#reconnect-banner')!.classList.contains('visible'), true);
@@ -402,5 +422,6 @@ describe('App', () => {
     assert.equal(localStorage.getItem('herdr_token'), null);
     assert.equal($('#topbar')!.style.display, 'none');
     assert.equal($('#reconnect-banner')!.classList.contains('visible'), false);
+    assert.ok(!$('#sidebar'), 'no sidebar over the token screen');
   });
 });

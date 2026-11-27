@@ -69,7 +69,7 @@ All in `internal/bridge/` (one package):
   (socket, ping, backoff, state polling, watches) and `notify.ts` (the toast store: short-lived
   results of the user's actions, and the OS notifications; a status push or an alert never
   toasts). The screens are in `web/src/ui/`: Settings, Token, the agents list `Dashboard.tsx`,
-  `Pane.tsx` and `PromptPanel.tsx`; `Toasts.tsx` draws into `#toast-container` and `Modals.tsx`
+  `Pane.tsx` and `PromptPanel.tsx`, and on a PC the sidebar `Sidebar.tsx` beside them; `Toasts.tsx` draws into `#toast-container` and `Modals.tsx`
   (Confirm, on Mantine's Modal; Rename, New agent, the image preview) is portalled into `#modal-root`;
   a pane's ⋮ is a Mantine Menu (`Pane.tsx`'s `AgentMenu`, its dropdown in `#modal-root` too). An opened
   pane's body is `pane-view.ts` (`createPaneView` → setMode/onState/echo/destroy, one per opened
@@ -437,6 +437,13 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
 - **Wide screens (a PC)**: the PC layout is `web/style.css`'s last block, `@media (min-width:
   1024px)` (the `lg` breakpoint); none of it applies below 1024px (every phone, landscape too), so the phone layout stays
   as it is. It keeps the scroll containers full width and makes the readable column with their padding.
+  At that width (`WIDE_QUERY`, `theme.ts`; theme.test checks it against style.css and `lg`) the shell
+  also draws the sidebar (`ui/Sidebar.tsx`) on every screen but the token one: each orchestrator's
+  Home a heading over its account's agents (`homeGroups`), then Other. It comes first in `#app`, in a
+  slot of its own, so `#topbar`/`#reconnect-banner`/`#screen` stay the same elements as it comes and
+  goes; while it is there `#app` is a two-column grid (`#app:has(> #sidebar)`) and `--sidebar-w` is its
+  width, for an overlay that should leave it usable. Like the list it holds still while a finger is
+  down (`useHeldState`), and it opens an agent the list's way (`openPane`).
 
 ## Security invariants
 
