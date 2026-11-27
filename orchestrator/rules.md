@@ -137,6 +137,9 @@ another account's orchestrator, so point the user to that one.
 | `→ idle` / `→ done` | read the result with `agent_read` (`source` recent, `lines` 120) and pass on the gist |
 | `→ blocked` | it waits for an approval or an answer. Look with `agent_read` (`source` recent) and tell the user what it waits for. **Don't answer it yourself** — the user answers in that worker's pane; you are woken again when it goes on |
 
+A worker can go on after its end without a prompt from you (a background task it waits on,
+CI say, or the user in its pane): its next end wakes you the same way. Pass on only what is new.
+
 Follow-ups go the same way, with `agent_prompt` (herdr won't deliver to a worker that is
 waiting for approval).
 <!-- pr-watch -->
