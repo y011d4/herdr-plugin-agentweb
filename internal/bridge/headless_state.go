@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -53,7 +54,17 @@ type hlModel struct {
 	yoicksUses    map[string]string // the yoicks tool_use ids awaiting their result → the tool
 	check         *ClaudeCheck      // the last claude check (the version warning tells it)
 	version       string            // the Claude Code version it last reported (the version warning's)
+	models        []HeadlessModel   // the models Claude Code offers (its answer to initRequest)
 }
+
+// initRequest is the request_id of the initialize control request each child gets at its start:
+// its answer lists the models Claude Code offers this account (and the account's email: only
+// the models are read).
+const initRequest = "yoicks-init"
+
+// modelRe is a model value fit for --model: one of Claude Code's aliases or ids (opus,
+// claude-opus-4-8, opus[1m]), never a flag.
+var modelRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,99}$`)
 
 type hlWarning struct{ Kind, Message string }
 
@@ -64,6 +75,7 @@ type hlStep struct {
 	Init     string // the first init's log line
 	Reply    any    // a control_response to write back
 	Acked    string // the request_id a control_response answered
+	AckError string // its error, when it is one
 	Log      string // a line for bridge.log (keys and kinds only, never content)
 	Ask      string // the tool_use id of an AskUserQuestion it asked
 	CanUse   *hlCanUse
@@ -208,7 +220,23 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 			st.Reply = controlResponse(id, map[string]any{"subtype": "error", "error": fmt.Sprintf("yoicks: unsupported control request %v", req["subtype"])})
 		}
 	case "control_response":
-		st.Acked, _ = ev["response"].(map[string]any)["request_id"].(string)
+		resp := ev["response"].(map[string]any)
+		st.Acked, _ = resp["request_id"].(string)
+		if resp["subtype"] == "error" {
+			st.AckError, _ = resp["error"].(string)
+			st.AckError = firstNonEmpty(st.AckError, "an error")
+		}
+		inner, _ := resp["response"].(map[string]any)
+		if list, ok := inner["models"].([]any); ok && st.Acked == initRequest {
+			m.models = nil
+			for _, it := range list {
+				it, _ := it.(map[string]any)
+				str := func(k string) string { s, _ := it[k].(string); return s }
+				if modelRe.MatchString(str("value")) {
+					m.models = append(m.models, HeadlessModel{str("value"), str("displayName"), str("description"), str("resolvedModel")})
+				}
+			}
+		}
 	}
 	return st
 }
