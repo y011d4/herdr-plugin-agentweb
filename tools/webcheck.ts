@@ -1032,7 +1032,8 @@ async function p10(c: Ctx) {
   result(c, wb.length === 1 && wb[0].direction === 'down' && wb[0].steps === 3, 'P10.app-wheel', `posts=${js(wb)}`, 'a PC wheel deltaY 90 POSTs exactly {down, 3}');
 
   await sleep(1000);
-  const tq = await pg.tapEl(`[...document.querySelectorAll('.qkey')].find((b) => b.textContent === '\\u2193')`);
+  const tq = Date.now(); // before the tap: its POST, even its answer, can come before tapEl returns
+  await pg.tapEl(`[...document.querySelectorAll('.qkey')].find((b) => b.textContent === '\\u2193')`);
   // the echo's two reads go out 120 and 500 ms after the key's POST /input is answered (terminal.ts echo), not after
   // the tap: under CPU load that answer alone takes a few hundred ms, so the window starts there
   const answered = await waitFn(() => pg.resps.find((r) => r.t >= tq && r.url.includes(`/api/panes/${enc(less)}/input`)), 3000, 20);
