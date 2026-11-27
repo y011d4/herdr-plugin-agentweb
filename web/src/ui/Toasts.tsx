@@ -1,7 +1,9 @@
 /**
  * ui/Toasts.tsx — the toast stack (notify.ts's store), drawn into #toast-container, oldest
- * first. A toast goes after 4s, on its ✕, or a right swipe past 72px.
+ * first, each one Mantine's Notification. A toast goes after 4s, on its ✕, or a right swipe past
+ * 72px. Only the toasts take taps: a tap between or beside them reaches the screen under them.
  */
+import { Notification } from '@mantine/core';
 import { useRef, useSyncExternalStore } from 'react';
 import { dismissToast, getToasts, removeToast, subscribeToasts, type Toast } from '../notify.ts';
 
@@ -18,9 +20,17 @@ function ToastItem({ toast: t }: { toast: Toast }) {
   const style = (): CSSStyleDeclaration => el.current!.style;
 
   return (
-    <div
+    // #toast-container is the live region: no alert role of its own, so a toast is read out once
+    <Notification
       ref={el}
+      role="none"
       className={t.fading ? 'toast fading' : 'toast'}
+      title={t.title}
+      color="gray"
+      radius={10}
+      bg="dark.4"
+      closeButtonProps={{ 'aria-label': 'Dismiss', size: 'lg' }}
+      onClose={() => dismissToast(t.id)}
       onTouchStart={(e) => {
         s.startX = e.touches[0].clientX;
         s.dx = 0;
@@ -46,11 +56,7 @@ function ToastItem({ toast: t }: { toast: Toast }) {
         s.dx = 0;
       }}
     >
-      <div className="toast-main">
-        <div className="toast-header">{t.title}</div>
-        <div className="toast-body">{t.body}</div>
-      </div>
-      <button className="toast-close" aria-label="Dismiss" onClick={() => dismissToast(t.id)}>&#10005;</button>
-    </div>
+      {t.body}
+    </Notification>
   );
 }

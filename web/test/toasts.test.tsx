@@ -6,7 +6,8 @@ import { Toasts } from '../src/ui/Toasts.tsx';
 import { fire, render } from './render.ts';
 
 const toasts = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('.toast')];
-const titles = (): string[] => toasts().map((t) => t.querySelector('.toast-header')!.textContent!);
+const titles = (): string[] => toasts().map((t) => t.querySelector('.mantine-Notification-title')!.textContent!);
+const fading = (): boolean[] => toasts().map((t) => t.classList.contains('fading'));
 const tick = (ms: number): Promise<void> => fire(() => { vi.advanceTimersByTime(ms); });
 
 /** A finger from x=100 to 100+dx, then lifted. */
@@ -32,13 +33,16 @@ describe('Toasts', () => {
     vi.useRealTimers();
   });
 
-  it('draws each toast as the legacy markup', async () => {
+  it("draws each toast as Mantine's Notification: the title, the body as text, ✕ (Dismiss), no alert role", async () => {
     await fire(() => showToast('A <b>', 'x & y'));
     const [a] = toasts();
     assert.equal(a.parentElement!.children.length, 1);
-    assert.equal(a.outerHTML, '<div class="toast"><div class="toast-main">' +
-      '<div class="toast-header">A &lt;b&gt;</div><div class="toast-body">x &amp; y</div></div>' +
-      '<button class="toast-close" aria-label="Dismiss">✕</button></div>');
+    assert.ok(a.classList.contains('mantine-Notification-root'));
+    assert.equal(titles()[0], 'A <b>');
+    assert.equal(a.querySelector('.mantine-Notification-description')!.innerHTML, 'x &amp; y');
+    assert.ok(a.querySelector('button[aria-label="Dismiss"]'));
+    // the container is the live region: an alert role would have it read out twice
+    assert.equal(a.getAttribute('role'), 'none');
   });
 
   it('keeps the newest 10', async () => {
@@ -49,9 +53,9 @@ describe('Toasts', () => {
   it('fades out after 4s, then goes', async () => {
     await fire(() => showToast('brief', ''));
     await tick(3999);
-    assert.deepEqual(toasts().map((t) => t.className), ['toast']);
+    assert.deepEqual(fading(), [false]);
     await tick(1);
-    assert.deepEqual(toasts().map((t) => t.className), ['toast fading']);
+    assert.deepEqual(fading(), [true]);
     await tick(299);
     assert.equal(toasts().length, 1);
     await tick(1);
@@ -73,8 +77,8 @@ describe('Toasts', () => {
   it('✕ fades it out at once', async () => {
     await fire(() => showToast('t', ''));
     const [t] = toasts();
-    await fire(() => (t.querySelector('.toast-close') as HTMLElement).click());
-    assert.equal(t.className, 'toast fading');
+    await fire(() => t.querySelector<HTMLElement>('button[aria-label="Dismiss"]')!.click());
+    assert.deepEqual(fading(), [true]);
     await tick(300);
     assert.equal(toasts().length, 0);
   });
