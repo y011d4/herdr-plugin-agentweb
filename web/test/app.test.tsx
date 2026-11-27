@@ -15,7 +15,7 @@ import { emit, setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
 import { App, start } from '../src/ui/App.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
-import './render.ts'; // the act environment
+import { mantine } from './render.ts'; // and the act environment
 
 // The socket: the shell's message handler (the first to subscribe; pane views come later), and each
 // watch sent (the pane, its mode, hidden).
@@ -82,7 +82,7 @@ describe('App', () => {
     history.replaceState(null, '', '/');
     const replace = vi.spyOn(location, 'replace');
     start();
-    await act(async () => { createRoot(document.getElementById('app')!).render(<StrictMode><App /></StrictMode>); });
+    await act(async () => { createRoot(document.getElementById('app')!).render(<StrictMode>{mantine(<App />)}</StrictMode>); });
 
     assert.equal(document.querySelectorAll('#topbar').length, 1, 'one topbar');
     assert.equal(document.querySelectorAll('#screen').length, 1);

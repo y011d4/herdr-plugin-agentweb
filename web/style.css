@@ -44,11 +44,14 @@
   --font-mono: 'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
 }
 
-/* ── Reset ── */
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* The element resets are reset.css, under Mantine's layer (app.css). Mantine's baseline sets
+   `font: inherit` on every control; the app's own (the ones without Mantine's mantine-* classes)
+   keep the browser's font settings but the family and size, as before Mantine. No specificity, so
+   any rule below still wins. */
+:where(button, input, textarea, select):where(:not([class*='mantine-'])) {
+  font: revert;
+  font-family: inherit;
+  font-size: inherit;
 }
 
 html, body {
@@ -56,8 +59,10 @@ html, body {
   background: var(--color-bg);
   color: var(--color-text);
   font-family: system-ui, -apple-system, sans-serif;
-  font-size: 15px;
   line-height: 1.5;
+  /* the browser's default, over Mantine's baseline (antialiased) */
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   /* top-edge swipes belong to the app (history load), not pull-to-refresh */
   overscroll-behavior-y: none;
   -webkit-text-size-adjust: 100%;
@@ -71,25 +76,8 @@ html, body {
   overflow: hidden;
 }
 
-button {
-  font-family: inherit;
-  font-size: inherit;
-  cursor: pointer;
-  border: none;
-  background: none;
-  color: inherit;
-}
-
-input, textarea {
-  font-family: inherit;
-  font-size: inherit;
-  color: inherit;
-}
-
-a {
-  color: var(--color-accent);
-  text-decoration: none;
-}
+/* 15px text, on the body: the root stays 16px, for Mantine's and Tailwind's rem (theme.ts) */
+body { font-size: 15px; }
 
 /* ── Layout shell ── */
 #app {
