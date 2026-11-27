@@ -18,6 +18,7 @@ import { showToast } from '../notify.ts';
 import type { PaneView, PanelPrompt } from '../pane-view.ts';
 import type { PromptOption } from '../prompt.ts';
 import type { AskQuestion } from '../transcript.ts';
+import { Disclosure } from './ChatLog.tsx';
 import { BUILD } from './Settings.tsx';
 
 const COOLDOWN_MS = 1500; // the floor of the re-tap block after a sent answer
@@ -109,12 +110,11 @@ export function PromptPanel({ paneId, prompt, view }: { paneId: string; prompt: 
             onClick={() => { void tap(o); }} />
         ))}
       </Options>
-      <details className="chat-prompt-term" ref={term}>
-        <summary>Terminal</summary>
+      <Disclosure className="chat-prompt-term text-[11px]" ref={term} summary={<span className="inline-block pt-0.5 pb-1.5">Terminal</span>}>
         {screen === null
           ? <div className="chat-prompt-screen"><Loader size={20} /></div>
           : <div className="chat-prompt-screen" dangerouslySetInnerHTML={{ __html: screen }}></div>}
-      </details>
+      </Disclosure>
     </div>
   );
 }

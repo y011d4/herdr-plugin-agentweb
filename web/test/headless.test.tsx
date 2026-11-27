@@ -15,7 +15,7 @@ import { homeTopbar, Pane, usageParts } from '../src/ui/Pane.tsx';
 import { claudeCheckText } from '../src/ui/Settings.tsx';
 import { watchMessages } from '../src/watch.ts';
 import { messages, state as recorded, transcript } from './contract.gen.ts';
-import { chatHtml, fire, render } from './render.ts';
+import { chatDom, fire, render } from './render.ts';
 
 vi.mock('../src/ws.ts', () => ({
   onWsMessage: (_fn: (msg: WsMessage) => void) => () => {},
@@ -402,7 +402,9 @@ describe('around a headless orchestrator', () => {
   });
 
   it("shows the bridge's [yoicks] words as a dim line, escaped, the worker's name a button", () => {
-    assert.equal(chatHtml({ kind: 'user', text: '[yoicks] w-1: working → done <b>', sidechain: false, ts: null }),
-      '<div class="chat-item chat-notice">[yoicks] <button type="button" class="chat-notice-agent" data-agent="w-1">w-1</button>: working → done &lt;b&gt;</div>');
+    const line = chatDom([{ kind: 'user', text: '[yoicks] w-1: working → done <b>', sidechain: false, ts: null }]).querySelector('.chat-item.chat-notice')!;
+    assert.equal(line.textContent, '[yoicks] w-1: working → done <b>'); // its words as text: no <b> element
+    assert.equal(line.querySelector('b'), null);
+    assert.equal(line.querySelector<HTMLElement>('button.chat-notice-agent')!.dataset.agent, 'w-1');
   });
 });
