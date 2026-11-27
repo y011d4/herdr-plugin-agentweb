@@ -365,6 +365,57 @@ describe('pane header', () => {
   });
 });
 
+describe('read-only chat', () => {
+  const bar = () => $('#pane-input').closest<HTMLElement>('.input-bar')!;
+
+  it("a pane's chat has no composer or keys, its terminal has both; while it works ■ Interrupt sends Esc", async () => {
+    await show('p1'); // claude, working
+    assert.equal(bar().style.display, '', 'shown until the view is in chat (a terminal scrolled to its bottom stays so)');
+    await answer('/read?source=visible', read[1]);
+    await answer('/transcript', transcript[0]);
+    assert.equal(bar().style.display, 'none', 'chat: read-only');
+    await fire(() => $('#btn-pane-interrupt').click());
+    assert.deepEqual(posts('p1'), [{ keys: ['esc'] }]);
+    await fire(() => $('#btn-view-toggle').click());
+    assert.equal(bar().style.display, '', 'terminal: the composer and keys');
+    assert.ok(!$('#btn-pane-interrupt'), "■ is the chat's (the terminal has Esc)");
+    await type('typed in the terminal');
+    await fire(() => $('#btn-view-toggle').click());
+    assert.equal(bar().style.display, 'none');
+    await fire(() => $('#btn-view-toggle').click());
+    assert.equal(ta().value, 'typed in the terminal', 'hidden, not dropped');
+  });
+
+  it('■ only while it works', async () => {
+    const s = fresh();
+    s.workspaces[0].tabs[0].panes[0].agent!.status = 'idle';
+    setAppState(s);
+    await show('p1');
+    await answer('/read?source=visible', read[1]);
+    await answer('/transcript', transcript[0]);
+    assert.ok(!$('#btn-pane-interrupt'));
+    s.workspaces[0].tabs[0].panes[0].agent!.status = 'working';
+    await fire(() => setAppState(structuredClone(s)));
+    assert.ok($('#btn-pane-interrupt'));
+  });
+
+  it('a pane without a transcript (its terminal) has them; so has a chat with a kept first task', async () => {
+    await show('p2'); // a shell
+    await answer('/read?source=visible', read[1]);
+    await answer('/transcript', { available: false });
+    assert.equal(bar().style.display, '');
+    await unmount();
+    keptTasks.keep('p1', 'first task');
+    await show('p1');
+    await answer('/read?source=visible', read[1]);
+    await answer('/transcript', transcript[0]);
+    assert.equal(bar().style.display, '', 'chat, with the task to send');
+    assert.equal(ta().value, 'first task');
+    keptTasks.beginSend('p1', 'first task'); // sent: no longer kept, for the tests after this one
+    keptTasks.finishSend('p1', true);
+  });
+});
+
 describe('Home', () => {
   const home = async (s: AppState): Promise<void> => {
     setAppState(s);

@@ -449,6 +449,10 @@ body { font-size: 15px; }
   padding-bottom: var(--safe-bottom);
 }
 
+/* a read-only chat's one key (ui/Pane.tsx) */
+.pane-interrupt-bar { padding: 8px 12px calc(var(--safe-bottom) + 8px); }
+.pane-interrupt-bar .btn-secondary { width: 100%; }
+
 .input-row {
   display: flex;
   align-items: center;

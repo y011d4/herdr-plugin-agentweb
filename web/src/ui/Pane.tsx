@@ -5,6 +5,8 @@
  * the counts, Clear and Stop) and "doing now" line, the composer and the quick keys, around the pane's body. The
  * body (terminal, chat) is pane-view.ts, imperative, in #pane-view: created on mount, destroyed on
  * unmount, one at a time. Below it, while the view reports a prompt, the answer panel (PromptPanel.tsx).
+ * A pane's chat is read-only: its composer and keys show with its terminal (or for a kept first task),
+ * and while it works ■ Interrupt sends Esc.
  * A headless orchestrator's Home (hl:<name>: no herdr pane) sends through /api/orchestrators/:name/*,
  * has ■ on its "doing now" line, its usage and warnings on the status bar and its question (the
  * State's headless.pending) in HeadlessPrompt; no terminal and no keys.
@@ -131,6 +133,11 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
   }, [paneId]);
   // "doing now": only while the orchestrator works — its latest tool call, or "thinking…" between them
   const working = findPane(paneId)?.pane?.agent?.status === 'working';
+  // A pane's chat is for reading: typing and keys are its terminal's (one tap away), but for a first
+  // task New agent couldn't deliver (decided as it opens). Shown until the view is in chat: a bar
+  // showing up later would shrink a terminal already scrolled to its bottom (hiding one grows the chat).
+  const [kept] = useState(() => keptTasks.draft(paneId) !== null);
+  const readOnly = !home && mode === 'chat' && !kept;
   const hl = headlessName(paneId);
   const pending = hl ? state?.orchestrators?.find((o) => o.name === hl)?.headless?.pending : null;
   return (
@@ -150,7 +157,14 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
           {working ? (activity ? `▸ ${activity}` : 'thinking…') : null}
         </div>
       )}
-      <div className="input-bar">
+      {/* Esc: Claude Code's interrupt, the one key a read-only chat keeps */}
+      {readOnly && working && (
+        <div className="input-bar pane-interrupt-bar">
+          <button className="btn-secondary" id="btn-pane-interrupt" onClick={() => { void sendKey(paneId, { keys: ['esc'] }); }}>&#9632; Interrupt</button>
+        </div>
+      )}
+      {/* hidden, not unmounted: what is typed stays, as across a terminal ⇄ chat switch */}
+      <div className="input-bar" style={readOnly ? { display: 'none' } : undefined}>
         <Composer paneId={paneId} home={home} name={name} />
         {/* Home hides the terminal keys while chatting; they come back with the terminal */}
         <div className="quickkey-row" id="quickkey-row" style={home && mode !== 'terminal' ? { display: 'none' } : undefined}>
