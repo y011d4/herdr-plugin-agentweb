@@ -302,7 +302,8 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "todo", Description: "The user's to-do list, shown on their Home: what only the user can do and nothing else shows them " +
 		"(merge a PR, a decision outside this chat, a step on the PC, a login, a cleanup later on). Add items, mark items done by id, " +
-		"or call it with nothing to read the list; it returns the list. A worker waiting for an approval and your own questions show on their own: never add those."},
+		"or call it with nothing to read the list; it returns the list. A worker waiting for an approval and your own pending question show on their own: never add those; " +
+		"a decision the user owes that no pending question shows (one you asked in plain text, say) goes on."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in todoIn) (*mcp.CallToolResult, any, error) {
 			r.log("tool todo +%d -%d", len(in.Add), len(in.Done))
 			items, gone, err := r.todos.Apply(r.def.Name, in.Add, in.Done, nowMs())
