@@ -115,6 +115,19 @@ func waitUntil(t *testing.T, timeout time.Duration, what string, ok func() bool)
 	}
 }
 
+// clockWaiting waits until something waits d from now on clk (what names it).
+func clockWaiting(t *testing.T, clk *fakeherdr.FakeClock, what string, d time.Duration) {
+	t.Helper()
+	waitUntil(t, 10*time.Second, what+" waits "+d.String(), func() bool { return clk.Pending(d) })
+}
+
+// pass moves clk d on once something waits d from now on it (what names that).
+func pass(t *testing.T, clk *fakeherdr.FakeClock, what string, d time.Duration) {
+	t.Helper()
+	clockWaiting(t, clk, what, d)
+	clk.Advance(d)
+}
+
 // background requests the bridge sends on its own (state, seqs, accounts)
 var backgroundMethods = []string{"events.subscribe", "session.snapshot", "agent.list", "pane.process_info"}
 
@@ -412,6 +425,7 @@ func TestWSDeflatePingAndReadLimit(t *testing.T) {
 }
 
 func TestWSPaneWatch(t *testing.T) {
+	clock := fakeherdr.NewFakeClock()
 	b := startBridge(t, Config{}, func(m string, p json.RawMessage) (fakeherdr.Reply, bool) {
 		if m == "pane.read" {
 			if strings.Contains(string(p), `"gone"`) {
@@ -420,7 +434,7 @@ func TestWSPaneWatch(t *testing.T) {
 			return fakeherdr.Reply{Result: map[string]any{"read": map[string]any{"text": "screen"}}}, true
 		}
 		return fakeherdr.Reply{}, false
-	}, nil)
+	}, func(s *server) { s.clock = clock })
 	c, _, err := b.dial(t, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -430,11 +444,23 @@ func TestWSPaneWatch(t *testing.T) {
 	if m := readUntil(t, c, "pane_output"); m["paneId"] != "p1" || m["ansi"] != "screen" || m["appScroll"] != false {
 		t.Errorf("pane_output: %v", m)
 	}
-	write(t, c, `{"type":"unwatch_pane"}`)
-	time.Sleep(200 * time.Millisecond)
 	reads := func() int { return len(slices.DeleteFunc(b.sent(0), func(m string) bool { return m != "pane.read" })) }
+	pass(t, clock, "the watch", paneWatchInterval) // it looks again
+	waitUntil(t, 5*time.Second, "the second look", func() bool { return reads() == 2 })
+	write(t, c, `{"type":"unwatch_pane"}`)
+	write(t, c, `{"type":"ping"}`) // handled in order: by the pong, the unwatch was
+	readUntil(t, c, "pong")
+	b.srv.bmu.Lock()
+	for cl := range b.srv.clients {
+		cl.mu.Lock()
+		if cl.paneStop != nil {
+			t.Error("the pane watch goes on after unwatch_pane")
+		}
+		cl.mu.Unlock()
+	}
+	b.srv.bmu.Unlock()
 	before := reads()
-	time.Sleep(2 * paneWatchInterval)
+	clock.Advance(2 * paneWatchInterval)
 	if after := reads(); after != before {
 		t.Errorf("pane.read went on after unwatch_pane: %d, then %d", before, after)
 	}
@@ -518,6 +544,7 @@ func TestPressRefusedWithoutScrollState(t *testing.T) {
 }
 
 func TestWSTranscriptWatch(t *testing.T) {
+	clock := fakeherdr.NewFakeClock()
 	defer func(h string) { claudeHome = h }(claudeHome)
 	claudeHome = t.TempDir()
 	cwd := "/work/repo"
@@ -542,7 +569,7 @@ func TestWSTranscriptWatch(t *testing.T) {
 			pane["agent_session"] = map[string]any{"source": "herdr:claude", "value": session}
 		}
 		return fakeherdr.Reply{Result: map[string]any{"pane": pane}}, true
-	}, func(s *server) { s.transcriptResolve = 1500 * time.Millisecond })
+	}, func(s *server) { s.clock = clock })
 	c, _, err := b.dial(t, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -554,7 +581,6 @@ func TestWSTranscriptWatch(t *testing.T) {
 			defer b.srv.bmu.Unlock()
 			return len(b.srv.clients) == 0
 		})
-		time.Sleep(transcriptWatchInterval) // a poll in flight finishes before claudeHome is restored
 	}()
 	texts := func(m map[string]any) (out []string) {
 		items, _ := m["items"].([]any)
@@ -563,6 +589,12 @@ func TestWSTranscriptWatch(t *testing.T) {
 		}
 		return out
 	}
+	// n looks, each a poll interval after the last
+	looks := func(n int) {
+		for range n {
+			pass(t, clock, "the watch", transcriptWatchInterval)
+		}
+	}
 	write(t, c, `{"type":"watch_transcript","paneId":"p1"}`)
 	if m := readUntil(t, c, "transcript_items"); m["reset"] != true || m["sessionId"] != sessA || !slices.Equal(texts(m), []string{"one"}) {
 		t.Errorf("first: %v", m)
@@ -570,18 +602,21 @@ func TestWSTranscriptWatch(t *testing.T) {
 	f, _ := os.OpenFile(filepath.Join(dir, sessA+".jsonl"), os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString(line("two"))
 	f.Close()
+	pass(t, clock, "the watch", transcriptWatchInterval) // its next look tails the file
 	if m := readUntil(t, c, "transcript_items"); m["reset"] != false || !slices.Equal(texts(m), []string{"two"}) {
 		t.Errorf("appended: %v", m)
 	}
 	mu.Lock()
 	session = sessB // /clear: a new session file
 	mu.Unlock()
+	looks(4) // a resolve again 5 s after the last
 	if m := readUntil(t, c, "transcript_items"); m["reset"] != true || m["sessionId"] != sessB || !slices.Equal(texts(m), []string{"fresh"}) {
 		t.Errorf("after a session switch: %v", m)
 	}
 	mu.Lock()
 	session = ""
 	mu.Unlock()
+	looks(5)
 	if m := readUntil(t, c, "transcript_items"); m["available"] != false || m["reset"] != true {
 		t.Errorf("no session: %v", m)
 	}

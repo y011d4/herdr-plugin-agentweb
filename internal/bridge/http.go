@@ -94,8 +94,9 @@ type server struct {
 	claudeCheck atomic.Pointer[ClaudeCheck]
 	stop        chan struct{}
 	stopOnce    sync.Once
-	// how often a transcript watch re-resolves the session (a field so tests can shorten it)
-	transcriptResolve time.Duration
+	bg          sync.WaitGroup // the PC notifications (notification.show) in flight; tests wait for them
+	// the time a WS client's pane and transcript watches poll on (tests: a fakeherdr.FakeClock)
+	clock clock
 
 	// broadcast lock: the WS client set and the last state message sent (ws.go)
 	bmu       sync.Mutex
@@ -110,11 +111,11 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 		// exact variant: herdr's detected agent type can't tell "claude" from a custom
 		// "claude-yolo". Durable (herdr keeps the panes across a bridge restart);
 		// entries are dropped on stop/clear.
-		profiles:          createPaneProfileStore(path.Join(cfg.StateDir, "pane-profiles.json")),
-		stop:              make(chan struct{}),
-		transcriptResolve: transcriptResolveInterval,
-		clients:           map[*wsClient]struct{}{},
-		headless:          map[string]*headlessRunner{},
+		profiles: createPaneProfileStore(path.Join(cfg.StateDir, "pane-profiles.json")),
+		stop:     make(chan struct{}),
+		clock:    realClock{},
+		clients:  map[*wsClient]struct{}{},
+		headless: map[string]*headlessRunner{},
 	}
 	for _, d := range cfg.Orchestrators {
 		if d.Mode != "headless" {
@@ -686,7 +687,9 @@ func (s *server) checkClaude() {
 	if s.cfg.NotifyURL != nil && *s.cfg.NotifyURL != "" {
 		go postNtfy(*s.cfg.NotifyURL, "yoicks: claude check failed", message)
 	}
-	go s.rpc("notification.show", map[string]any{"title": "yoicks: claude check failed", "body": message, "sound": "request"})
+	s.bg.Go(func() {
+		s.rpc("notification.show", map[string]any{"title": "yoicks: claude check failed", "body": message, "sound": "request"})
+	})
 }
 
 // headlessStatus tells a headless orchestrator's change to done or blocked like an agent's
@@ -707,7 +710,7 @@ func (s *server) showOnPC(def OrchestratorDef, title, body, sound string) {
 	if strings.HasPrefix(def.Name, "wc-") {
 		return
 	}
-	go s.rpc("notification.show", map[string]any{"title": title, "body": body, "sound": sound})
+	s.bg.Go(func() { s.rpc("notification.show", map[string]any{"title": title, "body": body, "sound": sound}) })
 }
 
 // startHeadless starts the headless orchestrators that ran when the bridge last stopped; for

@@ -483,6 +483,10 @@ func TestHeadlessNotifications(t *testing.T) {
 	for _, name := range []string{"h1", "wc-h1"} {
 		t.Setenv("HLNAME", name)
 		b := startHeadless(t, t.TempDir(), nil, nil)
+		// the server's own callback, then a word that it has returned (any notification begun)
+		h := b.srv.headless[name]
+		told, onStatus := make(chan string, 4), h.onStatus
+		h.onStatus = func(from, to string) { onStatus(from, to); told <- from + " → " + to }
 		c, _, err := b.dial(t, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -507,7 +511,15 @@ func TestHeadlessNotifications(t *testing.T) {
 		if !got {
 			t.Errorf("%s: no agent_status", name)
 		}
-		time.Sleep(200 * time.Millisecond)
+		select {
+		case s := <-told:
+			if s != "working → done" {
+				t.Errorf("%s: told %q", name, s)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: the status callback never ran", name)
+		}
+		b.srv.bg.Wait() // the PC notifications it began, shown
 		if shown := len(b.world.Notifications()); (shown > 0) != (name == "h1") {
 			t.Errorf("%s: %d notifications", name, shown)
 		}
