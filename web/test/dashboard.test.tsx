@@ -51,27 +51,25 @@ describe('Dashboard cards', () => {
     assert.equal(location.hash, '#/agents');
   });
 
-  it("names a card by its agent's purpose, else herdr's name for it, else its tab; below, the name a purpose hides and the location its name doesn't say", async () => {
+  it("names a card by herdr's name for its agent, else by its tab; under it its purpose; last, the location its name doesn't say and the branch", async () => {
     const s = fresh();
     const tab = s.workspaces[0].tabs.find((t) => t.panes.some((p) => p.paneId === 'p7'))!;
     tab.label = 'fix-auth';
     tab.panes.find((p) => p.paneId === 'p7')!.agent!.herdrName = 'fix-auth'; // agent start's tab is labelled by the name
     s.purposes.p7 = 'ログインを直す';
     const c = await show('#/agents', s);
-    const card = (id: string): string[] => ['.agent-name', '.card-location']
-      .map((sel) => c.querySelector(`.agent-card[data-pane-id="${id}"] ${sel}`)!.textContent!);
-    assert.deepEqual(card('p3'), ['レビューの指摘を直す', 'w-review · repo-wt-feat › feat #1']);
-    // the branch leaves the purpose's row for the dim line
-    assert.deepEqual(card('p7'), ['ログインを直す', 'fix-auth · main · repo']);
-    assert.ok(!c.querySelector('.agent-card[data-pane-id="p7"] .card-branch'));
+    const card = (id: string): Array<string | undefined> => ['.agent-name', '.card-purpose', '.card-location']
+      .map((sel) => c.querySelector(`.agent-card[data-pane-id="${id}"] ${sel}`)?.textContent ?? undefined);
+    assert.deepEqual(card('p3'), ['w-review', 'レビューの指摘を直す', 'repo-wt-feat › feat #1']); // detached: no branch
+    assert.deepEqual(card('p7'), ['fix-auth', 'ログインを直す', 'repo · main']);
+    assert.equal(c.querySelector<HTMLElement>('.agent-card[data-pane-id="p7"] .card-purpose')!.title, 'ログインを直す', 'all of it on hover');
     delete s.purposes.p3;
     delete s.purposes.p7;
     await act(async () => setAppState(structuredClone(s)));
-    assert.deepEqual(card('p3'), ['w-review', 'repo-wt-feat › feat #1']);
-    assert.deepEqual(card('p7'), ['fix-auth', 'repo']);
-    assert.equal(c.querySelector('.agent-card[data-pane-id="p7"] .card-branch')!.textContent, 'main');
-    assert.deepEqual(card('p6'), ['feat #2', 'repo-wt-feat']); // no name: the tab
-    assert.deepEqual(card('p1'), ['one #1', 'repo']);
+    assert.deepEqual(card('p3'), ['w-review', undefined, 'repo-wt-feat › feat #1']);
+    assert.deepEqual(card('p7'), ['fix-auth', undefined, 'repo · main']);
+    assert.deepEqual(card('p6'), ['feat #2', undefined, 'repo-wt-feat']); // no name: the tab
+    assert.deepEqual(card('p1'), ['one #1', undefined, 'repo · main']);
   });
 });
 

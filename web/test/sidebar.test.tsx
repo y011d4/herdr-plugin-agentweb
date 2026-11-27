@@ -52,14 +52,16 @@ describe('Sidebar', () => {
     assert.ok(!c.querySelector('[data-sidebar-pane="p4"]'), 'an orchestrator is a heading, never an agent');
   });
 
-  it('shows an agent as its card does: the title and branch, the workspace, its status (a seen done as idle)', async () => {
+  it('shows an agent as its card does: the name, its purpose, the location and branch, its status (a seen done as idle)', async () => {
     store.seenDone = { p3: 4 };
     const c = await show('#/agents', fresh());
     const p1 = c.querySelector<HTMLElement>('[data-sidebar-pane="p1"]')!;
-    assert.equal(p1.textContent, 'one #1 main' + 'repo' + 'working'); // label (title, branch), location, status
-    assert.equal(p1.querySelector('.card-branch')!.textContent, ' main');
-    // its purpose, then herdr's name before the location
-    assert.equal(c.querySelector('[data-sidebar-pane="p3"]')!.textContent, 'レビューの指摘を直す' + 'w-review · repo-wt-feat › feat #1' + 'idle');
+    assert.equal(p1.textContent, 'one #1' + 'repo · main' + 'working'); // label, location and branch, status
+    assert.equal(p1.querySelector('.card-location')!.textContent, 'repo · main');
+    assert.ok(!p1.querySelector('.card-purpose'), 'none given');
+    const p3 = c.querySelector<HTMLElement>('[data-sidebar-pane="p3"]')!;
+    assert.equal(p3.textContent, 'w-review' + 'レビューの指摘を直す' + 'repo-wt-feat › feat #1' + 'idle'); // herdr's name, its purpose
+    assert.equal(p3.querySelector<HTMLElement>('.card-purpose')!.title, 'レビューの指摘を直す', 'all of it on hover');
     assert.equal(p1.querySelector<HTMLElement>('.status-badge')!.dataset.status, 'working');
     assert.equal(c.querySelector('[data-sidebar-pane="p3"] .status-badge')!.textContent, 'idle');
     assert.equal(c.querySelector('[data-sidebar-pane="p6"] .status-badge')!.textContent, 'blocked');

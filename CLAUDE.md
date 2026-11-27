@@ -415,9 +415,10 @@ Verified live against herdr 0.7.3 / protocol 16:
   untagged checkout has no herdr identity, so it derives its full worktree info from the
   pane cwd (and clears when that stops resolving). `repo_key` uses git's
   shared `--git-common-dir`, matching herdr's own repoKey. In the UI each card (and sidebar
-  row, and drawer title) shows the agent's purpose (state `purposes`) else its herdr name
-  (`herdrName`, else its tab name), and (dim, beside it) its git branch; under a purpose, the
-  name leads the dim location line. The dashboard is one flat list of every agent, most
+  row) shows the agent's herdr name (`herdrName`, else its tab name), under it its purpose
+  (state `purposes`, when given: two lines at most, all of it on hover), then one dim line,
+  its location and git branch; the drawer title is the name and location, the purpose a small
+  line under them. The dashboard is one flat list of every agent, most
   recent status change first, so each card names its own location (`cardLocation`); a linked
   worktree's card adds a `worktree` chip. The order is herdr's `stateChangeSeq` (a change
   not fetched yet counts as newest), then `sinceUnixMs`: that one lives only in bridge memory,
