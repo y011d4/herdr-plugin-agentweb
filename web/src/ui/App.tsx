@@ -78,24 +78,26 @@ export function App() {
   const link = useSyncExternalStore(subscribeShell, () => linkUp);
   const wide = useMediaQuery(WIDE_QUERY, false, { getInitialValueInEffect: false }); // read now: no first paint without it
   const drawer = useSyncExternalStore(subscribeShell, () => sheet);
+  // the screen under an agent's drawer is out of reach, the keyboard's too; a wide screen's sidebar isn't
+  const under = drawer?.open && kind !== 'token' ? true : undefined;
   const slot = (content: ReactNode): ReactNode => <Fragment key={key}>{content}</Fragment>;
   return (
     <>
       {/* a PC's: never over the token screen. Its slot stays when it isn't drawn, so the elements
           after it (#topbar, #reconnect-banner, #screen) stay the same as it comes and goes. */}
       {wide && kind !== 'token' && <Sidebar />}
-      <header id="topbar" className="topbar" style={topbar ? undefined : { display: 'none' }}>
+      <header id="topbar" className="topbar" inert={under} style={topbar ? undefined : { display: 'none' }}>
         <div id="topbar-left">{slot(topbar?.left)}</div>
         <div className="topbar-title" id="topbar-title">{slot(topbar?.title)}</div>
         <div id="conn-dot" className={link ? 'conn-dot connected' : 'conn-dot'} title={link === null ? 'Disconnected' : link ? 'Connected' : 'Reconnecting…'}></div>
         <div id="topbar-right">{slot(topbar?.right)}</div>
       </header>
       {/* never over the token screen: leaving it while the link is down shows it */}
-      <div id="reconnect-banner" role="status" aria-live="polite" className={link === false && kind !== 'token' ? 'visible' : undefined}>
+      <div id="reconnect-banner" role="status" aria-live="polite" inert={under} className={link === false && kind !== 'token' ? 'visible' : undefined}>
         <span className="loading-spinner" style={{ width: 14, height: 14, borderWidth: 2 }}></span>
         Reconnecting&hellip;
       </div>
-      <main id="screen">{slot(node)}</main>
+      <main id="screen" inert={under}>{slot(node)}</main>
       <div id="toast-container" aria-live="assertive" aria-atomic="false"><Toasts /></div>
       {createPortal(<><AgentDrawer sheet={kind === 'token' ? null : drawer} actions={agentActions} /><Modals /></>, document.getElementById('modal-root')!)}
     </>
@@ -374,6 +376,7 @@ async function clearAgentFlow(paneId: string): Promise<void> {
     // replacement yet, so stay on #/home/<name> and let onStateUpdate re-resolve it. The hold's
     // timer bounds the Clear's flag too: it ends within 8s even if no gap is ever seen.
     if (view.homeMode) { if (homeClearing) holdHomeForReplacement(); return; }
+    if (view.activePaneId !== paneId) return; // another pane opened meanwhile: it stays
     if (res.paneId) openAgent(res.paneId);
     else closeAgent();
   } catch (err) {
@@ -390,7 +393,7 @@ async function stopAgentFlow(paneId: string): Promise<void> {
   try {
     await (hl ? orchestratorPost(hl, 'stop') : apiDelete(`/api/panes/${encodeURIComponent(paneId)}`));
     showToast('Stopped', hl ? 'The orchestrator stopped' : 'Agent pane closed');
-    if (!view.homeMode) closeAgent(); // a Home stays: the State shows it stopped
+    if (!view.homeMode && view.activePaneId === paneId) closeAgent(); // a Home stays: the State shows it stopped; another pane opened meanwhile too
   } catch (err) {
     showToast('Stop failed', (err as Error).message);
   }
