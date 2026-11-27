@@ -15,6 +15,11 @@ button {
   color: inherit;
 }
 
+/* the other things clicked: a disclosure's summary, an agent card (Mantine's controls: theme.ts's cursorType) */
+summary, [role='button'] {
+  cursor: pointer;
+}
+
 input, textarea {
   font-family: inherit;
   font-size: inherit;

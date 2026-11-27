@@ -111,7 +111,7 @@ export function Todos({ o, now }: { o: OrchestratorView; now: number }) {
     <Stack className="home-todos" gap={2}>
       {due.map((it) => <Todo key={it.id} home={o.name} item={it} now={now} />)}
       {later.length > 0 && (
-        <UnstyledButton className="self-start py-1 text-[12px] font-semibold text-(--color-text-dim)" data-action="todo-later"
+        <UnstyledButton className="self-start py-1 text-[12px] font-semibold text-(--color-text-dim) hover:text-(--color-text)" data-action="todo-later"
           aria-expanded={open} onClick={() => setOpen(!open)}>
           {`Later (${later.length}) ${open ? '▾' : '›'}`}
         </UnstyledButton>
