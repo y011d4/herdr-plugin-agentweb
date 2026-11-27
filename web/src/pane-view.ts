@@ -105,7 +105,6 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   const chatEl = Object.assign(document.createElement('div'), { className: 'chat-log', id: 'chat-log' });
   chatEl.style.display = 'none';
   container.replaceChildren(terminalEl, chatEl);
-  const chat = createChatLog(chatEl); // draws the items (React) into chatEl; this keeps the scroll
   const term = createTerminal(terminalEl, { paneId });
   const listeners = new AbortController();
   const { signal } = listeners;
@@ -131,6 +130,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   let epoch = 0; // bumped by each suspend: a response to a request from before it never applies
   let wanted: { mode: 'terminal' | 'chat'; persist: boolean } | null = null; // a setMode while suspended, for the resume
   const home = view.homeMode; // a Home's view (the global changes under a drawer)
+  const chat = createChatLog(chatEl, { home }); // draws the items (React) into chatEl; this keeps the scroll
   let historyLoaded = false; // the terminal's scrollback is in (read with a look at the terminal until it is)
   let chatAvailable = false;
   let chatSessionId: string | null = null;
