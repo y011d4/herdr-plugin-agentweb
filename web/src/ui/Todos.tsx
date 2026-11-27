@@ -108,7 +108,7 @@ export function Todos({ o, now }: { o: OrchestratorView; now: number }) {
   const { now: due, later } = splitTodos(o.todos ?? [], now);
   if (!due.length && !later.length) return null;
   return (
-    <Stack className="home-todos" gap={2}>
+    <Stack className="home-todos" gap={0}>
       {due.map((it) => <Todo key={it.id} home={o.name} item={it} now={now} />)}
       {later.length > 0 && (
         <UnstyledButton className="self-start py-1 text-[12px] font-semibold text-(--color-text-dim) hover:text-(--color-text)" data-action="todo-later"
@@ -136,7 +136,8 @@ function Todo({ home, item, now }: { home: string; item: TodoItem; now: number }
     }
   };
   return (
-    <Group className="home-todo" data-todo={item.id} gap={10} wrap="nowrap">
+    // a line under each but the list's last, so items of two or three lines don't run together
+    <Group className="home-todo border-b border-(--color-border) py-1.5 last:border-b-0" data-todo={item.id} gap={10} wrap="nowrap">
       <ActionIcon variant="default" radius="xl" className="shrink-0" aria-label={`Done: ${item.text}`} data-action="todo-done"
         loading={busy} onClick={() => { void done(); }}>&#10003;</ActionIcon>
       <div className="min-w-0 flex-1">

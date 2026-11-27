@@ -46,7 +46,7 @@ export const state: AppState = {
   ],
   orchestrators: [
     { name: 'personal', label: 'personal', paneId: 'p4', agents: ['p1', 'p2', 'p3', 'p4', 'p5'], mode: 'tui', headless: null, todos: [
-      todo('a1b2c3', 'Merge PR #119 (the to-do list, bridge side)', { agent: 'review', url: 'https://example.com/pull/119' }),
+      todo('a1b2c3', 'Merge PR #119 (the to-do list, bridge side) once its CI is green and the screens look right on the phone', { agent: 'review', url: 'https://example.com/pull/119' }),
       todo('d4e5f6', 'Rotate the ntfy token on the PC', { due: at(0, 8) }),
       todo('0a0b0c', 'Delete ~/backup.tgz', { due: at(1, 9) }),
     ] },
@@ -142,6 +142,9 @@ export const scenes: Scene[] = [
   { name: 'agents', hash: '#/agents', ready: "!!document.querySelector('#screen-agents[data-ready]')" },
   { name: 'agents-home', hash: '#/agents/personal', ready: "!!document.querySelector('#screen-agents[data-ready]')" },
   { name: 'home', hash: '#/home/personal', ready: items('') },
+  // its Needs you popover: the ready check taps the button (once: then it's aria-expanded) until the list shows
+  { name: 'home-needs', hash: '#/home/personal', ready: `${items('')} && (!!document.querySelector('[data-needs-list] .home-todo')
+    || void document.querySelector('[data-action=needs][aria-expanded=false]')?.click())` },
   { name: 'home-headless', hash: '#/home/pfn', ready: `${items('')} && !!document.querySelector('.ask-opt')` },
   { name: 'home-stopped', hash: '#/home/kenri', ready: "!!document.querySelector('#screen-home-stopped')" },
   { name: 'pane-chat', hash: '#/pane/p5', ready: items('.agent-drawer') },
