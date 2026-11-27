@@ -69,8 +69,12 @@ func TestHeadlessPRWatch(t *testing.T) {
 	var asked [][]string
 	answer := map[string]string{merged: "MERGED", closed: "CLOSED", unread: "", open: "OPEN"}
 	var fail error
+	var during func() // what happens while gh is asked
 	b.srv.prStates = func(_ context.Context, urls []string) (map[string]string, error) {
 		asked = append(asked, urls)
+		if during != nil {
+			during()
+		}
 		return answer, fail
 	}
 	prWakes := func() []string { return b.wakesWith(t, "[yoicks] PR ") }
@@ -110,6 +114,16 @@ func TestHeadlessPRWatch(t *testing.T) {
 	b.clock.Advance(wakeCoalesce + time.Second)
 	if got := prWakes(); len(got) != 3 || len(asked) != 2 || !sameSet(asked[1], []string{unread, open}) {
 		t.Errorf("wakes %q, asked %q", got, asked)
+	}
+
+	// merged while the user ticks its item off: nothing is told
+	answer[open] = "MERGED"
+	during = func() { b.srv.todos.Done("h1", b.srv.todos.Items("h1")[1].ID) }
+	b.srv.watchPRs()
+	during = nil
+	b.clock.Advance(wakeCoalesce + time.Second)
+	if got, left := prWakes(), b.srv.todos.Items("h1"); len(got) != 3 || len(left) != 3 || left[1].Text != "read the docs" {
+		t.Errorf("wakes %q, left %+v", got, left)
 	}
 
 	// gh failing: one alert per error, on the Home's notifications (sent on goroutines: any order)
