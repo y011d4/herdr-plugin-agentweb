@@ -711,19 +711,22 @@ func (s *server) showOnPC(def OrchestratorDef, title, body, sound string) {
 }
 
 // startHeadless starts the headless orchestrators that ran when the bridge last stopped; for
-// the rest it only stops the children an earlier bridge left.
-func (s *server) startHeadless() {
+// the rest it only stops the children an earlier bridge left. wait (for tests) returns once
+// each has started, been refused or been reaped.
+func (s *server) startHeadless() (wait func()) {
+	var wg sync.WaitGroup
 	for _, h := range s.headless {
 		if !h.wantsToRun() {
-			go h.reap()
+			wg.Go(h.reap)
 			continue
 		}
-		go func() {
+		wg.Go(func() {
 			if err := h.Start(); err != nil {
 				h.failed(err)
 			}
-		}()
+		})
 	}
+	return wg.Wait
 }
 
 // shutdownHeadless ends every headless child, in parallel (yoicks stop waits 5 s in all).

@@ -491,7 +491,12 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
 - Headless orchestrators (`headless_test.go`, `mcp_test.go`) run on `tools/fakeclaude` (stream-json,
   scripts by message text, MCP calls through go-sdk's client as Claude Code makes them) and
   fakeherdr's World, which answers the agent calls (`agent.get/read/prompt/wait`, a worker's script
-  via `OnPrompt`, `StallAfter`) and records `notification.show`; never a real Claude.
+  via `OnPrompt`, `StallAfter`) and records `notification.show`; never a real Claude. Their time
+  is a `fakeherdr.FakeClock`, the runner's (`clock`: its restarts, coalesced wake-ups, delivery
+  window, silence and question checks) and the World's waits alike: a test moves it on (`pass`,
+  `Advance`) where real time would pass, and never sleeps for a timer; fakeclaude's `hang` and
+  `hold` go on at a SIGUSR1 (`release`). Only real-process deadlines (`stopChild`'s signals, write
+  deadlines) and herdr's socket deadline (`TestHerdrWaitHasNoDeadline`) stay on the real clock.
 - **The real Claude** only in `headless_live_test.go` (`//go:build claudelive`; CI only vets it):
   `go test -tags claudelive -count=1 -run TestClaudeLive -v ./internal/bridge` runs `claude` itself
   through the runner (haiku via the test-only `extraArgs`, the personal account, throwaway dirs,

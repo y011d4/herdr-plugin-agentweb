@@ -33,16 +33,13 @@ import (
 // the tools a headless child may use without asking (approve is the permission tool itself)
 var yoicksTools = []string{"overview", "agent_get", "agent_read", "agent_prompt", "agent_start", "worktree_remove"}
 
-// how often a held approve tells the client it waits: under MCP's 60 s call timeout and the
-// 300 s HTTP idle limit (S0 row 5; a var for tests)
-var approveProgress = 20 * time.Second
-
-// how soon an AskUserQuestion in the stream must reach approve (a var for tests)
-var askReachWait = 10 * time.Second
-
 const (
-	deliveryWindow = 1500 * time.Millisecond // herdr refusing a prompt answers within it
-	wakeCoalesce   = 3 * time.Second
+	// how often a held approve tells the client it waits: under MCP's 60 s call timeout and
+	// the 300 s HTTP idle limit (S0 row 5)
+	approveProgress = 20 * time.Second
+	askReachWait    = 10 * time.Second        // how soon an AskUserQuestion in the stream must reach approve
+	deliveryWindow  = 1500 * time.Millisecond // herdr refusing a prompt answers within it
+	wakeCoalesce    = 3 * time.Second
 )
 
 // ── the listener ─────────────────────────────────────────────────────────────
@@ -324,8 +321,6 @@ func (r *headlessRunner) approve(ctx context.Context, req *mcp.CallToolRequest, 
 	}
 	r.asked(in.ToolUseID)
 	defer r.dropQuestion(p)
-	tick := time.NewTicker(approveProgress)
-	defer tick.Stop()
 	for n := 1.0; ; n++ {
 		select {
 		case res := <-p.reply:
@@ -333,7 +328,7 @@ func (r *headlessRunner) approve(ctx context.Context, req *mcp.CallToolRequest, 
 			return textResult(string(b), false), nil, nil
 		case <-ctx.Done(): // the call was cancelled (an interrupt) or its session ended
 			return nil, nil, ctx.Err()
-		case <-tick.C:
+		case <-r.clock.After(approveProgress):
 			if token := req.Params.GetProgressToken(); token != nil {
 				req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{ProgressToken: token, Progress: n, Message: "waiting for the user"})
 			}
@@ -423,7 +418,7 @@ func (r *headlessRunner) watchAsk(toolUseID string) {
 		r.asks[toolUseID] = false
 	}
 	r.mu.Unlock()
-	time.AfterFunc(askReachWait, func() {
+	r.clock.AfterFunc(askReachWait, func() {
 		defer r.recoverAt("the question check")
 		r.mu.Lock()
 		alert := func() {}
@@ -474,7 +469,7 @@ func (r *headlessRunner) prompt(pane, name, text string, epoch int) *mcp.CallToo
 	if strings.TrimSpace(text) == "" { // nothing to send: no watch to wait on
 		return textResult("text must be non-empty", true)
 	}
-	deadline := time.Now().Add(agentReadyTimeout)
+	deadline := r.clock.Now().Add(agentReadyTimeout)
 	for {
 		raw, err := r.rpc("agent.get", map[string]any{"target": pane})
 		if err != nil {
@@ -491,7 +486,7 @@ func (r *headlessRunner) prompt(pane, name, text string, epoch int) *mcp.CallToo
 			return textResult("delivered to "+name+": you are woken when it finishes or stops for an answer", false)
 		}
 		r.unwatch(func(o *hlWatch) bool { return o == w })
-		if code := herdrCode(err); code != "agent_not_ready" && code != "agent_blocked" || !time.Now().Before(deadline) {
+		if code := herdrCode(err); code != "agent_not_ready" && code != "agent_blocked" || !r.clock.Now().Before(deadline) {
 			return textResult("not delivered to "+name+": "+err.Error(), true)
 		}
 		if raw, err := r.rpc("agent.get", map[string]any{"target": pane}); err == nil {
@@ -500,7 +495,7 @@ func (r *headlessRunner) prompt(pane, name, text string, epoch int) *mcp.CallToo
 				return textResult("task not sent: "+name+" waits on a question in its pane (folder trust, a permission) that the user answers there; you are woken when it is ready", false)
 			}
 		}
-		time.Sleep(250 * time.Millisecond)
+		<-r.clock.After(250 * time.Millisecond)
 	}
 }
 
@@ -570,7 +565,7 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 	defer once(context.Canceled) // ended before any answer
 	until := untilSettled
 	if text != "" {
-		t := time.AfterFunc(deliveryWindow, func() { once(nil) })
+		t := r.clock.AfterFunc(deliveryWindow, func() { once(nil) })
 		raw, err := r.waitRPC(ctx, "agent.prompt", map[string]any{"target": w.Pane, "text": text, "wait": map[string]any{"until": untilSettled}})
 		early := t.Stop()
 		if err != nil && early && herdrCode(err) != "agent_prompt_stalled" { // a stall was delivered, just not taken up yet
@@ -629,7 +624,10 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 			}
 			// a quick worker may be done again before a level wait sees it working: look again after 8 s
 			r.waitRPC(ctx, "agent.wait", map[string]any{"target": w.Pane, "until": []string{"working"}, "timeout_ms": 8000})
-			time.Sleep(500 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+			case <-r.clock.After(500 * time.Millisecond):
+			}
 			continue
 		}
 		if !r.settle(w, raw, &until) {
@@ -693,7 +691,7 @@ func (r *headlessRunner) retryWatch(ctx context.Context, w *hlWatch, err error) 
 	select {
 	case <-ctx.Done():
 		return false
-	case <-time.After(time.Second):
+	case <-r.clock.After(time.Second):
 		return true
 	}
 }
@@ -707,7 +705,7 @@ func (r *headlessRunner) scheduleWakes() {
 		return
 	}
 	gen := r.gen
-	r.wakeTimer = time.AfterFunc(wakeCoalesce, func() {
+	r.wakeTimer = r.clock.AfterFunc(wakeCoalesce, func() {
 		defer r.recoverAt("the wake-up")
 		r.mu.Lock()
 		if r.gen != gen {

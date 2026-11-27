@@ -161,20 +161,20 @@ func TestHeadlessAskAndAnswer(t *testing.T) {
 	b.waitFor(t, "no question", func(v OrchestratorView) bool { return v.Headless.Pending == nil && v.Headless.Status == "idle" })
 }
 
-// The approve call stays open past Claude Code's 60 s with progress (the clock shortened).
+// The approve call stays open past Claude Code's 60 s with progress.
 func TestHeadlessApproveSendsProgress(t *testing.T) {
-	old := approveProgress
-	approveProgress = 100 * time.Millisecond
-	t.Cleanup(func() { approveProgress = old })
 	b := startHeadless(t, t.TempDir(), nil, nil)
 	b.start(t)
 	b.waitStatus(t, "idle")
 	b.send(t, "ask")
 	v := b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
-	waitUntil(t, 5*time.Second, "progress", func() bool {
-		f, _ := os.ReadFile(b.log)
-		return strings.Count(string(f), `"progress"`) >= 5
-	})
+	for n := 1; n <= 5; n++ {
+		b.pass(t, "the held approve", approveProgress)
+		waitUntil(t, 5*time.Second, "progress", func() bool {
+			f, _ := os.ReadFile(b.log)
+			return strings.Count(string(f), `"progress"`) >= n
+		})
+	}
 	b.post(t, "answer", `{"id":"`+v.Headless.Pending.ID+`","answers":{"Which fruit?":"apple"}}`)
 	b.waitStatus(t, "done")
 }
@@ -277,9 +277,14 @@ func (b *hlBridge) wakes(t *testing.T) []string {
 	return out
 }
 
+// prompt has the orchestrator send w1 a task; once herdr has it, the delivery window passes
+// (a worker still at it is told delivered then; one done sooner was told at once).
 func (b *hlBridge) prompt(t *testing.T) {
 	t.Helper()
+	n := len(b.world.Prompts())
 	b.send(t, `call agent_prompt {"name":"w1","text":"do the thing"}`)
+	waitUntil(t, 10*time.Second, "w1 gets the task", func() bool { return len(b.world.Prompts()) > n })
+	b.clock.Advance(deliveryWindow)
 	b.waitStatus(t, "done")
 	_, tr, _ := b.do(t, "GET", "/api/panes/hl:"+b.name+"/transcript", b.token, nil)
 	if !strings.Contains(tr, "delivered to w1") || strings.Contains(tr, "not delivered") {
@@ -287,35 +292,75 @@ func (b *hlBridge) prompt(t *testing.T) {
 	}
 }
 
+// waitWakes: the wake-ups are written, each once its coalescing window has passed, and
+// nothing more is queued, nor written once another window has passed.
 func (b *hlBridge) waitWakes(t *testing.T, want ...string) {
 	t.Helper()
-	waitUntil(t, 20*time.Second, "the wake-ups", func() bool { return len(b.wakes(t)) >= len(want) })
-	time.Sleep(wakeCoalesce + time.Second) // and no more
-	if got := b.wakes(t); !slices.Equal(got, want) {
-		t.Errorf("wakes %q, want %q", got, want)
+	h := b.srv.headless[b.name]
+	waitUntil(t, 10*time.Second, "the wake-ups", func() bool {
+		h.mu.Lock()
+		queued := h.wakeTimer != nil
+		h.mu.Unlock()
+		if queued {
+			b.clock.Advance(wakeCoalesce)
+		}
+		return len(b.wakes(t)) >= len(want)
+	})
+	h.mu.Lock()
+	left := slices.Clone(h.wakes)
+	h.mu.Unlock()
+	b.clock.Advance(wakeCoalesce + time.Second)
+	if got := b.wakes(t); !slices.Equal(got, want) || len(left) != 0 {
+		t.Errorf("wakes %q (still queued %q), want %q", got, left, want)
 	}
+}
+
+// watching waits until w1's watch has seen it at status: what a next change is told from.
+func (b *hlBridge) watching(t *testing.T, status string) {
+	t.Helper()
+	h := b.srv.headless[b.name]
+	waitUntil(t, 10*time.Second, "w1 watched at "+status, func() bool {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return h.watches["w1p"] != nil && h.watches["w1p"].Status == status
+	})
+}
+
+// watches is the number of workers the orchestrator follows.
+func (b *hlBridge) watches() int {
+	h := b.srv.headless[b.name]
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.watches)
+}
+
+// queued waits until a wake-up is queued (its window not passed yet).
+func (b *hlBridge) queued(t *testing.T) {
+	t.Helper()
+	h := b.srv.headless[b.name]
+	waitUntil(t, 10*time.Second, "a wake-up queued", func() bool { h.mu.Lock(); defer h.mu.Unlock(); return len(h.wakes) > 0 })
 }
 
 func TestHeadlessWakeUps(t *testing.T) {
 	needsAccounts(t)
+	// (that herdr's wait outlasts the request timeout: TestHerdrWaitHasNoDeadline)
 	t.Run("a worker that finishes after 10 s: one wake-up, one task", func(t *testing.T) {
 		b := startHeadless(t, t.TempDir(), nil, nil)
-		w := worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
-			w.Set(pane, "working")
-			time.Sleep(11 * time.Second)
-			w.Set(pane, "done")
-		})
+		w := worker(t, b, "idle", nil)
 		b.start(t)
 		b.waitStatus(t, "idle")
-		b.prompt(t)
+		b.prompt(t)             // delivered as the window ends
+		w.Set("w1p", "working") // it takes the task up (within herdr's stall time)
+		b.clock.Advance(10 * time.Second)
+		w.Set("w1p", "done")
 		b.waitWakes(t, "[yoicks] w1: working → done")
-		if n := len(w.Prompts()); n != 1 {
-			t.Errorf("%d prompts", n)
+		if n := len(w.Prompts()); n != 1 || b.watches() != 0 {
+			t.Errorf("%d prompts, %d watches", n, b.watches())
 		}
 	})
 	t.Run("at once, and blocked then done", func(t *testing.T) {
 		b := startHeadless(t, t.TempDir(), nil, nil)
-		worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
+		w := worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
 			w.Set(pane, "working")
 			w.Set(pane, "done")
 		})
@@ -324,17 +369,19 @@ func TestHeadlessWakeUps(t *testing.T) {
 		b.prompt(t)
 		b.waitWakes(t, "[yoicks] w1: working → done")
 
-		b.world.OnPrompt(func(pane, text string) {
-			b.world.Set(pane, "working")
-			time.Sleep(300 * time.Millisecond)
-			b.world.Set(pane, "blocked")
-			time.Sleep(4 * time.Second) // the user answers in its pane
-			b.world.Set(pane, "working")
-			time.Sleep(300 * time.Millisecond)
-			b.world.Set(pane, "done")
+		w.OnPrompt(func(pane, text string) {
+			w.Set(pane, "working")
+			w.Set(pane, "blocked")
 		})
 		b.prompt(t)
+		b.waitWakes(t, "[yoicks] w1: working → done", "[yoicks] w1: working → blocked")
+		w.Set("w1p", "working") // the user answers in its pane
+		b.watching(t, "working")
+		w.Set("w1p", "done")
 		b.waitWakes(t, "[yoicks] w1: working → done", "[yoicks] w1: working → blocked", "[yoicks] w1: working → done")
+		if b.watches() != 0 {
+			t.Errorf("%d watches", b.watches())
+		}
 	})
 	for _, ready := range []bool{false, true} {
 		// herdr answers agent_not_ready while a startup question holds it, agent_blocked at a dialog
@@ -351,29 +398,30 @@ func TestHeadlessWakeUps(t *testing.T) {
 		b.send(t, `call agent_prompt {"name":"w1","text":"do the thing"}`)
 		b.waitStatus(t, "done")
 		w.Set("w1p", "working") // the user answered its permission question: it works on
-		time.Sleep(300 * time.Millisecond)
+		b.watching(t, "working")
 		w.Set("w1p", "blocked") // and asks another
 		b.waitWakes(t, "[yoicks] w1: working → blocked")
 		w.Set("w1p", "working")
-		time.Sleep(300 * time.Millisecond)
+		b.watching(t, "working")
 		w.Set("w1p", "done")
 		// its own task's end: the orchestrator's task still waits to be sent
 		b.waitWakes(t, "[yoicks] w1: working → blocked", "[yoicks] w1: working → done, ready, task not sent")
-		if n := len(w.Prompts()); n != 0 {
-			t.Errorf("%d prompts", n)
+		if n := len(w.Prompts()); n != 0 || b.watches() != 0 {
+			t.Errorf("%d prompts, %d watches", n, b.watches())
 		}
 	})
 	t.Run("a stalled prompt goes on with the level wait", func(t *testing.T) {
 		b := startHeadless(t, t.TempDir(), nil, nil)
-		w := worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
-			time.Sleep(time.Second) // later than the stall
-			w.Set(pane, "working")
-			w.Set(pane, "done")
-		})
+		w := worker(t, b, "idle", nil)
 		w.StallAfter(300 * time.Millisecond)
 		b.start(t)
 		b.waitStatus(t, "idle")
-		b.prompt(t)
+		b.prompt(t) // the delivery window passes the stall: herdr answers stalled
+		// the level wait finds it idle as before: it waits for a move
+		b.waiting(t, "the wait for a move", 8*time.Second)
+		w.Set("w1p", "working") // later than the stall
+		w.Set("w1p", "done")
+		b.pass(t, "the pause before it looks again", 500*time.Millisecond)
 		b.waitWakes(t, "[yoicks] w1: working → done")
 	})
 	t.Run("re-armed after a bridge restart: a change meanwhile wakes once", func(t *testing.T) {
@@ -409,9 +457,23 @@ func TestHeadlessWakeUps(t *testing.T) {
 		// a watch saved at that done answers at once with the same seq: it waits on, quiet
 		raw, _ := b.srv.rpc("agent.get", map[string]any{"target": "w1p"})
 		status, seq, _ := agentState(raw)
-		b.srv.headless["h1"].watch(&hlWatch{Pane: "w1p", Name: "w1", Status: status, Seq: seq}, "", nil, 0)
+		h := b.srv.headless["h1"]
+		h.mu.Lock()
+		epoch := h.epoch
+		h.mu.Unlock()
+		if !h.watch(&hlWatch{Pane: "w1p", Name: "w1", Status: status, Seq: seq}, "", nil, epoch) {
+			t.Fatal("not watched")
+		}
 		b.srv.client.Refresh() // a reconnect's fresh snapshot
+		for range 2 {          // each look finds it as told: it waits on for a move
+			b.pass(t, "the wait for a move", 8*time.Second)
+			b.pass(t, "the pause before it looks again", 500*time.Millisecond)
+		}
+		b.waiting(t, "the wait for a move", 8*time.Second) // again
 		b.waitWakes(t, "[yoicks] w1: working → done")
+		if b.watches() != 1 {
+			t.Errorf("%d watches", b.watches())
+		}
 	})
 }
 
@@ -454,22 +516,27 @@ func TestHeadlessNotifications(t *testing.T) {
 
 // An AskUserQuestion that never reaches approve: the Home is told (r6).
 func TestHeadlessQuestionNotReachingTheHome(t *testing.T) {
-	old := askReachWait
-	askReachWait = 300 * time.Millisecond
-	t.Cleanup(func() { askReachWait = old })
 	b := startHeadless(t, t.TempDir(), nil, nil)
 	b.start(t)
 	b.waitStatus(t, "idle")
 	b.send(t, "ask") // through approve: no warning
 	v := b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
-	time.Sleep(600 * time.Millisecond)
-	b.post(t, "answer", `{"id":"`+v.Headless.Pending.ID+`","answers":{"Which fruit?":"apple"}}`)
-	b.waitStatus(t, "done")
+	b.pass(t, "the question check", askReachWait) // it runs before Advance returns
 	if v := b.view(t); hasWarning(v, "question_route") {
 		t.Fatalf("a question that reached approve: %+v", v.Headless.Warnings)
 	}
+	b.post(t, "answer", `{"id":"`+v.Headless.Pending.ID+`","answers":{"Which fruit?":"apple"}}`)
+	b.waitStatus(t, "done")
 	b.send(t, "asknoroute")
-	v = b.waitFor(t, "the warning", func(v OrchestratorView) bool { return hasWarning(v, "question_route") })
+	b.waitStatus(t, "done")
+	if v := b.view(t); hasWarning(v, "question_route") {
+		t.Fatalf("before its check: %+v", v.Headless.Warnings)
+	}
+	b.pass(t, "the question check", askReachWait)
+	v = b.view(t)
+	if !hasWarning(v, "question_route") {
+		t.Fatalf("no warning: %+v", v.Headless.Warnings)
+	}
 	for _, w := range v.Headless.Warnings {
 		if w.Kind == "question_route" && !slices.Equal(w.Actions, []string{"interrupt"}) {
 			t.Errorf("actions %v", w.Actions)
@@ -508,7 +575,6 @@ func TestHeadlessWakeWaitsForTheChild(t *testing.T) {
 	needsAccounts(t)
 	script := func(w *fakeherdr.World, pane string) {
 		w.Set(pane, "working")
-		time.Sleep(300 * time.Millisecond)
 		w.Set(pane, "done")
 	}
 	t.Run("a child down when the timer fires gets it once restarted", func(t *testing.T) {
@@ -517,12 +583,14 @@ func TestHeadlessWakeWaitsForTheChild(t *testing.T) {
 		b.start(t)
 		b.waitStatus(t, "idle")
 		b.prompt(t)
-		time.Sleep(time.Second) // the worker is done: its wake-up queued, not written yet
-		b.send(t, "crash")      // down for 6 s, past the 3 s timer
-		time.Sleep(wakeCoalesce + time.Second)
+		b.queued(t) // the worker is done: its wake-up queued, not written yet
+		b.send(t, "crash")
+		b.waitFor(t, "the child down", func(v OrchestratorView) bool { return v.PaneID == nil })
+		b.clock.Advance(wakeCoalesce + time.Second) // past the 3 s timer, within the 6 s down
 		if got := b.wakes(t); len(got) != 0 {
 			t.Fatalf("written with no child: %q", got)
 		}
+		b.restartDue()
 		b.waitWakes(t, "[yoicks] w1: working → done")
 	})
 	t.Run("a Stop drops the queue with the watches; the timer then writes nothing", func(t *testing.T) {
@@ -531,11 +599,11 @@ func TestHeadlessWakeWaitsForTheChild(t *testing.T) {
 		b.start(t)
 		b.waitStatus(t, "idle")
 		b.prompt(t)
-		time.Sleep(time.Second)
+		b.queued(t)
 		b.post(t, "stop", "")
 		b.start(t)
 		b.waitStatus(t, "idle")
-		time.Sleep(wakeCoalesce + time.Second)
+		b.clock.Advance(wakeCoalesce + time.Second)
 		if got := b.wakes(t); len(got) != 0 {
 			t.Errorf("wakes %q", got)
 		}
@@ -550,9 +618,9 @@ func TestHeadlessWakeWaitsForTheChild(t *testing.T) {
 		b.start(t)
 		b.waitStatus(t, "idle")
 		b.prompt(t)
-		time.Sleep(time.Second)
+		b.queued(t)
 		b.srv.shutdownHeadless()
-		time.Sleep(wakeCoalesce + time.Second)
+		b.clock.Advance(wakeCoalesce + time.Second) // its timer finds no child
 		if saved, _ := os.ReadFile(headlessPath(state, "h1", ".json")); !strings.Contains(string(saved), `"wakes":["[yoicks] w1: working → done"]`) {
 			t.Fatalf("saved %s", saved)
 		}
@@ -605,13 +673,12 @@ func TestHeadlessClearForgetsWorkers(t *testing.T) {
 	b := startHeadless(t, state, nil, nil)
 	worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
 		w.Set(pane, "working")
-		time.Sleep(300 * time.Millisecond)
 		w.Set(pane, "done")
 	})
 	b.start(t)
 	b.waitStatus(t, "idle")
 	b.prompt(t)
-	time.Sleep(time.Second) // queued, not written yet
+	b.queued(t) // not written yet
 	saved, _ := os.ReadFile(headlessPath(state, "h1", ".json"))
 	if !strings.Contains(string(saved), `"wakes":["[yoicks] w1: working → done"]`) || strings.Contains(string(saved), `"pane":"w1p"`) {
 		t.Fatalf("the wake-up and the watch's end, saved together: %s", saved)
@@ -630,7 +697,7 @@ func TestHeadlessClearForgetsWorkers(t *testing.T) {
 	os.Remove(settings)
 	b.start(t)
 	b.waitStatus(t, "idle")
-	time.Sleep(wakeCoalesce + time.Second)
+	b.clock.Advance(wakeCoalesce + time.Second)
 	if got := b.wakes(t); len(got) != 0 {
 		t.Errorf("the old session's wake-up reached the fresh one: %q", got)
 	}
@@ -702,8 +769,7 @@ func TestHeadlessCallAcrossAClear(t *testing.T) {
 	needsAccounts(t)
 	b := startHeadless(t, t.TempDir(), nil, nil)
 	h := b.srv.headless["h1"]
-	var prompted atomic.Bool
-	worker(t, b, "idle", func(w *fakeherdr.World, pane string) { prompted.Store(true) })
+	worker(t, b, "idle", nil)
 	entered, release := make(chan struct{}), make(chan struct{})
 	var gate sync.Once
 	rpc := h.rpc
@@ -737,12 +803,10 @@ func TestHeadlessCallAcrossAClear(t *testing.T) {
 	if res == nil || !res.IsError || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "stopped or cleared") {
 		t.Fatalf("the call from before the Clear: %+v", res)
 	}
-	time.Sleep(time.Second)
-	h.mu.Lock()
-	watches := len(h.watches)
-	h.mu.Unlock()
-	if watches != 0 || prompted.Load() {
-		t.Errorf("a watch survived the Clear (%d), the worker prompted: %v", watches, prompted.Load())
+	// a watch is registered before its worker is sent anything, and herdr counts a prompt as it
+	// takes it: none of either by the call's answer, none ever
+	if watches, prompts := b.watches(), len(b.world.Prompts()); watches != 0 || prompts != 0 {
+		t.Errorf("a watch survived the Clear (%d), the worker prompted %d times", watches, prompts)
 	}
 	if now := bearer(h); now == "" || now == old {
 		t.Errorf("the fresh child's bearer: %q", now)
@@ -781,9 +845,8 @@ func TestHeadlessRearmedWatchLeavesNoSavedCopy(t *testing.T) {
 // restarted crashes the child and waits for its automatic restart to come up.
 func (b *hlBridge) restarted(t *testing.T) {
 	t.Helper()
-	before, _ := b.runs(t)
 	b.send(t, "crash")
-	waitUntil(t, 10*time.Second, "the restart", func() bool { runs, _ := b.runs(t); return len(runs) > len(before) })
+	waitUntil(t, 10*time.Second, "the restart", b.restartDue) // the crash seen, its delay passed: started again
 	b.waitFor(t, "the new child up", func(v OrchestratorView) bool { return v.Headless.Status == "idle" || v.Headless.Status == "done" })
 }
 
@@ -794,8 +857,7 @@ func TestHeadlessCallAcrossARestart(t *testing.T) {
 	needsAccounts(t)
 	b := startHeadless(t, t.TempDir(), nil, func(h *headlessRunner) { h.restartDelays = []time.Duration{100 * time.Millisecond} })
 	h := b.srv.headless["h1"]
-	var prompts atomic.Int32
-	worker(t, b, "idle", func(w *fakeherdr.World, pane string) { prompts.Add(1); w.Set(pane, "working") })
+	w := worker(t, b, "idle", func(w *fakeherdr.World, pane string) { w.Set(pane, "working") })
 	var armed atomic.Bool
 	entered, release := make(chan struct{}), make(chan struct{})
 	var gate sync.Once
@@ -818,7 +880,11 @@ func TestHeadlessCallAcrossARestart(t *testing.T) {
 		res, _ := cs.CallTool(ctx, &mcp.CallToolParams{Name: "agent_prompt", Arguments: map[string]any{"name": "w1", "text": "do the thing"}})
 		return res
 	}
-	if res := call(); res == nil || res.IsError { // the watch from before: it keeps working
+	first := make(chan *mcp.CallToolResult, 1)
+	go func() { first <- call() }()
+	waitUntil(t, 10*time.Second, "w1 gets the task", func() bool { return len(w.Prompts()) == 1 })
+	b.clock.Advance(deliveryWindow)                // delivered, the worker at it
+	if res := <-first; res == nil || res.IsError { // the watch from before: it keeps working
 		t.Fatalf("the first prompt: %+v", res)
 	}
 	h.mu.Lock()
@@ -834,12 +900,13 @@ func TestHeadlessCallAcrossARestart(t *testing.T) {
 	if res == nil || !res.IsError || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "restarted") {
 		t.Fatalf("the call from before the restart: %+v", res)
 	}
-	time.Sleep(time.Second)
+	// (a watch is registered before its worker is sent anything, and herdr counts a prompt as
+	// it takes it: by the call's answer, any would show)
 	h.mu.Lock()
 	after := h.watches["w1p"]
 	h.mu.Unlock()
-	if after == nil || after != before || prompts.Load() != 1 {
-		t.Errorf("the watch from before replaced (%v), the worker prompted %d times", after != before, prompts.Load())
+	if after == nil || after != before || len(w.Prompts()) != 1 {
+		t.Errorf("the watch from before replaced (%v), the worker prompted %d times", after != before, len(w.Prompts()))
 	}
 }
 
@@ -882,7 +949,7 @@ func TestHeadlessStdioQuestionFromAChildBeingReplaced(t *testing.T) {
 	h.epoch++ // as a Stop or Clear does before the old child has exited
 	h.mu.Unlock()
 	b.send(t, "askstdio") // its question comes as a can_use_tool on stdout
-	time.Sleep(1500 * time.Millisecond)
+	b.waitStdin(t, `this orchestrator's session has ended`)
 	if v := b.view(t); v.Headless.Pending != nil || v.Headless.Status == "blocked" {
 		t.Fatalf("a question from the child being replaced became pending: %+v", v.Headless)
 	}

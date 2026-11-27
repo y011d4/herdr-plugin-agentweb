@@ -70,7 +70,7 @@ func TestClaudeLive(t *testing.T) {
 		h = s.headless["live"]
 		h.extraArgs, h.lineHook = []string{"--model", "haiku"}, hook
 	})
-	b := &hlBridge{tb, "", "", "live"}
+	b := &hlBridge{testBridge: tb, name: "live"} // the real claude, on the real clock
 	failed := []string{}
 	version, completed := "", false
 	defer func() { // however it ends: its child stopped, its verdict written, its transcripts removed
