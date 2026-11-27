@@ -107,6 +107,14 @@ describe('terminal', () => {
     reqs.find((r) => r.url.includes('source=recent'))!.answer(200, { ansi: 'old-1\nold-2\nhello 日本語' });
     await history;
     assert.equal(el.querySelector('#term-history')!.textContent, '', 'not applied');
+
+    const failing = term.refresh(); // a screen read failing after a hold and its release: no error drawn
+    term.setHeld(true);
+    term.setHeld(false);
+    reads().at(-1)!.answer(500, { error: { code: 'x', message: 'boom' } });
+    await failing;
+    await flush();
+    assert.match(live().textContent!, /hello 日本語/, 'the newer screen stays');
   });
 
   it('renders a read that lands while it lives', async () => {
