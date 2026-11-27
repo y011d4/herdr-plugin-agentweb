@@ -25,24 +25,19 @@ function tabTitle({ pane, tabLabel, tabAgentIndex, tabAgentCount }: DashboardCar
   return tabAgentCount > 1 ? `${base} #${tabAgentIndex}` : base;
 }
 
-/** A card's agent's name: herdr's (the one `[yoicks]` notices use), else its tab (an agent the
- *  user runs directly has no name). */
-function cardName(card: DashboardCard): string {
+/** A card's label, its first line: herdr's name for the agent (the one `[yoicks]` notices use), else
+ *  its tab (an agent the user runs directly has no name). Its purpose, when its orchestrator gave one,
+ *  is the line under it. */
+export function cardTitle(card: DashboardCard): string {
   return card.pane.agent?.herdrName || tabTitle(card);
 }
 
-/** A card's label: what the agent is for, as its orchestrator said, else its name. */
-export function cardTitle(card: DashboardCard): string {
-  return card.purpose || cardName(card);
-}
-
-/** The dim line under a label: where the agent runs, as far as its name doesn't say (the workspace ›
- *  the tab); under a purpose, led by the name and the branch, which then leave the label's row to it. */
+/** The dim last line: where the agent runs, as far as its name doesn't say (the workspace › the tab),
+ *  then its branch. */
 export function cardLocation(card: DashboardCard): string {
   const tab = tabTitle(card);
-  const name = cardName(card);
-  const where = tab === name ? card.workspaceLabel : `${card.workspaceLabel} › ${tab}`;
-  return card.purpose ? [name, card.branch, where].filter(Boolean).join(' · ') : where;
+  const where = tab === cardTitle(card) ? card.workspaceLabel : `${card.workspaceLabel} › ${tab}`;
+  return [where, card.branch].filter(Boolean).join(' · ');
 }
 
 /** The agents a list or a Home shows, most recent status change first: never the orchestrators,
@@ -113,10 +108,11 @@ const SCROLLER = 'flex-1 overflow-y-auto [overflow-anchor:none] pb-[calc(var(--s
 // one column of cards, side by side from lg
 const LIST = 'agent-list mt-4 flex flex-col gap-2.5 px-4 min-[600px]:px-6 lg:grid lg:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]';
 
-// One card. The list is flat, so each card names its own location; `branch` and the `worktree`
-// chip come from that workspace.
+// One card: the name and the status; the purpose (two lines at most, all of it on hover); what it's
+// doing; then one dim line, cut short rather than wrapped: the location and the branch (the list is
+// flat, so each card names its own), the kind, the `worktree` chip (from that workspace), the time.
 function AgentCard({ card }: { card: DashboardCard }) {
-  const { pane, branch, isWorktree } = card;
+  const { pane, purpose, isWorktree } = card;
   const { paneId, agent, title } = pane;
   const { displayName, name, customStatus, message, sinceUnixMs } = agent!;
   // The chip shows the stable agent kind, so prefer `name` (raw pane.agent,
@@ -129,20 +125,18 @@ function AgentCard({ card }: { card: DashboardCard }) {
     <Card className={CARD} data-pane-id={paneId} role="button" tabIndex={0} withBorder radius={10} padding={0} px={16} py={14}
       onClick={() => openAgent(paneId)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openAgent(paneId); }}>
       <Group gap={10} wrap="nowrap" mb={6}>
-        {card.purpose ? <Text className="agent-name min-w-0" fw={600} truncate>{card.purpose}</Text> : <>
-          <Text className="agent-name shrink-0" fw={600} maw="50%" truncate>{cardTitle(card)}</Text>
-          {branch ? <Text className="card-branch min-w-0" fz={13} c="dimmed" truncate>{branch}</Text> : null}
-        </>}
+        <Text className="agent-name min-w-0" fw={600} truncate>{cardTitle(card)}</Text>
         <span className="ml-auto" />
         <StatusBadge status={status} />
       </Group>
+      {purpose ? <Text className="card-purpose" fz={14} lh={1.35} mb={6} lineClamp={2} title={purpose}>{purpose}</Text> : null}
       {meta ? <Text fz={13} c="dimmed" mb={4} truncate>{meta}</Text> : null}
-      <Group gap={12} fz={13} c="dimmed">
+      <Group gap={12} fz={13} c="dimmed" wrap="nowrap">
         <Text className="card-location min-w-0" inherit truncate>{cardLocation(card)}</Text>
         <Tag>{agentKind}</Tag>
         {isWorktree ? <Tag c="working">worktree</Tag> : null}
         {title ? <Text fz={12} inherit truncate>{title}</Text> : null}
-        {relTime ? <span>{relTime}</span> : null}
+        {relTime ? <span className="shrink-0 whitespace-nowrap">{relTime}</span> : null}
       </Group>
     </Card>
   );
