@@ -443,7 +443,8 @@ describe('Home', () => {
   it('shows the counts of its account and goes to its list from them', async () => {
     await home(fresh());
     assert.equal($('#tb').textContent, 'Personal· ready>_⚙', "a Home's topbar: no Agents, ends with Settings, no ⋮");
-    assert.equal($('.home-counts').textContent, '1 working1 done0 idleAgents ›'); // p1, p3 (p4 is the orchestrator)
+    assert.equal($('.home-counts').textContent, '1 working1 done0 idle›');
+    assert.equal($('.home-counts').getAttribute('aria-label'), 'Agents: 1 working, 1 done, 0 idle'); // p1, p3 (p4 is the orchestrator)
     // two configured, one running: the switcher lists both, the stopped one dimmed
     const sw = [...container.querySelectorAll<HTMLElement>('.home-switch-btn')];
     assert.deepEqual(sw.map((b) => switcher(b, b.dataset.orch!)), ['on|personal|idle|Personal', 'stopped|work|stopped|work1']); // 1: p6 waits, and work's account is unknown (every agent)
