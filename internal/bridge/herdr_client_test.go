@@ -209,12 +209,15 @@ func agentListsHandled(t *testing.T, c *HerdrClient) func(what string) {
 	}
 }
 
-// connectedSnapshot waits until c has applied the snapshot after its subscription's ack, and
-// the rest of that actor step (the agent.list debounce it arms).
+// connectedSnapshot waits until c has applied the snapshot after its subscription's ack (the
+// state says connected from the snapshot before it on), and so armed its agent.list debounce.
 func connectedSnapshot(t *testing.T, c *HerdrClient) {
 	t.Helper()
-	waitUntil(t, 5*time.Second, "the snapshot after the ack", func() bool { s := c.State(); return s != nil && s.Connected })
-	actorValue(c, func() bool { return true })
+	waitUntil(t, 5*time.Second, "the ack", c.IsConnected)
+	// the ack's actor step asked for that snapshot (snapshotDepth); none is in flight once it's applied
+	waitUntil(t, 5*time.Second, "the snapshot after the ack", func() bool {
+		return actorValue(c, func() bool { return c.snapshotDepth == 0 })
+	})
 }
 
 // The wait before a reconnect doubles after each failure, up to 30 s, and starts over
