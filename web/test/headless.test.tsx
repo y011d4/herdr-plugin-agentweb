@@ -191,7 +191,13 @@ describe("a headless orchestrator's Home", () => {
     location.hash = '#/home/pilot';
     await fire(() => names[1].click());
     assert.equal(location.hash, '#/home/pilot');
-    assert.deepEqual(getToasts().map((t) => t.body), ['No running agent is named w-gone now.']);
+    assert.deepEqual(getToasts().map((t) => t.body), ["w-gone isn't known yet, or is gone: try again in a moment."], 'p1, p6, p7 have no name yet');
+    clearToasts();
+    const named = withPilot(idle);
+    for (const p of named.workspaces.flatMap((w) => w.tabs.flatMap((t) => t.panes))) if (p.agent) p.agent.herdrName ??= `w-${p.paneId}`;
+    await fire(() => setAppState(named));
+    await fire(() => names[1].click());
+    assert.deepEqual(getToasts().map((t) => t.body), ['No running agent is named w-gone.'], 'every name known');
   });
 
   it('sends nothing while an image is still being scaled', async () => {

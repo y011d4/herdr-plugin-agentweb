@@ -164,7 +164,8 @@ type HerdrClient struct {
 	rebuildT      debounce
 	broadcastT    debounce
 	completionT   debounce
-	listAt        int64 // requestedAt of the agent.list answer applied last: an older one is dropped
+	listSent      int64 // agent.list requests sent, and the number of the one whose answer was applied last:
+	listApplied   int64 // an older answer is dropped (a count, not the clock, which can step back)
 	coverageEpoch int // bumped whenever live event coverage is lost
 	// pane IDs covered by the currently acknowledged subscription; snapshot status
 	// replays skip these (live events deliver their changes) and cover the rest
@@ -738,6 +739,8 @@ func (c *HerdrClient) refreshCompletionSeqsSoon() {
 	c.schedule(&c.completionT, completionSeqDebounce, func() {
 		requestedAt := nowMs()
 		epoch := c.coverageEpoch
+		c.listSent++
+		n := c.listSent
 		go func() {
 			res, err := herdrRPC(c.socketPath, "agent.list", nil)
 			c.post(func() {
@@ -750,10 +753,10 @@ func (c *HerdrClient) refreshCompletionSeqsSoon() {
 				}
 				// answers can land out of order: an older one would put back what the newer one
 				// replaced (a renamed agent's old name)
-				if json.Unmarshal(res, &r) != nil || requestedAt < c.listAt {
+				if json.Unmarshal(res, &r) != nil || n < c.listApplied {
 					return
 				}
-				c.listAt = requestedAt
+				c.listApplied = n
 				next := applyCompletionSeqs(c.cur, r.Agents, requestedAt)
 				if next == c.cur {
 					return
