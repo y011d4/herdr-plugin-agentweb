@@ -20,4 +20,12 @@ describe('Token', () => {
     assert.deepEqual(onToken.mock.calls, [['tok-1']]);
     await unmount();
   });
+
+  it("takes the theme's touch target (theme.ts): the field, a PasswordInput, and Connect", async () => {
+    const { container, unmount } = await render(<Token onToken={() => {}} />);
+    const height = (el: Element | null, prop: string): string => (el as HTMLElement | null)?.style.getPropertyValue(prop) ?? 'none';
+    assert.equal(height(container.querySelector('#token-input')!.closest(`[style*="--input-height"]`), '--input-height'), 'calc(2.75rem * var(--mantine-scale))');
+    assert.equal(height(container.querySelector('button[type="submit"]'), '--button-height'), 'calc(2.75rem * var(--mantine-scale))');
+    await unmount();
+  });
 });
