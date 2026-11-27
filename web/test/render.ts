@@ -1,6 +1,7 @@
 // Component tests without Testing Library: React 19's act + createRoot (happy-dom).
 import { MantineProvider } from '@mantine/core';
 import { act, createElement, type ReactNode } from 'react';
+import { vi } from 'vitest';
 import { createRoot } from 'react-dom/client';
 import { theme } from '../src/theme.ts';
 
@@ -21,3 +22,21 @@ export async function render(node: ReactNode): Promise<{ container: HTMLElement;
 
 /** Runs fn (a click, a submit…) and lets React finish what it set off. */
 export const fire = (fn: () => void): Promise<void> => act(async () => fn());
+
+/** matchMedia answering `query` as the test says (the returned function changes it and tells its
+ *  listeners, as Mantine's useMediaQuery listens), every other query as before. happy-dom's own
+ *  doesn't always tell a change. */
+export function fakeMedia(query: string, matches: boolean): (on: boolean) => Promise<void> {
+  const real = window.matchMedia.bind(window);
+  const fns = new Set<(e: { matches: boolean }) => void>();
+  vi.stubGlobal('matchMedia', (q: string) => (q !== query ? real(q) : {
+    media: q,
+    get matches() { return matches; },
+    addEventListener: (_: string, fn: (e: { matches: boolean }) => void) => { fns.add(fn); },
+    removeEventListener: (_: string, fn: (e: { matches: boolean }) => void) => { fns.delete(fn); },
+  }));
+  return (on) => act(async () => {
+    matches = on;
+    for (const fn of fns) fn({ matches: on });
+  });
+}

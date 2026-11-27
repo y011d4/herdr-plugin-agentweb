@@ -23,3 +23,7 @@ export const theme = createTheme({
     Portal: Portal.extend({ defaultProps: { target: '#modal-root' } }),
   },
 });
+
+/** The PC layout's width: style.css's last block, and the sidebar (ui/App.tsx) with it; the lg
+ *  breakpoint (64em). Below it, every phone, nothing changes. theme.test.ts checks all three agree. */
+export const WIDE_QUERY = '(min-width: 1024px)';

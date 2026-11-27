@@ -16,7 +16,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, typ
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
 import { draftKey, getDraft, pruneDrafts, setDraft } from '../drafts.ts';
-import { homeSummary, shownStatus } from '../dashboard-group.ts';
+import { homeSummary, orchestratorStatus } from '../dashboard-group.ts';
 import { fitImages, MAX_IMAGES, toAttachment, type ImageAttachment } from '../image.ts';
 import { showToast } from '../notify.ts';
 import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
@@ -168,7 +168,7 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
         <div className="home-switch">
           {all.map((o) => {
             const pane = o.paneId ? findPane(o.paneId)?.pane : undefined;
-            const st = !o.paneId ? 'stopped' : pane?.agent ? shownStatus(pane, store.seenDone) : 'unknown';
+            const st = orchestratorStatus(o, pane, store.seenDone);
             return (
               <button key={o.name} className={`home-switch-btn${o.name === name ? ' active' : ''}${o.paneId ? '' : ' stopped'}`}
                 data-orch={o.name} data-pane-id={o.paneId ?? undefined} onClick={() => { location.hash = homeHash(o.name); }}>

@@ -1,7 +1,7 @@
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
-import { dashboardCards, homeSummary, markSeen, shownStatus } from '../src/dashboard-group.ts';
-import type { AgentStatus, PaneNode, WorkspaceNode, WorktreeInfo } from '../src/types.ts';
+import { dashboardCards, homeGroups, homeSummary, markSeen, orchestratorStatus, shownStatus } from '../src/dashboard-group.ts';
+import type { AgentStatus, OrchestratorView, PaneNode, WorkspaceNode, WorktreeInfo } from '../src/types.ts';
 
 function agentPane(id: string, sinceUnixMs: number, status: AgentStatus = 'idle', completionSeq: number | null = null, stateChangeSeq: number | null = null): PaneNode {
   return {
@@ -104,5 +104,45 @@ describe('phone-seen done', () => {
 
   it("keeps a done pane's record while its completionSeq is being refetched (bridge restart)", () => {
     assert.deepEqual(markSeen({ a1: 42 }, ws1(done('a1', null), done('b1', 3)), 'b1'), { a1: 42, b1: 3 });
+  });
+});
+
+describe('homeGroups', () => {
+  const ws = [wsNode('A', [agentPane('a1', 100), agentPane('a2', 300)]), wsNode('B', [agentPane('b1', 200), agentPane('b2', 50)])];
+  const orch = (name: string, agents: string[] | null, paneId: string | null = null): OrchestratorView =>
+    ({ name, label: '', paneId, agents, mode: 'tui', headless: null });
+  const ids = (groups: ReturnType<typeof homeGroups>): Array<[string | null, string[]]> =>
+    groups.map((g) => [g.home?.name ?? null, g.cards.map((c) => c.pane.paneId)]);
+
+  it("puts each orchestrator's account's agents under it, in config order, the list's order within", () => {
+    const groups = homeGroups(dashboardCards(ws), [orch('work', ['b1', 'b2']), orch('personal', ['a1', 'a2'])]);
+    assert.deepEqual(ids(groups), [['work', ['b1', 'b2']], ['personal', ['a2', 'a1']]]);
+  });
+
+  it('ends with Other (home null): the agents no orchestrator lists, left out when there are none', () => {
+    assert.deepEqual(ids(homeGroups(dashboardCards(ws), [orch('personal', ['a1', 'a2'])])), [['personal', ['a2', 'a1']], [null, ['b1', 'b2']]]);
+    assert.deepEqual(ids(homeGroups(dashboardCards(ws), [])), [[null, ['a2', 'b1', 'a1', 'b2']]]);
+    assert.deepEqual(ids(homeGroups([], [orch('personal', [])])), [['personal', []]]);
+  });
+
+  it("gives an orchestrator whose account isn't known none (its Home counts every agent, a list of them all would repeat them)", () => {
+    assert.deepEqual(ids(homeGroups(dashboardCards(ws), [orch('personal', ['a1']), orch('work', null)])),
+      [['personal', ['a1']], ['work', []], [null, ['a2', 'b1', 'b2']]]);
+  });
+
+  it('lists an agent under every orchestrator of its account, as each Home counts it', () => {
+    assert.deepEqual(ids(homeGroups(dashboardCards(ws), [orch('o1', ['a1', 'b1', 'a2', 'b2']), orch('o2', ['a1', 'b1', 'a2', 'b2'])])),
+      [['o1', ['a2', 'b1', 'a1', 'b2']], ['o2', ['a2', 'b1', 'a1', 'b2']]]);
+  });
+});
+
+describe('orchestratorStatus', () => {
+  const o = (paneId: string | null): OrchestratorView => ({ name: 'p', label: '', paneId, agents: null, mode: 'tui', headless: null });
+  it('is stopped without a pane, unknown while its pane has no agent, else its shown status', () => {
+    assert.equal(orchestratorStatus(o(null), undefined, {}), 'stopped');
+    assert.equal(orchestratorStatus(o('x'), shell('x'), {}), 'unknown');
+    assert.equal(orchestratorStatus(o('x'), undefined, {}), 'unknown');
+    assert.equal(orchestratorStatus(o('x'), agentPane('x', 1, 'working'), {}), 'working');
+    assert.equal(orchestratorStatus(o('x'), agentPane('x', 1, 'done', 4), { x: 4 }), 'idle'); // a seen done
   });
 });

@@ -1229,6 +1229,49 @@ async function p6(c: Ctx) {
   }
 }
 
+/** W1: the PC sidebar. On a PC (1280px): #sidebar left of the topbar and #screen, --sidebar-w its
+ *  width; a heading per orchestrator, in /api/state's order, over its account's agents, then Other with
+ *  the agents no account has (when there are any); clicking wc-less there opens #/pane/<it> and marks it.
+ *  Down to a phone's width the sidebar goes, and #screen stays the same element. */
+async function w1(c: Ctx) {
+  const { pg } = c;
+  const less = c.rec.names.less;
+  const row = `document.querySelector('#sidebar [data-sidebar-pane=${js(less)}]')`;
+  try {
+    await mobile(pg, false);
+    await loadApp(c, '#/agents'); // a new document: a PC's pointer
+    let groups = '';
+    const g = await waitFn(async () => {
+      const st = await api(c, 'GET', '/api/state');
+      const orch: any[] = st.orchestrators;
+      const agents = allPanes(st).filter((p) => p.agent && !orch.some((o) => o.paneId === p.paneId)).map((p) => p.paneId as string);
+      const want: Array<[string, string[]]> = orch.map((o) => [o.name, agents.filter((id) => o.agents?.includes(id)).sort()]);
+      const other = agents.filter((id) => !orch.some((o) => o.agents?.includes(id))).sort();
+      if (other.length) want.push(['', other]);
+      const dom = await pg.ev(`[...document.querySelectorAll('#sidebar section.sidebar-group')].map((s) =>
+        [s.dataset.home, [...s.querySelectorAll('[data-sidebar-pane]')].map((e) => e.dataset.sidebarPane).sort()])`);
+      groups = `${want.length}/${dom.length}`;
+      return js(dom) === js(want);
+    }, 5000, 300);
+    const geo = await pg.ev(`(() => { const x = (id) => Math.round(document.getElementById(id).getBoundingClientRect().x);
+      return { w: Math.round(document.getElementById('sidebar').getBoundingClientRect().width), topbar: x('topbar'), screen: x('screen'),
+        v: getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w').trim() }; })()`);
+    const screen = await pg.ev(`window.__wcScreen = document.getElementById('screen'), 1`);
+    const p = await pg.at(row);
+    for (const type of ['mousePressed', 'mouseReleased']) await pg.S('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', clickCount: 1 });
+    const open = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)} && ${row}?.getAttribute('aria-current') === 'page'`, 2000);
+    await mobile(pg, true);
+    const gone = await pg.until(`!document.getElementById('sidebar') && document.getElementById('screen') === window.__wcScreen`, 2000);
+    result(c, !g.timeout && geo.w === 300 && geo.topbar === 300 && geo.screen === 300 && geo.v === '300px' && screen === 1 && !open.timeout && !gone.timeout, 'W1',
+      `groups=${groups}:${g.timeout ? 'mismatch' : 'ok'},width=${geo.w},topbarX=${geo.topbar},screenX=${geo.screen},--sidebar-w=${geo.v},open=${ms(open)},phone=${ms(gone)}`,
+      "1280px: #sidebar 300px left of #topbar and #screen (--sidebar-w 300px); its groups = /api/state's orchestrators (each its account's agents) + Other; " +
+        "clicking wc-less there opens #/pane/<it> marked within 2s; at 390px no #sidebar and the same #screen within 2s");
+  } finally {
+    await mobile(pg, true);
+    await loadApp(c, '#/agents'); // a phone's document again
+  }
+}
+
 /** P19: wc-shell's quick keys: Esc POSTs exactly {keys:['esc']}, 1 exactly {text:'1'}. */
 async function p19(c: Ctx) {
   const { pg, rec } = c;
@@ -1799,6 +1842,7 @@ const ITEMS: Item[] = [
   { id: 'P16', tier: 1, run: p16 },
   { id: 'P7', tier: 1, needs: ['less'], run: p7 },
   { id: 'P18', tier: 1, needs: ['less'], run: p18 },
+  { id: 'W1', tier: 1, needs: ['less'], run: w1 },
   { id: 'P3', tier: 1, needs: ['less'], run: p3 },
   { id: 'P4-T1', tier: 1, needs: ['less'], run: p4t1 },
   { id: 'P15', tier: 1, needs: ['stop'], run: p15 },
