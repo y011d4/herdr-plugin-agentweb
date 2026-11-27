@@ -16,8 +16,9 @@
  * web/dist), shoots each scene on a phone and a PC, before and after, and writes <scene>-<phone|pc>.<side>.png and
  * manifest.json (which changed: the PNGs' bytes differ) into --out. Each shot gets a browser context of its own
  * (the app keeps seen-done, the last Home, drafts in localStorage), a frozen clock (the fixture's T0 + 30s), UTC,
- * en-US, and no animations, so the same build shoots the same bytes. CI (.github/workflows/screenshots.yml) posts
- * the changed ones on the PR.
+ * en-US, no animations (reduced motion for Mantine's), and its images decoded, so the same build shoots the same
+ * bytes. CI (.github/workflows/screenshots.yml) posts the changed ones on the PR and fails its `screens` check until
+ * the user approves them with the ui-change label.
  *
  * A preview is a throwaway bridge (state/config under $WC_ROOT/preview-<port>, `env -u HERDR_BIN_PATH`)
  * over the REAL herdr, which production also shows, unless the root has a private herdr: `herdr start` runs a
@@ -2456,9 +2457,13 @@ async function shots(o: Record<string, any>): Promise<number> {
         await S('Emulation.setLocaleOverride', { locale: 'en-US' });
         await S('Emulation.setDeviceMetricsOverride', size.metrics);
         await S('Emulation.setTouchEmulationEnabled', size.metrics.mobile ? { enabled: true, maxTouchPoints: 5 } : { enabled: false });
+        // Mantine's transitions run on JS timers the CSS override can't stop (slow on a loaded runner): with the theme's
+        // respectReducedMotion, this makes them 0 ms
+        await S('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
         await S('Page.navigate', { url: `${server.url}/${scene.token === false ? '' : '?token=shots'}${scene.hash}` });
         const ready = !(await waitFn(() => ev(`(() => { try { return !!(${scene.ready}); } catch { return false; } })()`), 10_000)).timeout;
-        await ev('document.fonts.ready.then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))');
+        await ev(`document.fonts.ready.then(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))))
+          .then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))`);
         await sleep(300);
         const { data } = await S('Page.captureScreenshot', { format: 'png' });
         return { png: Buffer.from(data, 'base64'), ready };

@@ -33,6 +33,9 @@ export const theme = createTheme({
   // a pointer over every Mantine control (button, menu item, nav link, anchor, switch, select): Mantine's
   // default is the arrow; a disabled one is not-allowed (Mantine's, and style.css's for UnstyledButton)
   cursorType: 'pointer',
+  // Mantine's transitions (a drawer's slide, a menu, a modal) take 0 ms for a user whose system asks for reduced
+  // motion; the PR screenshots ask for it too, so none is caught half-way (webcheck.ts's shots)
+  respectReducedMotion: true,
   components: {
     // Mantine's portals (a modal, a menu's dropdown) go into #modal-root, above the app (index.html)
     Portal: Portal.extend({ defaultProps: { target: '#modal-root' } }),
