@@ -154,7 +154,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       else opts.modeChanged(); // staying on the terminal: Home reveals its keys
     } catch {
       // leave the terminal view; toggle stays hidden (Home reveals the keys)
-      if (!destroyed) opts.modeChanged();
+      if (!destroyed && !suspended && reqEpoch === epoch) opts.modeChanged();
     } finally {
       chatProbing = false;
     }
@@ -190,9 +190,15 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     opts.modeChanged();
     updatePromptPanel(); // hide the answer panel (chat-only)
     wsSendWatch(); // server: stop transcript watch, resume pane watch
-    void term.refresh().then(() => { // repaint the live screen the user returns to
-      if (destroyed || historyLoaded) return;
-      historyLoaded = true; // opened on its chat: the scrollback with the terminal's first look
+    lookAtTerminal(); // repaint the live screen the user returns to
+  }
+
+  // The terminal's live screen, read again, and its scrollback with its first look (a pane opened on its chat,
+  // or one suspended before its first read was done).
+  function lookAtTerminal(): void {
+    void term.refresh().then(() => {
+      if (destroyed || suspended || historyLoaded) return;
+      historyLoaded = true;
       void term.loadHistory();
     });
   }
@@ -515,6 +521,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       if (destroyed) return;
       suspended = true;
       epoch++;
+      term.setHeld(true);
       if (paneRefreshTimer) clearInterval(paneRefreshTimer);
       paneRefreshTimer = null;
       stopPromptScreenPoll();
@@ -523,12 +530,13 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     resume() {
       if (destroyed || !suspended) return;
       suspended = false;
+      term.setHeld(false);
       view.paneViewMode = mode;
       opts.showToggle(chatAvailable && !headless);
       opts.modeChanged();
       startPaneRefresh();
       updatePromptPanel();
-      if (mode === 'terminal') void term.refresh();
+      if (mode === 'terminal') lookAtTerminal();
     },
     onState() {
       if (destroyed || suspended) return;
@@ -556,8 +564,9 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       });
     },
     async reread(current) {
+      const reqEpoch = epoch;
       const live = await readPromptScreen();
-      if (current() && !destroyed && !suspended) renderPromptPanel(live?.parsed ?? null, live?.id ?? '');
+      if (current() && !destroyed && !suspended && reqEpoch === epoch) renderPromptPanel(live?.parsed ?? null, live?.id ?? '');
     },
     destroy() {
       destroyed = true;

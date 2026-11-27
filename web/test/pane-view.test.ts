@@ -197,6 +197,17 @@ describe('pane view: chat', () => {
     assert.match(chatLog().textContent!, /after/);
   });
 
+  it('a probe failing while suspended reports nothing (the toggle slot is the drawer\'s)', async () => {
+    vi.useFakeTimers();
+    open('p3'); // its terminal chosen in a test above: the terminal first, then the probe
+    await answer('/api/panes/p3/read?source=visible', read[1]);
+    assert.equal(count('/api/panes/p3/transcript'), 1);
+    const modes = calls.modes;
+    view.suspend();
+    await answer('/api/panes/p3/transcript', { error: 'boom' }, 500);
+    assert.equal(calls.modes, modes, 'no modeChanged');
+  });
+
   it('a fallback poll in flight as it is suspended applies neither then nor after the resume', async () => {
     vi.useFakeTimers();
     open('p1');

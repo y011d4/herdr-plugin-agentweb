@@ -27,6 +27,8 @@ export interface Terminal {
   echo(): void;
   /** the bridge's app-scroll decision (pane_output / a visible read carry it) */
   setAppScroll(on: boolean): void;
+  /** held (a Home's under a drawer): no reads, and none in flight applies; released by `false` */
+  setHeld(on: boolean): void;
   destroy(): void;
 }
 
@@ -59,6 +61,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
   const listeners = new AbortController();
   const { signal } = listeners;
   let destroyed = false;
+  let held = false; // setHeld
 
   // each pane opens fitted to width, scrolled to the bottom
   // null = auto-fit the pane width; a number = font px set by the pinch gesture
@@ -294,13 +297,14 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
     // without lastLiveAnsi we can't trim it off, so we'd duplicate it into history.
     // (Bails harmlessly when the first pane read hasn't rendered yet; historyFetchedAt
     // stays 0 so the next above-bottom scroll retries once live output exists.)
-    if (destroyed || historyRefreshing || terminalTouchActive || !lastLiveAnsi) return;
+    if (destroyed || held || historyRefreshing || terminalTouchActive || !lastLiveAnsi) return;
     historyRefreshing = true;
     try {
       const data = await apiGet<ReadResponse>(
         `/api/panes/${encodeURIComponent(paneId)}/read?source=recent&lines=${HISTORY_LINES}&format=ansi`
       );
       if (destroyed) return; // navigated away
+      if (held) { historyFetchedAt = 0; return; } // under a drawer: read again once back
       // A gesture may have started while the fetch was in flight; replacing the
       // history DOM / adjusting scrollTop now would cancel or jump it. Bail and
       // leave the cache dirty so the next above-bottom scroll refetches.
@@ -385,14 +389,14 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
   }
 
   async function refreshPaneOutput(): Promise<void> {
-    if (destroyed) return;
+    if (destroyed || held) return;
     const seq = outputSeq;
     const reqId = ++refreshReqSeq;
     try {
       const data = await apiGet<ReadResponse>(
         `/api/panes/${encodeURIComponent(paneId)}/read?source=visible&lines=200&format=ansi`
       );
-      if (destroyed) return; // navigated away
+      if (destroyed || held) return; // navigated away, or under a drawer
       // A later read started while this one was in flight — let the newest win, so
       // an earlier HTTP read can't overwrite a newer one's fresher output.
       if (reqId !== refreshReqSeq) return;
@@ -406,7 +410,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
       renderPaneOutput(data.ansi ?? data.text ?? '');
     } catch (err) {
       const message = (err as Error).message;
-      if (message === '401' || destroyed) return;
+      if (message === '401' || destroyed || held) return;
       // transient failures (bridge restart, herdr reconnect) must not wipe the
       // terminal the user is reading — keep the last render and toast instead
       if (lastLiveAnsi) {
@@ -432,6 +436,10 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
       setTimeout(() => { void refreshPaneOutput(); }, 500);
     },
     setAppScroll(on) { appScrollPane = on; },
+    setHeld(on) {
+      held = on;
+      if (on) refreshReqSeq++; // a read in flight now never applies, also once released
+    },
     destroy() {
       destroyed = true;
       listeners.abort();

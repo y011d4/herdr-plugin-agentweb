@@ -85,6 +85,23 @@ describe('terminal', () => {
     assert.ok(live().querySelector('.loading-spinner'), 'no error text either');
   });
 
+  it('held (a Home under a drawer) it reads nothing, and a read in flight never applies, also once released', async () => {
+    const inFlight = term.refresh();
+    term.setHeld(true);
+    await term.refresh();
+    await term.loadHistory();
+    assert.equal(reqs.length, 1, 'no read while held');
+    reads()[0].answer(200, read[1]);
+    await inFlight;
+    term.setHeld(false);
+    await flush();
+    assert.ok(live().querySelector('.loading-spinner'), 'the held read not drawn');
+    const again = term.refresh();
+    reads()[1].answer(200, read[1]);
+    await again;
+    assert.match(live().textContent!, /hello 日本語/, 'released: it reads and draws');
+  });
+
   it('renders a read that lands while it lives', async () => {
     const refreshed = term.refresh();
     reads()[0].answer(200, read[1]);
