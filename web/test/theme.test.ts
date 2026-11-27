@@ -22,6 +22,8 @@ describe('theme', () => {
       [dark[0], dark[2], dark[4], dark[6], dark[7], dark[8], theme.colors!.accent![0]],
       [color.text, color['text-dim'], color.border, color['surface-2'], color.surface, color.bg, color.accent],
     );
+    // the statuses' (ui/Status.tsx; unknown is the theme's alone)
+    for (const st of ['idle', 'working', 'blocked', 'done']) assert.equal(theme.colors![st]![6], color[st], st);
   });
 
   it("makes a button given no size, and an input at its default (sm), style.css's touch target tall", () => {

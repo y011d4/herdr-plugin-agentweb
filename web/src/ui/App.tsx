@@ -13,6 +13,7 @@
  * start() (main.tsx) loads the token, connects, fetches the first
  * State and listens: hashchange, the SW's navigate message, visibilitychange, the viewport.
  */
+import { Center, Loader } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { Fragment, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -282,7 +283,7 @@ function handleRoute(e?: Event): void {
   if (route.kind === 'loading') {
     // can't resolve the orchestrator yet — the first state re-routes (onStateUpdate)
     routeRendered = false;
-    show('loading', <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}><span className="loading-spinner"></span></div>, BARE);
+    show('loading', <Center flex={1}><Loader size={20} /></Center>, BARE);
   } else if (route.kind === 'home') {
     view.homeMode = true;
     view.activePaneId = route.paneId;

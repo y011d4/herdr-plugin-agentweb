@@ -20,6 +20,12 @@ export const theme = createTheme({
     // a menu's) 7: style.css's --color-text, -text-dim, -border, -surface-2, -surface; 8 is --color-bg.
     dark: ['#e2e4ea', '#c0c4d4', '#7b8099', '#5a5f72', '#2e3140', '#292c38', '#252830', '#1c1f26', '#111318', '#0b0c10'],
     accent: colorsTuple('#4f8ef7'), // --color-accent
+    // an agent's status (ui/Status.tsx): --color-idle, -working, -blocked, -done; unknown's is here alone
+    idle: colorsTuple('#5a5f72'),
+    working: colorsTuple('#4f8ef7'),
+    blocked: colorsTuple('#f47c2a'),
+    done: colorsTuple('#3daf72'),
+    unknown: colorsTuple('#3a3e4f'),
   },
   primaryColor: 'accent',
   components: {
