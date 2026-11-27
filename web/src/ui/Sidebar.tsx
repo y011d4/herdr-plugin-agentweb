@@ -15,7 +15,7 @@ import { homeGroups, orchestratorStatus, shownStatus, type DashboardCard, type H
 import { openAgent } from '../nav.ts';
 import { homeHash } from '../routes.ts';
 import { findPane, store } from '../store.ts';
-import { agentCards, cardLocation, cardTitle, orchestratorLabel, useHeldState } from './Dashboard.tsx';
+import { CardWhere, agentCards, cardTitle, orchestratorLabel, useHeldState } from './Dashboard.tsx';
 import { StatusBadge, StatusDot } from './Status.tsx';
 import { NeedsBadge, needsYou, useMinute } from './Todos.tsx';
 
@@ -86,7 +86,7 @@ function Agent({ card, on }: { card: DashboardCard; on: boolean }) {
       label={cardTitle(card)}
       // spans (a button holds no <p>), each a line of its own; the purpose wraps, under the row's noWrap
       description={<>{purpose ? <Text span className="card-purpose my-0.5 whitespace-normal text-(--color-text)" fz={13} lh={1.3} lineClamp={2} title={purpose}>{purpose}</Text> : null}
-        <Text span className="card-location block" inherit truncate>{cardLocation(card)}</Text></>}
+        <CardWhere card={card} /></>}
       rightSection={<StatusBadge status={st} small />} active={on} aria-current={current(on)}
       onClick={() => openAgent(paneId)} />
   );

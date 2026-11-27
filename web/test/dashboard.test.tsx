@@ -58,18 +58,18 @@ describe('Dashboard cards', () => {
     tab.panes.find((p) => p.paneId === 'p7')!.agent!.herdrName = 'fix-auth'; // agent start's tab is labelled by the name
     s.purposes.p7 = 'ログインを直す';
     const c = await show('#/agents', s);
-    const card = (id: string): Array<string | undefined> => ['.agent-name', '.card-purpose', '.card-location']
+    const card = (id: string): Array<string | undefined> => ['.agent-name', '.card-purpose', '.card-location', '.card-branch']
       .map((sel) => c.querySelector(`.agent-card[data-pane-id="${id}"] ${sel}`)?.textContent ?? undefined);
-    assert.deepEqual(card('p3'), ['w-review', 'レビューの指摘を直す', 'repo-wt-feat › feat #1']); // detached: no branch
-    assert.deepEqual(card('p7'), ['fix-auth', 'ログインを直す', 'repo · main']);
+    assert.deepEqual(card('p3'), ['w-review', 'レビューの指摘を直す', 'repo-wt-feat › feat #1', undefined]); // detached: no branch
+    assert.deepEqual(card('p7'), ['fix-auth', 'ログインを直す', 'repo', 'main']);
     assert.equal(c.querySelector<HTMLElement>('.agent-card[data-pane-id="p7"] .card-purpose')!.title, 'ログインを直す', 'all of it on hover');
     delete s.purposes.p3;
     delete s.purposes.p7;
     await act(async () => setAppState(structuredClone(s)));
-    assert.deepEqual(card('p3'), ['w-review', undefined, 'repo-wt-feat › feat #1']);
-    assert.deepEqual(card('p7'), ['fix-auth', undefined, 'repo · main']);
-    assert.deepEqual(card('p6'), ['feat #2', undefined, 'repo-wt-feat']); // no name: the tab
-    assert.deepEqual(card('p1'), ['one #1', undefined, 'repo · main']);
+    assert.deepEqual(card('p3'), ['w-review', undefined, 'repo-wt-feat › feat #1', undefined]);
+    assert.deepEqual(card('p7'), ['fix-auth', undefined, 'repo', 'main']);
+    assert.deepEqual(card('p6'), ['feat #2', undefined, 'repo-wt-feat', undefined]); // no name: the tab
+    assert.deepEqual(card('p1'), ['one #1', undefined, 'repo', 'main']);
   });
 });
 
