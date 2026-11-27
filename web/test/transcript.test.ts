@@ -280,11 +280,12 @@ describe('conversationItems / latestActivity (home chat)', () => {
     const calls = new Map();
     const texts = (items: TimelineItem[]): string[] => conversationItems(items, calls).map((i) => (i as { text: string }).text);
     // its summary is `<name>: <the text's first line>` (transcript_normalize.go); the call alone shows nothing
-    assert.deepEqual(texts([prompt('p1', 'w-a: Also add a test for the redirect'), prompt('p2', 'w-a: /exit'), prompt('p3', 'w-a: ' + 'あ'.repeat(60))]), []);
+    assert.deepEqual(texts([prompt('p1', 'w-a: Also add a test for the redirect'), prompt('p2', 'w-a: /exit'), prompt('p3', 'w-a: ' + 'あ'.repeat(60)),
+      prompt('p4', `w-a: ${'x'.repeat(49)} and more`)]), []);
     const delivered = 'delivered to w-a: you are woken when it finishes or stops for an answer';
-    // delivered: the task's first line, cut short; /exit is just such a task
-    assert.deepEqual(texts([res('p1', delivered), res('p2', delivered), res('p3', delivered)]),
-      ['[yoicks] sent to w-a: Also add a test for the redirect', '[yoicks] sent to w-a: /exit', `[yoicks] sent to w-a: ${'あ'.repeat(50)}…`]);
+    // delivered: the task's first line, cut short (no space left before the …); /exit is just such a task
+    assert.deepEqual(texts([res('p1', delivered), res('p2', delivered), res('p3', delivered), res('p4', delivered)]),
+      ['[yoicks] sent to w-a: Also add a test for the redirect', '[yoicks] sent to w-a: /exit', `[yoicks] sent to w-a: ${'あ'.repeat(50)}…`, `[yoicks] sent to w-a: ${'x'.repeat(49)}…`]);
     // not delivered: the bridge's reason, without its own "not delivered to <name>:" / "task not sent:"
     assert.deepEqual(texts([
       prompt('f1', 'w-a: go'), res('f1', 'not delivered to w-a:\nagent_not_found', true),

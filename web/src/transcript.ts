@@ -323,7 +323,7 @@ function toolNotice(call: ToolUse, text: string): string {
   const [name, first] = i < 0 ? [call.summary, ''] : [call.summary.slice(0, i), call.summary.slice(i + 2)];
   if (!/^delivered to /.test(line)) return `[yoicks] not sent to ${name}: ${line.replace(/^(?:not delivered to \S+|task not sent): /, '')}`;
   const task = [...first];
-  return `[yoicks] sent to ${name}: ${task.length > TASK_SHOWN ? `${task.slice(0, TASK_SHOWN).join('')}…` : first}`;
+  return `[yoicks] sent to ${name}: ${task.length > TASK_SHOWN ? `${task.slice(0, TASK_SHOWN).join('').trimEnd()}…` : first}`;
 }
 
 /**
