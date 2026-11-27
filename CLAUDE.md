@@ -59,7 +59,12 @@ All in `internal/bridge/` (one package):
 - `web/src/main.tsx` (index.html's entry) starts `ui/App.tsx`, the SPA shell, and draws it into
   `#app` over index.html's static first paint (the same topbar, banner and `#screen`): hash routing
   (`routes.ts`, pure `resolveRoute`; each route render gives the screen and its topbar a new key,
-  so they mount afresh), the topbar (each screen fills its three slots), the connection dot and the
+  so they mount afresh; `#/pane/<id>` opens the pane in `ui/AgentDrawer.tsx`, Mantine's Drawer, over the
+  screen it was opened from, `view.paneBackRoute`, which stays as it is: a list live and at its scroll,
+  a Home with its view stopped; a sheet from the bottom on a phone, from the right at 1024px and up),
+  `nav.ts` (`openAgent`/`go`: drawer → drawer replaces the history entry; `closeAgent`: back to the
+  entry under it when it was opened on it, `view.paneOverBase`, else a replace; ✕, the dimmed screen,
+  Escape with no other layer over it and the phone's Back close it), the topbar (each screen fills its three slots), the connection dot and the
   reconnect banner, the SW's `navigate` message, visibilitychange's global part (the watch, the
   open pane's OS notifications, seen done), `visualViewport` → `--app-height` and the startup (token,
   WS, first `/api/state`, a 401 → the token screen). Under it: `api.ts` (token, REST; a 401 →
@@ -71,13 +76,14 @@ All in `internal/bridge/` (one package):
   toasts). The screens are in `web/src/ui/`: Settings, Token, the agents list `Dashboard.tsx`,
   `Pane.tsx` and `PromptPanel.tsx`, and on a PC the sidebar `Sidebar.tsx` beside them; `Toasts.tsx` draws into `#toast-container` and `Modals.tsx`
   (Confirm, on Mantine's Modal; Rename, New agent, the image preview) is portalled into `#modal-root`;
-  a pane's ⋮ is a Mantine Menu (`Pane.tsx`'s `AgentMenu`, its dropdown in `#modal-root` too). An opened
+  a pane's ⋮ is a Mantine Menu (`Pane.tsx`'s `AgentMenu`, in its drawer's header, its dropdown in `#modal-root`
+  too, over the drawer). An opened
   pane's body is `pane-view.ts` (`createPaneView` → setMode/onState/echo/destroy, one per opened
   pane or Home: the chat log, the transcript probe, its own WS messages and agent_status, the 3s
-  refresh, the pane's visibilitychange, the prompt poll and going Back after an answer) over `terminal.ts` (`createTerminal`:
+  refresh, the pane's visibilitychange, the prompt poll and closing the drawer after an answer) over `terminal.ts` (`createTerminal`:
   the continuous buffer, fit/pinch, wheel forwarding and fling). These two are the imperative
   engines, and an engine owns only its own DOM subtree: `#pane-view`'s children, an empty
-  container React draws and never renders into. `ui/Pane.tsx` draws the topbar, Home's
+  container React draws and never renders into. `ui/Pane.tsx` draws Home's topbar and
   bits, the composer (an uncontrolled textarea) and the quick keys around `#pane-view`, and
   `ui/PromptPanel.tsx` the answer panel pane-view reports (`opts.prompt`: taps, in-flight guard, cooldown, 409). A headless
   orchestrator's Home (`hl:<name>`) is the same screen: `findPane`/`markPaneSeen` (`store.ts`) make it
@@ -146,7 +152,7 @@ All in `internal/bridge/` (one package):
   Home's Agents › (its status bar's counts) opens `#/agents/<name>`: only the panes in its state `agents` (its Claude
   account's, via `paneAccount`, cached per agent pane and re-checked every 60s by `paneAccountCache`;
   `null` = unknown → every agent),
-  with Back to the Home; a pane opened from there goes Back to that list. Any route to
+  with Back to the Home; a pane opened from there opens over that list. Any route to
   its pane (`#/pane/<id>`: notification clicks, stale links) is replaced by its Home. herdr's
   `pane.agent_detected` (fires on detect *and* release) is rebuild-triggering, so agent presence and
   `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `yoicks agent …`, waking on background
@@ -424,7 +430,9 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   `createPaneView` / `createTerminal`, and the shell destroys it on leaving (`ui/App.tsx`'s
   `handleRoute` → `closePaneView`): `destroy()` stops its timers and listeners, and
   every async continuation checks `destroyed`, so a stale response can't poison the next pane's
-  view. Within a pane, reads also drop a response a newer read or WS push superseded.
+  view. Within a pane, reads also drop a response a newer read or WS push superseded. A drawer
+  opened over a Home stops the Home's view and leaves its DOM: the pane ids (`#pane-view`,
+  `#chat-log`, `#terminal-output`, `#screen-pane`…) then exist twice, so select inside `.agent-drawer`.
 - **`ui/Pane.tsx`: the composer is uncontrolled.** The textarea has no `value` prop, so a state
   push never resets what is being typed, an IME composition included. Enter sends only on a PC
   (Shift+Enter: a newline), never the Enter that confirms an IME conversion (`isComposing`, or
@@ -444,7 +452,8 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   slot of its own, so `#topbar`/`#reconnect-banner`/`#screen` stay the same elements as it comes and
   goes; while it is there `#app` is a two-column grid (`#app:has(> #sidebar)`) and `--sidebar-w` is its
   width, for an overlay that should leave it usable. Like the list it holds still while a finger is
-  down (`useHeldState`), and it opens an agent the list's way (`openPane`).
+  down (`useHeldState`), and it opens an agent the list's way (`nav.ts`'s `openAgent`: its drawer, over
+  the screen on show; the dimmed part starts at `--sidebar-w`, so the sidebar stays usable under it).
 
 ## Security invariants
 

@@ -25,8 +25,10 @@ export interface View {
   /** the pane on screen is an orchestrator's Home (#/home/<name>) */
   homeMode: boolean;
   paneViewMode: 'terminal' | 'chat';
-  /** where a pane's Back goes: Home or an account's list when it was opened from there, else the list */
+  /** the screen under a pane's drawer: Home or an account's list when it was opened from there, else the list */
   paneBackRoute: string;
+  /** the drawer was opened on top of that screen's history entry here (its close goes back to it) */
+  paneOverBase: boolean;
   /** where Settings' Back goes: the Home or list that opened it, else the list */
   settingsBackRoute: string;
 }
@@ -34,7 +36,7 @@ export interface View {
 export const store: { appState: AppState | null; wsConnected: boolean; view: View; seenDone: SeenDone } = {
   appState: null,
   wsConnected: false,
-  view: { screen: 'loading', activePaneId: null, homeMode: false, paneViewMode: 'terminal', paneBackRoute: '#/agents', settingsBackRoute: '#/agents' },
+  view: { screen: 'loading', activePaneId: null, homeMode: false, paneViewMode: 'terminal', paneBackRoute: '#/agents', paneOverBase: false, settingsBackRoute: '#/agents' },
   seenDone: (() => {
     try { return JSON.parse(localStorage.getItem(STORAGE_SEEN) ?? '{}') ?? {}; } catch { return {}; }
   })(),

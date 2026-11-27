@@ -7,7 +7,8 @@ import { clearToasts, getToasts } from '../src/notify.ts';
 import { keptTasks, setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
 import { orchestratorOfPane } from '../src/routes.ts';
-import { Pane, paneTopbar, paneViewOnState } from '../src/ui/Pane.tsx';
+import { AgentDrawer } from '../src/ui/AgentDrawer.tsx';
+import { homeTopbar, Pane, paneViewOnState } from '../src/ui/Pane.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
 import { fire, render } from './render.ts';
 
@@ -34,12 +35,16 @@ let desktop: boolean;
 let unmount: () => Promise<void>;
 let container: HTMLElement;
 
-/** The pane screen as mounted: its topbar's slots, then the screen. */
+const noActions = () => ({ rename: () => {}, clear: () => {}, stop: () => {} });
+/** A pane as mounted, in its drawer over `back`; a Home with its topbar's slots, then the screen. */
 async function show(paneId: string, home = false, back = '#/agents', name = home ? orchestratorOfPane(store.appState, paneId)?.name : undefined): Promise<void> {
   store.view.activePaneId = paneId;
   store.view.homeMode = home;
-  const t = paneTopbar(paneId, home, back, () => {});
-  ({ container, unmount } = await render(<><div id="tb">{t.left}{t.title}{t.right}</div><Pane paneId={paneId} home={home} name={name} /></>));
+  store.view.paneBackRoute = back;
+  store.view.paneOverBase = false;
+  const t = homeTopbar(paneId);
+  ({ container, unmount } = await render(home ? <><div id="tb">{t.title}{t.right}</div><Pane paneId={paneId} home name={name} /></>
+    : <AgentDrawer sheet={{ paneId, key: 1, open: true }} actions={noActions} />));
 }
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => container.querySelector<T>(sel)!;
 const ta = () => $<HTMLTextAreaElement>('#pane-input');
@@ -289,15 +294,16 @@ describe('quick keys', () => {
   });
 });
 
-describe('pane topbar', () => {
-  it('names the agent and where it is, keeps that while the pane is gone, and goes Back', async () => {
+describe('pane header', () => {
+  it('names the agent and where it is, keeps that while the pane is gone, and ✕ closes it', async () => {
+    location.hash = '#/pane/p1'; // opened afresh: its close replaces it with the screen under it
     await show('p1', false, '#/agents/personal');
-    assert.equal($('#tb').textContent!.replace(/[⋮]/g, ''), '← Agentsclaude· repo / oneChat');
+    assert.equal($('.agent-drawer-head').textContent!.replace(/[⋮]/g, ''), '✕claude· repo / oneChat');
     const s = fresh();
     s.workspaces[0].tabs[0].panes.splice(0, 1);
     await fire(() => setAppState(s));
-    assert.match($('#tb').textContent!, /claude· repo \/ one/);
-    await fire(() => $('.topbar-back').click());
+    assert.match($('.agent-drawer-head').textContent!, /claude· repo \/ one/);
+    await fire(() => $('#btn-drawer-close').click());
     assert.equal(location.hash, '#/agents/personal');
   });
 

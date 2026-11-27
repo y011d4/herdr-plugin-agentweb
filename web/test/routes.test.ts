@@ -1,6 +1,6 @@
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
-import { agentsScope, nextPaneBackRoute, nextSettingsBackRoute, paneGoneRoute, paneRoute, resolveRoute } from '../src/routes.ts';
+import { agentsScope, nextPaneBackRoute, nextPaneOverBase, nextSettingsBackRoute, paneRoute, resolveRoute } from '../src/routes.ts';
 import type { AppState, OrchestratorView } from '../src/types.ts';
 
 const orch = (name: string, paneId: string | null): OrchestratorView => ({ name, label: '', paneId, agents: null, mode: 'tui', headless: null });
@@ -115,9 +115,11 @@ describe('route helpers', () => {
     assert.equal(nextSettingsBackRoute(null, '#/home/a'), '#/home/a');
   });
 
-  it("paneGoneRoute: back to the account's list a pane came from, else the list", () => {
-    assert.equal(paneGoneRoute({ homeMode: false, paneBackRoute: '#/agents/a' }), '#/agents/a');
-    assert.equal(paneGoneRoute({ homeMode: false, paneBackRoute: '#/home/a' }), '#/agents');
-    assert.equal(paneGoneRoute({ homeMode: true, paneBackRoute: '#/agents/a' }), '#/agents');
+  it('nextPaneOverBase: opened from the screen under it; pane to pane keeps it; a fresh open or another screen not', () => {
+    assert.equal(nextPaneOverBase('#/home/a', '#/home/a', false), true);
+    assert.equal(nextPaneOverBase('#/agents', '#/agents', false), true);
+    assert.equal(nextPaneOverBase('#/pane/p9', '#/agents', true), true);
+    assert.equal(nextPaneOverBase('#/pane/p9', '#/agents', false), false);
+    for (const from of ['#/settings', '', null]) assert.equal(nextPaneOverBase(from, '#/agents', true), false, String(from));
   });
 });

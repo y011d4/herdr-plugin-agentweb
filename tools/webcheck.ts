@@ -1071,9 +1071,11 @@ async function p15(c: Ctx) {
   const list = '#/agents/wc-o1'; // not the default #/agents: the way back is remembered
   await pg.goto(list);
   await pg.goto(`#/pane/${enc(stop)}`);
-  await pg.until(`!!document.getElementById('btn-agent-menu')`, 5000);
+  const menu = `document.getElementById('btn-agent-menu')`;
+  await pg.until(`!!${menu}`, 5000);
+  await pg.uncovered(menu, await pg.at(menu)); // its drawer in place, no toast over its header
   guard(c.rec, stop);
-  await pg.tapEl(`document.getElementById('btn-agent-menu')`);
+  await pg.tapEl(menu);
   // Mantine's menu and modal mount through a transition, a frame or so after the tap
   await pg.until(`!!document.getElementById('am-stop')`, 3000);
   await pg.tapEl(`document.getElementById('am-stop')`);
@@ -1159,6 +1161,92 @@ async function p18(c: Ctx) {
     await mobile(pg, true);
     mutate(rec, tab, ['tab', 'rename', tab, 'wc-less']);
     await pg.goto('#/agents');
+  }
+}
+
+/** M1: an agent's drawer over the list (390x844): a sheet from the bottom, the list's top showing above it, the list the
+ *  same node at its scroll under it and back; ✕ closes it, and so does Back, without the history growing. */
+async function m1(c: Ctx) {
+  const { pg, rec } = c;
+  const less = rec.names.less;
+  const SC = `document.getElementById('screen-agents')`;
+  const CARD = `document.querySelector('.agent-card[data-pane-id=${js(less)}]')`;
+  const SHEET = `document.querySelector('.agent-drawer-content')`;
+  const pane = js(`#/pane/${enc(less)}`);
+  await pg.goto('#/agents');
+  await pg.until(`!!${SC}?.dataset.ready && !!${CARD}`, 5000);
+  await pg.ev(`(() => { const s = ${SC}; s.style.paddingBottom = '1500px'; window.__wcSc = s; })()`);
+  const cycle = async (close: () => Promise<unknown>) => {
+    // scrolled to 60px above the card (or 60px): tapped where it shows (at() would scroll it into view)
+    const p = await pg.ev(`(() => { const s = ${SC}, card = ${CARD};
+      s.scrollTop = Math.max(60, card.getBoundingClientRect().top - s.getBoundingClientRect().top + s.scrollTop - 60);
+      const r = card.getBoundingClientRect(), top = Math.max(r.top, s.getBoundingClientRect().top);
+      return { x: r.x + r.width / 2, y: (top + r.bottom) / 2 }; })()`);
+    await sleep(300);
+    await pg.tap(p.x, p.y);
+    const open = await pg.until(`location.hash === ${pane} && !!${SHEET}`, 3000);
+    await sleep(400); // its slide-in
+    const [top0, sheetTop, sheetH] = await pg.ev(`(() => { const r = ${SHEET}.getBoundingClientRect(); return [${SC}.scrollTop, Math.round(r.top), Math.round(r.bottom)]; })()`);
+    await close();
+    const closed = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
+    const [top1, same, len] = await pg.ev(`[${SC}.scrollTop, ${SC} === window.__wcSc, history.length]`);
+    return { open, closed, top0, top1, same, len, sheetTop, sheetH };
+  };
+  const a = await cycle(() => pg.tapEl(`document.getElementById('btn-drawer-close')`));
+  const b = await cycle(() => pg.ev('history.back()')); // the phone's Back
+  result(c, !a.open.timeout && !a.closed.timeout && a.sheetTop >= 40 && a.sheetTop <= 60 && a.sheetH === 844 && a.same && Math.abs(a.top1 - a.top0) <= 1,
+    'M1.close', `open=${ms(a.open)},sheet=${a.sheetTop}..${a.sheetH},closed=${ms(a.closed)},sameNode=${a.same},scrollTop=${a.top0}->${a.top1}`,
+    "scrolled (>= 60px), a tap on wc-less's card opens #/pane/<it> in a sheet from 40-60px to the bottom; ✕ closes it within 3s back to the same #screen-agents at its scrollTop (+-1px)");
+  result(c, !b.open.timeout && !b.closed.timeout && b.same && Math.abs(b.top1 - b.top0) <= 1 && b.len === a.len,
+    'M1.back', `closed=${ms(b.closed)},sameNode=${b.same},scrollTop=${b.top0}->${b.top1},history=${a.len}->${b.len}`,
+    'Back closes it too (the same list, its scrollTop); opening and closing again leaves history.length as it was');
+}
+
+/** M2: on a PC (1280x844) the drawer comes from the right, min(900px, 65% of the width right of the sidebar) wide, its
+ *  dimmed part right of the sidebar; Escape closes the ⋮ menu over it first, then the drawer; a click on the dimmed screen
+ *  closes it too. */
+async function m2(c: Ctx) {
+  const { pg, rec } = c;
+  const less = rec.names.less;
+  const SHEET = `document.querySelector('.agent-drawer-content')`;
+  const MENU = `document.getElementById('btn-agent-menu')`;
+  const pane = `#/pane/${enc(less)}`;
+  const click = async (x: number, y: number) => {
+    for (const type of ['mousePressed', 'mouseReleased']) await pg.S('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
+  };
+  const esc = async () => {
+    for (const type of ['keyDown', 'keyUp']) await pg.S('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await sleep(300);
+  };
+  await mobile(pg, false);
+  try {
+    await pg.goto('#/agents');
+    await pg.goto(pane);
+    const open = await pg.until(`!!${SHEET} && !!${MENU}`, 3000);
+    await sleep(400);
+    const [left, right, dim, side] = await pg.ev(`(() => { const r = ${SHEET}.getBoundingClientRect();
+      return [Math.round(r.left), Math.round(r.right), Math.round(document.querySelector('.agent-drawer-overlay').getBoundingClientRect().left),
+        parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')) || 0]; })()`);
+    const want = Math.min(900, (1280 - side) * 0.65);
+    result(c, !open.timeout && right === 1280 && Math.abs(1280 - left - want) <= 1 && dim === side, 'M2.wide', `open=${ms(open)},x=${left}..${right},dimFrom=${dim},--sidebar-w=${side}`,
+      'from #/agents, #/pane/<wc-less> opens a drawer on the right edge, min(900, 65% of 1280 - --sidebar-w) wide, dimmed from --sidebar-w');
+    const m = await pg.at(MENU);
+    await click(m.x, m.y);
+    const menu = await pg.until(`!!document.querySelector('[data-menu-dropdown]')`, 2000);
+    await esc();
+    const [menuGone, stayed] = await pg.ev(`[!document.querySelector('[data-menu-dropdown]'), location.hash === ${js(pane)} && !!${SHEET}]`);
+    await esc();
+    const closed = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
+    result(c, !menu.timeout && menuGone && stayed && !closed.timeout, 'M2.escape', `menu=${ms(menu)},menuGone=${menuGone},drawerStayed=${stayed},closed=${ms(closed)}`,
+      "with ⋮'s menu open, Escape closes the menu only; Escape again closes the drawer back to #/agents within 3s");
+    await pg.goto(pane);
+    await pg.until(`!!${SHEET}`, 3000);
+    await sleep(400);
+    await click(side + 100, 400);
+    const outside = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
+    result(c, !outside.timeout, 'M2.outside', `closed=${ms(outside)}`, 'a click on the dimmed screen left of it (right of the sidebar) closes it back to #/agents within 3s');
+  } finally {
+    await mobile(pg, true);
   }
 }
 
@@ -1847,6 +1935,8 @@ const ITEMS: Item[] = [
   { id: 'P7', tier: 1, needs: ['less'], run: p7 },
   { id: 'P18', tier: 1, needs: ['less'], run: p18 },
   { id: 'W1', tier: 1, needs: ['less'], run: w1 },
+  { id: 'M1', tier: 1, needs: ['less'], run: m1 },
+  { id: 'M2', tier: 1, needs: ['less'], run: m2 },
   { id: 'P3', tier: 1, needs: ['less'], run: p3 },
   { id: 'P4-T1', tier: 1, needs: ['less'], run: p4t1 },
   { id: 'P15', tier: 1, needs: ['stop'], run: p15 },
