@@ -55,12 +55,16 @@ export function Modals() {
   return <Dialog key={open.id} close={open.close} preview={open.preview}>{open.render(open.close)}</Dialog>;
 }
 
+// 16px clear of the screen's edges and of its notch or home bar (safe areas): Mantine's offset is the
+// same at the top and the bottom (and caps the dialog's height), so it takes the larger inset
+const Y_OFFSET = 'calc(max(var(--safe-top), var(--safe-bottom)) + 16px)';
+
 // Mantine's Modal, above the toasts (z 1000): a dialog 420px wide at most, or the image preview over
 // the whole screen. Mantine closes it on Escape and a backdrop tap and traps the focus. (Its own focus
 // return needs `opened` to turn false; this one unmounts, and showModal gives the focus back.)
 function Dialog({ close, preview, children }: { close: () => void; preview: boolean; children: ReactNode }) {
   return (
-    <Modal.Root opened onClose={close} centered zIndex={2000} xOffset={16} yOffset={16} radius={14}
+    <Modal.Root opened onClose={close} centered zIndex={2000} xOffset={16} yOffset={Y_OFFSET} radius={14}
       transitionProps={{ transition: 'fade', duration: 150 }} {...(preview
         ? { fullScreen: true, classNames: { content: 'image-preview bg-transparent' } }
         : { size: 'min(92vw, 420px)', classNames: { content: 'border border-(--color-border)' } })}>
