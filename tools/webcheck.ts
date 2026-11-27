@@ -9,6 +9,7 @@
  *   node tools/webcheck.ts setup --gonogo --base URL   # go/no-go: wc-less + a blocked wc-claude, held until SIGINT/SIGTERM
  *   node tools/webcheck.ts block                       # go/no-go B5: report that wc-less as blocked
  *   node tools/webcheck.ts teardown                    # clean every unfinished run
+ *   node tools/webcheck.ts herdr start|stop            # a private headless herdr for this WEBCHECK_ROOT
  *   node tools/webcheck.ts shots --after DIR [--before DIR] --out DIR [--only home,agents]   # the PR screenshots
  *
  * shots needs no herdr and no bridge: it serves tools/shots-fixture.ts's made-up data and a web build (DIR = a
@@ -19,7 +20,11 @@
  * the changed ones on the PR.
  *
  * A preview is a throwaway bridge (state/config under $WC_ROOT/preview-<port>, `env -u HERDR_BIN_PATH`)
- * over the REAL herdr, which production also shows. check/setup/teardown take $WC_ROOT/lock
+ * over the REAL herdr, which production also shows, unless the root has a private herdr: `herdr start` runs a
+ * headless `herdr server` under $WC_ROOT/herdr (its own HOME, so none of the desktop herdr's config or plugins),
+ * and while that dir exists every herdr call of this root and its previews go to that server, never to the
+ * desktop's. With a WEBCHECK_ROOT of its own (and a port of its own), a run then shows nowhere and waits for no
+ * other worker's. Tier 1 runs there; Tier 2's Claude needs the desktop's (its HOME, direnv). check/setup/teardown take $WC_ROOT/lock
  * (WC_ROOT = $WEBCHECK_ROOT or ~/.local/state/herdr-yoicks-webcheck) through a separate
  * `flock -n -o` holder process, so the lock lasts from setup to teardown and never reaches the
  * preview bridge or Chrome. Every mutation goes through guard(): only ids this run recorded in
@@ -39,9 +44,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
-const WC_ROOT = process.env.WEBCHECK_ROOT || path.join(os.homedir(), '.local/state/herdr-yoicks-webcheck');
+const DEFAULT_ROOT = path.join(os.homedir(), '.local/state/herdr-yoicks-webcheck');
+const WC_ROOT = process.env.WEBCHECK_ROOT || DEFAULT_ROOT;
 const LOCK = path.join(WC_ROOT, 'lock');
 const WORK = path.join(WC_ROOT, 'work');
+// A private herdr (`herdr start`): while $WC_ROOT/herdr exists, everything this root runs (its herdr calls, the preview
+// bridge) goes to that server's socket and never to the desktop's; a stopped one fails closed, never falls back.
+const PRIV = path.join(WC_ROOT, 'herdr');
+const PRIV_SOCK = path.join(PRIV, '.config', 'herdr', 'herdr.sock'); // where herdr puts it under its own HOME
+/** The env for a herdr CLI call to the private server: none of the desktop herdr's pane variables. */
+const privCliEnv = (): NodeJS.ProcessEnv => ({
+  ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('HERDR_'))), HERDR_SOCKET_PATH: PRIV_SOCK });
+const PRIV_AT_START = fs.existsSync(PRIV);
+if (PRIV_AT_START) {
+  for (const k of Object.keys(process.env)) if (k.startsWith('HERDR_')) delete process.env[k];
+  process.env.HERDR_SOCKET_PATH = PRIV_SOCK;
+}
 const PROD_PORT = '8390';
 const ASK_PROMPT = 'Use the AskUserQuestion tool exactly once to ask "Pick a fruit" with exactly three options: apple, banana, cherry. Do nothing else.';
 const OK_PROMPT = 'Reply with exactly the word OK and nothing else.';
@@ -117,8 +135,7 @@ function record(rec: Rec, o: { workspace?: string; tab?: string; pane?: string }
 function teardown(dir: string): void {
   let rec: Rec | null = null;
   try { rec = JSON.parse(fs.readFileSync(path.join(dir, 'webcheck.json'), 'utf8')); } catch { /* nothing recorded */ }
-  const c = rec?.chrome;
-  try { if (c && fs.readFileSync(`/proc/${c.pid}/cmdline`, 'utf8').includes(c.dir)) process.kill(c.pid, 'SIGKILL'); } catch { /* gone */ }
+  killChrome(rec);
   // a just-killed Chrome's helpers may still write to its profile: retry, and never stop the closing for it
   const rm = (p: string) => { try { fs.rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) { console.log(`WARN ${(e as Error).message}`); } };
   // the headless orchestrators it started stop (best-effort: stopping the preview ends them too)
@@ -146,6 +163,12 @@ function teardown(dir: string): void {
     }
   }
   rm(dir);
+}
+
+/** The Chrome a run recorded, while its cmdline still names the run's profile (a reused pid is left alone). */
+function killChrome(rec: Rec | null): void {
+  const c = rec?.chrome;
+  try { if (c && fs.readFileSync(`/proc/${c.pid}/cmdline`, 'utf8').includes(c.dir)) process.kill(c.pid, 'SIGKILL'); } catch { /* gone */ }
 }
 
 /** POST …/stop for a headless orchestrator of the preview at `base`; synchronous, for teardown (a signal
@@ -184,12 +207,15 @@ async function lock(): Promise<() => void> {
   });
   if (!got) throw env('another webcheck run');
   if (spawnSync('flock', ['-n', LOCK, 'true']).status === 0) throw env('run without lock');
+  // this process chose its herdr (its env) at its start; a herdr start|stop since then would leave it on the other
+  if (fs.existsSync(PRIV) !== PRIV_AT_START) { p.stdin!.end(); throw env('the root switched herdr since this command started: run it again'); }
   return () => p.stdin!.end();
 }
 
 // ── preview bridge ───────────────────────────────────────────────────────────
 
-interface Preview { bin: string; port: string; webDir?: string; fakeClaude?: string }
+/** herdr: the private herdr's socket it was started on (absent: the desktop's); a run refuses a preview on the other one */
+interface Preview { bin: string; port: string; webDir?: string; fakeClaude?: string; herdr?: string }
 const previewDir = (port: string) => path.join(WC_ROOT, `preview-${port}`);
 
 function previewEnv(p: Preview): NodeJS.ProcessEnv {
@@ -264,9 +290,25 @@ async function previewCmd(sub: string, o: Record<string, any>): Promise<number> 
   const unlock = await lock(); // never under a run; the holder process keeps the lock from the bridge
   try {
     const old = readPreview(port);
-    if (old) await previewCtl(old, 'stop').catch((e) => console.log(`WARN ${e.message}`));
-    if (sub === 'stop') { console.log(`preview ${port} stopped`); return 0; }
-    const p: Preview = { bin: path.resolve(o.bin), port, webDir: o['web-dir'] && path.resolve(o['web-dir']), fakeClaude: o['fake-claude'] && path.resolve(o['fake-claude']) };
+    // the record goes only once nothing answers on its port, whatever the stop said (a stop that timed out has
+    // already dropped the bridge's pid file: a second one "succeeds"): a bridge still up stays on the herdr it began on
+    if (old) {
+      const said = await previewCtl(old, 'stop').then(() => '', (e) => (e as Error).message);
+      // quiet = refused; a request left hanging (a stopped process still holding the port) is not quiet
+      const quiet = () => fetch(`http://127.0.0.1:${port}/healthz`, { signal: AbortSignal.timeout(1000) })
+        .then(() => false, (e) => (e as Error).name !== 'TimeoutError');
+      if ((await waitFn(quiet, 5000, 200)).timeout) {
+        throw env(`preview ${port} still answers after its stop${said ? ` (${said})` : ''}: stop its bridge by hand`);
+      }
+      if (said) console.log(`WARN ${said} (nothing answers on ${port}: stopped)`);
+    }
+    if (sub === 'stop') {
+      fs.rmSync(path.join(previewDir(port), 'preview.json'), { force: true }); // no record: not running (herdr start/stop look)
+      console.log(`preview ${port} stopped`);
+      return 0;
+    }
+    const p: Preview = { bin: path.resolve(o.bin), port, webDir: o['web-dir'] && path.resolve(o['web-dir']), fakeClaude: o['fake-claude'] && path.resolve(o['fake-claude']),
+      herdr: fs.existsSync(PRIV) ? PRIV_SOCK : undefined };
     if (p.fakeClaude && path.basename(p.fakeClaude) !== 'claude') throw env('--fake-claude must be named claude (go build -o DIR/claude ./tools/fakeclaude)');
     if (p.fakeClaude) fs.mkdirSync(path.join(WC_ROOT, 'fake-claude'), { recursive: true });
     // the orchestrators start with Tier 2's account (the bridge checks the started agent against it)
@@ -278,6 +320,67 @@ async function previewCmd(sub: string, o: Record<string, any>): Promise<number> 
     await previewCtl(p, 'start');
     console.log(`preview ${port} up: http://127.0.0.1:${port} (token ${path.join(previewDir(port), 'state', 'token')}, account ${account === null ? 'none: Tier 1 only' : accountName(account)}, ` +
       `headless ${!p.fakeClaude ? 'none (no --fake-claude: the H items fail)' : account !== null ? 'wc-h1 (fake) and wc-h2 (real)' : 'wc-h1 (fake)'})`);
+    return 0;
+  } finally {
+    unlock();
+  }
+}
+
+/** herdr start|stop: the private herdr (see PRIV). Headless (`herdr server`) under its own HOME and XDG dirs, so it
+ *  never reads the desktop herdr's config (its plugins.json would start a second yoicks) nor shares its socket;
+ *  no HERDR_* of the desktop's panes, no D-Bus (no desktop notifications), panes in /bin/sh. */
+async function herdrCmd(sub: string): Promise<number> {
+  if (sub !== 'start' && sub !== 'stop') throw new Error('usage: herdr start|stop');
+  if (PRIV_SOCK.length > 100) throw env(`${PRIV_SOCK} is too long for a unix socket: set a shorter WEBCHECK_ROOT`);
+  // what herdr says, never a guess: a failed status call must not read as stopped (stop would drop a live server's dir)
+  const running = (): boolean => {
+    const r = spawnSync('herdr', ['status', 'server'], { encoding: 'utf8', env: privCliEnv() });
+    const st = /^status: (running|not running)$/m.exec(r.stdout ?? '')?.[1];
+    if (!st) throw env(`herdr status server: ${r.error?.message ?? ((r.stderr || r.stdout || '').trim() || `exit ${r.status}`)}`);
+    return st === 'running';
+  };
+  // the default root is the desktop herdr's, shared by every worker: a private herdr there would switch their runs too
+  // through symlinks, the nearest existing ancestor's too (the default root may not exist yet)
+  const real = (d: string): string => {
+    const abs = path.resolve(d);
+    try { return fs.realpathSync(abs); } catch { return path.dirname(abs) === abs ? abs : path.join(real(path.dirname(abs)), path.basename(abs)); }
+  };
+  if (!process.env.WEBCHECK_ROOT || real(WC_ROOT) === real(DEFAULT_ROOT)) throw env('a private herdr needs a WEBCHECK_ROOT of its own (export WEBCHECK_ROOT=$(mktemp -d /tmp/wc-XXXX))');
+  const unlock = await lock();
+  try {
+    // a preview, and an unfinished run's record, stay on the herdr they began on: switching under them would guard ids
+    // in one herdr and act on the other's
+    const previews = fs.readdirSync(WC_ROOT).filter((d) => /^preview-\d+$/.test(d) && fs.existsSync(path.join(WC_ROOT, d, 'preview.json')));
+    if (previews.length) throw env(`stop this root's previews first (${previews.map((d) => `preview stop --port ${d.slice(8)}`).join(', ')})`);
+    const live = fs.existsSync(PRIV) && running();
+    const runs = path.join(WC_ROOT, 'run');
+    const unfinished = () => fs.existsSync(runs) && fs.readdirSync(runs).length > 0;
+    if (fs.existsSync(PRIV) && !live) { // a gone private herdr took its panes: only the runs' Chrome is left to end
+      for (const d of fs.existsSync(runs) ? fs.readdirSync(runs) : []) {
+        try { killChrome(JSON.parse(fs.readFileSync(path.join(runs, d, 'webcheck.json'), 'utf8'))); } catch { /* no record */ }
+      }
+      fs.rmSync(runs, { recursive: true, force: true });
+    }
+    if (unfinished()) teardownAll();
+    if (unfinished()) throw env(`unfinished runs left in ${runs}: teardown first`);
+    if (sub === 'stop') {
+      if (live) spawnSync('herdr', ['server', 'stop'], { env: privCliEnv(), stdio: 'ignore' });
+      if ((await waitFn(() => !running(), 10_000, 200)).timeout) throw env(`the private herdr (${PRIV_SOCK}) did not stop`);
+      fs.rmSync(PRIV, { recursive: true, force: true });
+      console.log('private herdr stopped');
+      return 0;
+    }
+    if (live) { console.log(`private herdr already running: ${PRIV_SOCK}`); return 0; }
+    fs.mkdirSync(PRIV, { recursive: true });
+    const e: NodeJS.ProcessEnv = { ...privCliEnv(), HOME: PRIV, XDG_CONFIG_HOME: path.join(PRIV, '.config'), XDG_STATE_HOME: path.join(PRIV, '.local/state'),
+      XDG_DATA_HOME: path.join(PRIV, '.local/share'), XDG_CACHE_HOME: path.join(PRIV, '.cache'), SHELL: '/bin/sh' };
+    delete e.HERDR_SOCKET_PATH; // the server's own place, under its HOME (= PRIV_SOCK)
+    delete e.DBUS_SESSION_BUS_ADDRESS;
+    const log = fs.openSync(path.join(PRIV, 'server.log'), 'a');
+    spawn('herdr', ['server'], { env: e, detached: true, stdio: ['ignore', log, log] }).unref();
+    fs.closeSync(log);
+    if ((await waitFn(running, 15_000, 200)).timeout) throw env(`the private herdr did not start (${path.join(PRIV, 'server.log')})`);
+    console.log(`private herdr up: ${PRIV_SOCK}`);
     return 0;
   } finally {
     unlock();
@@ -1069,13 +1172,16 @@ async function p4t1(c: Ctx) {
     other = await pg.cdp.send('Target.createTarget', { url: 'about:blank' });
     await pg.cdp.send('Target.activateTarget', { targetId: other!.targetId });
     if ((await pg.until('document.hidden', 3000)).timeout) throw env('could not hide the page');
+    const t0 = Date.now();
     await reportLess(c, 'blocked');
     const n = await pg.until(`${tagged}.then((k) => k === 1)`, 10_000, 200);
+    // what reached the page for wc-less: on a timeout, whether the push came at all
+    const pushes = pg.wsRecv.filter((f) => f.t >= t0 && f.msg?.type === 'agent_status' && f.msg.paneId === less).map((f) => `${f.msg.from}>${f.msg.to}@${f.t - t0}ms`);
     await pg.cdp.send('Target.activateTarget', { targetId: pg.targetId });
     await pg.until('!document.hidden', 3000);
     await pg.ev(`location.hash = ${js(`#/pane/${enc(less)}`)}`);
     const z = await pg.until(`${tagged}.then((k) => k === 0)`, 2000);
-    result(c, !n.timeout && !z.timeout, 'P4-T1', `notif=${ms(n)},cleared=${ms(z)}`,
+    result(c, !n.timeout && !z.timeout, 'P4-T1', `notif=${ms(n)},cleared=${ms(z)},pushes=${pushes.join('+') || 'none'}`,
       'hidden page: wc-less reported blocked -> 1 OS notification tagged with its pane id within 10s; opening the pane clears it within 2s');
   } finally {
     await pg.ev(prev === null ? `localStorage.removeItem('herdr_notifications')` : `localStorage.setItem('herdr_notifications', ${js(prev)})`);
@@ -1134,8 +1240,9 @@ async function p18(c: Ctx) {
   await pg.S('Emulation.setDeviceMetricsOverride', { width: 390, height: 400, deviceScaleFactor: 3, mobile: true });
   try {
     await pg.until(`!!${SC}?.dataset.ready && !!${CARD}`, 5000);
-    // scrolled to 200px (the padding makes room however many agents herdr has)
-    await pg.ev(`(() => { const s = ${SC}; s.style.paddingBottom = '1500px'; s.scrollTop = 200; window.__wcSc = s; })()`);
+    // scrolled to 200px: the padding on the list makes room however many agents herdr has (on the scroller itself it
+    // would grow the scroller's own box, not its scroll range: a private herdr's 2 cards then scroll 182px at most)
+    await pg.ev(`(() => { const s = ${SC}; s.firstElementChild.style.paddingBottom = '1500px'; s.scrollTop = 200; window.__wcSc = s; })()`);
     await sleep(300);
     const top0 = await pg.ev(`${SC}.scrollTop`);
     const p1 = await push();
@@ -1199,7 +1306,7 @@ async function p18(c: Ctx) {
       "a push arriving while a finger is down on wc-less's card: lifting it (a still tap) opens #/pane/<it> within 1s");
   } finally {
     pg.stateMark = '';
-    await pg.ev(`(() => { const s = ${SC}; if (s) s.style.paddingBottom = ''; })()`);
+    await pg.ev(`(() => { const l = ${SC}?.firstElementChild; if (l) l.style.paddingBottom = ''; })()`);
     await mobile(pg, true);
     mutate(rec, tab, ['tab', 'rename', tab, 'wc-less']);
     await pg.goto('#/agents');
@@ -1217,7 +1324,7 @@ async function m1(c: Ctx) {
   const pane = js(`#/pane/${enc(less)}`);
   await pg.goto('#/agents');
   await pg.until(`!!${SC}?.dataset.ready && !!${CARD}`, 5000);
-  await pg.ev(`(() => { const s = ${SC}; s.style.paddingBottom = '1500px'; window.__wcSc = s; })()`);
+  await pg.ev(`(() => { const s = ${SC}; s.firstElementChild.style.paddingBottom = '1500px'; window.__wcSc = s; })()`);
   const cycle = async (close: () => Promise<unknown>) => {
     // scrolled to 60px above the card (or 60px): tapped where it shows (at() would scroll it into view)
     const p = await pg.ev(`(() => { const s = ${SC}, card = ${CARD};
@@ -1328,7 +1435,7 @@ async function s1(c: Ctx) {
   const SHEET = `document.querySelector('.settings-sheet')`;
   await pg.goto('#/agents');
   await pg.until(`!!${SC}?.dataset.ready`, 5000);
-  await pg.ev(`(() => { const s = ${SC}; s.style.paddingBottom = '1500px'; s.scrollTop = 60; window.__wcSc = s; })()`);
+  await pg.ev(`(() => { const s = ${SC}; s.firstElementChild.style.paddingBottom = '1500px'; s.scrollTop = 60; window.__wcSc = s; })()`);
   const cycle = async (close: () => Promise<unknown>) => {
     await pg.tapEl(`document.getElementById('btn-settings')`);
     const open = await pg.until(`location.hash === '#/settings' && !!${SHEET}`, 3000);
@@ -2108,6 +2215,11 @@ async function locked(base: string, body: (c: Ctx) => Promise<void>, needs: Set<
   if (!fs.existsSync(tokenFile)) throw env(`no token at ${tokenFile} (start the preview with \`preview start\`)`);
   if (!(await fetch(`${base}/healthz`).then((r) => r.ok, () => false))) throw env(`no preview answering at ${base}`);
   const unlock = await lock();
+  const pv = readPreview(port);
+  if (pv?.herdr !== (PRIV_AT_START ? PRIV_SOCK : undefined)) {
+    unlock();
+    throw env(`the preview on ${port} runs on ${pv ? (pv.herdr ? 'the private herdr' : 'the desktop herdr') : 'no record'} and this root on the other: start it again (preview start)`);
+  }
   teardownAll();
   const dir = path.join(WC_ROOT, 'run', String(Date.now()));
   fs.mkdirSync(dir, { recursive: true });
@@ -2359,6 +2471,7 @@ async function main(): Promise<number> {
     gonogo: { type: 'boolean' }, bin: { type: 'string' }, port: { type: 'string' }, 'web-dir': { type: 'string' }, 'fake-claude': { type: 'string' },
     before: { type: 'string' }, after: { type: 'string' }, out: { type: 'string' } } });
   if (cmd === 'shots') return shots(o);
+  if (cmd === 'herdr') return herdrCmd(sub);
   if (cmd === 'preview') return previewCmd(sub, o);
   if (cmd === 'teardown') { const unlock = await lock(); try { teardownAll(); } finally { unlock(); } return 0; }
   if (cmd === 'block') return block();
