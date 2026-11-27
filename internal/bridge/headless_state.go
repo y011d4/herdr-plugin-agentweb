@@ -248,7 +248,8 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 			for _, it := range list {
 				it, _ := it.(map[string]any)
 				str := func(k string) string { s, _ := it[k].(string); return s }
-				if modelRe.MatchString(str("value")) {
+				// not Claude Code's "default": the Home offers the models themselves
+				if modelRe.MatchString(str("value")) && str("value") != "default" {
 					m.models = append(m.models, HeadlessModel{str("value"), str("displayName"), str("description"), str("resolvedModel")})
 				}
 			}
