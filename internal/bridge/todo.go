@@ -10,7 +10,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -111,21 +113,35 @@ func newTodo(a todoAdd, now int64, loc *time.Location) (todoEntry, error) {
 
 // todoStore holds every Home's list.
 type todoStore struct {
-	dir      string // <state>/todos
-	mu       sync.Mutex
-	lists    map[string][]todoEntry // by orchestrator name
+	dir   string // <state>/todos
+	mu    sync.Mutex
+	lists map[string][]todoEntry // by orchestrator name
+	// the lists whose file is there but couldn't be read: they take no change, which would replace it
+	broken   map[string]error
 	onChange func()
 	loc      *time.Location // a date's due is 09:00 here (tests: a fixed one)
 }
 
-// newTodoStore reads the lists of the named orchestrators (an unreadable file: an empty list).
+// newTodoStore reads the lists of the named orchestrators. One whose file is there but can't be
+// read or parsed shows empty and takes no change until the file is fixed or removed and the bridge
+// restarted: a write would replace it.
 func newTodoStore(stateDir string, names []string) *todoStore {
-	s := &todoStore{dir: filepath.Join(stateDir, "todos"), lists: map[string][]todoEntry{}, onChange: func() {}, loc: time.Local}
+	s := &todoStore{dir: filepath.Join(stateDir, "todos"), lists: map[string][]todoEntry{}, broken: map[string]error{}, onChange: func() {}, loc: time.Local}
 	for _, name := range names {
 		var list []todoEntry
-		if b, err := os.ReadFile(s.path(name)); err == nil && json.Unmarshal(b, &list) == nil {
-			s.lists[name] = slices.DeleteFunc(list, func(e todoEntry) bool { return !todoIDRe.MatchString(e.ID) || e.Text == "" })
+		b, err := os.ReadFile(s.path(name))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
 		}
+		if err == nil {
+			err = json.Unmarshal(b, &list)
+		}
+		if err != nil {
+			s.broken[name] = fmt.Errorf("%s could not be read (%v): fix or remove it, then restart the bridge", s.path(name), err)
+			logf("[todo] %s", s.broken[name])
+			continue
+		}
+		s.lists[name] = slices.DeleteFunc(list, func(e todoEntry) bool { return !todoIDRe.MatchString(e.ID) || e.Text == "" })
 	}
 	return s
 }
@@ -160,6 +176,10 @@ func (s *todoStore) Apply(name string, add []todoAdd, done []string, now int64) 
 		added = append(added, e)
 	}
 	s.mu.Lock()
+	if err := s.broken[name]; err != nil { // a read too: "empty" would be a lie
+		s.mu.Unlock()
+		return nil, nil, err
+	}
 	list := slices.Clone(s.lists[name])
 	changed := false
 	for _, id := range done {
@@ -199,9 +219,13 @@ func (s *todoStore) Apply(name string, add []todoAdd, done []string, now int64) 
 }
 
 // Done removes name's item id (the user ticked it off); found false: there is none. An error
-// (it couldn't be saved) leaves the item there.
+// (it couldn't be saved, or its file read) leaves the item there.
 func (s *todoStore) Done(name, id string) (found bool, err error) {
 	s.mu.Lock()
+	if err := s.broken[name]; err != nil {
+		s.mu.Unlock()
+		return false, err
+	}
 	list := s.lists[name]
 	i := slices.IndexFunc(list, func(e todoEntry) bool { return e.ID == id })
 	if i >= 0 {
