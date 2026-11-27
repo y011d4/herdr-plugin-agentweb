@@ -1407,28 +1407,31 @@ func (s *server) serveStatic(w http.ResponseWriter, r *http.Request, urlPath str
 	}
 	sum := sha256.Sum256(data)
 	body, etag := data, fmt.Sprintf("%x", sum[:8])
-	accept := r.Header.Get("Accept-Encoding")
-	for _, enc := range encodings {
+	accept, best, bestQ := r.Header.Get("Accept-Encoding"), -1, 0.0
+	for i, enc := range encodings {
 		if _, err := fs.Stat(s.web, name+enc.suffix); err != nil {
 			continue
 		}
 		w.Header().Set("Vary", "Accept-Encoding")
-		if !accepts(accept, enc.coding) {
-			continue
+		if q := quality(accept, enc.coding); q > bestQ { // a tie keeps the earlier, better one
+			best, bestQ = i, q
 		}
+	}
+	if best >= 0 {
+		enc := encodings[best]
 		if encoded, err := fs.ReadFile(s.web, name+enc.suffix); err == nil {
 			body, etag = encoded, etag+"-"+enc.coding
 			w.Header().Set("Content-Encoding", enc.coding)
-			break
 		}
 	}
 	w.Header().Set("ETag", `"`+etag+`"`)
 	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(body))
 }
 
-// accepts reports whether an Accept-Encoding value lists coding with a q above 0.
-// A bare * doesn't count: identity is always acceptable, so that client gets the plain file.
-func accepts(header, coding string) bool {
+// quality is the q an Accept-Encoding value gives coding: 1 when listed without one, 0 when
+// not listed or unreadable. A bare * doesn't count: identity is always acceptable, so that
+// client gets the plain file.
+func quality(header, coding string) float64 {
 	for _, part := range strings.Split(header, ",") {
 		c, params, _ := strings.Cut(part, ";")
 		if !strings.EqualFold(strings.TrimSpace(c), coding) {
@@ -1436,11 +1439,13 @@ func accepts(header, coding string) bool {
 		}
 		for _, p := range strings.Split(params, ";") {
 			if k, v, _ := strings.Cut(strings.TrimSpace(p), "="); strings.EqualFold(k, "q") {
-				q, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
-				return err == nil && q > 0
+				if q, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+					return q
+				}
+				return 0
 			}
 		}
-		return true
+		return 1
 	}
-	return false
+	return 0
 }
