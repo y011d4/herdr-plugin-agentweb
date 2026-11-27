@@ -162,20 +162,6 @@ body { font-size: 15px; }
   flex-direction: column;
 }
 
-/* ── Secondary / ghost button ── */
-.btn-secondary {
-  padding: 10px 16px;
-  min-height: var(--touch-min);
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  font-size: 14px;
-  color: var(--color-text);
-  transition: background 0.15s;
-}
-.btn-secondary:hover { background: var(--color-border); }
-.btn-secondary:active { opacity: 0.8; }
-
 /* ── Pane detail ── */
 #screen-pane {
   flex: 1;
@@ -207,95 +193,6 @@ body { font-size: 15px; }
   touch-action: pan-x pan-y;
   /* the top-of-terminal swipe means "load history", not pull-to-refresh */
   overscroll-behavior: contain;
-}
-
-/* ── Settings ── */
-#screen-settings {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 16px calc(var(--safe-bottom) + 16px);
-  -webkit-overflow-scrolling: touch;
-}
-
-.settings-section {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  margin-bottom: 20px;
-  overflow: hidden;
-}
-
-.settings-section-title {
-  padding: 10px 16px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--color-text-dim);
-  background: var(--color-surface-2);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.settings-row {
-  display: flex;
-  align-items: center;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--color-border);
-  gap: 12px;
-  min-height: var(--touch-min);
-}
-.settings-row:last-child {
-  border-bottom: none;
-}
-
-.settings-row-label {
-  flex: 1;
-  font-size: 15px;
-}
-
-.settings-row-value {
-  font-size: 13px;
-  color: var(--color-text-dim);
-}
-
-.about-lockup { height: 28px; }
-
-/* Toggle switch */
-.toggle {
-  position: relative;
-  width: 48px;
-  height: 28px;
-  flex-shrink: 0;
-}
-.toggle input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.toggle-track {
-  position: absolute;
-  inset: 0;
-  border-radius: 14px;
-  background: var(--color-border);
-  transition: background 0.2s;
-  cursor: pointer;
-}
-.toggle input:checked + .toggle-track {
-  background: var(--color-accent);
-}
-.toggle-track::after {
-  content: '';
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: #fff;
-  transition: transform 0.2s;
-}
-.toggle input:checked + .toggle-track::after {
-  transform: translateX(20px);
 }
 
 /* ── Toasts (ui/Toasts.tsx: Mantine's Notification each) ── */
@@ -501,18 +398,6 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
 .settings-sheet-start:focus { outline: none; } /* where the focus starts, not a control */
 
 
-/* ── Home (the orchestrator's chat as the main screen) ── */
-/* the steps back to the TUI (Settings, a headless Home's warning) */
-.tui-steps {
-  margin: 0;
-  padding-left: 20px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--color-text);
-  overflow-wrap: anywhere;
-}
-.tui-steps code { font-family: var(--font-mono); font-size: 11px; }
-.settings-steps { flex-direction: column; align-items: stretch; gap: 6px; }
 /* ── Wide screens (a PC): 1024px and up ──
    Nothing here applies below 1024px, so the phone layout is unchanged. The scroll containers stay
    full width, so the wheel scrolls anywhere over them and their scrollbar sits at the screen's edge;
@@ -531,10 +416,6 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
   /* the chat's scrollbar takes its room off both edges: its column stays centered under the
      composer's, and doesn't shift once the chat overflows */
   .chat-log { scrollbar-gutter: stable both-edges; }
-  #screen-settings {
-    padding-left: max(16px, calc((100% - 760px) / 2));
-    padding-right: max(16px, calc((100% - 760px) / 2));
-  }
 
   /* The sidebar (ui/Sidebar.tsx), drawn at this width on every screen but the token one: while it
      is there the shell is two columns, the sidebar beside the topbar, the banner and #screen (their
