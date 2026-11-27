@@ -657,6 +657,25 @@ describe('App', () => {
     assert.equal(location.hash, '#/agents');
   });
 
+  it("Settings taking the place of a drawer over a Home whose orchestrator's pane changed meanwhile draws the Home afresh", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/agents');
+    await go('#/home/personal');
+    const home = $('#screen #screen-pane.screen-home');
+    await go('#/pane/p1');
+    const s = fresh();
+    s.orchestrators[0].paneId = 'p3'; // replaced while the drawer was open
+    await act(async () => push!({ type: 'state', state: s }));
+    await act(async () => { sw.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: '#/settings' } })); });
+    await settle();
+    assert.equal(location.hash, '#/settings');
+    assert.equal(store.view.activePaneId, 'p3', 'the replacement under Settings');
+    assert.ok($('#screen #screen-pane.screen-home') && $('#screen #screen-pane.screen-home') !== home, 'drawn afresh');
+    assert.equal(watches.at(-1), 'p3:chat');
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await settle();
+  });
+
   it("Settings from a pane's drawer (the sidebar's ⚙, a notification) takes the drawer's place; a pane from Settings takes its", async () => {
     const replace = vi.spyOn(location, 'replace').mockImplementation((url: string | URL) => { // as a browser's
       const oldURL = location.href;
