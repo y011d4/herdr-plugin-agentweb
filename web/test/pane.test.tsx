@@ -268,8 +268,7 @@ describe('answer panel', () => {
     'Enter to select · ↑/↓ to navigate · Esc to cancel'].join('\n');
 
   it('shows under the pane body while the pane is blocked in chat; a double tap sends one press', async () => {
-    await show('p6'); // claude, blocked
-    await answer('/read?source=visible', read[1]);
+    await show('p6'); // claude, blocked: on its chat
     await answer('/transcript', transcript[0]);
     await answer('/read?source=visible&format=ansi', { ansi: ASK });
     const panel = $('#chat-prompt');
@@ -356,11 +355,10 @@ describe('pane header', () => {
     assert.equal(location.hash, '#/agents/personal');
   });
 
-  it('shows the toggle once there is a transcript: chat by default, then terminal, remembered', async () => {
+  it("shows the toggle once there is a transcript: chat by default, then terminal, the pane's own choice while the app runs", async () => {
     await show('p1');
     const toggle = $('#btn-view-toggle');
     assert.equal(toggle.style.display, 'none');
-    await answer('/read?source=visible', read[1]);
     await answer('/transcript', transcript[0]);
     assert.equal(toggle.style.display, '');
     assert.equal(toggle.textContent, 'ChatTerm');
@@ -368,7 +366,18 @@ describe('pane header', () => {
     assert.equal($('#quickkey-row').style.display, '');
     await pick('terminal');
     assert.equal(shownMode(), 'terminal');
-    assert.equal(localStorage.getItem('herdr_pane_view'), 'terminal');
+    await unmount();
+    await show('p6');
+    assert.equal(store.view.paneViewMode, 'chat', 'another pane: on its chat');
+    await unmount();
+    for (const q of reqs) q.answered = true; // the views before: gone
+    await show('p1'); // reopened: its screen first, then the transcript shows the toggle
+    await answer('/api/panes/p1/read?source=visible', read[1]);
+    await answer('/api/panes/p1/transcript', transcript[0]);
+    assert.equal(shownMode(), 'terminal', 'reopened: on its terminal still');
+    await pick('chat'); // back to its chat, for the tests after this one
+    assert.equal(store.view.paneViewMode, 'chat');
+    assert.equal(localStorage.getItem('herdr_pane_view'), null, 'nothing stored');
   });
 });
 
@@ -376,11 +385,10 @@ describe('read-only chat', () => {
   const bar = () => $('#pane-input').closest<HTMLElement>('.input-bar')!;
 
   it("a pane's chat has no composer or keys, its terminal has both; while it works ■ Interrupt sends Esc", async () => {
-    await show('p1'); // claude, working
-    assert.equal(bar().style.display, '', 'shown until the view is in chat (a terminal scrolled to its bottom stays so)');
-    await answer('/read?source=visible', read[1]);
-    await answer('/transcript', transcript[0]);
+    await show('p1'); // claude, working: on its chat at once
     assert.equal(bar().style.display, 'none', 'chat: read-only');
+    await answer('/transcript', transcript[0]);
+    assert.equal(bar().style.display, 'none');
     await fire(() => $('#btn-pane-interrupt').click());
     assert.deepEqual(posts('p1'), [{ keys: ['esc'] }]);
     await pick('terminal');
@@ -391,6 +399,7 @@ describe('read-only chat', () => {
     assert.equal(bar().style.display, 'none');
     await pick('terminal');
     assert.equal(ta().value, 'typed in the terminal', 'hidden, not dropped');
+    await pick('chat'); // back to its chat, for the tests after this one
   });
 
   it('■ only while it works', async () => {
@@ -398,7 +407,6 @@ describe('read-only chat', () => {
     s.workspaces[0].tabs[0].panes[0].agent!.status = 'idle';
     setAppState(s);
     await show('p1');
-    await answer('/read?source=visible', read[1]);
     await answer('/transcript', transcript[0]);
     assert.ok(!$('#btn-pane-interrupt'));
     s.workspaces[0].tabs[0].panes[0].agent!.status = 'working';
@@ -414,7 +422,6 @@ describe('read-only chat', () => {
     await unmount();
     keptTasks.keep('p1', 'first task');
     await show('p1');
-    await answer('/read?source=visible', read[1]);
     await answer('/transcript', transcript[0]);
     assert.equal(bar().style.display, '', 'chat, with the task to send');
     assert.equal(ta().value, 'first task');
@@ -464,8 +471,7 @@ describe('Home', () => {
     assert.equal(toggle.style.display, 'none');
     assert.equal(toggle.getAttribute('aria-label'), 'Toggle terminal');
     assert.equal($('#pane-input').getAttribute('placeholder'), 'Message Personal…');
-    await answer('/read?source=visible', read[1]);
-    await answer('/transcript', transcript[0]); // an orchestrator always opens as chat
+    await answer('/transcript', transcript[0]); // an orchestrator always opens as chat, at once
     assert.equal(toggle.style.display, '');
     assert.equal(toggle.textContent, '>_');
     assert.equal($('#quickkey-row').style.display, 'none');
@@ -473,7 +479,6 @@ describe('Home', () => {
     assert.equal(toggle.textContent, 'Chat');
     assert.equal($('#quickkey-row').style.display, '');
     assert.equal(container.querySelectorAll('.qkey').length, 12);
-    assert.equal(localStorage.getItem('herdr_pane_view'), null);
   });
 
   it('shows "doing now" only while the orchestrator works, and its state in the title', async () => {
