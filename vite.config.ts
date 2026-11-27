@@ -1,8 +1,10 @@
 /// <reference types="vitest/config" />
 // The web UI's build (web/ → web/dist, which the Go binary embeds), dev server and tests.
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { promisify } from 'node:util';
+import { brotliCompress, gzip } from 'node:zlib';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig, transformWithOxc, type Plugin, type ResolvedConfig } from 'vite';
@@ -18,7 +20,7 @@ export default defineConfig(({ command, mode }) => ({
     cssCodeSplit: false,
     rolldownOptions: { output: { codeSplitting: false } },
   },
-  plugins: [react(), tailwindcss(), sw()],
+  plugins: [react(), tailwindcss(), sw(), precompress()],
   server: {
     port: 5174,
     strictPort: true,
@@ -77,6 +79,33 @@ function sw(): Plugin {
             .replace(/\b__SW_ASSETS__\b/g, JSON.stringify(assets)),
         });
       },
+    },
+  };
+}
+
+// precompress() writes each text file's brotli (.br, quality 11: Node's default) and gzip
+// (.gz, level 9) copy next to it, each only when smaller: the bridge sends the one the
+// client accepts (internal/bridge/http.go). At writeBundle, after sw() has listed and hashed
+// the files, so the SW neither precaches nor versions the copies.
+function precompress(): Plugin {
+  const encoders: [string, (data: Buffer) => Promise<Buffer>][] = [
+    ['.br', promisify(brotliCompress)],
+    ['.gz', (data) => promisify(gzip)(data, { level: 9 })],
+  ];
+  return {
+    name: 'yoicks-precompress',
+    apply: 'build',
+    async writeBundle({ dir }) {
+      const writes = [];
+      for (const entry of readdirSync(dir!, { recursive: true, withFileTypes: true })) {
+        if (!entry.isFile() || !/\.(html|js|css|webmanifest|svg)$/.test(entry.name)) continue;
+        const path = join(entry.parentPath, entry.name);
+        const data = readFileSync(path);
+        for (const [ext, encode] of encoders) {
+          writes.push(encode(data).then((z) => z.length < data.length && writeFileSync(path + ext, z)));
+        }
+      }
+      await Promise.all(writes);
     },
   };
 }
