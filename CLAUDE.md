@@ -96,6 +96,19 @@ All in `internal/bridge/` (one package):
   `index.html` and `sw.js` as `no-cache`, and the text files gzipped to a client that accepts it
   (each encoding its own ETag); `embed_test.go` checks the build and its size budgets (a cold open
   gzipped, the JS raw)
+- **Styles: Mantine and Tailwind v4 next to the hand-written CSS.** `web/app.css` (index.html's one
+  stylesheet) sets the cascade layers, lowest first: `theme` (Tailwind's variables), `base`
+  (`reset.css`: the element resets, which over Mantine would strip its buttons), `mantine`
+  (`@mantine/core/styles.layer.css`, all of it), `app` (`style.css`, over Mantine's baseline body
+  rules), `utilities` (Tailwind, scanning `web/src` only; no preflight, as Mantine advises).
+  `main.tsx` puts the app under `MantineProvider` with `theme.ts`, dark only (`forceColorScheme`;
+  index.html has `data-mantine-color-scheme="dark"` for the first paint). The theme is the app's
+  look: style.css's colors as Mantine's `dark` palette and the primary `accent`, 15px text. The
+  root stays 16px (style.css sets 15px on the body), so rem is unscaled. Both have the same five
+  breakpoints (xs 36em, sm 40em, md 48em, lg 64em = the PC layout's 1024px, xl 80em), in `theme.ts`
+  and app.css's `@theme`; `web/test/theme.test.ts` checks them and the colors against the CSS.
+  Mantine's portals go into `#modal-root` (the theme's Portal default). Tests render under
+  `render.ts`'s `mantine()` (`env="test"`: no transitions, a portal stays in place)
 - **Orchestrator homes**: config `orchestrators: [{name,label,env}]` — each is *managed*:
   `orchestrator.go` writes `<data>/orchestrators/<name>/` (data = `$XDG_DATA_HOME` or
   `~/.local/share`, + `herdr-yoicks`; `herdr-agentweb`, the dir from before the rename, while it
@@ -420,7 +433,7 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
 - WS pushes are deduped server-side against the last serialized state;
   `sinceUnixMs` carries over across re-snapshots so rebuilds don't defeat it.
 - **Wide screens (a PC)**: the PC layout is `web/style.css`'s last block, `@media (min-width:
-  1024px)`; none of it applies below 1024px (every phone, landscape too), so the phone layout stays
+  1024px)` (the `lg` breakpoint); none of it applies below 1024px (every phone, landscape too), so the phone layout stays
   as it is. It keeps the scroll containers full width and makes the readable column with their padding.
 
 ## Security invariants
@@ -541,8 +554,8 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   them) for the headless orchestrator's MCP server: Claude Code's MCP client changes (`server/discover`,
   protocol versions), and the official SDK follows it where a hand-written server would have to. Don't
   add more without a strong reason (QR uses the system `qrencode`, falling back to a plain URL). Node and the npm
-  dependencies are development-only: React is bundled into the web UI; the rest (TypeScript,
-  Vite, Vitest, happy-dom) is for its build and tests.
+  dependencies are development-only: React and Mantine are bundled into the web UI; the rest
+  (TypeScript, Vite, Tailwind, Vitest, happy-dom) is for its build and tests.
 - herdr's API schema (`herdr api schema --json`, protocol 22 = herdr 0.9.5) is saved in
   `testdata/herdr-schema/`; `internal/bridge/herdr_schema_test.go` checks every method,
   parameter, decoded field and event field the bridge uses against it. A new herdr field or
