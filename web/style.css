@@ -605,7 +605,8 @@ body { font-size: 15px; }
   flex-direction: column;
   gap: 8px;
   /* the toasts take taps (.toast), not the box around them: a tap between or beside them reaches
-     the screen under them. A drag on a toast still scrolls the stack. */
+     the screen under them. A drag or the wheel on a toast still scrolls the stack; its scrollbar
+     takes the mouse only while the stack overflows (data-overflow, ui/Toasts.tsx). */
   pointer-events: none;
   width: min(calc(100vw - 24px), 340px);
   /* cap the stack and scroll older toasts into reach instead of dropping them.
@@ -619,6 +620,8 @@ body { font-size: 15px; }
   overflow-x: hidden;
   scrollbar-width: thin;
 }
+
+#toast-container[data-overflow] { pointer-events: auto; }
 
 .toast {
   pointer-events: auto;

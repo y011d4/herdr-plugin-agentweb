@@ -83,3 +83,44 @@ describe('Toasts', () => {
     assert.equal(toasts().length, 0);
   });
 });
+
+describe('Toasts in #toast-container', () => {
+  it('mark it while the stack overflows (its scrollbar then takes the mouse: style.css)', async () => {
+    vi.useFakeTimers();
+    clearToasts();
+    const { unmount } = await render(<div id="toast-container"><Toasts /></div>);
+    const box = document.getElementById('toast-container')!;
+    // happy-dom has no layout: a toast is 100px, the box at most 250px (its max-height), and the
+    // newest toast's entry slide (8px down) overflows it even when it isn't full
+    box.style.maxHeight = '250px';
+    Object.defineProperty(box, 'clientHeight', { get: () => Math.min(100 * box.children.length, 250) });
+    Object.defineProperty(box, 'scrollHeight', { get: () => 100 * box.children.length + 8 });
+    await fire(() => { showToast('a', ''); showToast('b', ''); });
+    assert.equal(box.hasAttribute('data-overflow'), false, 'not full: the slide is no overflow');
+    await fire(() => showToast('c', ''));
+    assert.equal(box.hasAttribute('data-overflow'), true);
+    await fire(() => box.querySelector<HTMLElement>('button[aria-label="Dismiss"]')!.click());
+    await fire(() => { vi.advanceTimersByTime(300); });
+    assert.equal(box.hasAttribute('data-overflow'), false);
+    await unmount();
+    vi.useRealTimers();
+  });
+
+  it('a box just full, its newest toast still sliding in, is no overflow once the slide ends; a fractional cap is full', async () => {
+    clearToasts();
+    const { unmount } = await render(<div id="toast-container"><Toasts /></div>);
+    const box = document.getElementById('toast-container')!;
+    let slide = 8; // the entry's transform, until its animation ends
+    box.style.maxHeight = '250.4px'; // clientHeight rounds it down
+    Object.defineProperty(box, 'clientHeight', { get: () => Math.min(125 * box.children.length, 250) });
+    Object.defineProperty(box, 'scrollHeight', { get: () => 125 * box.children.length + slide });
+    await fire(() => { showToast('a', ''); showToast('b', ''); });
+    assert.equal(box.hasAttribute('data-overflow'), true, 'full, and the slide overflows it');
+    slide = 0;
+    await fire(() => box.lastElementChild!.dispatchEvent(new Event('animationend', { bubbles: true })));
+    assert.equal(box.hasAttribute('data-overflow'), false, 'the slide is over: no overflow');
+    await fire(() => showToast('c', ''));
+    assert.equal(box.hasAttribute('data-overflow'), true, 'a third toast overflows the 250.4px cap at clientHeight 250');
+    await unmount();
+  });
+});
