@@ -310,6 +310,7 @@ func TestStaticEncodings(t *testing.T) {
 	}
 	for accept, want := range map[string]string{
 		"gzip, deflate, br, zstd": "br", "BR": "br", "br, gzip ; q=1": "br", "br;q=0, gzip": "gzip", "GZIP;Q=0.5": "gzip",
+		"br;q=0.1, gzip;q=1": "gzip", "gzip;q=0.5, br;q=0.5": "br", "gzip;q=0.8, br": "br", "br;q=x, gzip;q=0.1": "gzip",
 		"gzip;q=0": "", "gzip; q=0.000": "", "gzip;q=x": "", "deflate, zstd": "", "*": "", "": "",
 	} {
 		rec := get("GET", css, map[string]string{"Accept-Encoding": accept})
