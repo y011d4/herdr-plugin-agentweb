@@ -464,12 +464,21 @@ class Page {
     await this.touch('touchEnd', []);
     await sleep(200);
   }
-  /** Center of the element `el` (a JS expression) after scrolling it into view. */
+  /** Center of the element `el` (a JS expression) after scrolling it into view, once it has stopped moving (5
+   *  frames alike): an opening sheet or drawer slides it in (Mantine's transitions, far longer under CPU load),
+   *  and a point taken on the way lands on whatever is there by the time of the tap (P16.toggle, under load). */
   async at(el: string): Promise<{ x: number; y: number }> {
-    const r = await this.ev(`(() => { const e = ${el}; if (!e) return null; e.scrollIntoView({ block: 'center' });
+    const r = await this.ev(`(async () => { const e = ${el}; if (!e) return null; e.scrollIntoView({ block: 'center' });
+      const tick = () => new Promise((f) => (document.hidden ? setTimeout(f, 50) : requestAnimationFrame(() => f())));
+      let last = '', still = 0;
+      for (let i = 0; i < 300 && still < 5; i++) {
+        await tick();
+        const b = e.getBoundingClientRect(), k = [b.x, b.y, b.width, b.height].map(Math.round).join();
+        still = k === last ? still + 1 : 0;
+        last = k;
+      }
       const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
     if (!r) throw new Error(`no element: ${el}`);
-    await sleep(250);
     return r;
   }
   async tapEl(el: string) { const p = await this.at(el); await this.tap(p.x, p.y); return Date.now(); }
@@ -1023,10 +1032,16 @@ async function p10(c: Ctx) {
   result(c, wb.length === 1 && wb[0].direction === 'down' && wb[0].steps === 3, 'P10.app-wheel', `posts=${js(wb)}`, 'a PC wheel deltaY 90 POSTs exactly {down, 3}');
 
   await sleep(1000);
-  const tq = await pg.tapEl(`[...document.querySelectorAll('.qkey')].find((b) => b.textContent === '\\u2193')`);
-  await sleep(700);
-  const reads = pg.reqs.filter((q) => q.method === 'GET' && q.t >= tq && q.t <= tq + 600 && q.url.includes(`/api/panes/${enc(less)}/read`)).length;
-  result(c, reads >= 2, 'P10.app-quickkey', `reads600ms=${reads}`, 'a quick key is followed by >= 2 GET /read within 600ms');
+  const tq = Date.now(); // before the tap: its POST, even its answer, can come before tapEl returns
+  await pg.tapEl(`[...document.querySelectorAll('.qkey')].find((b) => b.textContent === '\\u2193')`);
+  // the echo's two reads go out 120 and 500 ms after the key's POST /input is answered (terminal.ts echo), not after
+  // the tap: under CPU load that answer alone takes a few hundred ms, so the window starts there
+  const answered = await waitFn(() => pg.resps.find((r) => r.t >= tq && r.url.includes(`/api/panes/${enc(less)}/input`)), 3000, 20);
+  const tAns = answered.v?.t ?? tq;
+  await waitFn(() => Date.now() >= tAns + 700, 2000, 20);
+  const reads = pg.reqs.filter((q) => q.method === 'GET' && q.t >= tAns && q.t <= tAns + 600 && q.url.includes(`/api/panes/${enc(less)}/read`)).length;
+  result(c, !answered.timeout && reads >= 2, 'P10.app-quickkey', `answered=${answered.timeout ? 'timeout' : `${tAns - tq}ms`},reads600ms=${reads}`,
+    "a quick key's POST /input answered within 3s, then >= 2 GET /read within 600ms of the answer");
 }
 
 /** Stale responses: wc-shell's screen read, held until wc-less is on screen, must not paint wc-less's terminal. */
@@ -1121,7 +1136,6 @@ async function p13(c: Ctx) {
 
   await loadApp(c, '#/settings');
   await pg.until(`!!document.getElementById('btn-clear-token')`, 5000);
-  await sleep(400); // Settings' sheet slides up (200 ms): a tap computed before it settles lands elsewhere
   const t0 = await pg.tapEl(`document.getElementById('btn-clear-token')`);
   const gone = await pg.until(`localStorage.getItem('herdr_token') === null`, 1000);
   await sleep(5000);

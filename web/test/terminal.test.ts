@@ -5,12 +5,12 @@ import { createTerminal, type Terminal } from '../src/terminal.ts';
 import { read } from './contract.gen.ts';
 
 // The bridge: every request waits until the test answers it.
-interface Req { method: string; url: string; answer: (status: number, body: unknown) => void }
+interface Req { method: string; url: string; body?: string; answer: (status: number, body: unknown) => void }
 let reqs: Req[];
 beforeEach(() => {
   reqs = [];
   vi.stubGlobal('fetch', (url: string, init: RequestInit = {}) => new Promise((res) => {
-    reqs.push({ method: init.method ?? 'GET', url, answer: (status, body) => res({ ok: status < 400, status, json: async () => body }) });
+    reqs.push({ method: init.method ?? 'GET', url, body: init.body as string | undefined, answer: (status, body) => res({ ok: status < 400, status, json: async () => body }) });
   }));
 });
 const reads = () => reqs.filter((r) => r.url.includes('/read?source=visible'));
@@ -161,6 +161,25 @@ describe('terminal', () => {
     await vi.advanceTimersByTimeAsync(2000);
     assert.equal(reqs.filter((r) => r.url.endsWith('/scroll')).length, 0, 'the gesture from before the hold scrolls nothing');
     vi.useRealTimers();
+  });
+
+  it('flings off a fast swipe by when the finger moved, not when a busy page got to the events', async () => {
+    // performance too: the handlers read the clock, which the test moves on
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
+    term.setAppScroll(true);
+    // an event as the input made it (`at`: its timeStamp), handled whenever the page gets to it
+    const at = (type: string, points: Array<[number, number]>, t: number) =>
+      el.dispatchEvent(Object.defineProperty(Object.assign(new Event(type, { cancelable: true }), { touches: points.map(([clientX, clientY]) => ({ clientX, clientY })) }), 'timeStamp', { value: t }));
+    const t0 = performance.now();
+    at('touchstart', [[10, 300]], t0);
+    for (let i = 1; i <= 8; i++) { vi.advanceTimersByTime(8); at('touchmove', [[10, 300 - 20 * i]], t0 + 8 * i); }
+    vi.advanceTimersByTime(300); // the page busy (a render, say): the lift comes to the handler 300 ms late
+    at('touchend', [], t0 + 72);
+    for (let i = 0; i < 20; i++) { await vi.advanceTimersByTimeAsync(80); for (const r of reqs.filter((q) => q.url.endsWith('/scroll'))) r.answer(200, { ok: true }); }
+    const steps = reqs.filter((r) => r.url.endsWith('/scroll')).reduce((n, r) => n + JSON.parse(r.body!).steps, 0);
+    vi.useRealTimers();
+    // the swipe itself forwards 160 px / 12 px = 13 steps; a fling goes on past them
+    assert.ok(steps > 13, `a fling after the lift (steps sent: ${steps})`);
   });
 
   it('renders a read that lands while it lives', async () => {
