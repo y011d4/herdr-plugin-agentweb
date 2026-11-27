@@ -111,6 +111,16 @@ and with them Claude Code's memory, transcripts and folder trust, don't move. Th
 and `start` refuses while one runs, so a missed step 1 can't leave the old one serving. `HERDR_AGENTWEB_HOST`/`_PORT` are now
 `HERDR_YOICKS_HOST`/`_PORT`.
 
+To move it to `herdr-yoicks` (optional), stop every orchestrator and the bridge, then move
+`~/.local/share/herdr-agentweb` to `~/.local/share/herdr-yoicks`. In each orchestrator's Claude
+account (`~/.claude/projects`, or `$CLAUDE_CONFIG_DIR/projects`), also move its project dir, named
+after the old path with `/`, `.` and `_` as `-` (`-home-me--local-share-herdr-agentweb-orchestrators-personal`),
+to the same name with `herdr-yoicks`. Move each one only onto a name that doesn't exist yet. Without
+that second move, a headless orchestrator still resumes its session from the old project dir, but
+it no longer reads the old dir's memory, and its memory and sessions after a Clear go to the new one. Then start the bridge. `bridge.log` should show
+each headless orchestrator `started … (--resume)`. A TUI one asks for folder trust once in its new
+dir: choose "Yes, I trust this folder", because the default is "No, exit".
+
 ### Rolling back
 
 To go back to an earlier release, stop the bridge, reinstall that version, start again:
