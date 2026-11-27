@@ -551,7 +551,9 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   client's reconnects, debounces and agent.list retry (`HerdrClient.clock`) take one the same way, and a test waits
   for the PC notifications in flight with `server.bg`. Only real-process deadlines (`stopChild`'s
   signals, write deadlines) and herdr's socket deadline (`TestHerdrWaitHasNoDeadline`) stay on
-  the real clock, and so does `record-wire`. The TS-recorded client scenarios run the client on a
+  the real clock, and so does `record-wire`'s bridge, a process of its own: comparing, it waits
+  for the requests each operation was recorded with, not a fixed settle, and the two WS watches
+  run beside the rest on bridges of their own. The TS-recorded client scenarios run the client on a
   FakeClock kept at the real time's pace (`runScenario`), which a scenario may jump over a long
   wait (`Client.Jump`: ack-timeout's 10 s). fakeclaude is built once per test binary (`fakeClaudeEnv`).
 - **The real Claude** only in `headless_live_test.go` (`//go:build claudelive`; CI only vets it):
