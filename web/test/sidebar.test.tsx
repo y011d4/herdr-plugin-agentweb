@@ -43,11 +43,11 @@ describe('Sidebar', () => {
     assert.deepEqual(groups(c), [['personal', ['p1', 'p3']], ['work', []], ['', ['p7', 'p6']]]);
     const personal = c.querySelector<HTMLAnchorElement>('a[data-home="personal"]')!;
     assert.equal(personal.textContent, 'Personal');
-    assert.equal(personal.querySelector('.home-dot')!.className, 'home-dot idle'); // p4's status
+    assert.equal(personal.querySelector<HTMLElement>('.status-dot')!.dataset.status, 'idle'); // p4's status
     const work = c.querySelector<HTMLAnchorElement>('a[data-home="work"]')!;
     assert.equal(work.textContent, 'work'); // no label: its name
-    assert.ok(work.classList.contains('stopped'));
-    assert.equal(work.querySelector('.home-dot')!.className, 'home-dot stopped');
+    assert.match(work.style.color, /dimmed/); // not running
+    assert.equal(work.querySelector<HTMLElement>('.status-dot')!.dataset.status, 'stopped');
     assert.equal(c.querySelector('section[data-home=""] .sidebar-heading')!.textContent, 'Other');
     assert.ok(!c.querySelector('[data-sidebar-pane="p4"]'), 'an orchestrator is a heading, never an agent');
   });
@@ -58,7 +58,7 @@ describe('Sidebar', () => {
     const p1 = c.querySelector<HTMLElement>('[data-sidebar-pane="p1"]')!;
     assert.equal(p1.textContent, 'one #1 main' + 'repo' + 'working'); // label (title, branch), workspace, status
     assert.equal(p1.querySelector('.card-branch')!.textContent, ' main');
-    assert.equal(p1.querySelector('.status-badge')!.className, 'status-badge working');
+    assert.equal(p1.querySelector<HTMLElement>('.status-badge')!.dataset.status, 'working');
     assert.equal(c.querySelector('[data-sidebar-pane="p3"] .status-badge')!.textContent, 'idle');
     assert.equal(c.querySelector('[data-sidebar-pane="p6"] .status-badge')!.textContent, 'blocked');
   });
