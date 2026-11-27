@@ -1155,21 +1155,6 @@ body { font-size: 15px; }
 .modal-error:empty { margin-bottom: 0; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
 .modal-actions .btn-secondary, .modal-actions .btn-primary { padding-left: 20px; padding-right: 20px; }
-.modal-menu { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
-.modal-menu-item {
-  width: 100%;
-  text-align: left;
-  padding: 12px 14px;
-  min-height: var(--touch-min);
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  color: var(--color-text);
-  font-size: 15px;
-  transition: background 0.15s;
-}
-.modal-menu-item:active { background: var(--color-border); }
-.modal-menu-item.danger { color: var(--color-blocked); }
 .btn-primary.danger { background: var(--color-blocked); }
 /* a label + switch on one row (e.g. "Create a new worktree") */
 .modal-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

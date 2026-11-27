@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { act } from 'react';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { keptTasks, setAppState } from '../src/store.ts';
-import { confirmModal, Modals, openAgentMenu, openNewAgent, previewImage } from '../src/ui/Modals.tsx';
+import { confirmModal, Modals, openNewAgent, openRename, previewImage } from '../src/ui/Modals.tsx';
+import { paneTopbar } from '../src/ui/Pane.tsx';
 import { agentStart, errors, profiles, rename, state } from './contract.gen.ts';
 import { fire, render } from './render.ts';
 
@@ -22,7 +23,10 @@ function bridge(routes: Record<string, { status?: number; body: unknown }>): voi
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector<T>(sel)!;
-const open = (): boolean => !!document.querySelector('.modal-overlay');
+// a modal: Overlay's, or the confirm's on Mantine's Modal
+const open = (): boolean => !!document.querySelector('.modal-overlay, [data-modal-backdrop]');
+/** Escape, from the focused element as a browser sends it (Mantine's handler reads its target's attributes). */
+const escape = (): void => { (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); };
 /** Lets the requests and React settle. */
 const settle = (): Promise<void> => act(async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0)); });
 /** Types into a React-controlled field (the native setter, so React sees the change). */
@@ -41,7 +45,7 @@ beforeEach(async () => {
   ({ unmount } = await render(<Modals />));
 });
 afterEach(async () => {
-  await fire(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))); // a modal left open
+  await fire(() => escape()); // a modal left open
   await unmount();
   vi.unstubAllGlobals();
 });
@@ -59,8 +63,8 @@ describe('Confirm', () => {
     assert.equal(await p, true);
     assert.ok(!open());
 
-    for (const dismiss of [() => $('#cf-cancel').click(), () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })),
-      () => $('.modal-overlay').click()]) {
+    for (const dismiss of [() => $('#cf-cancel').click(), escape,
+      () => $('[data-modal-backdrop]').click()]) {
       p = confirmModal('Clear agent?', 'm', 'Clear', false);
       await settle();
       assert.equal($('#cf-ok').className, 'btn-primary');
@@ -81,25 +85,45 @@ describe('Confirm', () => {
   });
 });
 
-describe('Agent actions and Rename', () => {
-  const on = () => ({ clear: vi.fn(), stop: vi.fn() });
+describe('Agent actions (the ⋮) and Rename', () => {
+  const actions = () => ({ rename: vi.fn(), clear: vi.fn(), stop: vi.fn() });
+  const menuOpen = (): boolean => !!document.querySelector('[data-menu-dropdown]');
+  const calls = (cb: ReturnType<typeof actions>): number[] => [cb.rename, cb.clear, cb.stop].map((f) => f.mock.calls.length);
+  // the topbar's right side of a pane (not a Home): the view toggle and the ⋮
+  const topbar = (cb: ReturnType<typeof actions>) => render(paneTopbar('p1', false, '#/agents', cb).right);
 
-  it('Clear and Stop close the menu and hand over', async () => {
-    for (const [id, key] of [['#am-clear', 'clear'], ['#am-stop', 'stop']] as const) {
-      const cb = on();
-      await fire(() => openAgentMenu('p1', 'claude', cb));
+  it('the ⋮ opens Rename, Clear and Stop; a pick closes it and hands over', async () => {
+    for (const [i, id] of ['#am-rename', '#am-clear', '#am-stop'].entries()) {
+      const cb = actions();
+      const { unmount } = await topbar(cb);
+      assert.ok(!menuOpen());
+      await fire(() => $('#btn-agent-menu').click());
+      assert.deepEqual([...document.querySelectorAll('[data-menu-item]')].map((b) => `${b.id} ${b.textContent}`),
+        ['am-rename Rename…', 'am-clear Clear (fresh session)…', 'am-stop Stop agent…']);
       await fire(() => $(id).click());
-      assert.ok(!open());
-      assert.equal(cb[key].mock.calls.length, 1);
-      assert.equal(cb.clear.mock.calls.length + cb.stop.mock.calls.length, 1);
+      assert.ok(!menuOpen());
+      assert.deepEqual(calls(cb), [0, 1, 2].map((j) => (j === i ? 1 : 0)));
+      await unmount();
     }
+  });
+
+  it('Escape, a tap outside or the ⋮ again closes it and hands nothing over', async () => {
+    const cb = actions();
+    const { unmount } = await topbar(cb);
+    for (const dismiss of [escape,
+      () => document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })), () => $('#btn-agent-menu').click()]) {
+      await fire(() => $('#btn-agent-menu').click());
+      assert.ok(menuOpen());
+      await fire(dismiss);
+      assert.ok(!menuOpen());
+    }
+    assert.deepEqual(calls(cb), [0, 0, 0]);
+    await unmount();
   });
 
   it('renames: the current name selected, a name required, then the stored name toasted', async () => {
     bridge({ 'POST /api/panes/p%2F1/rename': { body: rename[0] } });
-    const cb = on();
-    await fire(() => openAgentMenu('p/1', 'claude', cb));
-    await fire(() => $('#am-rename').click());
+    await fire(() => openRename('p/1', 'claude'));
     const input = $<HTMLInputElement>('#rn-name');
     assert.equal(input.value, 'claude');
     assert.equal(document.activeElement, input);
@@ -119,9 +143,7 @@ describe('Agent actions and Rename', () => {
 
   it('a failed rename shows the error and can be saved again', async () => {
     bridge({ 'POST /api/panes/p1/rename': { status: 400, body: errors[0] } });
-    const cb = on();
-    await fire(() => openAgentMenu('p1', 'claude', cb));
-    await fire(() => $('#am-rename').click());
+    await fire(() => openRename('p1', 'claude'));
     await fire(() => $('#rn-save').click());
     await settle();
     assert.equal($('#rn-error').textContent, 'unknown profile: bash');
@@ -236,7 +258,7 @@ describe('Image preview', () => {
     location.hash = '#/home/pilot';
     const opener = document.body.appendChild(document.createElement('button'));
     for (const dismiss of [() => $('.image-preview-close').click(), () => $('.image-preview img').click(), () => $('.modal-overlay').click(),
-      () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))]) {
+      escape]) {
       opener.focus();
       await fire(() => previewImage('data:image/png;base64,x', 'Attached image'));
       assert.equal($<HTMLImageElement>('.image-preview img').alt, 'Attached image');

@@ -70,7 +70,8 @@ All in `internal/bridge/` (one package):
   results of the user's actions, and the OS notifications; a status push or an alert never
   toasts). The screens are in `web/src/ui/`: Settings, Token, the agents list `Dashboard.tsx`,
   `Pane.tsx` and `PromptPanel.tsx`; `Toasts.tsx` draws into `#toast-container` and `Modals.tsx`
-  (Confirm, agent actions, Rename, New agent, the image preview) is portalled into `#modal-root`. An opened
+  (Confirm, on Mantine's Modal; Rename, New agent, the image preview) is portalled into `#modal-root`;
+  a pane's ⋮ is a Mantine Menu (`Pane.tsx`'s `AgentMenu`, its dropdown in `#modal-root` too). An opened
   pane's body is `pane-view.ts` (`createPaneView` → setMode/onState/echo/destroy, one per opened
   pane or Home: the chat log, the transcript probe, its own WS messages and agent_status, the 3s
   refresh, the pane's visibilitychange, the prompt poll and going Back after an answer) over `terminal.ts` (`createTerminal`:
