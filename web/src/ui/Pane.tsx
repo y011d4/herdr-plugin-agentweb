@@ -547,11 +547,24 @@ const settingsButton = <TopbarIcon id="btn-settings" label="Settings" onClick={(
 
 export interface AgentActions { rename: () => void; clear: () => void; stop: () => void }
 
+/** Whether ⋮'s menu is open: the drawer's Escape closes the drawer only while it isn't (ui/AgentDrawer.tsx). */
+export let agentMenuOpen = false;
+
 /** A pane's ⋮: Mantine's menu under it (closes on a pick, a tap outside or Escape). Each item
- *  44px tall, the app's touch target. */
+ *  44px tall, the app's touch target. Any Escape while it is open closes it: Mantine's own handler is the
+ *  dropdown's, and its focus moves in only a moment after it opens (a timer), so an Escape from ⋮ before that
+ *  closed nothing, the menu staying and, with a menu open, the drawer too. */
 export function AgentMenu({ actions }: { actions: AgentActions }) {
+  const [opened, setOpened] = useState(false);
+  useLayoutEffect(() => { // as it commits: no Escape meanwhile finds the menu shown and the drawer not told
+    agentMenuOpen = opened;
+    if (!opened) return;
+    const onKey = (e: globalThis.KeyboardEvent): void => { if (e.key === 'Escape' && !e.isComposing) setOpened(false); };
+    addEventListener('keydown', onKey, true);
+    return () => { agentMenuOpen = false; removeEventListener('keydown', onKey, true); };
+  }, [opened]);
   return (
-    <Menu id="btn-agent-menu" position="bottom-end" width={220} radius="md">
+    <Menu id="btn-agent-menu" position="bottom-end" width={220} radius="md" opened={opened} onChange={setOpened}>
       <Menu.Target><TopbarIcon label="Agent actions">&#8942;</TopbarIcon></Menu.Target>
       <Menu.Dropdown>
         <Menu.Item id="am-rename" className="min-h-11" fz="md" onClick={actions.rename}>Rename…</Menu.Item>
