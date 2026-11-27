@@ -1074,7 +1074,10 @@ async function p15(c: Ctx) {
   await pg.until(`!!document.getElementById('btn-agent-menu')`, 5000);
   guard(c.rec, stop);
   await pg.tapEl(`document.getElementById('btn-agent-menu')`);
+  // Mantine's menu and modal mount through a transition, a frame or so after the tap
+  await pg.until(`!!document.getElementById('am-stop')`, 3000);
   await pg.tapEl(`document.getElementById('am-stop')`);
+  await pg.until(`!!document.getElementById('cf-ok')`, 3000);
   const t = await pg.tapEl(`document.getElementById('cf-ok')`);
   const back = await pg.until(`location.hash === ${js(list)}`, 3000);
   const del = pg.reqs.find((q) => q.t >= t - 1000 && q.method === 'DELETE' && q.url.endsWith(`/api/panes/${enc(stop)}`));
@@ -1479,6 +1482,7 @@ async function ht2(c: Ctx) {
   await status(['done', 'idle'], 60_000);
 
   await pg.tapEl(`document.getElementById('btn-home-clear')`);
+  await pg.until(`!!document.querySelector('#modal-root #cf-ok')`, 3000); // Mantine's modal mounts through a transition
   await pg.tapEl(`document.querySelector('#modal-root #cf-ok')`);
   const cleared = await pg.until(`${CHAT} === 'No messages yet.'`, 15_000, 300);
   const fresh = (await hlTranscript(c, 'wc-h2')).sessionId;
