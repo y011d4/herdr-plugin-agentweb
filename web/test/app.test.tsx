@@ -48,6 +48,8 @@ async function answer(match: string, body: unknown, status = 200): Promise<void>
   await settle(); // a hash it set routes on the next task
 }
 const reads = (paneId: string): number => reqs.filter((q) => q.url.startsWith(`/api/panes/${paneId}/read?source=visible`)).length;
+// a view's first look at a Claude pane (opened on its chat): its transcript's GET
+const transcripts = (paneId: string): number => reqs.filter((q) => q.url === `/api/panes/${encodeURIComponent(paneId)}/transcript`).length;
 
 const go = async (hash: string): Promise<void> => { location.hash = hash; await settle(); };
 const click = async (el: Element | null): Promise<void> => {
@@ -197,24 +199,28 @@ describe('App', () => {
     assert.equal(location.hash, '#/agents');
   });
 
-  it("opens a pane over a Home, the Home's view stopped as it is; closing goes back to the Home, drawn afresh", async () => {
+  it("opens a pane over a Home, whose view waits under it; closing goes back to the Home as it was, its view going on", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/home/personal');
+    await answer('/api/panes/p4/transcript', transcript[0]);
     const home = $('#screen #screen-pane.screen-home');
-    const homeReads = reads('p4');
+    const log = $('#screen #chat-log');
+    const homeLooks = transcripts('p4') + reads('p4');
     await go('#/pane/p1');
     assert.ok($('#screen #screen-pane.screen-home') === home, 'the Home under it, as it was');
     assert.ok($('.agent-drawer #screen-pane'));
     assert.equal(store.view.homeMode, false);
-    assert.equal(watches.at(-1), 'p1:terminal', 'the watch follows the drawer');
+    assert.equal(watches.at(-1), 'p1:chat', 'the watch follows the drawer (a Claude pane: on its chat)');
     const close = $('#btn-drawer-close')!;
     await act(async () => { close.click(); close.click(); }); // a double tap goes back once
     await settle();
     assert.equal(location.hash, '#/home/personal');
     assert.ok(!$('.agent-drawer #screen-pane'));
-    assert.ok($('#screen #screen-pane.screen-home') !== home, 'a fresh Home');
-    assert.ok(reads('p4') > homeReads, "its new view reads the orchestrator's screen");
+    assert.ok($('#screen #screen-pane.screen-home') === home && $('#screen #chat-log') === log, 'the same Home, the same chat: nothing drawn afresh');
+    assert.ok(log!.querySelectorAll('.chat-item').length > 0, 'its chat as it was, not emptied');
+    assert.equal(transcripts('p4') + reads('p4'), homeLooks, 'no new view: nothing read again');
     assert.equal(store.view.activePaneId, 'p4');
+    assert.equal(watches.at(-1), 'p4:chat', 'its watch back');
   });
 
   it('pane to pane replaces the entry (Back still closes the drawer); a pane opened afresh closes to the list in its place', async () => {
@@ -232,7 +238,14 @@ describe('App', () => {
     assert.equal(location.hash, '#/pane/p2');
     assert.equal(history.length, before, 'replaced');
     assert.equal(store.view.activePaneId, 'p2');
-    history.back(); // the phone's Back
+    for (const id of ['p3', 'p1', 'p3']) { // one agent after another (a notification, the sidebar): one drawer, in place
+      await act(async () => { sw.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: `#/pane/${id}` } })); });
+      await settle();
+    }
+    assert.equal(location.hash, '#/pane/p3');
+    assert.equal(history.length, before, 'still the one entry');
+    assert.equal(document.querySelectorAll('.agent-drawer #screen-pane').length, 1, 'one drawer');
+    history.back(); // the phone's Back: closes it, through none of the agents seen before
     await settle();
     assert.equal(location.hash, '#/agents');
     assert.ok(!$('.agent-drawer #screen-pane'));
@@ -477,26 +490,26 @@ describe('App', () => {
     await settle();
     assert.equal(location.hash, '#/pane/p2');
     await go('#/home/personal');
-    const before = reads('p4');
+    const before = transcripts('p4');
     await act(async () => { sw.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: '#/pane/p4' } })); });
     await settle();
     assert.equal(location.hash, '#/home/personal');
-    assert.ok(reads('p4') > before, "a new view reads the orchestrator's screen");
+    assert.ok(transcripts('p4') > before, "a new view reads the orchestrator's transcript");
     assert.equal(store.view.activePaneId, 'p4');
   });
 
-  it('pauses the watch while hidden; back on screen resumes it, closes the open pane’s OS notifications and marks it seen', async () => {
+  it('a chat pane’s watch goes on while hidden; back on screen it closes the open pane’s OS notifications and marks it seen', async () => {
     store.seenDone = {};
     hidden = true;
-    await go('#/pane/p3'); // done (completionSeq 4)
-    assert.equal(watches.at(-1), 'p3:terminal:hidden');
+    await go('#/pane/p3'); // done (completionSeq 4); a Claude pane, on its chat (its transcript watch goes on while hidden)
+    assert.equal(watches.at(-1), 'p3:chat:hidden');
     assert.equal(store.seenDone.p3, undefined, 'not seen while hidden');
     await settle();
     closed.length = 0;
     hidden = false;
     await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
     await settle();
-    assert.equal(watches.at(-1), 'p3:terminal');
+    assert.equal(watches.at(-1), 'p3:chat:hidden', 'a transcript watch never pauses: nothing to resume');
     assert.deepEqual(closed, ['p3']);
     assert.equal(store.seenDone.p3, 4);
   });
@@ -519,14 +532,13 @@ describe('App', () => {
 
   it('watches a pane opened from a chat pane on its terminal from the start', async () => {
     await go('#/pane/p1');
-    await answer('/api/panes/p1/read?source=visible', read[1]);
     await answer('/api/panes/p1/transcript', transcript[0]); // claude's transcript: chat
     assert.equal(watches.at(-1), 'p1:chat');
 
     await go('#/pane/p2'); // a shell: terminal only
     await answer('/api/panes/p2/read?source=visible', read[1]);
     await answer('/api/panes/p2/transcript', { available: false });
-    assert.ok($('#terminal-output')!.style.display !== 'none', 'the terminal is shown');
+    assert.ok($('.agent-drawer #terminal-output')!.style.display !== 'none', 'the terminal is shown');
     assert.deepEqual(watches.slice(watches.lastIndexOf('p1:chat') + 1).filter((w) => w.startsWith('p2:')), ['p2:terminal']);
   });
 

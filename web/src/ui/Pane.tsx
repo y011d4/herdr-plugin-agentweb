@@ -72,6 +72,25 @@ export function closePaneView(): void {
   toggle = NO_TOGGLE;
 }
 
+// A Home's view waiting under a drawer (suspended), until the drawer closes back onto it or the Home goes.
+let waiting: PaneView | null = null;
+
+/** A drawer opens over the Home on screen: its view waits, its DOM as it is. */
+export function suspendPaneView(): void {
+  paneView?.suspend();
+  waiting = paneView;
+  paneView = null;
+}
+
+/** The drawer closed back onto that Home: its view goes on (false: there was none, e.g. a stopped Home). */
+export function resumePaneView(): boolean {
+  if (!waiting) return false;
+  paneView = waiting;
+  waiting = null;
+  paneView.resume();
+  return true;
+}
+
 const KEYS: Array<[string, Record<string, unknown>]> = [
   ['Enter', { keys: ['enter'] }],
   ['⌫', { keys: ['backspace'] }],
@@ -128,6 +147,7 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
     return () => {
       view.destroy();
       if (paneView === view) paneView = null;
+      if (waiting === view) waiting = null;
       if (toggle.paneId === paneId) toggle = NO_TOGGLE;
       setPrompt(null);
     };

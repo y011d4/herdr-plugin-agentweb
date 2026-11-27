@@ -61,7 +61,9 @@ All in `internal/bridge/` (one package):
   (`routes.ts`, pure `resolveRoute`; each route render gives the screen and its topbar a new key,
   so they mount afresh; `#/pane/<id>` opens the pane in `ui/AgentDrawer.tsx`, Mantine's Drawer, over the
   screen it was opened from, `view.paneBackRoute`, which stays as it is: a list live and at its scroll,
-  a Home with its view stopped; a sheet from the bottom on a phone, from the right at 1024px and up),
+  a Home with its view suspended, resumed as it was on close (`suspendPaneView`/`resumePaneView`: no new view, no
+  flicker); a sheet from the bottom on a phone, from the right at 1024px and up; a Claude pane opens on its chat,
+  its terminal only when chosen for it, remembered per pane for the app's life (pane-view's `chosenView`)),
   `nav.ts` (`openAgent`/`go`: drawer → drawer replaces the history entry; `closeAgent`: back to the
   entry under it when it was opened on it, `view.paneOverBase`, else a replace; ✕, the dimmed screen,
   Escape with no other layer over it and the phone's Back close it), the topbar (each screen fills its three slots), the connection dot and the
@@ -432,7 +434,7 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   `handleRoute` → `closePaneView`): `destroy()` stops its timers and listeners, and
   every async continuation checks `destroyed`, so a stale response can't poison the next pane's
   view. Within a pane, reads also drop a response a newer read or WS push superseded. A drawer
-  opened over a Home stops the Home's view and leaves its DOM: the pane ids (`#pane-view`,
+  opened over a Home suspends the Home's view (no timers, messages or reads; resumed on close) and leaves its DOM: the pane ids (`#pane-view`,
   `#chat-log`, `#terminal-output`, `#screen-pane`…) then exist twice, so select inside `.agent-drawer`.
 - **`ui/Pane.tsx`: the composer is uncontrolled.** The textarea has no `value` prop, so a state
   push never resets what is being typed, an IME composition included. Enter sends only on a PC
