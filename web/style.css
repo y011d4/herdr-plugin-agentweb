@@ -1418,4 +1418,58 @@ body { font-size: 15px; }
     padding-left: max(16px, calc((100% - 760px) / 2));
     padding-right: max(16px, calc((100% - 760px) / 2));
   }
+
+  /* The sidebar (ui/Sidebar.tsx), drawn at this width on every screen but the token one: while it
+     is there the shell is two columns, the sidebar beside the topbar, the banner and #screen (their
+     rows set, so a hidden banner can't pull #screen into its row). --sidebar-w is its width, for
+     whatever covers the rest of the screen (an agent's drawer) and should leave it usable. */
+  :root:has(#sidebar) { --sidebar-w: 300px; }
+  #app:has(> #sidebar) {
+    display: grid;
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+  #app:has(> #sidebar) > #topbar { grid-area: 1 / 2; }
+  #app:has(> #sidebar) > #reconnect-banner { grid-area: 2 / 2; }
+  #app:has(> #sidebar) > #screen { grid-area: 3 / 2; min-height: 0; }
+  #sidebar {
+    grid-area: 1 / 1 / -1 / 2;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 8px 16px;
+    background: var(--color-surface);
+    border-right: 1px solid var(--color-border);
+  }
+  .sidebar-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 52px; /* the topbar's */
+    margin: 0 -8px 8px;
+    padding: 0 8px 0 16px;
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+  }
+  .sidebar-title { flex: 1; font-weight: 700; font-size: 16px; }
+  .sidebar-group { margin-top: 14px; }
+  .sidebar-heading {
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-text-dim);
+  }
+  #sidebar .mantine-NavLink-root { border-radius: 8px; }
+  .sidebar-home { font-weight: 700; }
+  .sidebar-home.stopped { color: var(--color-text-dim); }
+  #sidebar .sidebar-agent { padding-left: 28px; } /* under its Home */
+  .sidebar-agent .status-badge { font-size: 11px; padding: 1px 7px; }
+  /* what the sidebar does instead: the Home switcher, the list's ← Home, the topbar's New agent and Settings */
+  #app:has(> #sidebar) :is(.home-switch, #topbar-left .topbar-back[aria-label='Home'], #topbar #btn-new-agent, #topbar #btn-settings) {
+    display: none;
+  }
 }
