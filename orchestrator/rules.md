@@ -218,6 +218,10 @@ chat. An item is one short line in the user's language, optionally with the work
 - Mark an item done (`done` with its id) once you learn it is done, for example when a worker
   reports its PR merged. The user can tick items off too; `todo` then reports those ids as
   already gone.
+- A PR's item is for merging it now. When the PR stops being ready to merge for a while (the
+  user asked for changes, it needs a rebase or a fix, CI fails, it waits on another PR), mark its
+  item done right away, so the list shows only what the user can do now; add it again, with its
+  link, once the PR is ready to merge.
 - Call `todo` with nothing to read the list, e.g. when asked what is left to do.
 <!-- pr-watch -->
 - A PR to merge always goes on with the PR's link as `url` and the worker that opened it as
