@@ -17,7 +17,7 @@ const orch = '/home/u/.local/share/herdr-yoicks/orchestrators';
 
 type Agent = NonNullable<AppState['workspaces'][number]['tabs'][number]['panes'][number]['agent']>;
 const agent = (name: string, status: Agent['status'], extra: Partial<Agent> = {}): Agent => ({ name, displayName: name, status,
-  customStatus: null, message: null, sinceUnixMs: T0 - 4 * 60_000, completionSeq: null, stateChangeSeq: 10, herdrName: null, ...extra });
+  sinceUnixMs: T0 - 4 * 60_000, completionSeq: null, stateChangeSeq: 10, herdrName: null, ...extra });
 const pane = (paneId: string, cwd: string, a: Agent | null) => ({ paneId, focused: false, cwd, launchCwd: cwd, title: null, agent: a });
 const wt = (checkoutPath: string, branch: string, linked: boolean) =>
   ({ repoKey: `${repo}/.git`, repoName: 'herdr-yoicks', repoRoot: repo, checkoutPath, isLinkedWorktree: linked, branch });
@@ -34,7 +34,7 @@ export const state: AppState = {
     { workspaceId: 'w1', label: 'herdr-yoicks', cwd: repo, worktree: wt(repo, 'main', false), tabs: [
       { tabId: 't1', label: 'review', panes: [pane('p1', repo, agent('claude', 'blocked', { stateChangeSeq: 14, sinceUnixMs: T0 - 40_000, herdrName: 'review' }))] },
       { tabId: 't2', label: 'flaky-test', panes: [pane('p2', repo, agent('claude', 'working',
-        { stateChangeSeq: 13, sinceUnixMs: T0 - 90_000, customStatus: 'running npm test', herdrName: 'flaky-test' }))] },
+        { stateChangeSeq: 13, sinceUnixMs: T0 - 90_000, herdrName: 'flaky-test' }))] },
       { tabId: 't3', label: 'docs', panes: [pane('p3', repo, agent('codex', 'done', { stateChangeSeq: 12, completionSeq: 2, sinceUnixMs: T0 - 12 * 60_000 }))] },
     ] },
     { workspaceId: 'w2', label: 'herdr-yoicks-wt-image', cwd: `${repo}-wt-image`, worktree: wt(`${repo}-wt-image`, 'feat/image-paste', true), tabs: [
@@ -61,7 +61,7 @@ export const state: AppState = {
   orchestratorPaneId: 'p4',
   claudeCheck: { at: T0 - 3_600_000, version: '2.1.322', ok: true, failed: [] },
   // the workers' (p3, an agent the user runs, has none: its name shows)
-  purposes: { p1: 'Review PR #119 before it merges', p2: 'Find why the sidebar test flakes', p5: 'Paste images into the Home chat' },
+  purposes: { p1: 'Review PR #119 before it merges', p2: 'Find why the sidebar test flakes on CI and fix it for good', p5: 'Paste images into the Home chat' },
 };
 
 type Item = TimelineItem;

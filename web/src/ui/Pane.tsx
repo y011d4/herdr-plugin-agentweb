@@ -506,12 +506,15 @@ export function PaneTitle({ paneId, home }: { paneId: string; home: boolean }) {
       last.current = <>{orchestratorLabel(orchestratorOfPane(state, paneId))}<Subtitle className="home-state" c={st === 'working' || st === 'blocked' ? st : undefined}>{`· ${sub}`}</Subtitle></>;
     } else {
       const name = found?.pane?.agent?.herdrName || found?.pane?.agent?.displayName || found?.pane?.agent?.name || found?.pane?.title || paneId;
-      // what it is for, as its orchestrator said; then (dim) its name, and the tab, unless the name already says it
-      // (agent start labels the tab by the name)
+      // the name and (dim) where it is: the tab, unless the name already says it (agent start labels the tab by
+      // the name); under them, small, what it is for, as its orchestrator said (one line, all of it on hover)
       const purpose = state?.purposes?.[paneId];
       const where = !found ? '' : found.tab.label && found.tab.label !== name ? `${found.ws.label} / ${found.tab.label}` : found.ws.label;
-      const context = purpose ? [name, where].filter(Boolean).join(' · ') : where;
-      last.current = <>{purpose || name}{context ? <Subtitle>{`· ${context}`}</Subtitle> : null}</>;
+      const head = <>{name}{where ? <Subtitle>{`· ${where}`}</Subtitle> : null}</>;
+      last.current = !purpose ? head : <>
+        <div className="truncate">{head}</div>
+        <Text className="title-purpose" fz={12} fw={400} lh={1.3} c="dimmed" truncate title={purpose}>{purpose}</Text>
+      </>;
     }
   }
   return last.current;

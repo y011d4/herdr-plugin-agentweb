@@ -6,7 +6,7 @@ import type { AgentStatus, OrchestratorView, PaneNode, WorkspaceNode, WorktreeIn
 function agentPane(id: string, sinceUnixMs: number, status: AgentStatus = 'idle', completionSeq: number | null = null, stateChangeSeq: number | null = null): PaneNode {
   return {
     paneId: id, focused: false, cwd: null, launchCwd: null, title: null,
-    agent: { name: 'claude', displayName: null, status, customStatus: null, message: null, sinceUnixMs, completionSeq, stateChangeSeq },
+    agent: { name: 'claude', displayName: null, status, sinceUnixMs, completionSeq, stateChangeSeq },
   };
 }
 const shell = (id: string): PaneNode => ({ paneId: id, focused: false, cwd: null, launchCwd: null, title: null, agent: null });
