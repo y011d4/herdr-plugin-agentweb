@@ -232,6 +232,21 @@ describe('conversationItems / latestActivity (home chat)', () => {
     // a result cut short may name only some answers: it stays as it is, its "truncated" with it
     const cut = { ...answered('q1', 'answered: "A?"="x", "B?"="y'), truncated: true } as TimelineItem;
     assert.equal(conversationItems([cut], asks)[0].kind, 'tool_result');
+    // Chat about this (Claude Code's refusal, the bridge's /answer {chat}): a dim notice, not the refusal's words
+    const chat = conversationItems([answered('q1', 'The user wants to clarify these questions.\n    This means they may…\n- "好きな果物は？"\n  (No answer provided)', true)], asks);
+    assert.deepEqual(chat, [{ kind: 'user', text: '[yoicks] Chat about this', sidechain: false, ts: 5 }]);
+    assert.match(renderItem(chat[0]), /class="chat-item chat-notice"/);
+    // the answers given before it stay, a line each (as the bridge's clarify lists them)
+    const listed = 'The user wants to clarify these questions.\n    Questions asked:\n- "好きな果物は？"\n  Answer: ばなな, りんご\n- "いつ？"\n  (No answer provided)\n- "量は？"\n  Answer: 2 個\nくらい';
+    assert.deepEqual(conversationItems([answered('q1', listed, true)], asks).map((i) => (i as { text: string }).text),
+      ['好きな果物は？: ばなな, りんご\n量は？: 2 個\nくらい', '[yoicks] Chat about this']);
+    // cut short (a long one): the entries before the cut, the cut one left out
+    const long = { ...answered('q1', listed.slice(0, -4), true), truncated: true } as TimelineItem;
+    assert.deepEqual(conversationItems([long], asks).map((i) => (i as { text: string }).text), ['好きな果物は？: ばなな, りんご', '[yoicks] Chat about this']);
+    // an answer that only quotes those words is still an answer
+    const quoted = 'The user answered: "好きな果物は？"="The user wants to clarify these questions.\\n". Read the answers carefully.';
+    assert.equal(conversationItems([answered('q1', quoted)], asks)[0].kind, 'user');
+    assert.notEqual((conversationItems([answered('q1', quoted)], asks)[0] as { text: string }).text, '[yoicks] Chat about this');
   });
 
   it("shows a worker the headless orchestrator started as a [yoicks] notice of the bridge's answer, across appends", () => {

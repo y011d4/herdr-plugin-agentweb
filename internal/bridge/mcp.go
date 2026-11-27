@@ -319,7 +319,7 @@ func (r *headlessRunner) approve(ctx context.Context, req *mcp.CallToolRequest, 
 	if p == nil {
 		return textResult(`{"behavior":"deny","message":"this orchestrator's session has ended"}`, false), nil, nil
 	}
-	r.asked(in.ToolUseID)
+	r.asked(in.ToolUseID, p)
 	defer r.dropQuestion(p)
 	for n := 1.0; ; n++ {
 		select {
@@ -403,11 +403,49 @@ func (r *headlessRunner) Answer(id string, answers map[string]any, deny string) 
 	return nil
 }
 
-// asked notes that a question reached the permission route (see watchAsk).
-func (r *headlessRunner) asked(toolUseID string) {
+// Chat refuses the pending question id as Claude Code's "Chat about this" does, with its message:
+// the questions and the answers given so far (answers: maybe some, maybe none), so the model asks
+// what the user would like to clarify. A stale id is a 409.
+func (r *headlessRunner) Chat(id string, answers map[string]any) error {
+	var questions []AskQuestion
+	r.mu.Lock()
+	if p := r.pending; p != nil && p.id == id {
+		questions = p.questions
+	}
+	r.mu.Unlock()
+	return r.Answer(id, nil, clarify(questions, answers))
+}
+
+// clarify is Claude Code 2.1.322's "Chat about this" refusal, word for word (its TUI's).
+func clarify(questions []AskQuestion, answers map[string]any) string {
+	var b strings.Builder
+	b.WriteString("The user wants to clarify these questions.\n" +
+		"    This means they may have additional information, context or questions for you.\n" +
+		"    Take their response into account and then reformulate the questions if appropriate.\n" +
+		"    Start by asking them what they would like to clarify.\n" +
+		"    Questions asked:")
+	for _, q := range questions {
+		b.WriteString("\n- \"" + q.Question + "\"\n")
+		if a, _ := answers[q.Question].(string); a != "" {
+			b.WriteString("  Answer: " + a)
+		} else {
+			b.WriteString("  (No answer provided)")
+		}
+	}
+	return b.String()
+}
+
+// asked notes that question p reached the permission route (see watchAsk). One a message was
+// written behind while it was on its way (Send) is refused at once, as Chat about this.
+func (r *headlessRunner) asked(toolUseID string, p *hlPending) {
 	r.mu.Lock()
 	r.asks[toolUseID] = true
+	answers, chat := r.chatNext[toolUseID]
+	delete(r.chatNext, toolUseID)
 	r.mu.Unlock()
+	if chat {
+		r.Chat(p.id, answers)
+	}
 }
 
 // watchAsk: an AskUserQuestion in the stream must reach approve within askReachWait, else
@@ -426,6 +464,7 @@ func (r *headlessRunner) watchAsk(toolUseID string) {
 			alert = r.warn("question_route", "a question (AskUserQuestion) never reached the Home: interrupt and ask again")
 		}
 		delete(r.asks, toolUseID)
+		delete(r.chatNext, toolUseID)
 		r.mu.Unlock()
 		alert()
 		r.onChange()

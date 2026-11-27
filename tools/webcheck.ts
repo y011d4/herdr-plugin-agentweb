@@ -1483,9 +1483,9 @@ async function h3(c: Ctx) {
   await hlHome(c, 'wc-h1');
   const mark = await hlMark(c, 'wc-h1'); // a resumed session may hold an earlier answer: one past here
   await compose(c, 'ask');
-  const panel = await pg.until(`[...document.querySelectorAll('#headless-prompt .ask-opt')].map((b) => b.textContent).join('|') === '1applered|2cherry'`, 5000);
+  const panel = await pg.until(`[...document.querySelectorAll('#headless-prompt .ask-opt:not(.ask-extra)')].map((b) => b.textContent).join('|') === '1applered|2cherry'`, 5000);
   const id = (await hlView(c, 'wc-h1'))?.headless?.pending?.id;
-  await pg.tapEl(`document.querySelectorAll('#headless-prompt .ask-opt')[1]`);
+  await pg.tapEl(`document.querySelectorAll('#headless-prompt .ask-opt:not(.ask-extra)')[1]`);
   const answered = await waitFn(async () => (await hlItemsSince(c, 'wc-h1', mark)).some((i: any) => i.kind === 'tool_result' && i.text.includes('"Which fruit?":"cherry"')), 5000, 200);
   const gone = await pg.until(`!document.getElementById('headless-prompt')`, 3000);
   let stale = 0;
@@ -1596,8 +1596,8 @@ async function ht2(c: Ctx) {
   if (!model?.includes('haiku')) throw env(`wc-h2 answered on ${model ?? 'an unknown model'}, not haiku: stopped here`);
 
   await compose(c, ASK_PROMPT);
-  const panel = await pg.until(`document.querySelectorAll('#headless-prompt .ask-opt').length === 3`, 60_000, 300);
-  if (!panel.timeout) await pg.tapEl(`[...document.querySelectorAll('#headless-prompt .ask-opt')].find((b) => /cherry/.test(b.textContent))`);
+  const panel = await pg.until(`document.querySelectorAll('#headless-prompt .ask-opt:not(.ask-extra)').length === 3`, 60_000, 300);
+  if (!panel.timeout) await pg.tapEl(`[...document.querySelectorAll('#headless-prompt .ask-opt:not(.ask-extra)')].find((b) => /cherry/.test(b.textContent))`);
   const asked = await status(['done', 'idle'], 60_000);
   step('ask', !panel.timeout && !asked.timeout && !(await hlView(c, 'wc-h2'))?.headless?.pending, `${ms(panel)}/${ms(asked)}`);
 
