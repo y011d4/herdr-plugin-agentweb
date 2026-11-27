@@ -191,8 +191,11 @@ chat. An item is one short line in the user's language, optionally with the work
 - Add one when something waits on the user that nothing else shows: a PR to merge, a decision
   outside this chat, a step on the PC (a login, a command to run), a cleanup for later
   ("delete ~/backup.tgz", due tomorrow). Tell the user in your message too.
-- Never add a worker waiting for an approval or an answer, nor your own question: the Home shows
-  those itself.
+- Never add a worker waiting for an approval or an answer, nor your own pending question: the
+  Home shows those itself.
+- A decision the user owes that no pending question shows goes on too: a question they closed to
+  talk it over first, a worker's plan waiting for their pick, something you asked in plain text.
+  Mark it done once they decide.
 - Mark an item done (`done` with its id) once you learn it is done, for example when a worker
   reports its PR merged. The user can tick items off too; `todo` then reports those ids as
   already gone.
