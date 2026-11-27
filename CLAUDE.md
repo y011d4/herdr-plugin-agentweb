@@ -226,14 +226,18 @@ All in `internal/bridge/` (one package):
   `{id, text, agent, url (http(s) only), due, createdAt}`, sent as state `orchestrators[].todos`; the user ticks one off with
   `DELETE /api/orchestrators/:name/todos/:id`; the items come due are reminded once from the bridge's minute tick, in one
   `orchestrator_alert` of kind `todo` per Home (the phone tags notifications by Home), ntfy and `notification.show`; blocked workers and the Home's question are not
-  items: the web shows those from the State); `approve` is the child's
+  items: the web shows those from the State; with config `pr_watch`, `prwatch.go` looks up the github.com PR links on
+  those lists each minute, all in one `gh api graphql` call (the user's gh and login, the URLs as variables), removes a merged
+  or closed PR's item and wakes its Home with `[yoicks] PR merged: <url> (<worker>); its to-do item is removed`, an unreadable
+  PR's once a run, a gh failure alerted once per error, kind `github`, to each Home with a PR); `approve` is the child's
   `--permission-prompt-tool`: AskUserQuestion becomes state `headless.pending` (answered by
   `POST …/answer`: the panel's "Type something." is a question's own answer, its "Chat about this" (`{chat}`) refuses it with Claude Code's words; a `/send` meanwhile is written, then refuses it the same way), held open with progress, anything
   else is denied unasked. `agent_prompt` watches the worker (one goroutine, herdr's waits on a
   closable no-deadline connection, `HerdrClient.Wait`) and wakes the orchestrator with `[yoicks]
   <worker>: <from> → <to>` (names and status only, 3 s coalesced); the watches are saved and
   re-armed after a restart. rules.md has `<!-- tui -->`/`<!-- headless -->` sections (`rulesFor`
-  keeps the mode's; the TUI output is pinned by `orchestrator_golden_test.go`). `tools/fakeclaude`
+  keeps the mode's, and the `<!-- pr-watch -->` parts inside headless only with `pr_watch`,
+  `OrchestratorDef.PRWatch`; the TUI output is pinned by `orchestrator_golden_test.go`). `tools/fakeclaude`
   (built as `claude`; `YOICKS_CLAUDE_BIN` points the bridge at it) stands in for Claude Code in
   tests and checks, MCP calls included. Without a headless entry none of it runs: no child, no MCP
   listener, no `[headless` log line.
@@ -513,7 +517,9 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   pane + 0600 bridge.log) and the `qr` entrypoint. **Never print the token in
   action stdout** — herdr captures action output into its plugin logs.
 - Bind stays loopback-only by default; remote access is Tailscale's job
-  (`tailscale serve`). No outbound requests unless `notify_url` is set.
+  (`tailscale serve`). No outbound requests unless `notify_url` or `pr_watch` is set (`pr_watch`:
+  the user's `gh`, once a minute, asks GitHub's GraphQL API for the state of the github.com PR
+  links on the headless Homes' to-do lists, nothing else; the credentials stay gh's).
 - Static file serving keeps the resolve+prefix path-traversal guard.
 - A headless orchestrator stays on the Claude subscription (fail closed): its child's env is an
   allowlist (HOME PATH USER LOGNAME SHELL LANG LC_* TZ TMPDIR, TERM=dumb, then the entry's env; never

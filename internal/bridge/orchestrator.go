@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -93,15 +94,16 @@ func orchestratorFiles(def OrchestratorDef, rules, ctl string) map[string]string
 
 @local.md
 `,
-		"rules.md":              strings.ReplaceAll(rulesFor(rules, firstNonEmpty(def.Mode, "tui")), "{{yoicks}}", ctl),
+		"rules.md":              strings.ReplaceAll(rulesFor(rules, firstNonEmpty(def.Mode, "tui"), map[bool]string{true: "pr-watch"}[def.PRWatch]), "{{yoicks}}", ctl),
 		".claude/settings.json": js.String(),
 	}
 }
 
-// rulesFor is the bundled rules for mode: the shared text and that mode's sections, each
-// written "<!-- mode -->\n…<!-- /mode -->\n", their markers left out (the other mode's go whole).
-func rulesFor(rules, mode string) string {
-	for _, m := range []string{"tui", "headless"} {
+// rulesFor is the bundled rules with the sections named in keep (a mode, and pr-watch with the
+// PR watch on): the shared text and those sections, each written "<!-- name -->\n…<!-- /name
+// -->\n", their markers left out (the others go whole; pr-watch sits inside headless).
+func rulesFor(rules string, keep ...string) string {
+	for _, m := range []string{"tui", "headless", "pr-watch"} {
 		open, end := "<!-- "+m+" -->\n", "<!-- /"+m+" -->\n"
 		for {
 			i := strings.Index(rules, open)
@@ -109,7 +111,7 @@ func rulesFor(rules, mode string) string {
 			if i < 0 || j < i {
 				break
 			}
-			if m == mode {
+			if slices.Contains(keep, m) {
 				rules = rules[:i] + rules[i+len(open):j] + rules[j+len(end):]
 			} else {
 				rules = rules[:i] + rules[j+len(end):]
