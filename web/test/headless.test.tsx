@@ -9,14 +9,13 @@ import { shownStatus } from '../src/dashboard-group.ts';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { orchestratorOfPane, resolveRoute } from '../src/routes.ts';
 import { findPane, markPaneSeen, setAppState, store } from '../src/store.ts';
-import { renderItem } from '../src/transcript.ts';
 import type { AppState, OrchestratorView, WsMessage, WsStateMessage } from '../src/types.ts';
 import { Modals } from '../src/ui/Modals.tsx';
 import { homeTopbar, Pane, usageParts } from '../src/ui/Pane.tsx';
 import { claudeCheckText } from '../src/ui/Settings.tsx';
 import { watchMessages } from '../src/watch.ts';
 import { messages, state as recorded, transcript } from './contract.gen.ts';
-import { fire, render } from './render.ts';
+import { chatHtml, fire, render } from './render.ts';
 
 vi.mock('../src/ws.ts', () => ({
   onWsMessage: (_fn: (msg: WsMessage) => void) => () => {},
@@ -387,7 +386,7 @@ describe('around a headless orchestrator', () => {
   });
 
   it("shows the bridge's [yoicks] words as a dim line, escaped, the worker's name a button", () => {
-    assert.equal(renderItem({ kind: 'user', text: '[yoicks] w-1: working → done <b>', sidechain: false, ts: null }),
+    assert.equal(chatHtml({ kind: 'user', text: '[yoicks] w-1: working → done <b>', sidechain: false, ts: null }),
       '<div class="chat-item chat-notice">[yoicks] <button type="button" class="chat-notice-agent" data-agent="w-1">w-1</button>: working → done &lt;b&gt;</div>');
   });
 });

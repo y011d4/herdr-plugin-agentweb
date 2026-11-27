@@ -1,6 +1,14 @@
+// @vitest-environment happy-dom
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
-import { askAnswer, noticeHtml, renderMarkdown, renderItem, conversationItems, latestActivity, type TimelineItem } from '../src/transcript.ts';
+import { askAnswer, renderMarkdown, conversationItems, latestActivity, type TimelineItem } from '../src/transcript.ts';
+import { createElement } from 'react';
+import { Notice } from '../src/ui/ChatLog.tsx';
+import { chatHtml, htmlOf } from './render.ts';
+
+// what ui/ChatLog.tsx draws for an item, or a notice line, as HTML
+const renderItem = (item: TimelineItem): string => chatHtml(item);
+const noticeHtml = (line: string): string => htmlOf(createElement(Notice, { line }));
 
 // renderMarkdown is the chat prose renderer used for user + assistant turns.
 // It must be XSS-safe (all text escaped before formatting) and dependency-free.
@@ -284,9 +292,9 @@ describe('renderItem — images', () => {
   it("shows a user turn's images under its words, or alone", () => {
     const h = renderItem({ kind: 'user', text: 'what is it?', images: [png, png], sidechain: false, ts: null });
     assert.match(h, /^<div class="chat-item chat-user"><div class="chat-bubble chat-md"><p class="chat-p">what is it\?<\/p><\/div><\/div><div class="chat-item chat-user chat-images">/);
-    assert.equal(h.split(`<img class="chat-image" src="${png}" alt="image">`).length, 3);
+    assert.equal(h.split(`<img class="chat-image" alt="image" src="${png}">`).length, 3);
     assert.equal(renderItem({ kind: 'user', text: '', images: [png], sidechain: false, ts: null }),
-      `<div class="chat-item chat-user chat-images"><button type="button" class="chat-image-open" aria-label="View image"><img class="chat-image" src="${png}" alt="image"></button></div>`);
+      `<div class="chat-item chat-user chat-images"><button type="button" class="chat-image-open" aria-label="View image"><img class="chat-image" alt="image" src="${png}"></button></div>`);
   });
   it('escapes a src', () => {
     assert.doesNotMatch(renderItem({ kind: 'user', text: '', images: ['x" onerror="y'], sidechain: false, ts: null }), /" onerror/);
