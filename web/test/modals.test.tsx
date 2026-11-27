@@ -23,8 +23,12 @@ function bridge(routes: Record<string, { status?: number; body: unknown }>): voi
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector<T>(sel)!;
-// a modal: Overlay's, or the confirm's on Mantine's Modal
-const open = (): boolean => !!document.querySelector('.modal-overlay, [data-modal-backdrop]');
+// a modal (every one is Mantine's Modal)
+const open = (): boolean => !!document.querySelector('[data-modal-backdrop]');
+// a dialog's title: its first line
+const title = (): string => $('.mantine-Modal-body > p').textContent!;
+// the action button's fill: the theme's blocked (destructive) or the primary
+const fill = (el: HTMLElement): string => el.style.getPropertyValue('--button-bg');
 /** Escape, from the focused element as a browser sends it (Mantine's handler reads its target's attributes). */
 const escape = (): void => { (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); };
 /** Lets the requests and React settle. */
@@ -54,10 +58,10 @@ describe('Confirm', () => {
   it('resolves true on its button, false on Cancel, Escape or the backdrop; a tap inside keeps it', async () => {
     let p = confirmModal('Stop agent?', 'Closes the pane.', 'Stop', true);
     await settle();
-    assert.equal($('.modal-title').textContent, 'Stop agent?');
-    assert.equal($('#cf-ok').className, 'btn-primary danger');
+    assert.equal(title(), 'Stop agent?');
+    assert.match(fill($('#cf-ok')), /blocked/);
     assert.equal($('#cf-ok').textContent, 'Stop');
-    await fire(() => $('.modal-message').click());
+    await fire(() => $('.mantine-Modal-body > p:nth-child(2)').click());
     assert.ok(open());
     await fire(() => $('#cf-ok').click());
     assert.equal(await p, true);
@@ -67,7 +71,7 @@ describe('Confirm', () => {
       () => $('[data-modal-backdrop]').click()]) {
       p = confirmModal('Clear agent?', 'm', 'Clear', false);
       await settle();
-      assert.equal($('#cf-ok').className, 'btn-primary');
+      assert.doesNotMatch(fill($('#cf-ok')), /blocked/);
       await fire(dismiss);
       assert.equal(await p, false);
       assert.ok(!open());
@@ -80,7 +84,7 @@ describe('Confirm', () => {
     void confirmModal('c', 'd', 'OK', false);
     assert.equal(await p, false);
     await settle();
-    assert.equal($('.modal-title').textContent, 'c');
+    assert.equal(title(), 'c');
     await fire(() => $('#cf-cancel').click());
   });
 
@@ -293,7 +297,7 @@ describe('Image preview', () => {
   it('shows the image with focus on ×; a tap on it or around it, ×, Escape or Back closes it and the route stays', async () => {
     location.hash = '#/home/pilot';
     const opener = document.body.appendChild(document.createElement('button'));
-    for (const dismiss of [() => $('.image-preview-close').click(), () => $('.image-preview img').click(), () => $('.modal-overlay').click(),
+    for (const dismiss of [() => $('.image-preview-close').click(), () => $('.image-preview img').click(), () => $('.image-preview').click(),
       escape]) {
       opener.focus();
       await fire(() => previewImage('data:image/png;base64,x', 'Attached image'));
