@@ -571,6 +571,20 @@ func noHeadlessPane(w http.ResponseWriter, id string) bool {
 	return true
 }
 
+// stringMap is a body's answers: an object of strings, or nil when absent; false for anything else.
+func stringMap(v any) (map[string]any, bool) {
+	if v == nil {
+		return nil, true
+	}
+	m, ok := v.(map[string]any)
+	for _, s := range m {
+		if _, isText := s.(string); !isText {
+			return nil, false
+		}
+	}
+	return m, ok
+}
+
 // headlessRoute is POST /api/orchestrators/:name/<action> for a headless orchestrator.
 func (s *server) headlessRoute(w http.ResponseWriter, r *http.Request, h *headlessRunner, action string) {
 	var err error
@@ -594,30 +608,32 @@ func (s *server) headlessRoute(w http.ResponseWriter, r *http.Request, h *headle
 			sendError(w, ierr)
 			return
 		}
-		if jsTrim(text) == "" && len(images) == 0 {
-			jsonError(w, http.StatusBadRequest, "invalid_params", "text must be a non-empty string, or images given")
+		answers, ok := stringMap(body["answers"]) // with a question open: its panel's so far (Chat about this)
+		if jsTrim(text) == "" && len(images) == 0 || !ok {
+			jsonError(w, http.StatusBadRequest, "invalid_params", "text must be a non-empty string, or images given; answers, if any, question → label")
 			return
 		}
-		err = h.Send(text, images)
+		err = h.Send(text, images, answers)
 	case "answer":
-		// {id, answers: {question: label(s)}} answers the pending question; {id, deny: message} refuses it
+		// {id, answers: {question: label(s)}} answers the pending question; {id, deny: message} refuses
+		// it; {id, chat: true, answers?: those given so far} is Claude Code's "Chat about this"
 		body := readBody(w, r)
 		if body == nil {
 			return
 		}
 		id, _ := body["id"].(string)
-		answers, isObject := body["answers"].(map[string]any)
+		answers, ok := stringMap(body["answers"])
 		deny, isText := body["deny"].(string)
-		for _, v := range answers {
-			if _, ok := v.(string); !ok {
-				isObject = false
-			}
-		}
-		if id == "" || isObject == isText {
-			jsonError(w, http.StatusBadRequest, "invalid_params", "an id, and answers (question → label) or deny (a message)")
+		chat := body["chat"] == true
+		switch {
+		case id == "" || !ok || chat && isText || !chat && (answers != nil) == isText:
+			jsonError(w, http.StatusBadRequest, "invalid_params", "an id, and answers (question → label), deny (a message) or chat: true")
 			return
+		case chat:
+			err = h.Chat(id, answers)
+		default:
+			err = h.Answer(id, answers, deny)
 		}
-		err = h.Answer(id, answers, deny)
 	case "interrupt":
 		err = h.Interrupt()
 	case "stop":

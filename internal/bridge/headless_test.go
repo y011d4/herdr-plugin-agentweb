@@ -1239,7 +1239,7 @@ func TestHeadlessImageBlocks(t *testing.T) {
 }
 
 // A message with images: the images then the text on its stdin, its user turn in the chat with
-// them; images alone are a message, an image can't answer a question.
+// them; images alone are a message, also about a question that waits (Chat about this).
 func TestHeadlessSendsImages(t *testing.T) {
 	b := startHeadless(t, t.TempDir(), nil, nil)
 	b.start(t)
@@ -1273,7 +1273,23 @@ func TestHeadlessSendsImages(t *testing.T) {
 	}
 	b.send(t, "ask")
 	b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
-	if status, out := send("banana"); status != 409 || !strings.Contains(out, "question_pending") {
+	if status, out := send("this one?"); status != 200 {
 		t.Errorf("with a question: %d %s", status, out)
+	}
+	b.waitStdin(t, `{"text":"this one?","type":"text"}`)
+	b.waitFor(t, "no question", func(v OrchestratorView) bool { return v.Headless.Pending == nil })
+}
+
+func TestClarifyIsClaudeCodes(t *testing.T) {
+	got := clarify([]AskQuestion{{Question: "Which fruit?"}, {Question: `Say "hi"?`}}, map[string]any{"Which fruit?": "apple, cherry", `Say "hi"?`: ""})
+	want := "The user wants to clarify these questions.\n" +
+		"    This means they may have additional information, context or questions for you.\n" +
+		"    Take their response into account and then reformulate the questions if appropriate.\n" +
+		"    Start by asking them what they would like to clarify.\n" +
+		"    Questions asked:\n" +
+		"- \"Which fruit?\"\n  Answer: apple, cherry\n" +
+		"- \"Say \"hi\"?\"\n  (No answer provided)"
+	if got != want {
+		t.Errorf("got %q", got)
 	}
 }

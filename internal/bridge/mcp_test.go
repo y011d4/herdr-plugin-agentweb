@@ -140,15 +140,55 @@ func TestHeadlessAskAndAnswer(t *testing.T) {
 		t.Errorf("answered twice: %d", status)
 	}
 
-	// a message while a question waits is its answer, in the user's own words (no refusal: the
-	// model would read that as an error)
-	b.send(t, "ask")
-	b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
-	b.send(t, "banana, please")
+	// what it said before asking shows while the question waits (narration, as Claude Code writes it)
+	b.send(t, "ask 2")
+	v = b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
+	if q := v.Headless.Pending.Questions; len(q) != 2 || q[1].Question != "Size?" {
+		t.Fatalf("questions %+v", q)
+	}
+	var chat struct{ Items []TimelineItem }
+	_, tr, _ = b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
+	json.Unmarshal([]byte(tr), &chat)
+	if n := len(chat.Items); n < 2 || chat.Items[n-2].Kind != "assistant" || chat.Items[n-2].Text != "Before you pick: apple is sweet, cherry is sour." ||
+		chat.Items[n-1].Name != "AskUserQuestion" {
+		t.Errorf("the chat while it asks: %s", tr)
+	}
+	// Chat about this: refused with Claude Code's words, the answers so far in them
+	for _, body := range []string{`{"id":"x","chat":true,"deny":"no"}`, `{"id":"x","chat":true,"answers":{"a":1}}`, `{"id":"x","chat":true,"answers":"a"}`, `{"chat":true}`, `{"id":"x"}`} {
+		if status, out := b.post(t, "answer", body); status != 400 {
+			t.Errorf("%s: %d %s", body, status, out)
+		}
+	}
+	if status, body := b.post(t, "answer", `{"id":"`+v.Headless.Pending.ID+`","chat":true,"answers":{"Which fruit?":"apple"}}`); status != 200 {
+		t.Fatalf("chat: %d %s", status, body)
+	}
 	b.waitFor(t, "the turn's end", func(v OrchestratorView) bool { return v.Headless.Status == "done" && v.Headless.Pending == nil })
 	_, tr, _ = b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
-	if !strings.Contains(tr, `\"behavior\":\"allow\"`) || !strings.Contains(tr, `\"answers\":{\"Which fruit?\":\"banana, please\"}`) ||
-		strings.Count(tr, `\"behavior\":\"deny\"`) != 0 {
+	chat.Items = nil
+	json.Unmarshal([]byte(tr), &chat)
+	refused := chat.Items[len(chat.Items)-2] // then the fake's reply
+	if refused.Kind != "tool_result" || !refused.IsError || refused.Text != clarify(v.Headless.Pending.Questions, map[string]any{"Which fruit?": "apple"}) {
+		t.Errorf("the tool_result: %s", tr)
+	}
+
+	// a message while a question waits is about it, not its answer (that is the panel's Type
+	// something.): it is written, then the question refused as Chat about this
+	b.send(t, "ask 2")
+	b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
+	if status, out := b.post(t, "send", `{"text":"x","answers":["cherry"]}`); status != 400 {
+		t.Errorf("answers not question → label: %d %s", status, out)
+	}
+	if status, out := b.post(t, "send", `{"text":"what is cherry?","answers":{"Which fruit?":"cherry"}}`); status != 200 { // the panel's so far
+		t.Fatalf("send: %d %s", status, out)
+	}
+	b.waitStdin(t, `"content":"what is cherry?"`)
+	waitUntil(t, 5*time.Second, "its reply", func() bool { // the fake takes it as the next turn, Claude Code at the refusal
+		_, tr, _ = b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
+		return strings.Contains(tr, `"text":"echo: what is cherry?"`)
+	})
+	b.waitFor(t, "no question", func(v OrchestratorView) bool { return v.Headless.Status == "done" && v.Headless.Pending == nil })
+	if strings.Count(tr, `The user wants to clarify these questions.`) != 2 || !strings.Contains(tr, `Answer: cherry`) || strings.Contains(tr, `\"answers\":{\"Size?\"`) ||
+		!strings.Contains(tr, `"text":"echo: what is cherry?"`) {
 		t.Errorf("the tool_result: %s", tr)
 	}
 
@@ -159,6 +199,37 @@ func TestHeadlessAskAndAnswer(t *testing.T) {
 		t.Fatalf("interrupt: %d %s", status, body)
 	}
 	b.waitFor(t, "no question", func(v OrchestratorView) bool { return v.Headless.Pending == nil && v.Headless.Status == "idle" })
+}
+
+// A message written while a question is on its way (in the stream, not at approve yet) would wait
+// in Claude Code's queue behind it: the question is refused as it arrives, as Chat about this, and
+// a later one isn't.
+func TestHeadlessSendBehindAQuestion(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	h := b.srv.headless[b.name]
+	b.send(t, "askhold")
+	waitUntil(t, 5*time.Second, "the question in the stream", func() bool {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return len(h.asks) == 1
+	})
+	if status, out := b.post(t, "send", `{"text":"and this?","answers":{"Which fruit?":"apple"}}`); status != 200 {
+		t.Fatalf("send: %d %s", status, out)
+	}
+	b.waitStdin(t, `"content":"and this?"`)
+	b.release(t)
+	var tr string
+	waitUntil(t, 5*time.Second, "the refusal", func() bool {
+		_, tr, _ = b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
+		return strings.Contains(tr, `"text":"echo: and this?"`)
+	})
+	if !strings.Contains(tr, `The user wants to clarify these questions.`) || !strings.Contains(tr, `Answer: apple`) {
+		t.Errorf("the tool_result: %s", tr)
+	}
+	b.send(t, "ask") // a later question waits for the user
+	b.waitFor(t, "the next question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
 }
 
 // The approve call stays open past Claude Code's 60 s with progress.

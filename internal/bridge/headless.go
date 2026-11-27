@@ -303,11 +303,12 @@ type headlessRunner struct {
 	interrupts   map[string]chan struct{}
 	nInterrupt   int
 	lastEvent    time.Time
-	pending      *hlPending          // the question waiting for the user
-	asks         map[string]bool     // AskUserQuestion tool_use ids: did each reach approve?
-	served       map[string]bool     // the tool_use ids of the tool calls that reached the bridge, until their result
-	watches      map[string]*hlWatch // by pane
-	saved        []hlWatch           // the watches saved by an earlier bridge, re-armed at the first start
+	pending      *hlPending                // the question waiting for the user
+	asks         map[string]bool           // AskUserQuestion tool_use ids: did each reach approve?
+	chatNext     map[string]map[string]any // of those not there yet, the ones a message was written behind (Send): their answers so far
+	served       map[string]bool           // the tool_use ids of the tool calls that reached the bridge, until their result
+	watches      map[string]*hlWatch       // by pane
+	saved        []hlWatch                 // the watches saved by an earlier bridge, re-armed at the first start
 	wakes        []string
 	wakeTimer    interface{ Stop() bool }
 	gen          int // its workers' generation: Stop and Clear begin a new one (forgetWorkers)
@@ -351,7 +352,7 @@ func newHeadlessRunner(def OrchestratorDef, stateDir, rules string) *headlessRun
 		clock:         realClock{},
 		restartDelays: []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second},
 		crashWindow:   10 * time.Minute, interruptWait: 2 * time.Second, silence: 3 * time.Minute,
-		alerted: map[string]bool{}, interrupts: map[string]chan struct{}{}, asks: map[string]bool{}, served: map[string]bool{},
+		alerted: map[string]bool{}, interrupts: map[string]chan struct{}{}, asks: map[string]bool{}, chatNext: map[string]map[string]any{}, served: map[string]bool{},
 		watches: map[string]*hlWatch{}}
 	r.model.Status = "stopped"
 	var saved headlessState
@@ -944,7 +945,7 @@ func (r *headlessRunner) canUse(c *hlChild, cu *hlCanUse, epoch int) {
 		reply(map[string]any{"behavior": "deny", "message": "this orchestrator's session has ended"})
 		return
 	}
-	r.asked(cu.ToolUseID)
+	r.asked(cu.ToolUseID, p)
 	go func() { reply(<-p.reply) }() // every pending question gets its reply (answer, deny, the child's end)
 }
 
@@ -1079,35 +1080,42 @@ func (r *headlessRunner) running() (*hlChild, error) {
 	return nil, &LifecycleError{Status: 409, Code: "not_running", Message: "orchestrator " + r.def.Name + " isn't running"}
 }
 
-// Send is the user's message: with a question pending, the answer to it in the user's own
-// words (AskUserQuestion's free-text answer, which the model takes as said: S0 row 12), the same
-// text for each of its questions; else it is written, also mid-turn (Claude Code takes it in at
-// the next tool boundary). A refusal would reach the model as an error with the text as its
-// reason, which it reads as nonsense. Images (imageBlocks') go first, then the text, if any; an
-// answer can't carry them, so with a question pending they are refused.
-func (r *headlessRunner) Send(text string, images []any) error {
+// Send is the user's message, written also mid-turn (Claude Code takes it in at the next tool
+// boundary). Images (imageBlocks') go first, then the text, if any. With a question pending once
+// it is written, it is about the question, not an answer (a question's own answer is the panel's
+// "Type something."): the question is refused as Claude Code's "Chat about this" refuses it, with
+// the answers the panel had so far, so the model reads the two together at the boundary the
+// refusal makes. Looked for after the write, and one already in the stream but not at the
+// permission route yet is refused as it gets there (asked): else it would hold the message in
+// Claude Code's queue until it is answered.
+func (r *headlessRunner) Send(text string, images []any, answers map[string]any) error {
+	var err error
+	if len(images) == 0 {
+		err = r.write(text)
+	} else {
+		if jsTrim(text) != "" { // the API refuses an empty text block
+			images = append(images, map[string]any{"type": "text", "text": text})
+		}
+		err = r.write(images)
+	}
+	if err != nil {
+		return err
+	}
+	// ponytail: stdin and stdout share no order, so a question still unread on stdout (ms) is missed,
+	// and one asked in answer to this message would be taken for an earlier one (it takes an API call:
+	// never this soon). Telling them apart needs a mark from Claude Code it doesn't give.
 	r.mu.Lock()
 	p := r.pending
+	for id, reached := range r.asks {
+		if p == nil && !reached {
+			r.chatNext[id] = answers
+		}
+	}
 	r.mu.Unlock()
 	if p != nil {
-		if len(images) > 0 {
-			return &LifecycleError{Status: 409, Code: "question_pending", Message: "answer the question first: images can't answer it"}
-		}
-		answers := map[string]any{}
-		for _, q := range p.questions {
-			answers[q.Question] = text
-		}
-		if r.Answer(p.id, answers, "") == nil {
-			return nil
-		}
+		r.Chat(p.id, answers) // answered meanwhile (a 409): the message stands on its own
 	}
-	if len(images) == 0 {
-		return r.write(text)
-	}
-	if jsTrim(text) != "" { // the API refuses an empty text block
-		images = append(images, map[string]any{"type": "text", "text": text})
-	}
-	return r.write(images)
+	return nil
 }
 
 // The images a message may carry: JPEG, PNG or GIF that decode whole (a broken one in the

@@ -89,14 +89,45 @@ func (f *fake) call(ctx context.Context, tool, id string, args map[string]any) (
 	return strings.Join(text, "\n"), res.IsError, nil
 }
 
-// askMCP: an AskUserQuestion through the permission tool, its decision the tool_result.
-func (f *fake) askMCP(ctx context.Context) {
-	input := map[string]any{"questions": []any{map[string]any{"question": "Which fruit?", "header": "Fruit", "multiSelect": false,
-		"options": []any{map[string]any{"label": "apple", "description": "red"}, map[string]any{"label": "cherry", "description": ""}}}}}
-	f.emit(assistant([]any{map[string]any{"type": "tool_use", "id": "toolu_ask", "name": "AskUserQuestion", "input": input}}))
+// askQuestions: `ask N`'s first n (1 to 4) questions; the third is a multiSelect one.
+func askQuestions(n int) map[string]any {
+	opt := func(label, desc string) any { return map[string]any{"label": label, "description": desc} }
+	all := []any{
+		map[string]any{"question": "Which fruit?", "header": "Fruit", "multiSelect": false, "options": []any{opt("apple", "red"), opt("cherry", "")}},
+		map[string]any{"question": "Size?", "header": "Size", "multiSelect": false, "options": []any{opt("S", ""), opt("L", "")}},
+		map[string]any{"question": "Toppings?", "header": "Toppings", "multiSelect": true, "options": []any{opt("cream", ""), opt("nuts", "")}},
+		map[string]any{"question": "When?", "header": "When", "multiSelect": false, "options": []any{opt("now", ""), opt("later", "")}},
+	}
+	return map[string]any{"questions": all[:min(max(n, 1), len(all))]}
+}
+
+// narrationSig: a thinking block's signature as the API tags narration (the words the model says to
+// the user between its tool calls): field 2 → 1 → 8 = "narration", which Claude Code 2.1.322 reads
+// to tell it from thinking ("thinking" there).
+const narrationSig = "CAQSEwoRCBQYAjgBQgluYXJyYXRpb24="
+
+// askMCP: an AskUserQuestion of n questions through the permission tool, its decision the
+// tool_result. As Claude Code writes them, the transcript has the words before it (narration) and
+// the tool_use before the permission call.
+func (f *fake) askMCP(ctx context.Context, n int, hold bool) {
+	input := askQuestions(n)
+	said := []any{map[string]any{"type": "thinking", "thinking": "Before you pick: apple is sweet, cherry is sour.", "signature": narrationSig}}
+	f.emit(assistant(said))
+	f.record(map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "model": "fake", "content": said}})
+	use := []any{map[string]any{"type": "tool_use", "id": "toolu_ask", "name": "AskUserQuestion", "input": input}}
+	f.emit(assistant(use))
+	f.record(map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "model": "fake", "content": use}})
+	if hold {
+		<-release
+	}
 	result, _, err := f.call(ctx, "approve", "toolu_ask", map[string]any{"tool_name": "AskUserQuestion", "input": input, "tool_use_id": "toolu_ask"})
 	if err != nil {
 		result = "the permission call failed: " + err.Error()
+	}
+	var d struct{ Behavior, Message string }
+	if json.Unmarshal([]byte(result), &d) == nil && d.Behavior == "deny" { // as Claude Code records a refusal: its message, an error
+		f.toolResult("toolu_ask", d.Message, true)
+		return
 	}
 	f.toolResult("toolu_ask", result, false)
 }

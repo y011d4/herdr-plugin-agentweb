@@ -31,7 +31,7 @@ import { TopbarIcon, agentCards, cardTitle, orchestratorLabel, relativeTime } fr
 import { StatusDot } from './Status.tsx';
 import type { Topbar } from './App.tsx';
 import { previewImage } from './Modals.tsx';
-import { HeadlessPrompt, PromptPanel } from './PromptPanel.tsx';
+import { answersSoFar, HeadlessPrompt, PromptPanel } from './PromptPanel.tsx';
 import { TuiSteps } from './Settings.tsx';
 
 type Mode = 'terminal' | 'chat';
@@ -379,7 +379,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
       // raw control byte a full-screen / non-readline TUI could act on. Other panes just get
       // text+enter. enter:true then submits in the same request.
       const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
-      await (hl ? orchestratorPost(hl, 'send', sent.length ? { text, images: sent } : { text }) : apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) }));
+      await (hl ? orchestratorPost(hl, 'send', { text, ...(sent.length ? { images: sent } : {}), ...(answersSoFar.has(hl) ? { answers: answersSoFar.get(hl) } : {}) }) : apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) }));
       if (kept) keptTasks.finishSend(paneId, true);
       if (t.value === text) { // clear on success, but keep text typed mid-send
         t.value = '';
