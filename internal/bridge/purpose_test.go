@@ -44,14 +44,15 @@ func TestPurposeStore(t *testing.T) {
 	}
 	shell := func(id string) RawPane { return RawPane{PaneID: id, TabID: "t1", WorkspaceID: "w1"} }
 
-	s.Set("p1", "テストを直す")
-	s.Set("p2", "docs")
-	s.Set("p3", "gone")
-	s.Set("p3", "") // none: removed
-	if changes != 4 {
+	s.Set("p1", "テストを直す", false)
+	s.Set("p2", "docs", false)
+	s.Set("p3", "gone", false)
+	s.Set("p3", "", false)      // none: removed
+	s.Set("p4", "retask", true) // a re-task: its agent was there, and has exited since
+	if changes != 5 {
 		t.Errorf("%d changes", changes)
 	}
-	s.Prune(state(true)) // nothing seen yet: all kept
+	s.Prune(state(true)) // nothing seen yet: kept, but p4
 	s.Prune(state(true, agent("p1"), agent("p2")))
 	s.Prune(state(false)) // disconnected: tells nothing
 	if got := s.Purposes(); !maps.Equal(got, map[string]string{"p1": "テストを直す", "p2": "docs"}) {
