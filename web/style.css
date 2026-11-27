@@ -99,13 +99,6 @@ body { font-size: 15px; }
   white-space: nowrap;
 }
 
-.topbar-subtitle {
-  font-weight: 400;
-  font-size: 12px;
-  color: var(--color-text-dim);
-  margin-left: 6px;
-}
-
 .topbar-back {
   display: flex;
   align-items: center;
@@ -126,22 +119,7 @@ body { font-size: 15px; }
   gap: 8px;
 }
 
-.topbar-action {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--touch-min);
-  min-height: var(--touch-min);
-  margin-right: -8px; /* only the outermost button is pulled to the padding edge */
-  color: var(--color-text-dim);
-  font-size: 20px;
-}
-/* inner buttons keep the row gap instead of pulling their neighbour in */
-#topbar-right .topbar-action:not(:last-child) {
-  margin-right: 0;
-}
-
-.topbar-action:hover, .topbar-back:hover {
+.topbar-back:hover {
   color: var(--color-text);
 }
 
@@ -246,126 +224,6 @@ body { font-size: 15px; }
   touch-action: pan-x pan-y;
   /* the top-of-terminal swipe means "load history", not pull-to-refresh */
   overscroll-behavior: contain;
-}
-
-/* ── Input bar ── */
-.input-bar {
-  flex-shrink: 0;
-  background: var(--color-surface);
-  border-top: 1px solid var(--color-border);
-  padding-bottom: var(--safe-bottom);
-}
-
-/* a read-only chat's one key (ui/Pane.tsx) */
-.pane-interrupt-bar { padding: 8px 12px calc(var(--safe-bottom) + 8px); }
-.pane-interrupt-bar .btn-secondary { width: 100%; }
-
-.input-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px 6px;
-}
-
-.input-row textarea {
-  flex: 1;
-  padding: 10px 12px;
-  min-height: var(--touch-min);
-  max-height: 120px;
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  color: var(--color-text);
-  font-size: 14px;
-  font-family: inherit;
-  line-height: 1.4;
-  outline: none;
-  resize: none;
-}
-.input-row textarea:focus {
-  border-color: var(--color-accent);
-}
-
-.input-send-btn {
-  padding: 8px 12px;
-  min-height: var(--touch-min);
-  min-width: 64px;
-  background: var(--color-accent);
-  color: #fff;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.input-send-btn:active { opacity: 0.8; }
-
-/* a headless Home's images: + picks them, a thumbnail each above the composer until sent */
-.input-attach-btn {
-  min-width: var(--touch-min);
-  min-height: var(--touch-min);
-  border-radius: 8px;
-  background: var(--color-surface-2);
-  color: var(--color-text);
-  font-size: 20px;
-}
-.input-images {
-  display: flex;
-  gap: 8px;
-  padding: 8px 12px 0;
-  overflow-x: auto;
-}
-.input-image { position: relative; flex-shrink: 0; }
-.input-image button { display: block; padding: 0; }
-.input-image img {
-  display: block;
-  height: 56px;
-  max-width: 96px;
-  object-fit: cover;
-  border-radius: 6px;
-  border: 1px solid var(--color-border);
-}
-.input-image .input-image-remove {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--color-surface-2);
-  color: var(--color-text);
-  font-size: 14px;
-  line-height: 22px;
-}
-
-
-/* Quick-key row */
-.quickkey-row {
-  display: flex;
-  gap: 6px;
-  padding: 0 12px 8px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-.quickkey-row::-webkit-scrollbar { display: none; }
-
-.qkey {
-  flex-shrink: 0;
-  padding: 6px 12px;
-  min-height: 36px;
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: var(--color-text-dim);
-  white-space: nowrap;
-  transition: background 0.1s, color 0.1s;
-}
-.qkey:active {
-  background: var(--color-accent);
-  color: #fff;
-  border-color: var(--color-accent);
 }
 
 /* ── Settings ── */
@@ -709,15 +567,6 @@ body { font-size: 15px; }
   margin-bottom: 3px;
 }
 
-/* view toggle in the top bar reflects the active view */
-.view-toggle {
-  font-size: 13px;
-  font-family: system-ui, -apple-system, sans-serif;
-  padding: 4px 10px;
-  border-radius: 14px;
-  background: var(--color-surface-2);
-}
-
 /* AskUserQuestion card (read-only, in transcript history) */
 .chat-ask { border-left-color: var(--color-blocked); }
 .ask-q { margin-top: 6px; }
@@ -857,8 +706,6 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
   flex-shrink: 0;
 }
 .agent-drawer-head:focus { outline: none; } /* the start of the focus (ui/AgentDrawer.tsx), not a control */
-.agent-drawer-head .topbar-action:not(:last-child) { margin-right: 0; }
-.agent-drawer-close { margin-right: 0; font-size: 18px; }
 
 /* ── Home (the orchestrator's chat as the main screen) ── */
 .home-status {
@@ -1015,23 +862,9 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
   border-radius: 14px 14px 14px 4px;
   padding: 8px 12px;
 }
-.topbar-subtitle.home-state.working { color: var(--color-working); }
-.topbar-subtitle.home-state.blocked { color: var(--color-blocked); }
 /* a stopped orchestrator's Home: dimmed in the switcher, Start in its body */
 .home-switch-btn.stopped { opacity: 0.55; }
 .home-dot.stopped { background: transparent; box-shadow: inset 0 0 0 1px var(--color-idle); }
-.topbar-subtitle.home-state.stopped { color: var(--color-text-dim); }
-.home-stopped {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 24px 16px;
-  color: var(--color-text-dim);
-}
-.home-stopped .btn-primary { width: auto; padding-left: 28px; padding-right: 28px; }
 /* a headless orchestrator's Home: ■ on its "doing now" line, its usage, its warnings, its question */
 .home-activity .home-interrupt {
   float: right;
@@ -1098,8 +931,8 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
     /* resolved where it's used: 100% is that element's containing block */
     --wide-gutter: max(16px, calc((100% - 880px) / 2));
   }
-  /* the chat and everything around it (Home's bars, the answer panel, the composer, the keys) */
-  .chat-log, .chat-prompt, .home-status, .home-activity, .input-images, .input-row, .quickkey-row {
+  /* the chat and everything around it (Home's bars, the answer panel; the composer and the keys: lg:px-(--wide-gutter)) */
+  .chat-log, .chat-prompt, .home-status, .home-activity {
     padding-left: var(--wide-gutter);
     padding-right: var(--wide-gutter);
   }
