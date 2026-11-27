@@ -130,3 +130,71 @@ jobs:
       - name: govulncheck
         if: matrix.os == 'ubuntu-latest'
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  # webcheck's Tier 1 (tools/webcheck.ts): the web UI in headless Chrome through a preview bridge, over a private
+  # headless herdr (`webcheck herdr start`) and the fake claude: no desktop herdr, no real Claude (Tier 2 stays a
+  # step by hand). herdr is the release binary of the version production runs (CLAUDE.md's herdr 0.9.5), checked
+  # against the SHA-256 below (herdr publishes none): a release replaced under the same tag fails here, not runs.
+  # Raising the version is a PR that changes both lines, and so runs this against the new herdr first.
+  webcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HERDR_VERSION: v0.9.5
+      HERDR_SHA256: 14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: package.json # its engines.node
+          cache: npm
+
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          # a key of its own (the web job's is go.mod, the bridge jobs' go.sum): see the web job's note
+          cache-dependency-path: |
+            go.mod
+            go.sum
+
+      - name: Install herdr
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/herdr" "https://github.com/herdrdev/herdr/releases/download/$HERDR_VERSION/herdr-linux-x86_64"
+          echo "$HERDR_SHA256  $RUNNER_TEMP/bin/herdr" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/bin/herdr"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # the web build first: the bridge embeds it
+      - name: Build the web UI, the bridge and the fake claude
+        run: |
+          npm ci --ignore-scripts
+          npx vite build
+          go build -o bin/yoicks ./cmd/yoicks
+          go build -o "$RUNNER_TEMP/fake/claude" ./tools/fakeclaude
+
+      - name: Tier 1
+        env:
+          WEBCHECK_ROOT: ${{ runner.temp }}/wc
+        run: |
+          node tools/webcheck.ts herdr start
+          node tools/webcheck.ts preview start --bin bin/yoicks --fake-claude "$RUNNER_TEMP/fake/claude"
+          node tools/webcheck.ts check --base http://127.0.0.1:8395 --tier 1
+
+      - name: Upload the logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: webcheck-logs
+          path: |
+            ${{ runner.temp }}/wc/preview-*/state/bridge.log
+            ${{ runner.temp }}/wc/herdr/server.log
+            ${{ runner.temp }}/wc/herdr/.config/herdr/herdr-server.log
+          retention-days: 7
+          if-no-files-found: ignore
