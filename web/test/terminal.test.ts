@@ -128,8 +128,11 @@ describe('terminal', () => {
     term.setAppScroll(true);
     el.dispatchEvent(new WheelEvent('wheel', { deltaY: 90, cancelable: true }));
     term.setHeld(true);
+    el.dispatchEvent(new WheelEvent('wheel', { deltaY: 90, cancelable: true })); // and none queued while held
     await vi.advanceTimersByTimeAsync(1000);
-    assert.equal(reqs.filter((r) => r.url.endsWith('/scroll')).length, 0);
+    term.setHeld(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    assert.equal(reqs.filter((r) => r.url.endsWith('/scroll')).length, 0, 'none sent, also once released');
     vi.useRealTimers();
   });
 
