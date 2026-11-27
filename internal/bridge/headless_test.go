@@ -728,20 +728,32 @@ func TestHeadlessShutdownPastAStuckWrite(t *testing.T) {
 	b.start(t)
 	b.waitStatus(t, "idle")
 	b.send(t, "deaf")
-	big, _ := json.Marshal(map[string]string{"text": strings.Repeat("x", 60000)})
-	sent := make(chan struct{})
-	go func() {
-		defer close(sent)
-		for range 4 { // more than the pipe holds
-			b.do(t, "POST", "/api/orchestrators/h1/send", b.token, big)
-		}
-	}()
+	b.waitStdin(t, `"content":"deaf"`) // read: it reads nothing more
 	h := b.srv.headless["h1"]
 	h.mu.Lock()
 	c := h.child
 	h.mu.Unlock()
-	// a send writing, under the write lock (the child reads nothing: the pipe fills, a send sticks)
-	waitUntil(t, 10*time.Second, "a send stuck", func() bool { return len(c.wlock) == 1 })
+	// its stdin pipe filled (the fd is non-blocking, for the poller: a write that can't go in
+	// whole answers EAGAIN), so no send's write can end
+	raw, err := c.stdin.SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw.Write(func(fd uintptr) bool {
+		for chunk := make([]byte, 4096); ; {
+			if _, err := syscall.Write(int(fd), chunk); err != nil {
+				return true
+			}
+		}
+	})
+	sent := make(chan struct{})
+	go func() {
+		defer close(sent)
+		for range 2 { // one stuck in its write, one waiting for the write lock
+			b.do(t, "POST", "/api/orchestrators/h1/send", b.token, []byte(`{"text":"x"}`))
+		}
+	}()
+	waitUntil(t, 10*time.Second, "a send stuck in its write", func() bool { return len(c.wlock) == 1 })
 	runs, _ := b.runs(t)
 	began := time.Now()
 	b.srv.shutdownHeadless()
