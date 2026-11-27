@@ -329,6 +329,9 @@ describe('pane header', () => {
     await fire(() => screen(1));
     await close(outside);
     assert.ok(document.activeElement === $('#screen [data-pane-id="p2"]'), "its opener gone: the new screen's chip");
+    await reopen(outside);
+    await fire(() => set({ paneId: 'p2', key: 4, open: false, opener: outside, openedPane: 'p9' })); // p9 cleared into p2: no p9 chip
+    assert.ok(document.activeElement === $('#screen [data-pane-id="p2"]'), "the pane it opened on gone too: the pane on show's");
     await reopen(null);
     $('#side').focus();
     await close(null);

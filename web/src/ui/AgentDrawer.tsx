@@ -39,12 +39,14 @@ export function AgentDrawer({ sheet, actions }: { sheet: Sheet | null; actions: 
   const focusHead = useCallback((el: HTMLDivElement | null) => { el?.focus({ preventScroll: true }); }, []);
   // A phone's sheet traps the focus and gives it back on close (Mantine). A wide screen's, untrapped, gives
   // it back here: only when it was in the drawer or lost, not when the user took it to the sidebar. A Home
-  // under it is drawn afresh on close: there, to the new screen's control for the pane (a chip), if any.
+  // under it is drawn afresh on close: there, to the new screen's control for the pane it opened on (a
+  // chip), else for the pane on show (a Clear's new pane: the old one has none), if any.
   const content = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
     const a = document.activeElement;
     if (open || !sheet || !wide || (a && a !== document.body && !content.current?.contains(a))) return;
-    const back = sheet.opener?.isConnected ? sheet.opener : document.querySelector<HTMLElement>(`#screen [data-pane-id="${CSS.escape(sheet.openedPane)}"]`);
+    const control = (paneId: string) => document.querySelector<HTMLElement>(`#screen [data-pane-id="${CSS.escape(paneId)}"]`);
+    const back = sheet.opener?.isConnected ? sheet.opener : control(sheet.openedPane) ?? control(sheet.paneId);
     back?.focus({ preventScroll: true });
   }, [open]); // on a close only
   useEffect(() => {
