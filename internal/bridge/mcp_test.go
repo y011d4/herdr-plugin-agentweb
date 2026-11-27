@@ -416,7 +416,7 @@ func TestHeadlessWakeUps(t *testing.T) {
 		b.clock.Advance(10 * time.Second)
 		w.Set("w1p", "done")
 		b.waitWakes(t, "[yoicks] w1: working → done")
-		if n := len(w.Prompts()); n != 1 || b.watches() != 0 {
+		if n := len(w.Prompts()); n != 1 || b.watches() != 1 {
 			t.Errorf("%d prompts, %d watches", n, b.watches())
 		}
 	})
@@ -441,7 +441,7 @@ func TestHeadlessWakeUps(t *testing.T) {
 		b.watching(t, "working")
 		w.Set("w1p", "done")
 		b.waitWakes(t, "[yoicks] w1: working → done", "[yoicks] w1: working → blocked", "[yoicks] w1: working → done")
-		if b.watches() != 0 {
+		if b.watches() != 1 {
 			t.Errorf("%d watches", b.watches())
 		}
 	})
@@ -468,7 +468,31 @@ func TestHeadlessWakeUps(t *testing.T) {
 		w.Set("w1p", "done")
 		// its own task's end: the orchestrator's task still waits to be sent
 		b.waitWakes(t, "[yoicks] w1: working → blocked", "[yoicks] w1: working → done, ready, task not sent")
-		if n := len(w.Prompts()); n != 0 || b.watches() != 0 {
+		if n := len(w.Prompts()); n != 0 || b.watches() != 1 {
+			t.Errorf("%d prompts, %d watches", n, b.watches())
+		}
+	})
+	t.Run("a turn of its own after its end wakes too, once it holds: a flap wakes once, a look not at all", func(t *testing.T) {
+		b := startHeadless(t, t.TempDir(), nil, nil)
+		w := worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
+			w.Set(pane, "working")
+			w.Set(pane, "done")
+		})
+		b.start(t)
+		b.waitStatus(t, "idle")
+		b.prompt(t)
+		b.waitWakes(t, "[yoicks] w1: working → done") // its turn ends, a background task (CI) still running
+		w.Set("w1p", "idle")                          // the user looks at its pane: no turn
+		w.Set("w1p", "working")                       // the task's event: it goes on with no prompt
+		b.watching(t, "working")
+		w.Set("w1p", "done")
+		b.waiting(t, "the quiet time", resumeQuiet)
+		w.Set("w1p", "working")      // back at it within the quiet time: not told
+		b.clock.Advance(time.Second) // (so the next quiet wait is told from the one it left behind)
+		w.Set("w1p", "done")
+		b.pass(t, "the quiet time", resumeQuiet)
+		b.waitWakes(t, "[yoicks] w1: working → done", "[yoicks] w1: working → done")
+		if n := len(w.Prompts()); n != 1 || b.watches() != 1 { // still followed, for its next turn
 			t.Errorf("%d prompts, %d watches", n, b.watches())
 		}
 	})
@@ -508,7 +532,7 @@ func TestHeadlessWakeUps(t *testing.T) {
 	})
 	t.Run("no wake-up for a replay of the state already told (a reconnect, a re-arm)", func(t *testing.T) {
 		b := startHeadless(t, t.TempDir(), nil, nil)
-		worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
+		w := worker(t, b, "idle", func(w *fakeherdr.World, pane string) {
 			w.Set(pane, "working")
 			w.Set(pane, "done")
 		})
@@ -516,7 +540,7 @@ func TestHeadlessWakeUps(t *testing.T) {
 		b.waitStatus(t, "idle")
 		b.prompt(t)
 		b.waitWakes(t, "[yoicks] w1: working → done")
-		// a watch saved at that done answers at once with the same seq: it waits on, quiet
+		// a watch saved at that done, re-armed: it waits, quiet, for a turn of its own
 		raw, _ := b.srv.rpc("agent.get", map[string]any{"target": "w1p"})
 		status, seq, _ := agentState(raw)
 		h := b.srv.headless["h1"]
@@ -527,12 +551,14 @@ func TestHeadlessWakeUps(t *testing.T) {
 			t.Fatal("not watched")
 		}
 		b.srv.client.Refresh() // a reconnect's fresh snapshot
-		for range 2 {          // each look finds it as told: it waits on for a move
-			b.pass(t, "the wait for a move", 8*time.Second)
-			b.pass(t, "the pause before it looks again", 500*time.Millisecond)
-		}
-		b.waiting(t, "the wait for a move", 8*time.Second) // again
+		w.Set("w1p", "idle")   // a look at its pane
+		b.clock.Advance(time.Minute)
 		b.waitWakes(t, "[yoicks] w1: working → done")
+		w.Set("w1p", "working") // a turn of its own
+		b.watching(t, "working")
+		w.Set("w1p", "done")
+		b.pass(t, "the quiet time", resumeQuiet)
+		b.waitWakes(t, "[yoicks] w1: working → done", "[yoicks] w1: working → done")
 		if b.watches() != 1 {
 			t.Errorf("%d watches", b.watches())
 		}
@@ -754,8 +780,8 @@ func TestHeadlessClearForgetsWorkers(t *testing.T) {
 	b.prompt(t)
 	b.queued(t) // not written yet
 	saved, _ := os.ReadFile(headlessPath(state, "h1", ".json"))
-	if !strings.Contains(string(saved), `"wakes":["[yoicks] w1: working → done"]`) || strings.Contains(string(saved), `"pane":"w1p"`) {
-		t.Fatalf("the wake-up and the watch's end, saved together: %s", saved)
+	if !strings.Contains(string(saved), `"wakes":["[yoicks] w1: working → done"]`) || !strings.Contains(string(saved), `"status":"done"`) {
+		t.Fatalf("the wake-up and the watch at its end, saved together: %s", saved)
 	}
 	// a Clear whose start is refused (a settings file with an API key helper)
 	settings := filepath.Join(b.home, ".claude", "settings.json")
@@ -896,7 +922,7 @@ func TestHeadlessCallAcrossAClear(t *testing.T) {
 }
 
 // A saved watch that settles as soon as it is re-armed leaves no saved copy for a later
-// save to write back (a bridge stop then would bring back the watch beside its wake-up).
+// save to write back (a bridge stop then would bring back the watch from before its wake-up).
 func TestHeadlessRearmedWatchLeavesNoSavedCopy(t *testing.T) {
 	state := t.TempDir()
 	b := startHeadless(t, state, nil, nil)
@@ -908,12 +934,12 @@ func TestHeadlessRearmedWatchLeavesNoSavedCopy(t *testing.T) {
 	gen := h.gen
 	h.mu.Unlock()
 	h.watch(&saved, "", nil, gen) // as rearm does
-	waitUntil(t, 5*time.Second, "settled", func() bool { h.mu.Lock(); defer h.mu.Unlock(); return len(h.watches) == 0 && len(h.wakes) == 1 })
+	waitUntil(t, 5*time.Second, "settled", func() bool { h.mu.Lock(); defer h.mu.Unlock(); return len(h.wakes) == 1 })
 	h.mu.Lock()
 	h.persist() // any later save, a bridge stop's say
 	h.mu.Unlock()
 	got, _ := os.ReadFile(headlessPath(state, "h1", ".json"))
-	if !strings.Contains(string(got), "w1: working → done") || strings.Contains(string(got), `"pane":"w1p"`) {
+	if !strings.Contains(string(got), "w1: working → done") || strings.Count(string(got), `"pane":"w1p"`) != 1 || strings.Contains(string(got), `"status":"working"`) {
 		t.Errorf("saved: %s", got)
 	}
 }
