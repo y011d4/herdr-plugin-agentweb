@@ -139,6 +139,8 @@ type OrchestratorDef struct {
 	Env map[string]string
 	// "tui" (an agent in a herdr pane; "" too) or "headless" (the bridge's own claude -p child)
 	Mode string
+	// its to-do list's PRs are watched (config pr_watch, headless only): its rules say so
+	PRWatch bool
 }
 
 // OrchestratorView is an orchestrator as sent to clients.
