@@ -134,7 +134,7 @@ type promptIn struct {
 }
 
 type startIn struct {
-	Name     string `json:"name" jsonschema:"the new worker's name: w-<short english description>"`
+	Name     string `json:"name" jsonschema:"the new worker's name: a short english description (fix-login-redirect)"`
 	Cwd      string `json:"cwd" jsonschema:"the directory (repository) it works in"`
 	Profile  string `json:"profile,omitempty" jsonschema:"a launch profile (default claude)"`
 	Worktree string `json:"worktree,omitempty" jsonschema:"a branch: start it in a new worktree of the repository at cwd"`
