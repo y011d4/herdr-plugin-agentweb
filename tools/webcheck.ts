@@ -1469,8 +1469,8 @@ async function h2(c: Ctx) {
   const done = await waitFn(async () => (await hlStatus(c, 'wc-h1')) === 'done', 10_000, 200);
   await pg.goto('#/home/wc-h1');
   const reply = await pg.until(`document.querySelectorAll('#chat-log .chat-assistant').length > ${n0} && ${CHAT}.includes('echo: slow 3')`, 5000);
-  const dot = `document.querySelector('.home-switch-btn[data-orch="wc-h1"] i')?.className`;
-  const seen = await pg.until(`${dot} === 'home-dot idle'`, 3000);
+  const dot = `document.querySelector('.home-switch-btn[data-orch="wc-h1"] .status-dot')?.dataset.status`;
+  const seen = await pg.until(`${dot} === 'idle'`, 3000);
   const api0 = await hlStatus(c, 'wc-h1');
   result(c, !working.timeout && !done.timeout && !reply.timeout && !seen.timeout && api0 === 'done', 'H2',
     `working=${ms(working)},done=${ms(done)},reply=${ms(reply)},dot=${seen.v ? 'idle' : await pg.ev(dot)},api=${api0}`,
@@ -1857,7 +1857,7 @@ async function p8t2(c: Ctx) {
   }
   // wc-o1's Home: the switcher lists both, wc-o2 dimmed; tapping it opens wc-o2's stopped Home
   await pg.goto('#/home/wc-o1');
-  const dim = `document.querySelector('.home-switch-btn.stopped[data-orch="wc-o2"]')`;
+  const dim = `document.querySelector('.home-switch-btn[data-stopped][data-orch="wc-o2"]')`;
   const all = (await api(c, 'GET', '/api/state')).orchestrators.length; // wc-o1, wc-o2 and a wc-h
   const sw = await pg.until(`document.querySelectorAll('.home-switch-btn').length === ${all} && !!${dim}`, 5000);
   if (!sw.timeout) {

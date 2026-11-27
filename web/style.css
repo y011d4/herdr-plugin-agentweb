@@ -711,152 +711,6 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
 .agent-drawer-head:focus { outline: none; } /* the start of the focus (ui/AgentDrawer.tsx), not a control */
 
 /* ── Home (the orchestrator's chat as the main screen) ── */
-.home-status {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 14px;
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
-}
-/* at most ~3 rows of chips, so the counts row below (the way to the list) stays on screen */
-.home-attn {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  max-height: 88px;
-  overflow-y: auto;
-}
-.home-attn-label {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--color-blocked);
-  margin-right: 2px;
-}
-.home-chip {
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text);
-  background: transparent;
-  border: 1px solid var(--color-blocked);
-  border-radius: 14px;
-  padding: 3px 10px;
-  display: inline-flex;
-  gap: 6px;
-  align-items: baseline;
-  max-width: 100%;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.home-chip:active { background: var(--color-surface-2); }
-.home-chip-ws {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--color-text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.home-counts {
-  font: inherit;
-  font-size: 13px;
-  color: var(--color-text-dim);
-  background: none;
-  border: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 14px;
-  text-align: left;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-/* the counts, then the orchestrator's Clear and Stop at the right end */
-.home-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.home-row .home-counts { flex: 1; min-width: 0; }
-.home-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-.home-action {
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-dim);
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: 14px;
-  padding: 3px 10px;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.home-action:active { background: var(--color-surface-2); }
-.home-action.danger { color: var(--color-blocked); }
-.home-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-right: 5px;
-  vertical-align: 1px;
-}
-.home-dot.working { background: var(--color-working); }
-.home-dot.done    { background: var(--color-done); }
-.home-dot.idle    { background: var(--color-idle); }
-.home-dot.blocked { background: var(--color-blocked); }
-.home-dot.unknown { background: var(--color-idle); }
-/* switcher between orchestrators' Homes (shown when 2+ run) */
-.home-switch {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.home-switch-btn {
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-dim);
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: 14px;
-  padding: 4px 12px;
-  white-space: nowrap;
-  flex-shrink: 0;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.home-switch-btn.active {
-  color: var(--color-text);
-  border-color: var(--color-accent);
-  background: var(--color-surface-2);
-}
-.home-counts-more {
-  margin-left: auto;
-  color: var(--color-accent);
-  font-weight: 600;
-}
-.home-activity {
-  flex-shrink: 0;
-  padding: 6px 16px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--color-text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg);
-}
 /* the orchestrator's replies as left bubbles, opposite the user's */
 .screen-home .chat-assistant { align-self: flex-start; max-width: 92%; }
 .screen-home .chat-assistant .chat-md {
@@ -865,41 +719,7 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
   border-radius: 14px 14px 14px 4px;
   padding: 8px 12px;
 }
-/* a stopped orchestrator's Home: dimmed in the switcher, Start in its body */
-.home-switch-btn.stopped { opacity: 0.55; }
-.home-dot.stopped { background: transparent; box-shadow: inset 0 0 0 1px var(--color-idle); }
-/* a headless orchestrator's Home: ■ on its "doing now" line, its usage, its warnings, its question */
-.home-activity .home-interrupt {
-  float: right;
-  font: inherit;
-  font-size: 12px;
-  line-height: 1;
-  color: var(--color-blocked);
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  padding: 3px 10px;
-  margin: -3px 0 -3px 8px;
-  cursor: pointer;
-}
-.home-usage {
-  font-size: 12px;
-  color: var(--color-text-dim);
-  font-variant-numeric: tabular-nums;
-}
-.home-usage .stale { opacity: 0.5; }
-.home-warnings { display: flex; flex-direction: column; gap: 6px; }
-.home-warning {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  font-size: 12px;
-  color: var(--color-blocked);
-}
-.home-warning-text { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
-.home-warning-since { color: var(--color-text-dim); }
-.home-warning-actions { display: flex; gap: 6px; }
+/* the steps back to the TUI (Settings, a headless Home's warning) */
 .tui-steps {
   margin: 0;
   padding-left: 20px;
@@ -934,8 +754,8 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
     /* resolved where it's used: 100% is that element's containing block */
     --wide-gutter: max(16px, calc((100% - 880px) / 2));
   }
-  /* the chat and everything around it (Home's bars, the answer panel; the composer and the keys: lg:px-(--wide-gutter)) */
-  .chat-log, .chat-prompt, .home-status, .home-activity {
+  /* the chat and the answer panel (Home's bars, the composer and the keys: lg:px-(--wide-gutter)) */
+  .chat-log, .chat-prompt {
     padding-left: var(--wide-gutter);
     padding-right: var(--wide-gutter);
   }
