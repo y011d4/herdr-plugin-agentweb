@@ -92,10 +92,11 @@ func ghPRStates(ctx context.Context, urls []string) (map[string]string, error) {
 	return nil, perr
 }
 
-// watchPRs is the minute's look at the headless Homes' PRs: a merged or closed one's items are
-// removed and their Home woken; one that can't be read is told its Home once (per bridge run). gh
-// failing alerts each Home with such items, once per distinct error. One at a time (prBusy); only
-// the Homes with pr_watch (def.PRWatch), and nothing when none has a PR.
+// watchPRs is the minute's look at the PRs of the headless Homes with pr_watch (def.PRWatch): a
+// merged or closed one's items are removed and their Home woken (an item the user ticked off
+// meanwhile: nothing is told); one that can't be read is told its Home once (per bridge run). gh
+// failing alerts each Home with such items once per distinct error. Nothing when none has a PR;
+// one at a time (prBusy).
 func (s *server) watchPRs() {
 	type item struct {
 		home   string
@@ -127,20 +128,16 @@ func (s *server) watchPRs() {
 	defer cancel()
 	states, err := s.prStates(ctx, urls)
 	if err != nil {
-		if err.Error() != s.prErr {
-			s.prErr = err.Error()
-			logf("[pr-watch] %s", err)
-			var alerted []string
-			for _, it := range items {
-				if !slices.Contains(alerted, it.home) {
-					alerted = append(alerted, it.home)
-					s.broadcastAlert(s.headless[it.home].def, "github", "PR merges aren't noticed: "+err.Error())
-				}
+		for _, it := range items { // each Home once per error: one that adds its first PR meanwhile is told too
+			if s.prErr[it.home] != err.Error() {
+				s.prErr[it.home] = err.Error()
+				logf("[pr-watch] %s: %s", it.home, err)
+				s.broadcastAlert(s.headless[it.home].def, "github", "PR merges aren't noticed: "+err.Error())
 			}
 		}
 		return
 	}
-	s.prErr = ""
+	clear(s.prErr)
 	for _, it := range items {
 		var line string
 		switch states[it.pr] {
@@ -161,8 +158,10 @@ func (s *server) watchPRs() {
 		if it.agent != nil {
 			line += " (" + *it.agent + ")"
 		}
-		if _, err := s.todos.Done(it.home, it.id); err != nil { // kept: told on a later look
-			logf("[pr-watch] %s: %s", it.home, err)
+		if found, err := s.todos.Done(it.home, it.id); err != nil || !found { // kept: told on a later look; gone: the user ticked it off meanwhile
+			if err != nil {
+				logf("[pr-watch] %s: %s", it.home, err)
+			}
 			continue
 		}
 		s.headless[it.home].notice(line + "; its to-do item is removed")

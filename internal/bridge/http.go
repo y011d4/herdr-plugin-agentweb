@@ -96,10 +96,10 @@ type server struct {
 	// the last claude check (<state>/canary.json; nil: none), read at the start and each minute
 	claudeCheck atomic.Pointer[ClaudeCheck]
 	// the PR watch (pr_watch, prwatch.go): gh's lookup (tests: a stand-in), the look in progress,
-	// and (touched only by that look) the last error alerted and the PRs told unreadable
+	// and (touched only by that look) the last error alerted to each Home and the PRs told unreadable
 	prStates func(ctx context.Context, urls []string) (map[string]string, error)
 	prBusy   atomic.Bool
-	prErr    string
+	prErr    map[string]string // by Home
 	prUnread map[string]bool
 	stop     chan struct{}
 	stopOnce sync.Once
@@ -127,6 +127,7 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 		headless: map[string]*headlessRunner{},
 		prStates: ghPRStates,
 		prUnread: map[string]bool{},
+		prErr:    map[string]string{},
 	}
 	var names []string
 	for _, d := range cfg.Orchestrators {
