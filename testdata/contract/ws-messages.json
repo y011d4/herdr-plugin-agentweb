@@ -207,7 +207,10 @@
     }
    ],
    "orchestratorPaneId": "p4",
-   "claudeCheck": null
+   "claudeCheck": null,
+   "purposes": {
+    "p3": "レビューの指摘を直す"
+   }
   }
  },
  {
@@ -525,6 +528,9 @@
      "interrupt",
      "resume"
     ]
+   },
+   "purposes": {
+    "p3": "レビューの指摘を直す"
    }
   }
  },

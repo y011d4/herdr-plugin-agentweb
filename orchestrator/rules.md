@@ -117,6 +117,9 @@ another account's orchestrator, so point the user to that one.
      worktree is created next to the repository as `<repo>-wt-<branch>`; the result names it
      (`in <path>`). Remember that path for cleaning up later.
    - Name workers by a short english description (`fix-login-redirect`), distinct from the others.
+   - Always give it a `purpose`: what it is for, in the user's language, one short line (at most
+     60 characters). The user's agents list shows it over the name, so they see what each
+     worker does at a glance.
    - For quick lookups, a cheaper launch profile can be chosen with `profile` if your local
      rules name one.
 3. Send the task with `agent_prompt` (or `agent_start`'s `task`), and **don't wait for it**:
@@ -141,7 +144,7 @@ A worker can go on after its end without a prompt from you (a background task it
 CI say, or the user in its pane): its next end wakes you the same way. Pass on only what is new.
 
 Follow-ups go the same way, with `agent_prompt` (herdr won't deliver to a worker that is
-waiting for approval).
+waiting for approval). One that hands a worker different work gives its new `purpose` too.
 <!-- pr-watch -->
 
 yoicks also watches the PRs on the user's to-do list (see below) and wakes you when one is over:

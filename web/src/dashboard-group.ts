@@ -17,11 +17,14 @@ export interface DashboardCard {
   /** 1-based position among the tab's agent panes, to tell split-pane cards apart */
   tabAgentIndex: number;
   tabAgentCount: number;
+  /** what it is for, as its orchestrator said (AppState's purposes); null: nothing said */
+  purpose: string | null;
 }
 
 /** Every agent but the `orchestrators` (they have Homes, not cards); with a `scope` (an
  *  orchestrator's account's agents), only those. */
-export function dashboardCards(workspaces: WorkspaceNode[], orchestrators: Array<string | null> = [], scope: string[] | null = null): DashboardCard[] {
+export function dashboardCards(workspaces: WorkspaceNode[], orchestrators: Array<string | null> = [], scope: string[] | null = null,
+  purposes: Record<string, string> = {}): DashboardCard[] {
   const cards = workspaces.flatMap((ws) => {
     const branch = ws.worktree?.branch || null;
     const isWorktree = ws.worktree?.isLinkedWorktree ?? false;
@@ -35,6 +38,7 @@ export function dashboardCards(workspaces: WorkspaceNode[], orchestrators: Array
         tabLabel: t.label,
         tabAgentIndex: i + 1,
         tabAgentCount: agentPanes.length,
+        purpose: purposes[pane.paneId] || null,
       }));
     });
   });

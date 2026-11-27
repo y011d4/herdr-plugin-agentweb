@@ -134,12 +134,14 @@ type readIn struct {
 }
 
 type promptIn struct {
-	Name string `json:"name" jsonschema:"the agent's name (or pane id)"`
-	Text string `json:"text" jsonschema:"what to send it (/exit ends it)"`
+	Name    string `json:"name" jsonschema:"the agent's name (or pane id)"`
+	Text    string `json:"text" jsonschema:"what to send it (/exit ends it)"`
+	Purpose string `json:"purpose,omitempty" jsonschema:"only when this hands it different work: its new purpose (as agent_start's); left out, it keeps the one it has"`
 }
 
 type startIn struct {
 	Name     string `json:"name" jsonschema:"the new worker's name: a short english description (fix-login-redirect)"`
+	Purpose  string `json:"purpose,omitempty" jsonschema:"what it is for, in the user's language: one short line (at most 60 characters) the user's agents list shows over its name"`
 	Cwd      string `json:"cwd" jsonschema:"the directory (repository) it works in"`
 	Profile  string `json:"profile,omitempty" jsonschema:"a launch profile (default claude)"`
 	Worktree string `json:"worktree,omitempty" jsonschema:"a branch: start it in a new worktree of the repository at cwd"`
@@ -259,21 +261,36 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 			text, _ := paneReadText(raw).(string)
 			return textResult(text, false), nil, nil
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "agent_prompt", Description: "Send one of your account's agents a message (a task, a follow-up, /exit). Don't wait for it: a [yoicks] message wakes you when it finishes or stops for an answer."},
+	mcp.AddTool(s, &mcp.Tool{Name: "agent_prompt", Description: "Send one of your account's agents a message (a task, a follow-up, /exit). Don't wait for it: a [yoicks] message wakes you when it finishes or stops for an answer. " +
+		"Handing a worker different work, give its new purpose too."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in promptIn) (*mcp.CallToolResult, any, error) {
 			r.log("tool agent_prompt %s", in.Name)
+			purpose, err := checkPurpose(in.Purpose)
+			if err != nil {
+				return errResult(err)
+			}
 			if strings.TrimSpace(in.Text) == "" {
-				return r.prompt("", in.Name, in.Text, epochOf(ctx)), nil, nil // its error, before any herdr call
+				res, _ := r.prompt("", in.Name, in.Text, epochOf(ctx)) // its error, before any herdr call
+				return res, nil, nil
 			}
 			pane, err := ownAgentPane(r.rpc, in.Name, r.account())
 			if err != nil {
 				return errResult(err)
 			}
-			return r.prompt(pane, in.Name, in.Text, epochOf(ctx)), nil, nil
+			res, delivered := r.prompt(pane, in.Name, in.Text, epochOf(ctx))
+			if delivered && purpose != "" { // a task not taken leaves the work it has
+				r.purposes.Set(pane, purpose, nowMs())
+			}
+			return res, nil, nil
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "agent_start", Description: "Start a worker from a launch profile in a directory of your account (a new tab where a workspace is already at it, else a new workspace), or in a new worktree of the repository there; optionally send it its first task."},
+	mcp.AddTool(s, &mcp.Tool{Name: "agent_start", Description: "Start a worker from a launch profile in a directory of your account (a new tab where a workspace is already at it, else a new workspace), or in a new worktree of the repository there; optionally send it its first task. " +
+		"Give it a purpose: the user's agents list shows it over the worker's name."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in startIn) (*mcp.CallToolResult, any, error) {
 			r.log("tool agent_start %s", in.Name)
+			purpose, err := checkPurpose(in.Purpose)
+			if err != nil {
+				return errResult(err)
+			}
 			opt := map[string]string{"cwd": in.Cwd}
 			for k, v := range map[string]string{"profile": in.Profile, "worktree": in.Worktree, "base": in.Base} {
 				if v != "" {
@@ -287,10 +304,11 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 			if err != nil {
 				return errResult(err)
 			}
+			r.purposes.Set(pane, purpose, nowMs()) // none: a reused pane's old one goes too
 			if strings.TrimSpace(in.Task) == "" {
 				return textResult(started, false), nil, nil
 			}
-			res := r.prompt(pane, in.Name, in.Task, epochOf(ctx))
+			res, _ := r.prompt(pane, in.Name, in.Task, epochOf(ctx))
 			res.Content[0].(*mcp.TextContent).Text = started + "; " + res.Content[0].(*mcp.TextContent).Text
 			return res, nil, nil
 		})
@@ -528,39 +546,39 @@ func agentState(raw json.RawMessage) (status string, seq int64, cwd string) {
 	return status, int64(num(a["state_change_seq"])), cwd
 }
 
-// prompt sends a worker text and watches it: delivered (the result says so), not
+// prompt sends a worker text and watches it: delivered (the result says so, and delivered is true), not
 // delivered (herdr's answer), or not sent because it waits on a question in its pane (herdr
 // refuses a prompt then: agent_not_ready while a startup question holds it, agent_blocked at a
 // dialog, the folder-trust one included), with a wake-up once it is ready. epoch is the
 // calling child's: that child replaced since, no watch is made.
-func (r *headlessRunner) prompt(pane, name, text string, epoch int) *mcp.CallToolResult {
+func (r *headlessRunner) prompt(pane, name, text string, epoch int) (res *mcp.CallToolResult, delivered bool) {
 	if strings.TrimSpace(text) == "" { // nothing to send: no watch to wait on
-		return textResult("text must be non-empty", true)
+		return textResult("text must be non-empty", true), false
 	}
 	deadline := r.clock.Now().Add(agentReadyTimeout)
 	for {
 		raw, err := r.rpc("agent.get", map[string]any{"target": pane})
 		if err != nil {
-			return textResult("not delivered to "+name+": "+err.Error(), true)
+			return textResult("not delivered to "+name+": "+err.Error(), true), false
 		}
 		status, seq, cwd := agentState(raw)
 		w := &hlWatch{Pane: pane, Name: name, Cwd: cwd, Status: status, Seq: seq}
 		first := make(chan error, 1)
 		if !r.watch(w, text, first, epoch) {
-			return textResult("not delivered to "+name+": the orchestrator was restarted, stopped or cleared", true)
+			return textResult("not delivered to "+name+": the orchestrator was restarted, stopped or cleared", true), false
 		}
 		err = <-first
 		if err == nil {
-			return textResult("delivered to "+name+": you are woken when it finishes or stops for an answer", false)
+			return textResult("delivered to "+name+": you are woken when it finishes or stops for an answer", false), true
 		}
 		r.unwatch(func(o *hlWatch) bool { return o == w })
 		if code := herdrCode(err); code != "agent_not_ready" && code != "agent_blocked" || !r.clock.Now().Before(deadline) {
-			return textResult("not delivered to "+name+": "+err.Error(), true)
+			return textResult("not delivered to "+name+": "+err.Error(), true), false
 		}
 		if raw, err := r.rpc("agent.get", map[string]any{"target": pane}); err == nil {
 			if status, seq, cwd := agentState(raw); status == "blocked" {
 				r.watch(&hlWatch{Pane: pane, Name: name, Cwd: cwd, Status: status, Seq: seq, Startup: true}, "", nil, epoch)
-				return textResult("task not sent: "+name+" waits on a question in its pane (folder trust, a permission) that the user answers there; you are woken when it is ready", false)
+				return textResult("task not sent: "+name+" waits on a question in its pane (folder trust, a permission) that the user answers there; you are woken when it is ready", false), false
 			}
 		}
 		<-r.clock.After(250 * time.Millisecond)

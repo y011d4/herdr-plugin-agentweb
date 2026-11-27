@@ -528,10 +528,13 @@ export function PaneTitle({ paneId, home }: { paneId: string; home: boolean }) {
       const sub = st === 'working' ? 'working…' : st === 'blocked' ? 'needs you' : 'ready';
       last.current = <>{orchestratorLabel(orchestratorOfPane(state, paneId))}<Subtitle className="home-state" c={st === 'working' || st === 'blocked' ? st : undefined}>{`· ${sub}`}</Subtitle></>;
     } else {
-      const label = found?.pane?.agent?.herdrName || found?.pane?.agent?.displayName || found?.pane?.agent?.name || found?.pane?.title || paneId;
-      // the tab, unless the label already says it (agent start labels the tab by the name)
-      const context = !found ? '' : found.tab.label && found.tab.label !== label ? `${found.ws.label} / ${found.tab.label}` : found.ws.label;
-      last.current = <>{label}{context ? <Subtitle>{`· ${context}`}</Subtitle> : null}</>;
+      const name = found?.pane?.agent?.herdrName || found?.pane?.agent?.displayName || found?.pane?.agent?.name || found?.pane?.title || paneId;
+      // what it is for, as its orchestrator said; then (dim) its name, and the tab, unless the name already says it
+      // (agent start labels the tab by the name)
+      const purpose = state?.purposes?.[paneId];
+      const where = !found ? '' : found.tab.label && found.tab.label !== name ? `${found.ws.label} / ${found.tab.label}` : found.ws.label;
+      const context = purpose ? [name, where].filter(Boolean).join(' · ') : where;
+      last.current = <>{purpose || name}{context ? <Subtitle>{`· ${context}`}</Subtitle> : null}</>;
     }
   }
   return last.current;

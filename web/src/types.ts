@@ -81,6 +81,8 @@ export interface AppState {
   orchestratorPaneId: string | null;
   /** the last check of Claude Code's headless mode (scripts/claude-canary.sh); null when none has run */
   claudeCheck: ClaudeCheck | null;
+  /** what each worker is for, by pane id: the one line its orchestrator gave (agent_start) */
+  purposes: Record<string, string>;
 }
 
 export interface ClaudeCheck {

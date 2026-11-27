@@ -60,6 +60,8 @@ export const state: AppState = {
   ],
   orchestratorPaneId: 'p4',
   claudeCheck: { at: T0 - 3_600_000, version: '2.1.322', ok: true, failed: [] },
+  // the workers' (p3, an agent the user runs, has none: its name shows)
+  purposes: { p1: 'Review PR #119 before it merges', p2: 'Find why the sidebar test flakes', p5: 'Paste images into the Home chat' },
 };
 
 export const profiles: ProfilesResponse = { profiles: [{ name: 'claude', label: 'Claude Code' }, { name: 'codex', label: 'Codex' }] };

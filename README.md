@@ -504,7 +504,9 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   orchestrator wrote down for the user to do; `agent` a worker's herdr name, `url` an http(s) link, `due` ms, each
   `null` when not given)
   and `orchestratorPaneId` (the first running tui one's, or `null`), and `claudeCheck`, the last Claude Code check
-  (`{ at (ms), version, ok, failed: [items] }`, `null` when none has run). Each agent's `completionSeq` is herdr's
+  (`{ at (ms), version, ok, failed: [items] }`, `null` when none has run), and `purposes` (`{ <paneId>: <one line> }`,
+  never `null`: what each worker is for, as a headless orchestrator's `agent_start` or `agent_prompt` gave it; the
+  app shows it over the agent's name, and it goes once the agent is gone). Each agent's `completionSeq` is herdr's
   `completion_seq` (which completion its idle/done status is; `null` until fetched), and its
   `stateChangeSeq` is herdr's `state_change_seq` (herdr's order of status changes, which the app
   lists by; `null` until fetched), and its `herdrName` herdr's name for it (`agent.start`'s, as
