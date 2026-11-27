@@ -118,6 +118,8 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   view.paneViewMode = 'terminal';
   let mode: 'terminal' | 'chat' = 'terminal'; // this view's (view.paneViewMode is the one on show's)
   let suspended = false; // under a drawer (suspend/resume)
+  let epoch = 0; // bumped by each suspend: a response to a request from before it never applies
+  const home = view.homeMode; // a Home's view (the global changes under a drawer)
   let historyLoaded = false; // the terminal's scrollback (read with its first look)
   let chatAvailable = false;
   let chatSessionId: string | null = null;
@@ -141,9 +143,10 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   async function initChatAvailability(): Promise<void> {
     if (chatProbing) return; // one probe in flight — don't overlap (so a slow probe still applies)
     chatProbing = true;
+    const reqEpoch = epoch;
     try {
       const data = await apiGet<TranscriptResponse>(`/api/panes/${encodeURIComponent(paneId)}/transcript`);
-      if (destroyed || suspended) return;
+      if (destroyed || suspended || reqEpoch !== epoch) return;
       chatAvailable = data.available;
       opts.showToggle(chatAvailable);
       // the orchestrator is someone to talk to: always open it as chat
@@ -201,9 +204,10 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     // the slower initial load can't replace a fresher log or rewind the cursor.
     const reqSession = chatSessionId;
     const reqCursor = chatCursor;
+    const reqEpoch = epoch;
     try {
       const data = await apiGet<TranscriptResponse>(`/api/panes/${encodeURIComponent(paneId)}/transcript`);
-      if (destroyed || suspended || mode !== 'chat') return;
+      if (destroyed || suspended || reqEpoch !== epoch || mode !== 'chat') return;
       if (chatSessionId !== reqSession || chatCursor !== reqCursor) return; // superseded in flight
       if (!data.available) { noTranscript(); return; }
       opts.showToggle(!headless); // opened on its chat: the toggle once a transcript is there (the socket may be down)
@@ -220,7 +224,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     // they were reading instead of snapping to the bottom.
     const prevTop = chatEl.scrollTop;
     const prevFromBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight;
-    if (view.homeMode) {
+    if (home) {
       activity = latestActivity(items, null);
       opts.activity(activity);
       calls = new Map();
@@ -235,7 +239,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
 
   function appendChatItems(items: TimelineItem[]): void {
     if (items.length === 0) return;
-    if (view.homeMode) {
+    if (home) {
       activity = latestActivity(items, activity);
       opts.activity(activity);
       items = conversationItems(items, calls);
@@ -290,7 +294,8 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   // HTTP fallback while the WS is down: fetch items past the cursor for the same
   // session (mirrors the transcript watch).
   async function pollChatFallback(): Promise<void> {
-    if (destroyed || mode !== 'chat') return;
+    if (destroyed || suspended || mode !== 'chat') return;
+    const reqEpoch = epoch;
     // The response is only valid against the state this request started from. If
     // anything (a WS reset/push, or a newer poll) advances the session or cursor
     // while the request is in flight, applying it — append OR reset — would
@@ -300,12 +305,14 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     const q = chatSessionId ? `?session=${encodeURIComponent(chatSessionId)}&after=${reqCursor}` : '';
     try {
       const data = await apiGet<TranscriptResponse>(`/api/panes/${encodeURIComponent(paneId)}/transcript${q}`);
-      if (destroyed || mode !== 'chat') return;
+      if (destroyed || suspended || reqEpoch !== epoch || mode !== 'chat') return;
       // Drop any response whose request start no longer matches the current state
       // BEFORE acting on it — a stale available:false must not force the terminal
       // after a WS push/reset already advanced the chat.
       if (chatSessionId !== reqSession || chatCursor !== reqCursor) return; // superseded in flight
       if (!data.available) { noTranscript(); return; }
+      chatAvailable = true;
+      opts.showToggle(!headless); // opened on its chat with the socket down: the toggle once a transcript is there
       if (data.reset || data.sessionId !== chatSessionId) {
         chatSessionId = data.sessionId ?? null;
         chatCursor = data.cursor ?? 0;
@@ -507,6 +514,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     suspend() {
       if (destroyed) return;
       suspended = true;
+      epoch++;
       if (paneRefreshTimer) clearInterval(paneRefreshTimer);
       paneRefreshTimer = null;
       stopPromptScreenPoll();
@@ -532,7 +540,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       if (destroyed) return;
       // Tracked before the POST answers: the `working` push can beat its response.
       dropPendingAnswer();
-      const pending: PendingAnswer = { prompt: id, back: !view.homeMode && !chat, sent: false, resumed: false, timer: null };
+      const pending: PendingAnswer = { prompt: id, back: !home && !chat, sent: false, resumed: false, timer: null };
       pendingAnswer = pending;
       post.then(() => {
         if (pendingAnswer !== pending) return; // left, or a newer answer took over
@@ -549,7 +557,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     },
     async reread(current) {
       const live = await readPromptScreen();
-      if (current() && !destroyed) renderPromptPanel(live?.parsed ?? null, live?.id ?? '');
+      if (current() && !destroyed && !suspended) renderPromptPanel(live?.parsed ?? null, live?.id ?? '');
     },
     destroy() {
       destroyed = true;

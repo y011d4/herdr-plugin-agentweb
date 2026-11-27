@@ -196,6 +196,33 @@ describe('pane view: chat', () => {
     push({ type: 'transcript_items', paneId: 'p1', available: true, sessionId: session, items: [{ kind: 'assistant', text: 'after', sidechain: false }], cursor: 999, reset: false });
     assert.match(chatLog().textContent!, /after/);
   });
+
+  it('a fallback poll in flight as it is suspended applies neither then nor after the resume', async () => {
+    vi.useFakeTimers();
+    open('p1');
+    await answer('/transcript', transcript[0]);
+    store.wsConnected = false;
+    await vi.advanceTimersByTimeAsync(3000); // the socket down: a fallback poll
+    assert.equal(reqs.filter((q) => !q.answered && q.url.includes('/transcript?session=')).length, 1);
+    view.suspend();
+    const session = transcript[0].sessionId!;
+    await answer('/transcript?session=', { available: true, sessionId: session, cursor: 999, reset: false, items: [{ kind: 'assistant', text: 'stale', sidechain: false }] });
+    view.resume();
+    assert.ok(!/stale/.test(chatLog().textContent!), 'dropped');
+    store.wsConnected = true;
+  });
+
+  it('opened on its chat with the socket down, a fallback poll with a transcript shows the toggle', async () => {
+    vi.useFakeTimers();
+    store.wsConnected = false;
+    open('p1');
+    await answer('/transcript', { error: 'down' }, 500); // the first GET fails
+    assert.deepEqual(calls.toggle, []);
+    await vi.advanceTimersByTimeAsync(3000);
+    await answer('/transcript', { ...transcript[0], reset: true });
+    assert.deepEqual(calls.toggle, [true]);
+    store.wsConnected = true;
+  });
 });
 
 describe('pane view: answer panel', () => {
