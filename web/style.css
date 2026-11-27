@@ -207,16 +207,7 @@ body { font-size: 15px; }
   height: 100%;
 }
 
-.login-logo {
-  font-size: 48px;
-  line-height: 1;
-}
-
-.login-title {
-  font-size: 24px;
-  font-weight: 700;
-  text-align: center;
-}
+.login-logo { height: 64px; }
 
 .login-subtitle {
   font-size: 14px;
@@ -609,6 +600,8 @@ body { font-size: 15px; }
   font-size: 13px;
   color: var(--color-text-dim);
 }
+
+.about-lockup { height: 28px; }
 
 /* Toggle switch */
 .toggle {

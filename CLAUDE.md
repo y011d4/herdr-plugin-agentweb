@@ -97,7 +97,7 @@ All in `internal/bridge/` (one package):
   takes images (+ or paste; `image.ts` scales them to JPEG, the bridge's `imageBlocks` checks them); a tap on one, attached or sent, opens it full screen (`previewImage`: its own history entry, so Back closes it). `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure TimelineItem→HTML chat renderer, `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
-  (manifest, icons) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one
+  (manifest, icons: `scripts/icons.mjs` draws them from one mark, by hand, outputs committed) is copied as is, and `web/dist` (`//go:embed all:web/dist`) is the output: one
   JS and one CSS file under `assets/`, named by content hash (no code splitting: an open PWA would
   ask for a deleted chunk after a deploy). The bridge serves `assets/*` as `immutable`,
   `index.html` and `sw.js` as `no-cache`, and a text file as the best of its brotli and gzip
