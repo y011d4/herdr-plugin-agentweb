@@ -1718,10 +1718,9 @@ async function p11(c: Ctx) {
   await pg.goto(`#/pane/${enc(cl)}`);
   const shown = await pg.until(`(() => { const l = document.getElementById('chat-log'); return !!l && l.style.display !== 'none' && l.querySelectorAll('.chat-item').length; })()`, 5000);
   const users0 = await pg.ev(`window.__wcFirst = document.querySelector('#chat-log .chat-item'), document.querySelectorAll('#chat-log .chat-user').length`);
-  guard(c.rec, cl);
-  await pg.tapEl(`document.getElementById('pane-input')`);
-  await pg.S('Input.insertText', { text: NOTE_PROMPT });
-  await pg.tapEl(`document.getElementById('btn-send-enter')`);
+  // a pane's chat is read-only (its composer is the terminal's): the message goes in through the API
+  const readOnly = await pg.ev(`document.getElementById('pane-input').closest('.input-bar').style.display === 'none'`);
+  await sendPrompt(c, cl, NOTE_PROMPT);
   const user = await pg.until(`document.querySelectorAll('#chat-log .chat-user').length === ${users0 + 1}`, 10_000, 200);
   const same = await pg.ev(`document.querySelector('#chat-log .chat-item') === window.__wcFirst`);
   const det = await pg.until(`document.querySelectorAll('#chat-log details.chat-result').length`, 90_000, 300);
@@ -1733,9 +1732,9 @@ async function p11(c: Ctx) {
   const term = await pg.until(`localStorage.getItem('herdr_pane_view') === 'terminal'`, 2000);
   await pg.tapEl(`document.getElementById('btn-view-toggle')`);
   const chat = await pg.until(`localStorage.getItem('herdr_pane_view') === 'chat'`, 2000);
-  result(c, !shown.timeout && !user.timeout && same && !det.timeout && !app.timeout && open && Math.abs(top1 - top0) <= 1 && !term.timeout && !chat.timeout,
-    'P11', `chat=${ms(shown)},userAdded=${ms(user)},firstNodeKept=${same},result=${ms(det)},append=${ms(app)},detailsOpen=${open},scrollDelta=${top1 - top0},toggleSaved=${!term.timeout && !chat.timeout}`,
-    'chat within 5s; send adds 1 .chat-user, first node kept; an open tool result stays open and scrollTop holds (+-1px) across an append; the view toggle is saved');
+  result(c, !shown.timeout && readOnly && !user.timeout && same && !det.timeout && !app.timeout && open && Math.abs(top1 - top0) <= 1 && !term.timeout && !chat.timeout,
+    'P11', `chat=${ms(shown)},readOnly=${readOnly},userAdded=${ms(user)},firstNodeKept=${same},result=${ms(det)},append=${ms(app)},detailsOpen=${open},scrollDelta=${top1 - top0},toggleSaved=${!term.timeout && !chat.timeout}`,
+    'chat within 5s, no composer in it; a message adds 1 .chat-user, first node kept; an open tool result stays open and scrollTop holds (+-1px) across an append; the view toggle is saved');
 }
 
 /** P10-T2: from wc-claude in chat, straight to #/pane/<wc-shell> (no transcript): its server watch is the terminal's,
