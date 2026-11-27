@@ -100,7 +100,9 @@ All in `internal/bridge/` (one package):
   Settings shows the last Claude Code check and the TUI steps; the `[yoicks] …` lines at either end of a user turn render as dim lines (`splitNotices`), the rest as its bubble; an `agent_start` result shows as such a line, and a worker's name in one is a button that opens its drawer (`ui/ChatLog.tsx`'s `Notice`; the State's `agent.herdrName`, from `agent.list`, `nav.ts`'s `openAgentNamed`). Its composer
   takes images (+ or paste; `image.ts` scales them to JPEG, the bridge's `imageBlocks` checks them); a tap on one, attached or sent, opens it full screen (`previewImage`: its own history entry, so Back closes it). `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure: the chat's markdown as escaped HTML and what a Home's chat keeps, drawn by
-  `ui/ChatLog.tsx` (the items as React components, in a React root of its own on pane-view's `#chat-log`,
+  `ui/ChatLog.tsx` (the items as React components on Mantine's: bubbles and cards are Paper, the prose
+  Typography, a thinking block, a tool result and the answer panel's terminal a native `<details>` (`Disclosure`);
+  in a React root of its own on pane-view's `#chat-log`, under its own MantineProvider,
   synchronously, so the engine keeps measuring and scrolling it), `sw.ts` — service worker (built
   into `sw.js` by `vite.config.ts`'s `sw()`). `web/index.html` is Vite's input, `web/public/`
   (manifest, icons: `scripts/icons.mjs` draws them from one mark, by hand, outputs committed) is copied as is, and `web/dist` (`//go:embed all:web/dist*`) is the output: one
@@ -132,7 +134,8 @@ All in `internal/bridge/` (one package):
   overflow, a width's breakpoints) is Tailwind classes; colors are Mantine props with the theme's names
   (`dark.N`, `accent`, the statuses `idle`/`working`/`blocked`/`done`/`unknown`) or `var(--color-*)` in a
   class. `style.css` keeps the tokens, index.html's first paint (the topbar, the banner, `.loading-spinner`,
-  which `terminal.ts` uses too), the engines' DOM (the terminal, the chat), the toasts' box, the drawer's and the PC grid's
+  which `terminal.ts` uses too), the engines' DOM (the terminal; the chat's `#chat-log` box, and `.chat-md`,
+  which tunes Mantine's Typography for the chat's prose), the toasts' box, the drawer's and the PC grid's
   layout, and Settings. The theme makes a button given no size, and an input at its default size (sm; every
   Mantine input has one), 44px tall (`--touch-min`), an input's text 16px (below that iOS zooms in on focus;
   the composer keeps 14px); `theme.test.ts` checks it. Mantine's style props (`px`, `c`, `bg`…) are inline
@@ -140,7 +143,9 @@ All in `internal/bridge/` (one package):
   classes only. A class (Tailwind's layer, or `app`) beats Mantine's own CSS. Ids stay; the class names the
   tests and webcheck select on stay on their elements as hooks without CSS (`agent-card`, `home-chip`,
   `qkey`, `toast`, `ask-opt`…); a new hook is a `data-*` attribute. Mantine's focus trap focuses in a
-  `setTimeout`: `autoFocus` where the focus must be there as it mounts
+  `setTimeout`: `autoFocus` where the focus must be there as it mounts. Tailwind never finds a class written
+  right before `${…}` in a template string (`self-end${x}`): leave a space. With no preflight, `border-dashed`
+  dashes every side at the browser's default width: dash one edge with `[--tw-border-style:dashed]`
 - **Orchestrator homes**: config `orchestrators: [{name,label,env}]`, each in its own dir:
   `orchestrator.go` writes `<data>/orchestrators/<name>/` (data = `$XDG_DATA_HOME` or
   `~/.local/share`, + `herdr-yoicks`: `dataDir`) at bridge start and before each start: CLAUDE.md

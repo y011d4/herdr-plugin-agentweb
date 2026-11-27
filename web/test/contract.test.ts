@@ -3,7 +3,7 @@ import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { conversationItems, type TimelineItem } from '../src/transcript.ts';
-import { chatHtml } from './render.ts';
+import { chatDom } from './render.ts';
 import { dashboardCards } from '../src/dashboard-group.ts';
 import type { AppState } from '../src/types.ts';
 
@@ -17,11 +17,12 @@ const load = <T>(name: string): T =>
 describe('the Go bridge contract fixtures', () => {
   it('render as chat items, and the home chat keeps only the dialogue', () => {
     const items = load<TimelineItem[]>('timeline-items.json');
-    const html = chatHtml(...items); // what the chat log draws (ui/ChatLog.tsx)
+    const log = chatDom(items); // what the chat log draws (ui/ChatLog.tsx)
+    const html = log.innerHTML;
     assert.match(html, /fix the bug/);
     assert.match(html, /<strong>fixed<\/strong>/);
     assert.match(html, /cherry/); // the AskUserQuestion option
-    assert.ok(html.includes('<img class="chat-image" alt="image" src="data:image/png;base64,iVBORw0KGgo="'), "a user turn's image");
+    assert.equal(log.querySelector('img.chat-image')?.getAttribute('src'), 'data:image/png;base64,iVBORw0KGgo=', "a user turn's image");
     // the assistant turn is a sidechain; the question (AskUserQuestion) stays, its answer isn't among them
     assert.deepEqual(conversationItems(items).map((i) => i.kind), ['user', 'user', 'tool_use']);
   });

@@ -58,16 +58,13 @@ export const settle = (ms = 20): Promise<void> => act(async () => {
   }
 });
 
-/** What `node` draws, as HTML: React, synchronously, into a node of its own (then unmounted). */
-export function htmlOf(node: ReactElement): string {
+/** What `node` draws under Mantine's provider, as a node of its own to query (React, synchronously). */
+export function drawn(node: ReactElement): HTMLElement {
   const el = document.createElement('div');
-  const root = createRoot(el);
-  flushSync(() => root.render(node));
-  const h = el.innerHTML;
-  root.unmount();
-  return h;
+  flushSync(() => createRoot(el).render(mantine(node)));
+  return el;
 }
 
-/** What a chat log (ui/ChatLog.tsx) draws for `items`, as HTML. */
-export const chatHtml = (...items: TimelineItem[]): string =>
-  htmlOf(createElement(Fragment, null, ...items.map((item, i) => createElement(ChatItem, { key: i, item }))));
+/** What a chat log (ui/ChatLog.tsx) draws for `items` (`home`: a Home's log). */
+export const chatDom = (items: TimelineItem[], home = false): HTMLElement =>
+  drawn(createElement(Fragment, null, ...items.map((item, i) => createElement(ChatItem, { key: i, item, home }))));
