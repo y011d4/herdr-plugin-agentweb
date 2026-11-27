@@ -418,6 +418,25 @@ describe('App', () => {
     await go('#/agents');
   });
 
+  it('a Clear answered while its drawer is closing (its Back under way) opens nothing', async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/agents');
+    await go('#/pane/p1');
+    await click($('#btn-agent-menu'));
+    await click($('#am-clear'));
+    await click($('#modal-root #cf-ok'));
+    const realBack = history.back.bind(history);
+    let land = (): void => {};
+    const later = vi.spyOn(history, 'back').mockImplementation(() => { land = realBack; });
+    await click($('#btn-drawer-close')); // its Back not landed yet
+    await answer('POST /api/agents/p1/clear', { ok: true, paneId: 'p8' });
+    later.mockRestore();
+    await act(async () => land());
+    await settle();
+    assert.equal(location.hash, '#/agents');
+    assert.ok(!$('.agent-drawer #screen-pane'));
+  });
+
   it("a Stop answered after another pane opened leaves that pane's drawer open", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/agents');

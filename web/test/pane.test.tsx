@@ -45,7 +45,7 @@ async function show(paneId: string, home = false, back = '#/agents', name = home
   store.view.paneOverBase = false;
   const t = homeTopbar(paneId);
   ({ container, unmount } = await render(home ? <><div id="tb">{t.title}{t.right}</div><Pane paneId={paneId} home name={name} /></>
-    : <AgentDrawer sheet={{ paneId, key: 1, open: true }} actions={noActions} />));
+    : <AgentDrawer sheet={{ paneId, key: 1, open: true, opener: null }} actions={noActions} />));
 }
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => container.querySelector<T>(sel)!;
 const ta = () => $<HTMLTextAreaElement>('#pane-input');

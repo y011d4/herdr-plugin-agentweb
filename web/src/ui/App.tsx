@@ -18,7 +18,7 @@ import { Fragment, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { apiDelete, apiGet, apiPost, getToken, headlessName, loadToken, onUnauthorized, orchestratorPost, setToken } from '../api.ts';
 import { dismissNotificationsForPane, notifyAgentStatus, notifyOrchestratorAlert, showToast } from '../notify.ts';
-import { closeAgent, go, openAgent } from '../nav.ts';
+import { closeAgent, closingDrawer, go, openAgent } from '../nav.ts';
 import { homeOf, isAgentsRoute, nextPaneBackRoute, nextPaneOverBase, nextSettingsBackRoute, resolveRoute } from '../routes.ts';
 import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, store, subscribe, type View } from '../store.ts';
 import type { AppState, ClearResponse, WsMessage } from '../types.ts';
@@ -60,9 +60,11 @@ function show(kind: View['screen'], node: ReactNode, topbar?: Topbar, hash: stri
   changed();
 }
 
-/** Opens the drawer on a pane, a fresh view of it. */
+/** Opens the drawer on a pane, a fresh view of it; what had the focus as it opened (not on a pane to pane)
+ *  gets it back on its close. */
 function openSheet(paneId: string): void {
-  sheet = { paneId, key: (sheet?.key ?? 0) + 1, open: true };
+  const opener = sheet?.open ? sheet.opener : document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  sheet = { paneId, key: (sheet?.key ?? 0) + 1, open: true, opener };
   changed();
 }
 
@@ -366,9 +368,9 @@ function agentActions(paneId: string): AgentActions {
 // The pane a Clear is replacing: its going is expected (its drawer stays for the new pane).
 let clearingPane: string | null = null;
 
-/** Whether `paneId` is the drawer's pane now. The hash, not view.activePaneId: it changes at once, and
- *  the drawer is the hash's until the route has moved on (a close's Back may still be under way). */
-const drawerShows = (paneId: string): boolean => location.hash === `#/pane/${encodeURIComponent(paneId)}`;
+/** Whether `paneId` is the drawer's pane now, not closing. The hash, not view.activePaneId: it changes at
+ *  once; a close going Back changes it only once that lands (closingDrawer). */
+const drawerShows = (paneId: string): boolean => location.hash === `#/pane/${encodeURIComponent(paneId)}` && !closingDrawer();
 
 async function clearAgentFlow(paneId: string): Promise<void> {
   const hl = headlessName(paneId);
