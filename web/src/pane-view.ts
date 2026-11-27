@@ -119,6 +119,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   let mode: 'terminal' | 'chat' = 'terminal'; // this view's (view.paneViewMode is the one on show's)
   let suspended = false; // under a drawer (suspend/resume)
   let epoch = 0; // bumped by each suspend: a response to a request from before it never applies
+  let wanted: { mode: 'terminal' | 'chat'; persist: boolean } | null = null; // a setMode while suspended, for the resume
   const home = view.homeMode; // a Home's view (the global changes under a drawer)
   let historyLoaded = false; // the terminal's scrollback (read with its first look)
   let chatAvailable = false;
@@ -517,9 +518,10 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   })();
 
   return {
-    setMode(mode, persist) {
+    setMode(next, persist) {
       if (destroyed) return; // a late caller (an answer landing after the pane was left)
-      if (mode === 'chat') switchToChat(undefined, persist); else switchToTerminal(persist);
+      if (suspended) { wanted = { mode: next, persist }; return; } // under a drawer: as it resumes
+      if (next === 'chat') switchToChat(undefined, persist); else switchToTerminal(persist);
     },
     suspend() {
       if (destroyed) return;
@@ -540,10 +542,12 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       opts.modeChanged();
       startPaneRefresh();
       updatePromptPanel();
-      if (mode === 'terminal') {
-        historyLoaded = false; // a scrollback read held under the drawer never applied: read it again
-        lookAtTerminal();
-      }
+      if (mode === 'terminal') historyLoaded = false; // a scrollback read held under the drawer never applied: read it again
+      const w = wanted;
+      wanted = null;
+      if (w && w.mode !== mode) { // asked for under the drawer (a typing option's press landing)
+        if (w.mode === 'chat') switchToChat(undefined, w.persist); else switchToTerminal(w.persist);
+      } else if (mode === 'terminal') lookAtTerminal();
     },
     onState() {
       if (destroyed || suspended) return;

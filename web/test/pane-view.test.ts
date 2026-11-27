@@ -208,6 +208,18 @@ describe('pane view: chat', () => {
     assert.equal(calls.modes, modes, 'no modeChanged');
   });
 
+  it('a switch asked for while suspended (a typing option landing under a drawer) is made as it resumes', async () => {
+    open('p1');
+    await answer('/transcript', transcript[0]);
+    view.suspend();
+    view.setMode('terminal', false);
+    assert.equal(container.querySelector<HTMLElement>('#terminal-output')!.style.display, 'none', 'not under the drawer');
+    view.resume();
+    assert.equal(store.view.paneViewMode, 'terminal');
+    assert.equal(container.querySelector<HTMLElement>('#terminal-output')!.style.display, '');
+    view.setMode('chat', false);
+  });
+
   it("a terminal look from before a suspend leaves the scrollback to the resume's", async () => {
     open('p1');
     await answer('/transcript', transcript[0]);
