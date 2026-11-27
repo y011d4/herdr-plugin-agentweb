@@ -18,12 +18,10 @@ import (
 
 // AgentInfo is the agent running in a pane.
 type AgentInfo struct {
-	Name         *string `json:"name"`
-	DisplayName  *string `json:"displayName"`
-	Status       string  `json:"status"` // idle | working | blocked | done | unknown
-	CustomStatus *string `json:"customStatus"`
-	Message      *string `json:"message"`
-	SinceUnixMs  int64   `json:"sinceUnixMs"`
+	Name        *string `json:"name"`
+	DisplayName *string `json:"displayName"`
+	Status      string  `json:"status"` // idle | working | blocked | done | unknown
+	SinceUnixMs int64   `json:"sinceUnixMs"`
 	// herdr's completion_seq: which completion this idle/done status is (agent.list
 	// only; null until fetched)
 	CompletionSeq *int64 `json:"completionSeq"`
@@ -269,8 +267,6 @@ type RawPane struct {
 	Agent         string           `json:"agent"`
 	DisplayAgent  string           `json:"display_agent"`
 	AgentStatus   string           `json:"agent_status"`
-	CustomStatus  string           `json:"custom_status"`
-	AgentMessage  string           `json:"agent_message"`
 	Cwd           string           `json:"cwd"`
 	ForegroundCwd string           `json:"foreground_cwd"`
 	Title         string           `json:"title"`
