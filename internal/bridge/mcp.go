@@ -274,7 +274,7 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 			}
 			res, delivered := r.prompt(pane, in.Name, in.Text, epochOf(ctx))
 			if delivered && purpose != "" { // a task not taken leaves the work it has
-				r.purposes.Set(pane, purpose)
+				r.purposes.Set(pane, purpose, nowMs())
 			}
 			return res, nil, nil
 		})
@@ -299,7 +299,7 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 			if err != nil {
 				return errResult(err)
 			}
-			r.purposes.Set(pane, purpose) // none: a reused pane's old one goes too
+			r.purposes.Set(pane, purpose, nowMs()) // none: a reused pane's old one goes too
 			if strings.TrimSpace(in.Task) == "" {
 				return textResult(started, false), nil, nil
 			}

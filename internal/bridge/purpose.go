@@ -3,8 +3,8 @@ package bridge
 // What each worker is for: one short line in the user's language that its orchestrator gives at
 // agent_start (or agent_prompt, re-tasking it), which the agents list, the PC sidebar and the
 // drawer show over the worker's name (state `purposes`, by pane id). Kept in
-// <state>/agent-purposes.json, so a bridge restart keeps them; an entry goes once its pane, seen
-// with an agent, has none (the agent exited) or is gone.
+// <state>/agent-purposes.json, so a bridge restart keeps them; an entry goes once its pane has no
+// agent (the agent exited, or the pane is gone).
 
 import (
 	"encoding/json"
@@ -16,18 +16,22 @@ import (
 	"unicode"
 )
 
-const purposeMax = 60 // characters
+const (
+	purposeMax = 60 // characters
+	// how long the State may lag behind the agent_start or agent_prompt that set a purpose (ms)
+	purposeGrace = 60_000
+)
 
 type purposeEntry struct {
 	Purpose string `json:"purpose"`
-	Seen    bool   `json:"seen,omitempty"` // its pane has been seen with an agent
+	At      int64  `json:"at"`             // when it was set (ms)
+	Seen    bool   `json:"seen,omitempty"` // its pane has been seen with an agent since
 }
 
 type purposeStore struct {
 	path     string
 	mu       sync.Mutex
 	m        map[string]purposeEntry // by pane id
-	last     *State                  // the last connected State Prune saw (nil: none yet)
 	onChange func()
 }
 
@@ -60,14 +64,13 @@ func checkPurpose(p string) (string, error) {
 	return p, nil
 }
 
-// Set makes purpose (checkPurpose's) the agent in paneID's; "" removes it. The entry starts seen
-// when the last State already has that agent (a re-task: an exit meanwhile still prunes it).
-func (s *purposeStore) Set(paneID, purpose string) {
+// Set makes purpose (checkPurpose's) the agent in paneID's, as of now; "" removes it.
+func (s *purposeStore) Set(paneID, purpose string, now int64) {
 	s.mu.Lock()
 	if purpose == "" {
 		delete(s.m, paneID)
 	} else {
-		s.m[paneID] = purposeEntry{Purpose: purpose, Seen: s.last != nil && hasAgent(s.last, paneID)}
+		s.m[paneID] = purposeEntry{Purpose: purpose, At: now}
 	}
 	s.persist()
 	s.mu.Unlock()
@@ -85,25 +88,27 @@ func (s *purposeStore) Purposes() map[string]string {
 	return out
 }
 
-// Prune drops the purposes of agents gone, as st (a connected State) shows them. A pane not
-// seen with an agent yet is kept: the State can lag behind the agent_start that set it.
-// ponytail: an agent replaced in its pane while the bridge was down keeps the old purpose, and a
-// pane closed before the bridge ever saw it leaves its entry; compare herdr names if that shows up.
-func (s *purposeStore) Prune(st *State) {
+// Prune drops the purposes of agents gone, as st (a connected State) shows them: an entry whose
+// pane has no agent, once that pane has been seen with one since the entry was set, or once
+// purposeGrace has passed (the State can lag behind the call that set it; an agent gone within it
+// is never seen).
+// ponytail: an agent replaced in its pane while the bridge was down keeps the old purpose; compare
+// herdr names if that shows up.
+func (s *purposeStore) Prune(st *State, now int64) {
 	if !st.Connected {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.last = st
 	changed := false
 	for id, e := range s.m {
-		switch live := hasAgent(st, id); {
+		p := st.Pane(id)
+		switch live := p != nil && p.Agent != nil; {
 		case live && !e.Seen:
 			e.Seen = true
 			s.m[id] = e
 			changed = true
-		case !live && e.Seen:
+		case !live && (e.Seen || now-e.At > purposeGrace):
 			delete(s.m, id)
 			changed = true
 		}
@@ -119,9 +124,4 @@ func (s *purposeStore) persist() {
 	if os.MkdirAll(filepath.Dir(s.path), 0o700) == nil {
 		writeFile0600(s.path, b)
 	}
-}
-
-func hasAgent(st *State, paneID string) bool {
-	p := st.Pane(paneID)
-	return p != nil && p.Agent != nil
 }
