@@ -98,6 +98,58 @@ describe('notify', () => {
     assert.deepEqual(getToasts(), []);
   });
 
+  it('a notification registered as the page shows its pane is closed at once; not while Settings covers that pane', async () => {
+    const reg = { showNotification: async () => { hidden = false; }, getNotifications: async ({ tag }: { tag: string }) => [{ close: () => closed.push(tag) }] };
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { getRegistration: async () => reg } });
+    store.view.activePaneId = 'p3';
+    store.view.settingsOpen = true;
+    notifyAgentStatus(done);
+    await settle();
+    await settle();
+    assert.deepEqual(closed, [], 'out of sight under Settings');
+    hidden = true;
+    store.view.settingsOpen = false;
+    notifyAgentStatus(done);
+    await settle();
+    await settle();
+    assert.deepEqual(closed, ['p3']);
+  });
+
+  it('a notification for the pane Settings covers is shown even when the page shows meanwhile', async () => {
+    const shown: string[] = [];
+    const reg = { showNotification: async (_t: string, o: NotificationOptions) => { shown.push(o.tag!); }, getNotifications: async () => [] };
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { getRegistration: async () => { hidden = false; return reg; } } });
+    store.view.activePaneId = 'p3';
+    store.view.settingsOpen = true;
+    notifyAgentStatus(done);
+    await settle();
+    await settle();
+    assert.deepEqual(shown, ['p3'], 'out of sight under Settings: shown');
+    hidden = true;
+    store.view.settingsOpen = false;
+  });
+
+  it("a registration failing as the page shows: the page notification for the pane Settings covers, none for one in sight", async () => {
+    const made: unknown[] = [];
+    vi.stubGlobal('Notification', Object.assign(function (this: { addEventListener: () => void; close: () => void }) {
+      this.addEventListener = () => {};
+      this.close = () => {};
+      made.push(this);
+    }, { permission: 'granted' }));
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { getRegistration: async () => { hidden = false; throw new Error('no worker'); } } });
+    store.view.activePaneId = 'p3';
+    store.view.settingsOpen = true;
+    notifyAgentStatus(done);
+    await settle();
+    assert.equal(made.length, 1, 'out of sight under Settings');
+    hidden = true;
+    store.view.settingsOpen = false;
+    notifyAgentStatus(done);
+    await settle();
+    assert.equal(made.length, 1, 'in sight once the page shows: none');
+    hidden = true;
+  });
+
   it("opening a pane closes its OS notifications", async () => {
     dismissNotificationsForPane('p3');
     await settle();

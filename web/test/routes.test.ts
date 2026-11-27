@@ -1,6 +1,6 @@
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
-import { agentsScope, nextPaneBackRoute, nextPaneOverBase, nextSettingsBackRoute, paneRoute, resolveRoute } from '../src/routes.ts';
+import { agentsScope, isOverlay, nextOverlayBase, nextOverlayOverBase, paneRoute, resolveRoute } from '../src/routes.ts';
 import type { AppState, OrchestratorView } from '../src/types.ts';
 
 const orch = (name: string, paneId: string | null): OrchestratorView => ({ name, label: '', paneId, agents: null, mode: 'tui', headless: null });
@@ -100,26 +100,26 @@ describe('route helpers', () => {
     assert.equal(paneRoute(null, 'p1'), '#/pane/p1');
   });
 
-  it("nextPaneBackRoute: a Home or an account's list it came from; pane to pane keeps it", () => {
-    assert.equal(nextPaneBackRoute('#/home/a', '#/agents'), '#/home/a');
-    assert.equal(nextPaneBackRoute('#/agents/a', '#/agents'), '#/agents/a');
-    assert.equal(nextPaneBackRoute('#/pane/p9', '#/agents/a'), '#/agents/a');
-    for (const from of ['#/agents', '#/settings', '', null]) assert.equal(nextPaneBackRoute(from, '#/home/a'), '#/agents', String(from));
+  it('isOverlay: a pane (its drawer) and Settings', () => {
+    for (const h of ['#/pane/p1', '#/settings']) assert.ok(isOverlay(h), h);
+    for (const h of ['#/agents', '#/home/a', '#/settings/x', '']) assert.ok(!isOverlay(h), h);
   });
 
-  it('nextSettingsBackRoute: the Home or list that opened Settings, else the list; no hash change keeps it', () => {
-    assert.equal(nextSettingsBackRoute('#/home/a', '#/agents'), '#/home/a');
-    assert.equal(nextSettingsBackRoute('#/agents/a', '#/agents'), '#/agents/a');
-    assert.equal(nextSettingsBackRoute('#/agents', '#/home/a'), '#/agents');
-    assert.equal(nextSettingsBackRoute('', '#/home/a'), '#/agents');
-    assert.equal(nextSettingsBackRoute(null, '#/home/a'), '#/home/a');
+  it("nextOverlayBase: a Home or an account's list it came from; from an overlay (it replaced) the same", () => {
+    assert.equal(nextOverlayBase('#/home/a', '#/agents'), '#/home/a');
+    assert.equal(nextOverlayBase('#/agents/a', '#/agents'), '#/agents/a');
+    assert.equal(nextOverlayBase('#/pane/p9', '#/agents/a'), '#/agents/a');
+    assert.equal(nextOverlayBase('#/settings', '#/home/a'), '#/home/a');
+    for (const from of ['#/agents', '#/', '', null]) assert.equal(nextOverlayBase(from, '#/home/a'), '#/agents', String(from));
   });
 
-  it('nextPaneOverBase: opened from the screen under it; pane to pane keeps it; a fresh open or another screen not', () => {
-    assert.equal(nextPaneOverBase('#/home/a', '#/home/a', false), true);
-    assert.equal(nextPaneOverBase('#/agents', '#/agents', false), true);
-    assert.equal(nextPaneOverBase('#/pane/p9', '#/agents', true), true);
-    assert.equal(nextPaneOverBase('#/pane/p9', '#/agents', false), false);
-    for (const from of ['#/settings', '', null]) assert.equal(nextPaneOverBase(from, '#/agents', true), false, String(from));
+  it('nextOverlayOverBase: opened from the screen under it; from an overlay the same; a fresh open or another screen not', () => {
+    assert.equal(nextOverlayOverBase('#/home/a', '#/home/a', false), true);
+    assert.equal(nextOverlayOverBase('#/agents', '#/agents', false), true);
+    for (const from of ['#/pane/p9', '#/settings']) {
+      assert.equal(nextOverlayOverBase(from, '#/agents', true), true, from);
+      assert.equal(nextOverlayOverBase(from, '#/agents', false), false, from);
+    }
+    for (const from of ['#/', '', null]) assert.equal(nextOverlayOverBase(from, '#/agents', true), false, String(from));
   });
 });

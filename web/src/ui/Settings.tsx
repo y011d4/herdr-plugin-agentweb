@@ -1,5 +1,5 @@
-/** ui/Settings.tsx — #/settings: notifications, the connection, the headless orchestrators (the last
- *  Claude Code check, the way back to the TUI), sign-out and the app's build. */
+/** ui/Settings.tsx — #/settings (in ui/SettingsSheet.tsx): notifications, the connection, the headless
+ *  orchestrators (the last Claude Code check, the way back to the TUI), sign-out and the app's build. */
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { clearToken } from '../api.ts';
 import { STORAGE_NOTIF } from '../notify.ts';
@@ -35,12 +35,6 @@ export function TuiSteps({ name }: { name: string }) {
     </ol>
   );
 }
-
-/** Back goes to `back`: the Home or list that opened Settings. */
-export const settingsTopbar = (back: string) => ({
-  title: 'Settings',
-  left: <button className="topbar-back" aria-label="Back" onClick={() => { location.hash = back; }}>&#8592;</button>,
-});
 
 export function Settings({ toast, onSignedOut }: { toast: (title: string, body: string) => void; onSignedOut: () => void }) {
   const state = useSyncExternalStore(subscribe, () => store.appState);

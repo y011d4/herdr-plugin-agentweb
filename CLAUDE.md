@@ -63,10 +63,13 @@ All in `internal/bridge/` (one package):
   screen it was opened from, `view.paneBackRoute`, which stays as it is: a list live and at its scroll,
   a Home with its view suspended, resumed as it was on close (`suspendPaneView`/`resumePaneView`: no new view, no
   flicker); a sheet from the bottom on a phone, from the right at 1024px and up; a Claude pane opens on its chat,
-  its terminal only when chosen for it, remembered per pane for the app's life (pane-view's `chosenView`)),
-  `nav.ts` (`openAgent`/`go`: drawer → drawer replaces the history entry; `closeAgent`: back to the
-  entry under it when it was opened on it, `view.paneOverBase`, else a replace; ✕, the dimmed screen,
-  Escape with no other layer over it and the phone's Back close it), the topbar (each screen fills its three slots), the connection dot and the
+  its terminal only when chosen for it, remembered per pane for the app's life (pane-view's `chosenView`);
+  `#/settings` likewise opens Settings in `ui/SettingsSheet.tsx`, Mantine's Modal, centered at 1024px and
+  up, the whole screen on a phone, a Home under it running on; one overlay at a time, `isOverlay`),
+  `nav.ts` (`openAgent`/`go`: overlay → overlay replaces the history entry, so Settings from a drawer
+  takes its place; `closeOverlay` (`closeAgent`): back to the entry under it when it was opened on it,
+  `view.paneOverBase`, else a replace; ✕, the dimmed screen, Escape with no other layer over it and the
+  phone's Back close it), the topbar (each screen fills its three slots), the connection dot and the
   reconnect banner, the SW's `navigate` message, visibilitychange's global part (the watch, the
   open pane's OS notifications, seen done), `visualViewport` → `--app-height` and the startup (token,
   WS, first `/api/state`, a 401 → the token screen). Under it: `api.ts` (token, REST; a 401 →
