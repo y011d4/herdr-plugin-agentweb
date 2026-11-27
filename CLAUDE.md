@@ -294,7 +294,9 @@ manifest, so that switch is by hand (it prints the steps: stop, switch, build, `
 start). Any failure after the stop puts the old binary back and starts it. It prints the `BUILD`
 and `CACHE` that Settings → App version should show on the phone. A commit from before the script
 (before the Vite build) has no copy: `t=$(mktemp) && git show main:scripts/redeploy.sh > "$t" && sh
-"$t" main`. The binary path doesn't change, so the orchestrators' allowlists still match; Clear the TUI ones
+"$t" main`. `.claude/settings.json` allows exactly `sh scripts/redeploy.sh main` (auto mode too, once
+the folder is trusted); a rollback still asks, since a wildcard would let any commit, an unmerged
+one included, reach production. The binary path doesn't change, so the orchestrators' allowlists still match; Clear the TUI ones
 when `orchestrator/rules.md` differs between the versions. A headless one needs nothing: the restart resumes
 it, and a resumed session reads the CLAUDE.md and rules.md of its start (checked live on Claude Code 2.1.322).
 
