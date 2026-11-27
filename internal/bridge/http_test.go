@@ -6,7 +6,6 @@ package bridge
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -41,14 +40,17 @@ type testBridge struct {
 
 var testWeb = fstest.MapFS{
 	"index.html":         {Data: []byte("<!doctype html>")},
+	"index.html.gz":      {Data: []byte("gz(<!doctype html>)")}, // the bridge sends a copy as is
 	"app.js":             {Data: []byte("app()")},
 	"sw.js":              {Data: []byte("sw()")},
 	"style.css":          {Data: []byte("body{}")},
 	"icons/icon-192.png": {Data: []byte("png")},
 	"notes.bin":          {Data: []byte("?")},
 
-	"assets/index-abcd1234.js": {Data: []byte("app()")},
-	"assets/big-abcd1234.css":  {Data: []byte(strings.Repeat("body{color:red}", 100))},
+	"assets/index-abcd1234.js":   {Data: []byte("app()")},
+	"assets/big-abcd1234.css":    {Data: []byte(strings.Repeat("body{color:red}", 100))},
+	"assets/big-abcd1234.css.br": {Data: []byte("br(big css)")},
+	"assets/big-abcd1234.css.gz": {Data: []byte("gz(big css)")},
 }
 
 // startBridge runs the bridge on a fake herdr (World's three panes, plus over) and
@@ -282,10 +284,11 @@ func TestStaticFiles(t *testing.T) {
 	}
 }
 
-// TestStaticGzip: a text file goes gzipped only to a client that accepts gzip, under
-// its own ETag, and Vary says so; If-None-Match, ranges and HEAD apply to the body sent
-// (sent without a Content-Length: http.ServeContent leaves it out under a Content-Encoding).
-func TestStaticGzip(t *testing.T) {
+// TestStaticEncodings: a file goes as the best of the build's copies (.br, then .gz) that
+// the client accepts, under its own ETag, and Vary says so whenever a copy exists;
+// If-None-Match, ranges and HEAD apply to the body sent (sent without a Content-Length:
+// http.ServeContent leaves it out under a Content-Encoding).
+func TestStaticEncodings(t *testing.T) {
 	b := startBridge(t, Config{}, nil, nil)
 	get := func(method, path string, header map[string]string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, nil)
@@ -296,67 +299,56 @@ func TestStaticGzip(t *testing.T) {
 		b.srv.ServeHTTP(rec, req)
 		return rec
 	}
-	plain := testWeb["assets/big-abcd1234.css"].Data
-	gunzip := func(t *testing.T, data []byte) []byte {
-		zr, err := gzip.NewReader(bytes.NewReader(data))
-		if err != nil {
-			t.Fatal(err)
-		}
-		out, err := io.ReadAll(zr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return out
-	}
-	identity := get("GET", "/assets/big-abcd1234.css", nil)
+	const css = "/assets/big-abcd1234.css"
+	copies := map[string][]byte{"": testWeb["assets/big-abcd1234.css"].Data,
+		"br": testWeb["assets/big-abcd1234.css.br"].Data, "gzip": testWeb["assets/big-abcd1234.css.gz"].Data}
+	identity := get("GET", css, nil)
 	plainTag := identity.Header().Get("ETag")
-	if identity.Code != 200 || identity.Header().Get("Content-Encoding") != "" || !bytes.Equal(identity.Body.Bytes(), plain) ||
+	if identity.Code != 200 || identity.Header().Get("Content-Encoding") != "" || !bytes.Equal(identity.Body.Bytes(), copies[""]) ||
 		identity.Header().Get("Vary") != "Accept-Encoding" || !strings.HasPrefix(plainTag, `"`) {
 		t.Fatalf("no Accept-Encoding: %d %v", identity.Code, identity.Header())
 	}
-	for accept, want := range map[string]bool{
-		"gzip, deflate, br, zstd": true, "GZIP;Q=0.5": true, "br, gzip ; q=1": true,
-		"gzip;q=0": false, "gzip; q=0.000": false, "gzip;q=x": false, "br": false, "*": false, "": false,
+	for accept, want := range map[string]string{
+		"gzip, deflate, br, zstd": "br", "BR": "br", "br, gzip ; q=1": "br", "br;q=0, gzip": "gzip", "GZIP;Q=0.5": "gzip",
+		"gzip;q=0": "", "gzip; q=0.000": "", "gzip;q=x": "", "deflate, zstd": "", "*": "", "": "",
 	} {
-		rec := get("GET", "/assets/big-abcd1234.css", map[string]string{"Accept-Encoding": accept})
-		got := rec.Header().Get("Content-Encoding") == "gzip"
-		if rec.Code != 200 || got != want || rec.Header().Get("Vary") != "Accept-Encoding" {
-			t.Errorf("Accept-Encoding %q: %d gzip=%v %v, want gzip=%v", accept, rec.Code, got, rec.Header(), want)
-			continue
+		rec := get("GET", css, map[string]string{"Accept-Encoding": accept})
+		if rec.Code != 200 || rec.Header().Get("Content-Encoding") != want || !bytes.Equal(rec.Body.Bytes(), copies[want]) ||
+			rec.Header().Get("Vary") != "Accept-Encoding" || rec.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
+			t.Errorf("Accept-Encoding %q: %d %v %q, want %q", accept, rec.Code, rec.Header(), rec.Body.String(), want)
 		}
-		if !want {
-			continue
-		}
-		if !bytes.Equal(gunzip(t, rec.Body.Bytes()), plain) ||
-			rec.Header().Get("ETag") == plainTag || rec.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
-			t.Errorf("Accept-Encoding %q: a gzipped body of %d bytes, %v", accept, rec.Body.Len(), rec.Header())
+		if tag := rec.Header().Get("ETag"); want != "" && tag != strings.TrimSuffix(plainTag, `"`)+"-"+want+`"` {
+			t.Errorf("Accept-Encoding %q: ETag %s (plain %s)", accept, tag, plainTag)
 		}
 	}
-	gz := get("GET", "/assets/big-abcd1234.css", map[string]string{"Accept-Encoding": "gzip"})
-	gzTag := gz.Header().Get("ETag")
-	if rec := get("GET", "/assets/big-abcd1234.css", map[string]string{"Accept-Encoding": "gzip", "If-None-Match": gzTag}); rec.Code != 304 || rec.Body.Len() != 0 {
-		t.Errorf("If-None-Match of the gzipped one: %d, want 304", rec.Code)
+	br := map[string]string{"Accept-Encoding": "br, gzip"}
+	brTag := get("GET", css, br).Header().Get("ETag")
+	if rec := get("GET", css, map[string]string{"Accept-Encoding": "br", "If-None-Match": brTag}); rec.Code != 304 || rec.Body.Len() != 0 {
+		t.Errorf("If-None-Match of the brotli one: %d, want 304", rec.Code)
 	}
-	if rec := get("GET", "/assets/big-abcd1234.css", map[string]string{"Accept-Encoding": "gzip", "If-None-Match": plainTag}); rec.Code != 200 || rec.Header().Get("Content-Encoding") != "gzip" {
-		t.Errorf("If-None-Match of the plain one, asking gzip: %d %v, want 200 gzip", rec.Code, rec.Header())
+	if rec := get("GET", css, map[string]string{"Accept-Encoding": "br", "If-None-Match": plainTag}); rec.Code != 200 || rec.Header().Get("Content-Encoding") != "br" {
+		t.Errorf("If-None-Match of the plain one, asking br: %d %v, want 200 br", rec.Code, rec.Header())
 	}
-	if rec := get("GET", "/assets/big-abcd1234.css", map[string]string{"If-None-Match": plainTag}); rec.Code != 304 {
+	if rec := get("GET", css, map[string]string{"If-None-Match": plainTag}); rec.Code != 304 {
 		t.Errorf("If-None-Match of the plain one: %d, want 304", rec.Code)
 	}
-	if rec := get("GET", "/assets/big-abcd1234.css", map[string]string{"Accept-Encoding": "gzip", "Range": "bytes=0-9"}); rec.Code != 206 ||
-		!bytes.Equal(rec.Body.Bytes(), gz.Body.Bytes()[:10]) || rec.Header().Get("Content-Range") != "bytes 0-9/"+strconv.Itoa(gz.Body.Len()) {
-		t.Errorf("a range of the gzipped one: %d %v", rec.Code, rec.Header())
+	if rec := get("GET", css, map[string]string{"Accept-Encoding": "br", "Range": "bytes=0-3"}); rec.Code != 206 ||
+		!bytes.Equal(rec.Body.Bytes(), copies["br"][:4]) || rec.Header().Get("Content-Range") != "bytes 0-3/"+strconv.Itoa(len(copies["br"])) {
+		t.Errorf("a range of the brotli one: %d %v", rec.Code, rec.Header())
 	}
-	if rec := get("HEAD", "/assets/big-abcd1234.css", map[string]string{"Accept-Encoding": "gzip"}); rec.Code != 200 || rec.Body.Len() != 0 || rec.Header().Get("ETag") != gzTag ||
-		rec.Header().Get("Content-Encoding") != "gzip" {
+	if rec := get("HEAD", css, br); rec.Code != 200 || rec.Body.Len() != 0 || rec.Header().Get("ETag") != brTag ||
+		rec.Header().Get("Content-Encoding") != "br" {
 		t.Errorf("HEAD: %d %v", rec.Code, rec.Header())
 	}
-	// a body gzip would only grow, and a type that isn't text, stay plain
-	if rec := get("GET", "/app.js", map[string]string{"Accept-Encoding": "gzip"}); rec.Header().Get("Content-Encoding") != "" || rec.Body.String() != "app()" || rec.Header().Get("Vary") != "Accept-Encoding" {
-		t.Errorf("a tiny JS: %v %q", rec.Header(), rec.Body.String())
+	// a file with only a gzip copy goes gzipped to a client that would take br
+	if rec := get("GET", "/index.html", br); rec.Header().Get("Content-Encoding") != "gzip" || rec.Body.String() != "gz(<!doctype html>)" {
+		t.Errorf("index.html: %v %q", rec.Header(), rec.Body.String())
 	}
-	if rec := get("GET", "/icons/icon-192.png", map[string]string{"Accept-Encoding": "gzip"}); rec.Header().Get("Content-Encoding") != "" || rec.Header().Get("Vary") != "" {
-		t.Errorf("a PNG: %v", rec.Header())
+	// a file without copies (a body compression would only grow, a PNG) stays plain, with no Vary
+	for _, path := range []string{"/app.js", "/icons/icon-192.png"} {
+		if rec := get("GET", path, br); rec.Code != 200 || rec.Header().Get("Content-Encoding") != "" || rec.Header().Get("Vary") != "" {
+			t.Errorf("%s: %v", path, rec.Header())
+		}
 	}
 }
 

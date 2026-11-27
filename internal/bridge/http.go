@@ -9,7 +9,6 @@ package bridge
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -64,8 +63,9 @@ var mimeTypes = map[string]string{
 	".ico":         "image/x-icon",
 }
 
-// The text types: served gzipped to a client that accepts it.
-var compressible = map[string]bool{".html": true, ".js": true, ".css": true, ".webmanifest": true, ".svg": true}
+// The encodings a web file can have a copy in, next to it under the suffix (the build writes
+// them: vite.config.ts's precompress), best first.
+var encodings = []struct{ coding, suffix string }{{"br", ".br"}, {"gzip", ".gz"}}
 
 // pane routes: the id segment is any non-slash text (pane ids contain ':')
 var (
@@ -81,8 +81,7 @@ type server struct {
 	client   *HerdrClient
 	rpc      Rpc
 	web      fs.FS
-	gz       sync.Map // a web file's sha256 → its gzipped bytes (gzipped)
-	rules    string   // the bundled orchestrator/rules.md
+	rules    string // the bundled orchestrator/rules.md
 	profiles *PaneProfileStore
 	accounts *PaneAccountCache
 	// each configured orchestrator's expectedAccount ("": not found yet), found in the
@@ -1357,9 +1356,9 @@ func (s *server) clearAgentRoute(w http.ResponseWriter, target string) {
 // ── static files ─────────────────────────────────────────────────────────────
 
 // serveStatic serves the web UI (no auth). urlPath is still percent-encoded, as in
-// http.ts, which looks files up by the encoded name. A text file goes gzipped to a
-// client that accepts it, under its own ETag; http.ServeContent does HEAD, ranges
-// and If-None-Match on whichever body is sent.
+// http.ts, which looks files up by the encoded name. A file with an encoded copy (the
+// build's .br and .gz) goes in the best one the client accepts, under its own ETag;
+// http.ServeContent does HEAD, ranges and If-None-Match on whichever body is sent.
 func (s *server) serveStatic(w http.ResponseWriter, r *http.Request, urlPath string) {
 	rel := urlPath
 	if rel == "/" {
@@ -1408,39 +1407,31 @@ func (s *server) serveStatic(w http.ResponseWriter, r *http.Request, urlPath str
 	}
 	sum := sha256.Sum256(data)
 	body, etag := data, fmt.Sprintf("%x", sum[:8])
-	if compressible[ext] {
+	accept := r.Header.Get("Accept-Encoding")
+	for _, enc := range encodings {
+		if _, err := fs.Stat(s.web, name+enc.suffix); err != nil {
+			continue
+		}
 		w.Header().Set("Vary", "Accept-Encoding")
-		if acceptsGzip(r.Header.Get("Accept-Encoding")) {
-			if gz := s.gzipped(sum, data); len(gz) < len(data) {
-				body, etag = gz, etag+"-gzip"
-				w.Header().Set("Content-Encoding", "gzip")
-			}
+		if !accepts(accept, enc.coding) {
+			continue
+		}
+		if encoded, err := fs.ReadFile(s.web, name+enc.suffix); err == nil {
+			body, etag = encoded, etag+"-"+enc.coding
+			w.Header().Set("Content-Encoding", enc.coding)
+			break
 		}
 	}
 	w.Header().Set("ETag", `"`+etag+`"`)
 	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(body))
 }
 
-// gzipped is data gzipped, compressed once per content (keyed by its sha256).
-// ponytail: never evicted; only YOICKS_WEB_DIR's rebuilds add entries.
-func (s *server) gzipped(sum [32]byte, data []byte) []byte {
-	if gz, ok := s.gz.Load(sum); ok {
-		return gz.([]byte)
-	}
-	var buf bytes.Buffer
-	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
-	zw.Write(data)
-	zw.Close()
-	s.gz.Store(sum, buf.Bytes())
-	return buf.Bytes()
-}
-
-// acceptsGzip reports whether an Accept-Encoding value lists gzip with a q above 0.
+// accepts reports whether an Accept-Encoding value lists coding with a q above 0.
 // A bare * doesn't count: identity is always acceptable, so that client gets the plain file.
-func acceptsGzip(header string) bool {
+func accepts(header, coding string) bool {
 	for _, part := range strings.Split(header, ",") {
-		coding, params, _ := strings.Cut(part, ";")
-		if !strings.EqualFold(strings.TrimSpace(coding), "gzip") {
+		c, params, _ := strings.Cut(part, ";")
+		if !strings.EqualFold(strings.TrimSpace(c), coding) {
 			continue
 		}
 		for _, p := range strings.Split(params, ";") {
