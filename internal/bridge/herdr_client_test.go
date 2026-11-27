@@ -171,34 +171,33 @@ func TestHerdrClientReconnectBackoff(t *testing.T) {
 	dir, _ := os.MkdirTemp("", "fh")
 	defer os.RemoveAll(dir)
 	sock := filepath.Join(dir, "h.sock") // nothing listens yet
+	clock := fakeherdr.NewFakeClock()
 	c := NewHerdrClient(sock, HerdrClientCallbacks{})
+	c.clock = clock
 	defer c.Destroy()
 	c.post(func() { c.backoff = 5 * time.Millisecond })
 	c.Start()
-	time.Sleep(150 * time.Millisecond)
-	backoff := func() time.Duration { return actorValue(c, func() time.Duration { return c.backoff }) }
-	if b := backoff(); b < 40*time.Millisecond || b%(5*time.Millisecond) != 0 || (b/(5*time.Millisecond))&(b/(5*time.Millisecond)-1) != 0 {
-		t.Errorf("after ~150 ms of failures the wait is %v, want 5 ms doubled at least 3 times", b)
+	for _, ms := range []time.Duration{5, 10, 20} { // each failure waits twice the one before
+		pass(t, clock, "the reconnect", ms*time.Millisecond)
 	}
+	clockWaiting(t, clock, "the reconnect", 40*time.Millisecond)
 	srv, err := fakeherdr.Start(sock, fakeherdr.NewWorld().Handler())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer srv.Close()
-	for end := time.Now().Add(5 * time.Second); !c.IsConnected(); time.Sleep(10 * time.Millisecond) {
-		if time.Now().After(end) {
-			t.Fatal("never connected")
-		}
-	}
-	if b := backoff(); b != backoffInitial {
+	clock.Advance(40 * time.Millisecond)
+	waitUntil(t, 5*time.Second, "connected", c.IsConnected)
+	if b := actorValue(c, func() time.Duration { return c.backoff }); b != backoffInitial {
 		t.Errorf("connected, the wait is %v, want it back at %v", b, backoffInitial)
 	}
 
 	capped := NewHerdrClient(filepath.Join(dir, "none.sock"), HerdrClientCallbacks{})
+	capped.clock = fakeherdr.NewFakeClock()
 	defer capped.Destroy()
 	capped.post(func() { capped.backoff = 20 * time.Second })
 	capped.Start()
-	time.Sleep(100 * time.Millisecond)
+	clockWaiting(t, capped.clock.(*fakeherdr.FakeClock), "the reconnect", 20*time.Second) // failed once
 	if b := actorValue(capped, func() time.Duration { return capped.backoff }); b != backoffMax {
 		t.Errorf("doubling 20 s gave %v, want the %v cap", b, backoffMax)
 	}
@@ -214,6 +213,7 @@ func TestHerdrClientIgnoresAnAgentListFromBeforeADrop(t *testing.T) {
 	worldH := world.Handler()
 	var mu sync.Mutex
 	calls := 0
+	stale := make(chan struct{}) // the first answer goes out when closed
 	srv, err := fakeherdr.Start(filepath.Join(dir, "h.sock"), func(m string, p json.RawMessage) fakeherdr.Reply {
 		if m != "agent.list" {
 			return worldH(m, p)
@@ -222,28 +222,64 @@ func TestHerdrClientIgnoresAnAgentListFromBeforeADrop(t *testing.T) {
 		calls++
 		first := calls == 1
 		mu.Unlock()
-		seq, delay := 2, time.Duration(0)
-		if first { // answered after the drop and the reconnect
-			seq, delay = 1, 1500*time.Millisecond
+		list := func(seq int) fakeherdr.Reply {
+			return fakeherdr.Reply{Result: map[string]any{"agents": []any{
+				map[string]any{"pane_id": "p1", "agent": "claude", "agent_status": "idle", "completion_seq": seq}}}}
 		}
-		return fakeherdr.Reply{Delay: delay, Result: map[string]any{"agents": []any{
-			map[string]any{"pane_id": "p1", "agent": "claude", "agent_status": "idle", "completion_seq": seq}}}}
+		if !first {
+			return list(2)
+		}
+		return fakeherdr.Reply{Wait: func(gone <-chan struct{}) fakeherdr.Reply { // answered after the drop and the reconnect
+			select {
+			case <-stale:
+				return list(1)
+			case <-gone:
+				return fakeherdr.Reply{Close: true}
+			}
+		}}
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer srv.Close()
+	clock := fakeherdr.NewFakeClock()
 	c := NewHerdrClient(srv.Path, HerdrClientCallbacks{})
+	c.clock = clock
+	handled := make(chan struct{}, 2)
+	wasHandled := func(what string) {
+		t.Helper()
+		select {
+		case <-handled:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s never handled", what)
+		}
+	}
+	c.agentListHook = func() { handled <- struct{}{} }
 	defer c.Destroy()
 	c.Start()
+	seq := func() int64 {
+		s := c.State()
+		if s == nil || s.Pane("p1") == nil || s.Pane("p1").Agent.CompletionSeq == nil {
+			return 0
+		}
+		return *s.Pane("p1").Agent.CompletionSeq
+	}
+	pass(t, clock, "agent.list's debounce", completionSeqDebounce)
 	env := &fakeherdr.Env{Srv: srv, World: world, Errorf: t.Errorf}
 	env.WaitCount("agent.list", 1, 5*time.Second)
 	if srv.DropSubscriptions() != 1 {
 		t.Fatal("expected to drop one subscription")
 	}
-	time.Sleep(2500 * time.Millisecond) // the reconnect (1 s), then the stale answer (1.5 s)
-	if s := c.State(); s == nil || s.Pane("p1").Agent.CompletionSeq == nil || *s.Pane("p1").Agent.CompletionSeq != 2 {
-		t.Errorf("p1's completion seq: want 2 from after the reconnect, got %+v", s.Pane("p1").Agent)
+	pass(t, clock, "the reconnect", backoffInitial)
+	pass(t, clock, "agent.list's debounce", completionSeqDebounce)
+	wasHandled("the reconnect's answer")
+	if got := seq(); got != 2 {
+		t.Fatalf("p1's completion seq after the reconnect: %d, want 2", got)
+	}
+	close(stale)
+	wasHandled("the answer from before the drop")
+	if got := seq(); got != 2 {
+		t.Errorf("p1's completion seq: want 2 from after the reconnect, got %d", got)
 	}
 }
 
@@ -333,20 +369,44 @@ func TestHerdrCallCancellation(t *testing.T) {
 	if _, err := herdrCall(ctx, sock, "agent.wait", map[string]any{"target": "p1"}, 0); !errors.Is(err, context.Canceled) {
 		t.Errorf("cancelled before: %v", err)
 	}
-	time.Sleep(100 * time.Millisecond)
-	mu.Lock()
-	if conns != 0 || got != 0 {
-		t.Errorf("cancelled before: %d connections, %d bytes", conns, got)
+	// a connection of its own with one byte: by the time that byte is read, one made before it
+	// was accepted too
+	sentinel, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer sentinel.Close()
+	sentinel.Write([]byte("x"))
+	waitUntil(t, 5*time.Second, "the byte", func() bool { mu.Lock(); defer mu.Unlock(); return got > 0 })
+	mu.Lock()
+	extraConns, extraBytes := conns-1, got-1
 	mu.Unlock()
+	if extraConns != 0 || extraBytes != 0 {
+		t.Fatalf("cancelled before: %d connections, %d bytes besides the one", extraConns, extraBytes)
+	}
 
 	ctx, cancel = context.WithCancel(context.Background())
-	time.AfterFunc(100*time.Millisecond, cancel)
-	began := time.Now()
+	cancelled := make(chan time.Time, 1)
+	go func() { // once herdr has the request, which it never answers
+		for end := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+			mu.Lock()
+			in := conns == 2 && got > 1
+			mu.Unlock()
+			if in {
+				break
+			}
+			if time.Now().After(end) {
+				t.Error("herdr never got the request")
+				break
+			}
+		}
+		cancelled <- time.Now()
+		cancel()
+	}()
 	if _, err := herdrCall(ctx, sock, "agent.wait", map[string]any{"target": "p1"}, 0); !errors.Is(err, context.Canceled) {
 		t.Errorf("cancelled while waiting: %v", err)
 	}
-	if d := time.Since(began); d > time.Second {
+	if d := time.Since(<-cancelled); d > time.Second {
 		t.Errorf("returned %s after the cancel", d)
 	}
 }

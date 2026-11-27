@@ -162,6 +162,10 @@ type HerdrClient struct {
 	published  atomic.Pointer[State]
 	isConn     atomic.Bool
 
+	clock clock // its reconnects, debounces and ack timeout (tests: a fakeherdr.FakeClock, set before Start)
+	// tests: runs once an agent.list answer has been handled (applied or not), on the actor
+	agentListHook func()
+
 	// owned by the actor goroutine
 	cur           *State
 	subConn       *subscription
@@ -201,7 +205,7 @@ func NewHerdrClient(socketPath string, cb HerdrClientCallbacks) *HerdrClient {
 	c := &HerdrClient{
 		socketPath: socketPath, cb: cb,
 		inbox: make(chan func(), 1024), quit: make(chan struct{}),
-		backoff: backoffInitial, subscribed: map[string]bool{},
+		clock: realClock{}, backoff: backoffInitial, subscribed: map[string]bool{},
 	}
 	go func() {
 		for {
@@ -228,11 +232,9 @@ func (c *HerdrClient) post(f func()) {
 func (c *HerdrClient) Start() {
 	// catch branch changes (git checkout) that don't produce a herdr snapshot
 	go func() {
-		t := time.NewTicker(worktreeRefreshInterval)
-		defer t.Stop()
 		for {
 			select {
-			case <-t.C:
+			case <-c.clock.After(worktreeRefreshInterval):
 				c.post(c.refreshWorktreesSoon)
 			case <-c.quit:
 				return
@@ -319,13 +321,13 @@ func (c *HerdrClient) setConnected(v bool) {
 // already queued when the timer was restarted or cancelled is ignored.
 type debounce struct {
 	gen int
-	t   *time.Timer
+	t   interface{ Stop() bool }
 }
 
 func (c *HerdrClient) schedule(d *debounce, after time.Duration, f func()) {
 	d.cancel()
 	g := d.gen
-	d.t = time.AfterFunc(after, func() {
+	d.t = c.clock.AfterFunc(after, func() {
 		c.post(func() {
 			if d.gen == g {
 				d.t = nil
@@ -577,7 +579,7 @@ func (c *HerdrClient) openSubscription(paneIDs []string, onReady func()) *subscr
 		}
 		s.mu.Unlock()
 		// a socket that connects but never acks would otherwise hang forever
-		ackTimer := time.AfterFunc(requestTimeout(), func() {
+		ackTimer := c.clock.AfterFunc(requestTimeout(), func() {
 			c.post(func() {
 				if !s.acked {
 					s.destroy()
@@ -747,6 +749,9 @@ func (c *HerdrClient) refreshCompletionSeqsSoon() {
 		go func() {
 			res, err := herdrRPC(c.socketPath, "agent.list", nil)
 			c.post(func() {
+				if c.agentListHook != nil {
+					defer c.agentListHook()
+				}
 				// coverage lost meanwhile: the reconnect snapshot schedules a fresh fetch
 				if err != nil || c.destroyed || c.cur == nil || !c.cur.Connected || epoch != c.coverageEpoch {
 					return
@@ -774,7 +779,7 @@ func (c *HerdrClient) scheduleReconnect() {
 	}
 	delay := c.backoff
 	c.backoff = min(c.backoff*2, backoffMax)
-	time.AfterFunc(delay, func() { c.post(c.connect) })
+	c.clock.AfterFunc(delay, func() { c.post(c.connect) })
 }
 
 func (c *HerdrClient) connect() {
