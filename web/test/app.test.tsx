@@ -15,6 +15,7 @@ import { emit, setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
 import { WIDE_QUERY } from '../src/theme.ts';
 import { App, start } from '../src/ui/App.tsx';
+import { previewImage } from '../src/ui/Modals.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
 import { fakeMedia, mantine } from './render.ts'; // and the act environment
 
@@ -148,6 +149,17 @@ describe('App', () => {
     assert.ok(!$('.agent-drawer #screen-pane'), 'the drawer closed');
     assert.ok($('#screen #screen-agents') === list, 'back on the same list');
     assert.equal(history.length, before + 1, 'the close went back: no entry left over');
+  });
+
+  it("a pane gone under an image preview closes both: the preview's entry, then the drawer's", async () => {
+    await go('#/agents');
+    await go('#/pane/p1');
+    await act(async () => previewImage('data:image/png;base64,AA==', 'shot'));
+    assert.ok($('#modal-root .image-preview'));
+    await act(async () => push!({ type: 'pane_gone', paneId: 'p1' }));
+    await settle(50);
+    assert.equal(location.hash, '#/agents');
+    assert.ok(!$('#modal-root .image-preview') && !$('.agent-drawer #screen-pane'));
   });
 
   it('leaves a pane a State no longer has', async () => {
