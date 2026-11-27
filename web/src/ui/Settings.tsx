@@ -151,6 +151,7 @@ export function Settings({ toast, onSignedOut }: { toast: (title: string, body: 
 
       <div className="settings-section">
         <div className="settings-section-title">About</div>
+        <div className="settings-row"><img className="about-lockup" src="/icons/lockup.svg" alt="Yoicks" /></div>
         <div className="settings-row">
           <span className="settings-row-label">App version</span>
           <span className="settings-row-value" id="app-version">{`${APP_VERSION} (${BUILD})${cache === null ? '' : ` cache ${cache}`}`}</span>
