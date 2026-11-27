@@ -285,6 +285,8 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     opts.showToggle(!headless); // a headless orchestrator has no terminal to toggle to
     if (mode !== 'chat') return; // availability noted; content applies only in chat mode
     // a re-watch (a reconnect, a resume) resending what is on show: nothing to redraw
+    // ponytail: one that moved on comes back as a same-session reset (one redraw, scroll kept); appending
+    // from the cursor instead needs watch_transcript to take one
     if (msg.reset && msg.sessionId != null && msg.sessionId === chatSessionId && msg.cursor === chatCursor) return;
     if (msg.reset || msg.sessionId !== chatSessionId) {
       // Same session (a reconnect re-watch) → keep scroll; a new session → bottom.

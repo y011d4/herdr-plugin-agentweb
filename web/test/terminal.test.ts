@@ -144,6 +144,8 @@ describe('terminal', () => {
     term.setHeld(true);
     term.setHeld(false);
     assert.match(live().textContent!, /deferred under a finger/, 'the gesture ended by the hold holds nothing up once released');
+    void term.loadHistory();
+    assert.equal(reqs.filter((r) => r.url.includes('source=recent')).length, 1, 'nor the scrollback, the finger still down');
     touch(el, 'touchstart', [[10, 300]]);
     term.render('second, deferred');
     term.setHeld(true);
