@@ -6,15 +6,16 @@
 #
 # Run it in the linked checkout (it refuses anywhere else). It refuses before touching
 # the bridge when the tree isn't clean, when herdr-plugin.toml would change (herdr
-# caches the linked manifest: that switch is manual, the steps are printed), or when
-# local main has commits origin/main lacks. Any failure after the stop restores and
+# caches the linked manifest: that switch is manual, the steps are printed), when
+# local main has commits origin/main lacks, or (main only) when CI's run of the commit
+# hasn't passed (it waits for one still going). Any failure after the stop restores and
 # starts the old binary, then exits non-zero: the bridge is never left down.
 #
 # A commit from before this script existed: run main's copy,
 #   t=$(mktemp) && git show main:scripts/redeploy.sh > "$t" && sh "$t" main
 #
-# REDEPLOY_HERDR (the herdr command), REDEPLOY_HEALTHZ (the bridge's /healthz URL,
-# default http://127.0.0.1:8390/healthz) and REDEPLOY_HEALTHZ_WAIT (seconds, default 60)
+# REDEPLOY_HERDR and REDEPLOY_GH (the herdr and gh commands), REDEPLOY_HEALTHZ (the bridge's
+# /healthz URL, default http://127.0.0.1:8390/healthz) and REDEPLOY_HEALTHZ_WAIT (seconds, default 60)
 # exist for testing (scripts/redeploy_test.go) and a non-default port.
 set -eu
 
@@ -27,6 +28,7 @@ if [ -z "${REDEPLOY_COPY:-}" ]; then
 fi
 
 herdr=${REDEPLOY_HERDR:-herdr}
+gh=${REDEPLOY_GH:-gh}
 healthz=${REDEPLOY_HEALTHZ:-http://127.0.0.1:8390/healthz}
 healthz_wait=${REDEPLOY_HEALTHZ_WAIT:-60}
 say() { echo "redeploy: $*" >&2; }
@@ -96,7 +98,17 @@ if [ "$ref" = main ]; then
 	if git show-ref --verify --quiet refs/heads/main && ! git merge-base --is-ancestor refs/heads/main origin/main; then
 		die "local main has commits origin/main lacks: it can't fast-forward"
 	fi
-	switch="git switch main && git merge --ff-only origin/main"
+	switch="git switch main && git merge --ff-only $target" # the commit CI checked, even if origin/main moves
+	# The gate, before anything stops: CI's run of this very commit (ci.yml on its push to main,
+	# webcheck's Tier 1 included) passed. One still going is waited for (a few minutes); none yet,
+	# a failed one, or a cancelled one (main moved on: run this again) refuses. A rollback skips it.
+	command -v "$gh" >/dev/null 2>&1 || die "needs $gh (CI's run of the commit is the deploy gate)"
+	short=$(git rev-parse --short "$target")
+	run=$("$gh" run list --workflow ci.yml --commit "$target" --limit 1 --json databaseId -q '.[0].databaseId') ||
+		die "gh run list failed: can't see CI's run of $short"
+	[ -n "$run" ] || die "no CI run of $short yet: try again in a moment"
+	say "waiting for CI run $run of $short"
+	"$gh" run watch "$run" --exit-status >/dev/null 2>&1 || die "CI run $run of $short didn't pass: not deploying (gh run view $run)"
 else
 	target=$(git rev-parse --verify --quiet "$ref^{commit}") || die "can't resolve $ref (git fetch first?)"
 	switch="git switch --detach $target"

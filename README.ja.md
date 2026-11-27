@@ -412,6 +412,7 @@ sh scripts/redeploy.sh <commit>     # 前のコミットに同じことをする
 stop と start のアクションと `/healthz` を待ち、そのあと設定 → App version に出るはずの `BUILD` と
 `CACHE` を表示します。変更の残ったツリーや、`herdr-plugin.toml` が変わる切り替えは、何も止めずに断ります
 (herdr は link した manifest をキャッシュするため。`herdr plugin link` を含む手作業の手順を表示します)。
+`main` では、出すコミットの CI (GitHub Actions、`gh` で確認) が通るまで出しません。実行中ならその終わりを待ちます。
 stop の後に失敗したときは、元のバイナリを起動し直します。
 
 デタッチしたデーモンのログは `<state dir>/bridge.log` に出力されます
