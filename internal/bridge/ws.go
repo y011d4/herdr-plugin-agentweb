@@ -113,6 +113,19 @@ func (s *server) broadcastState() {
 		}
 	}
 	s.accounts.Refresh(agentPanes)
+	var gone []string
+	s.agentPanes, gone = agentsGone(s.agentPanes, st)
+	for _, id := range gone { // a worker's agent exited: close its idle shell
+		s.bg.Go(func() {
+			s.closeMu.Lock() // one at a time (closeFinishedWorker)
+			defer s.closeMu.Unlock()
+			if closed, err := closeFinishedWorker(s.rpc, st, id, isWorker, func() { <-s.clock.After(waitAfterExit) }); closed {
+				logf("[yoicks] closed pane %s: its worker's agent exited", id)
+			} else if err != nil {
+				logf("[yoicks] pane %s: its worker's agent exited, but it could not be closed: %s", id, err)
+			}
+		})
+	}
 	for _, h := range s.headless { // a worker gone ends its watch
 		h.dropGone(st)
 	}

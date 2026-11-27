@@ -384,7 +384,9 @@ its own Claude account. The account is an agent process's `CLAUDE_CONFIG_DIR` (d
   repo (`<repo>-wt-<branch>`). herdr can't hand a worktree an environment, so the worktree's account
   must come from the directory: an `.envrc` above the repo (one per org dir, say) covers it. The
   started agent's account is checked; a mismatch stops it again. A new worktree is then kept,
-  since the agent may already have written to it.
+  since the agent may already have written to it. Once the agent exits (`/exit`, or on its own),
+  the bridge closes the tab it opened for it (marked `YOICKS_WORKER=1` in that tab's shell), so
+  finished workers leave no idle shells behind; a worktree's tab goes with `worktree remove`.
 - `worktree remove <checkout path>` — removes a finished worker's linked worktree and its branch,
   only when no agent is left in it, it has no uncommitted or untracked files, and the branch is
   merged (an ancestor of `origin/HEAD`, or the head of a merged PR per `gh`, for squash merges).
