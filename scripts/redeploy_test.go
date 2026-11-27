@@ -31,12 +31,15 @@ case "$1 $2" in
 esac
 `
 
-// fakeGh: CI's run 7 of any commit, passed; none with $FAKE/norun, failed with $FAKE/cifail
+// fakeGh: CI's run 7 of any commit, passed; none with $FAKE/norun, failed with $FAKE/cifail;
+// $ON_WATCH runs during the wait
 const fakeGh = `#!/bin/sh
 echo "gh $*" >>"$FAKE/calls"
 case "$1 $2" in
 "run list") [ -e "$FAKE/norun" ] || echo 7 ;;
-"run watch") [ ! -e "$FAKE/cifail" ] ;;
+"run watch")
+	if [ -n "${ON_WATCH:-}" ]; then sh -c "$ON_WATCH"; fi
+	[ ! -e "$FAKE/cifail" ] ;;
 esac
 `
 
@@ -191,6 +194,22 @@ func TestRedeploy(t *testing.T) {
 			refused(t, w, out, err, want)
 		}
 	})
+	t.Run("checks the tree and main after the CI wait", func(t *testing.T) {
+		for want, onWatch := range map[string]string{
+			"M README":           "echo edited >README",
+			"can't fast-forward": "git commit -q --allow-empty -m local",
+		} {
+			w := setup(t)
+			write(t, filepath.Join(w.prod, "README"), "")
+			must(t, w.prod, "git", "add", "README")
+			must(t, w.prod, "git", "commit", "-qm", "readme")
+			must(t, w.prod, "git", "push", "-q", "origin", "HEAD:main")
+			must(t, w.seed, "git", "pull", "-q", "--ff-only")
+			push(t, w, "other", "x")
+			out, err := redeploy(t, w, "main", "ON_WATCH=cd '"+w.prod+"' && "+onWatch)
+			refused(t, w, out, err, want)
+		}
+	})
 	t.Run("a rollback doesn't ask CI", func(t *testing.T) {
 		w := setup(t)
 		old := must(t, w.seed, "git", "rev-parse", "--short", "HEAD")
@@ -293,6 +312,18 @@ func TestRedeploy(t *testing.T) {
 		push(t, w, "README", "x")
 		out, err := redeploy(t, w, "main", "ON_STOP=git -C '"+w.prod+"' commit -q --allow-empty -m race")
 		restored(t, w, out, err, old)
+	})
+	t.Run("restarts the old binary when main moves past the checked commit", func(t *testing.T) {
+		w := setup(t)
+		old := read(filepath.Join(w.prod, "bin/yoicks"))
+		push(t, w, "README", "x")
+		// during the stop: a newer commit lands, and local main is fast-forwarded to it
+		out, err := redeploy(t, w, "main", "ON_STOP=git -C '"+w.seed+"' commit -q --allow-empty -m next && git -C '"+w.seed+
+			"' push -q origin HEAD:main && git -C '"+w.prod+"' pull -q --ff-only")
+		restored(t, w, out, err, old)
+		if !strings.Contains(out, "something moved it") {
+			t.Errorf("want the moved checkout named:\n%s", out)
+		}
 	})
 	t.Run("restores the old binary when the new one isn't healthy", func(t *testing.T) {
 		w := setup(t)
