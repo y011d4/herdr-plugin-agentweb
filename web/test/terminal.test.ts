@@ -123,6 +123,16 @@ describe('terminal', () => {
     assert.match(live().textContent!, /hello 日本語/, 'the newer screen stays');
   });
 
+  it('held, it sends no queued app scroll', async () => {
+    vi.useFakeTimers();
+    term.setAppScroll(true);
+    el.dispatchEvent(new WheelEvent('wheel', { deltaY: 90, cancelable: true }));
+    term.setHeld(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    assert.equal(reqs.filter((r) => r.url.endsWith('/scroll')).length, 0);
+    vi.useRealTimers();
+  });
+
   it('renders a read that lands while it lives', async () => {
     const refreshed = term.refresh();
     reads()[0].answer(200, read[1]);
