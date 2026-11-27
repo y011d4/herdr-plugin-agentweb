@@ -40,3 +40,17 @@ export function fakeMedia(query: string, matches: boolean): (on: boolean) => Pro
     for (const fn of fns) fn({ matches: on });
   });
 }
+
+const happyDOM = (globalThis as unknown as { happyDOM: { waitUntilComplete(): Promise<void> } }).happyDOM;
+
+/** With the test's fake timers (vi.useFakeTimers): lets the promises run, then happy-dom's own tasks
+ *  (a hash change comes on a timer of its own, out of the fakes' reach), then ms pass on the app's
+ *  timers; again, with no more time, while that changed the location (a route replacing its hash). */
+export const settle = (ms = 20): Promise<void> => act(async () => {
+  for (let href = '', first = true; href !== location.href; first = false) {
+    href = location.href;
+    await vi.advanceTimersByTimeAsync(0);
+    await happyDOM.waitUntilComplete();
+    await vi.advanceTimersByTimeAsync(first ? ms : 0);
+  }
+});

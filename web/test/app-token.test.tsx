@@ -1,14 +1,14 @@
 // @vitest-environment happy-dom
 // The shell (ui/App.tsx) opened without a token: the token screen, signing in, and the reconnect
 // banner, which never shows over the token screen. The tests run in order on one started app.
-import { describe, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { StrictMode, act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { emit, store } from '../src/store.ts';
 import { App, start } from '../src/ui/App.tsx';
 import { state } from './contract.gen.ts';
-import { mantine } from './render.ts'; // and the act environment
+import { mantine, settle } from './render.ts'; // and the act environment
 
 vi.mock('../src/ws.ts', () => ({ onWsMessage: () => () => {}, wsConnect: () => {}, wsSendWatch: () => {} }));
 
@@ -22,7 +22,8 @@ async function answer(url: string, body: unknown, status = 200): Promise<void> {
   const r = reqs.find((q) => !q.answered && q.url === url);
   assert.ok(r, `no open request ${url}`);
   r.answered = true;
-  await act(async () => { r.answer(status, body); await new Promise((res) => setTimeout(res, 20)); });
+  await act(async () => r.answer(status, body));
+  await settle();
 }
 const $ = (sel: string): HTMLElement | null => document.querySelector<HTMLElement>(sel);
 const banner = (): boolean => $('#reconnect-banner')!.classList.contains('visible');
@@ -32,6 +33,8 @@ async function signIn(token: string): Promise<void> {
 }
 
 describe('App without a token', () => {
+  beforeAll(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); }); // the app's timers are the test's
+  afterAll(() => { vi.useRealTimers(); });
   it('shows the token screen without the topbar, and no banner over it while the link is down', async () => {
     document.body.innerHTML = '<div id="app"></div><div id="modal-root"></div>';
     location.hash = '#/agents';
