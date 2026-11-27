@@ -823,9 +823,17 @@ func TestHeadlessStartWithABlankTask(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "agent_start", Arguments: map[string]any{"name": "w-x", "cwd": t.TempDir(), "task": "  \n"}})
+	// a purpose too long is refused before anything starts
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "agent_start", Arguments: map[string]any{"name": "w-x", "cwd": t.TempDir(), "purpose": strings.Repeat("x", 61)}})
+	if err != nil || !res.IsError || len(calls) != 0 {
+		t.Fatalf("%v %+v %v", err, res, calls)
+	}
+	res, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: "agent_start", Arguments: map[string]any{"name": "w-x", "cwd": t.TempDir(), "task": "  \n", "purpose": " ログインを直す "}})
 	if err != nil || res.IsError || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "started w-x") || strings.Contains(res.Content[0].(*mcp.TextContent).Text, "deliver") {
 		t.Fatalf("%v %+v", err, res)
+	}
+	if got := b.srv.purposes.Purposes(); got["n1"] != "ログインを直す" {
+		t.Errorf("purposes %v", got)
 	}
 	mu.Lock()
 	defer mu.Unlock()

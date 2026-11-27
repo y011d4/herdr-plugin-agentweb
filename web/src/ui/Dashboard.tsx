@@ -26,22 +26,30 @@ function tabTitle({ pane, tabLabel, tabAgentIndex, tabAgentCount }: DashboardCar
   return tabAgentCount > 1 ? `${base} #${tabAgentIndex}` : base;
 }
 
-/** A card's label: herdr's name for the agent (the one `[yoicks]` notices use), else its tab (an
- *  agent the user runs directly has no name). */
-export function cardTitle(card: DashboardCard): string {
+/** A card's agent's name: herdr's (the one `[yoicks]` notices use), else its tab (an agent the
+ *  user runs directly has no name). */
+function cardName(card: DashboardCard): string {
   return card.pane.agent?.herdrName || tabTitle(card);
 }
 
-/** Where a card's agent runs, as far as its label doesn't say: the workspace › the tab. */
+/** A card's label: what the agent is for, as its orchestrator said, else its name. */
+export function cardTitle(card: DashboardCard): string {
+  return card.purpose || cardName(card);
+}
+
+/** The dim line under a label: where the agent runs, as far as its name doesn't say (the workspace ›
+ *  the tab); under a purpose, led by the name and the branch, which then leave the label's row to it. */
 export function cardLocation(card: DashboardCard): string {
   const tab = tabTitle(card);
-  return tab === cardTitle(card) ? card.workspaceLabel : `${card.workspaceLabel} › ${tab}`;
+  const name = cardName(card);
+  const where = tab === name ? card.workspaceLabel : `${card.workspaceLabel} › ${tab}`;
+  return card.purpose ? [name, card.branch, where].filter(Boolean).join(' · ') : where;
 }
 
 /** The agents a list or a Home shows, most recent status change first: never the orchestrators,
  *  and for an orchestrator (`scope`) only its account's agents — all of them when that isn't known. */
 export function agentCards(state: AppState | null, scope?: OrchestratorView): DashboardCard[] {
-  return dashboardCards(state?.workspaces ?? [], (state?.orchestrators ?? []).map((o) => o.paneId), scope?.agents ?? null);
+  return dashboardCards(state?.workspaces ?? [], (state?.orchestrators ?? []).map((o) => o.paneId), scope?.agents ?? null, state?.purposes);
 }
 
 /** An orchestrator's name: its configured label, else its workspace label. */
@@ -122,8 +130,10 @@ function AgentCard({ card }: { card: DashboardCard }) {
     <Card className={CARD} data-pane-id={paneId} role="button" tabIndex={0} withBorder radius={10} padding={0} px={16} py={14}
       onClick={() => openAgent(paneId)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openAgent(paneId); }}>
       <Group gap={10} wrap="nowrap" mb={6}>
-        <Text className="agent-name shrink-0" fw={600} maw="50%" truncate>{cardTitle(card)}</Text>
-        {branch ? <Text className="card-branch min-w-0" fz={13} c="dimmed" truncate>{branch}</Text> : null}
+        {card.purpose ? <Text className="agent-name min-w-0" fw={600} truncate>{card.purpose}</Text> : <>
+          <Text className="agent-name shrink-0" fw={600} maw="50%" truncate>{cardTitle(card)}</Text>
+          {branch ? <Text className="card-branch min-w-0" fz={13} c="dimmed" truncate>{branch}</Text> : null}
+        </>}
         <span className="ml-auto" />
         <StatusBadge status={status} />
       </Group>

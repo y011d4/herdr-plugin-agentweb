@@ -159,15 +159,18 @@ describe('App', () => {
     assert.equal(history.length, before + 1, 'the close went back: no entry left over');
   });
 
-  it("titles a drawer by herdr's name for its agent, else by the agent kind, with the location beside", async () => {
+  it("titles a drawer by its agent's purpose, else herdr's name for it, else the agent kind, with the name and location beside", async () => {
     await go('#/agents');
     await go('#/pane/p3');
-    assert.equal($('.agent-drawer-head .topbar-title')!.textContent, 'w-review· repo-wt-feat / feat');
+    assert.equal($('.agent-drawer-head .topbar-title')!.textContent, 'レビューの指摘を直す· w-review · repo-wt-feat / feat');
     const was = store.appState!;
     const s = structuredClone(was);
     s.workspaces.flatMap((w) => w.tabs).find((t) => t.panes.some((p) => p.paneId === 'p3'))!.label = 'w-review';
     await act(async () => push!({ type: 'state', state: s }));
-    assert.equal($('.agent-drawer-head .topbar-title')!.textContent, 'w-review· repo-wt-feat', 'a tab labelled by the name: not again');
+    assert.equal($('.agent-drawer-head .topbar-title')!.textContent, 'レビューの指摘を直す· w-review · repo-wt-feat', 'a tab labelled by the name: not again');
+    s.purposes = {};
+    await act(async () => push!({ type: 'state', state: structuredClone(s) }));
+    assert.equal($('.agent-drawer-head .topbar-title')!.textContent, 'w-review· repo-wt-feat', 'no purpose: the name');
     await act(async () => push!({ type: 'state', state: was }));
     await go('#/agents');
     await go('#/pane/p7');
@@ -287,7 +290,7 @@ describe('App', () => {
     assert.equal(location.hash, '#/pane/p3');
     const heads = document.querySelectorAll('.agent-drawer .agent-drawer-head');
     assert.equal(heads.length, 1, 'one header: none left over from the agents before');
-    assert.equal(heads[0].querySelector('.topbar-title')!.textContent, 'w-review· repo-wt-feat / feat');
+    assert.equal(heads[0].querySelector('.topbar-title')!.textContent, 'レビューの指摘を直す· w-review · repo-wt-feat / feat');
     assert.equal(document.querySelectorAll('.agent-drawer #screen-pane').length, 1, 'one body');
     assert.equal(history.length, before, 'one entry: switched in place');
     history.back(); // the phone's Back: closes it

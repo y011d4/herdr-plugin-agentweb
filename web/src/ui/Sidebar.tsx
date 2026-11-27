@@ -84,7 +84,7 @@ function Agent({ card, on }: { card: DashboardCard; on: boolean }) {
   const st = shownStatus(card.pane, store.seenDone) || 'unknown';
   return (
     <NavLink component="button" className="rounded-lg" data-sidebar-pane={paneId} noWrap pl={28}
-      label={<>{cardTitle(card)}{card.branch ? <Text span className="card-branch" fz={13} c="dimmed">{` ${card.branch}`}</Text> : null}</>}
+      label={<>{cardTitle(card)}{card.branch && !card.purpose ? <Text span className="card-branch" fz={13} c="dimmed">{` ${card.branch}`}</Text> : null}</>}
       description={cardLocation(card)}
       rightSection={<StatusBadge status={st} small />} active={on} aria-current={current(on)}
       onClick={() => openAgent(paneId)} />

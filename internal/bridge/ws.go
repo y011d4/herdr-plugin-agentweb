@@ -116,6 +116,7 @@ func (s *server) broadcastState() {
 	for _, h := range s.headless { // a worker gone ends its watch
 		h.dropGone(st)
 	}
+	s.purposes.Prune(st) // and its purpose
 	msg, err := marshalRaw(WsStateMessage{Type: "state", State: s.clientState(st)})
 	if err != nil || bytes.Equal(msg, s.lastState) {
 		return

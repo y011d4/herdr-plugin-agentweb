@@ -353,6 +353,8 @@ type ClientState struct {
 	OrchestratorPaneID *string `json:"orchestratorPaneId"`
 	// the last check of Claude Code's headless mode; null when none has run
 	ClaudeCheck *ClaudeCheck `json:"claudeCheck"`
+	// what each worker is for (pane id → one line its orchestrator gave; purpose.go): never null
+	Purposes map[string]string `json:"purposes"`
 }
 
 // ClaudeCheck is the last periodic check of Claude Code's headless mode: what

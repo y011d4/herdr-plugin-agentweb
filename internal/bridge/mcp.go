@@ -129,12 +129,14 @@ type readIn struct {
 }
 
 type promptIn struct {
-	Name string `json:"name" jsonschema:"the agent's name (or pane id)"`
-	Text string `json:"text" jsonschema:"what to send it (/exit ends it)"`
+	Name    string `json:"name" jsonschema:"the agent's name (or pane id)"`
+	Text    string `json:"text" jsonschema:"what to send it (/exit ends it)"`
+	Purpose string `json:"purpose,omitempty" jsonschema:"only when this hands it different work: its new purpose (as agent_start's); left out, it keeps the one it has"`
 }
 
 type startIn struct {
 	Name     string `json:"name" jsonschema:"the new worker's name: a short english description (fix-login-redirect)"`
+	Purpose  string `json:"purpose,omitempty" jsonschema:"what it is for, in the user's language: one short line (at most 60 characters) the user's agents list shows over its name"`
 	Cwd      string `json:"cwd" jsonschema:"the directory (repository) it works in"`
 	Profile  string `json:"profile,omitempty" jsonschema:"a launch profile (default claude)"`
 	Worktree string `json:"worktree,omitempty" jsonschema:"a branch: start it in a new worktree of the repository at cwd"`
@@ -254,9 +256,14 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 			text, _ := paneReadText(raw).(string)
 			return textResult(text, false), nil, nil
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "agent_prompt", Description: "Send one of your account's agents a message (a task, a follow-up, /exit). Don't wait for it: a [yoicks] message wakes you when it finishes or stops for an answer."},
+	mcp.AddTool(s, &mcp.Tool{Name: "agent_prompt", Description: "Send one of your account's agents a message (a task, a follow-up, /exit). Don't wait for it: a [yoicks] message wakes you when it finishes or stops for an answer. " +
+		"Handing a worker different work, give its new purpose too."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in promptIn) (*mcp.CallToolResult, any, error) {
 			r.log("tool agent_prompt %s", in.Name)
+			purpose, err := checkPurpose(in.Purpose)
+			if err != nil {
+				return errResult(err)
+			}
 			if strings.TrimSpace(in.Text) == "" {
 				return r.prompt("", in.Name, in.Text, epochOf(ctx)), nil, nil // its error, before any herdr call
 			}
@@ -264,11 +271,19 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 			if err != nil {
 				return errResult(err)
 			}
+			if purpose != "" {
+				r.purposes.Set(pane, purpose)
+			}
 			return r.prompt(pane, in.Name, in.Text, epochOf(ctx)), nil, nil
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "agent_start", Description: "Start a worker from a launch profile in a directory of your account (a new tab where a workspace is already at it, else a new workspace), or in a new worktree of the repository there; optionally send it its first task."},
+	mcp.AddTool(s, &mcp.Tool{Name: "agent_start", Description: "Start a worker from a launch profile in a directory of your account (a new tab where a workspace is already at it, else a new workspace), or in a new worktree of the repository there; optionally send it its first task. " +
+		"Give it a purpose: the user's agents list shows it over the worker's name."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in startIn) (*mcp.CallToolResult, any, error) {
 			r.log("tool agent_start %s", in.Name)
+			purpose, err := checkPurpose(in.Purpose)
+			if err != nil {
+				return errResult(err)
+			}
 			opt := map[string]string{"cwd": in.Cwd}
 			for k, v := range map[string]string{"profile": in.Profile, "worktree": in.Worktree, "base": in.Base} {
 				if v != "" {
@@ -282,6 +297,7 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 			if err != nil {
 				return errResult(err)
 			}
+			r.purposes.Set(pane, purpose) // none: a reused pane's old one goes too
 			if strings.TrimSpace(in.Task) == "" {
 				return textResult(started, false), nil, nil
 			}
