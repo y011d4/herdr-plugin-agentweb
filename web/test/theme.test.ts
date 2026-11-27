@@ -1,5 +1,6 @@
 // theme.ts against the CSS: Mantine's breakpoints are Tailwind's (app.css), and its colors style.css's.
 import { readFileSync } from 'node:fs';
+import { rem, type MantineTheme } from '@mantine/core';
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import { WIDE_QUERY, theme } from '../src/theme.ts';
@@ -21,6 +22,17 @@ describe('theme', () => {
       [dark[0], dark[2], dark[4], dark[6], dark[7], dark[8], theme.colors!.accent![0]],
       [color.text, color['text-dim'], color.border, color['surface-2'], color.surface, color.bg, color.accent],
     );
+  });
+
+  it("makes a button given no size, and an input at its default (sm), style.css's touch target tall", () => {
+    const touch = rem(css('style.css').match(/--touch-min:\s*([\d.]+px);/)![1]);
+    const vars = (name: 'Button' | 'Input', size?: string): unknown =>
+      theme.components![name].vars!(theme as MantineTheme, { size } as never, {} as never);
+    assert.deepEqual(vars('Button'), { root: { '--button-height': touch, '--button-fz': 'var(--mantine-font-size-md)' } });
+    assert.deepEqual(vars('Input', 'sm'), { wrapper: { '--input-height': touch, '--input-fz': rem(16) } });
+    // any other size is Mantine's own
+    assert.deepEqual(vars('Button', 'compact-sm'), { root: {} });
+    assert.deepEqual(vars('Input', 'xs'), { wrapper: {} });
   });
 
   it("has the PC layout's width as style.css's last block and the lg breakpoint", () => {
