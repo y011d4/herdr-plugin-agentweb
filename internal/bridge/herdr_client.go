@@ -36,6 +36,7 @@ const (
 	// short, so the seq reaches the phone with (or right after) the done status itself:
 	// the phone records a "seen" only against a known seq
 	completionSeqDebounce   = 50 * time.Millisecond
+	agentListRetry          = 2 * time.Second
 	worktreeRefreshInterval = 30 * time.Second
 )
 
@@ -166,6 +167,7 @@ type HerdrClient struct {
 	completionT   debounce
 	listSent      int64 // agent.list requests sent, and the number of the one whose answer was applied last:
 	listApplied   int64 // an older answer is dropped (a count, not the clock, which can step back)
+	listRetried   bool  // a failed agent.list was asked again once (until one succeeds)
 	coverageEpoch int // bumped whenever live event coverage is lost
 	// pane IDs covered by the currently acknowledged subscription; snapshot status
 	// replays skip these (live events deliver their changes) and cover the rest
@@ -745,9 +747,19 @@ func (c *HerdrClient) refreshCompletionSeqsSoon() {
 			res, err := herdrRPC(c.socketPath, "agent.list", nil)
 			c.post(func() {
 				// coverage lost meanwhile: the reconnect snapshot schedules a fresh fetch
-				if err != nil || c.destroyed || c.cur == nil || !c.cur.Connected || epoch != c.coverageEpoch {
+				if c.destroyed || c.cur == nil || !c.cur.Connected || epoch != c.coverageEpoch {
 					return
 				}
+				// failed: asked again once, a while later (or the names and seqs would wait for the
+				// next status change or snapshot)
+				if err != nil {
+					if !c.listRetried {
+						c.listRetried = true
+						time.AfterFunc(agentListRetry, func() { c.post(c.refreshCompletionSeqsSoon) })
+					}
+					return
+				}
+				c.listRetried = false
 				var r struct {
 					Agents []RawAgentSeqs `json:"agents"`
 				}
