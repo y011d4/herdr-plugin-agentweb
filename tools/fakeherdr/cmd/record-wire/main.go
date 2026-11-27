@@ -6,7 +6,8 @@
 // re-record only for an intended change of behavior, and review the diff.
 //
 // Everything lives in a fresh temp dir (state, config, data, HOME, a scratch git repo
-// with an origin) and the bridge listens on 127.0.0.1:8392. The account checks read
+// with an origin) and the bridge listens on 127.0.0.1:8392 (the WS watches run on bridges
+// of their own, on free ports, beside it). The account checks read
 // /proc, so two `sleep` processes stand in for agents: one with the default account
 // (HOME's), one with another CLAUDE_CONFIG_DIR. Fake `herdr` and `gh` CLIs come first
 // on PATH, so the CLI's pass-through calls are logged instead of run, and so do fakes
@@ -26,6 +27,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -34,6 +36,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,7 +47,8 @@ import (
 	"github.com/y011d4/herdr-yoicks/tools/fakeherdr"
 )
 
-// the bridge's port and where the recordings go (main_test.go repoints both)
+// the bridge's port (the WS watches' bridges take free ones: run) and where the recordings
+// go (main_test.go repoints both)
 var (
 	port   = "8392"
 	outDir = filepath.Join("testdata", "wire")
@@ -53,6 +57,10 @@ var (
 // goBin is the yoicks recorded, as `yoicks serve` and its commands: main
 // builds it, main_test.go its own.
 var goBin string
+
+// expected, when set (main_test.go), is the number of herdr requests an operation was
+// recorded with (testdata/wire); settle then waits for that many.
+var expected func(op string) (n int, ok bool)
 
 func main() {
 	_ = os.MkdirAll(outDir, 0o755)
@@ -332,27 +340,33 @@ type cliCall struct {
 }
 
 type recorder struct {
+	port    string // its bridge's
 	s       *session
 	srv     *fakeherdr.Server
 	token   string
 	baseEnv []string
 	norm    func(string) string
+	// how many herdr requests the operations so far took: each operation's start where the
+	// last one's ended, so every request after the startup lookups goes to one
+	taken int
 }
 
-// settle covers the client's debounces (250 ms) and agent.list's (50 ms) after an op.
-const settle = 700 * time.Millisecond
+// settleTime covers the client's debounces (250 ms) and agent.list's (50 ms) after an op.
+const settleTime = 700 * time.Millisecond
 
-func (r *recorder) op(name string, f func(rec *record) error) error {
+// op records operation name; timed: it ends with settleTime even when comparing (settle).
+func (r *recorder) op(name string, timed bool, f func(rec *record) error) error {
 	r.s.reset()
 	logPath := filepath.Join(r.s.tmp, "cli.log")
 	_ = os.Remove(logPath)
-	mark := len(r.srv.Requests())
+	mark := r.taken
 	rec := &record{Op: name}
 	if err := f(rec); err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}
-	time.Sleep(settle)
-	rec.Herdr = r.srv.Requests()[mark:]
+	r.settle(name, mark, timed)
+	reqs := r.srv.Requests()
+	rec.Herdr, r.taken = reqs[mark:], len(reqs)
 	if b, err := os.ReadFile(logPath); err == nil {
 		rec.HerdrCLI = strings.Split(strings.TrimSpace(string(b)), "\n")
 	}
@@ -362,6 +376,27 @@ func (r *recorder) op(name string, f func(rec *record) error) error {
 	return os.WriteFile(filepath.Join(outDir, name+".json"), []byte(out), 0o644)
 }
 
+// settle waits for an operation's last herdr requests, those the bridge sends after its answer
+// (a debounced agent.list, a task delivered once its agent is up). Recording, settleTime.
+// Comparing, until as many as recorded have come: a late extra one then lands in a later
+// operation's requests (taken), whose comparison fails, so nothing goes unseen; that one
+// may be innocent. Not for a timed one: a WS watch (its polls run on the bridge's own timer,
+// compared as sets) and the last operation (no later one to show an extra).
+func (r *recorder) settle(name string, mark int, timed bool) {
+	n, ok := 0, false
+	if expected != nil && !timed {
+		n, ok = expected(name)
+	}
+	if !ok {
+		time.Sleep(settleTime)
+		return
+	}
+	// too few by then: the comparison says which
+	for end := time.Now().Add(10 * time.Second); len(r.srv.Requests())-mark < n && time.Now().Before(end); {
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func (r *recorder) http(rec *record, method, path string, body any) error {
 	var rd io.Reader
 	var raw json.RawMessage
@@ -369,7 +404,7 @@ func (r *recorder) http(rec *record, method, path string, body any) error {
 		raw, _ = json.Marshal(body)
 		rd = bytes.NewReader(raw)
 	}
-	req, _ := http.NewRequest(method, "http://127.0.0.1:"+port+path, rd)
+	req, _ := http.NewRequest(method, "http://127.0.0.1:"+r.port+path, rd)
 	req.Header.Set("Authorization", "Bearer "+r.token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -417,7 +452,48 @@ func (r *recorder) cli(rec *record, extraEnv []string, args ...string) error {
 	return nil
 }
 
+// run records every operation. The WS watches poll on the bridge's own timers for seconds,
+// so each runs on a bridge (with its fake herdr and dirs) of its own on a free port, beside
+// the rest on port: they only read p1 and its transcript, which no other operation changes.
 func run() error {
+	picks := []func(op string) bool{
+		func(op string) bool { return !strings.HasPrefix(op, "ws-") },
+		func(op string) bool { return op == "ws-watch-pane" },
+		func(op string) bool { return op == "ws-watch-transcript" },
+	}
+	// each listener held until all are picked, so none comes twice (port isn't held: skipped)
+	ports, held := []string{port}, []net.Listener{}
+	for len(ports) < len(picks) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			break
+		}
+		held = append(held, ln)
+		if _, p, _ := net.SplitHostPort(ln.Addr().String()); !slices.Contains(ports, p) {
+			ports = append(ports, p)
+		}
+	}
+	for _, ln := range held {
+		ln.Close()
+	}
+	if len(ports) < len(picks) {
+		return fmt.Errorf("no free ports for the WS watches' bridges")
+	}
+	errs := make([]error, len(picks))
+	var wg sync.WaitGroup
+	for i, pick := range picks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = runGroup(ports[i], pick)
+		}()
+	}
+	wg.Wait()
+	return errors.Join(errs...)
+}
+
+// runGroup records the operations pick takes, through a bridge on port.
+func runGroup(port string, pick func(op string) bool) error {
 	bridge := exec.Command(goBin, "serve")
 	tmp, err := os.MkdirTemp("", "fw")
 	if err != nil {
@@ -470,7 +546,7 @@ func run() error {
 	defer bridge.Process.Kill()
 	exited := make(chan struct{})
 	go func() { _ = bridge.Wait(); close(exited) }()
-	if err := waitConnected(srv, exited); err != nil {
+	if err := waitConnected(srv, port, exited); err != nil {
 		b, _ := os.ReadFile(filepath.Join(tmp, "bridge.log"))
 		return fmt.Errorf("%w; bridge log: %s", err, b)
 	}
@@ -478,8 +554,20 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	// let the startup lookups (agent.list, each agent pane's account) finish
-	time.Sleep(time.Second)
+	// the startup lookups come before the first operation
+	agents := 0
+	for _, p := range s.snapshot()["panes"].([]map[string]any) {
+		if p["agent"] != nil {
+			agents++
+		}
+	}
+	startup := srv.Requests()
+	for end := time.Now().Add(10 * time.Second); !startupDone(startup, agents); startup = srv.Requests() {
+		if time.Now().After(end) {
+			return fmt.Errorf("the bridge's startup lookups never finished: %v", startup)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	tsRe := regexp.MustCompile(`\b(claude|codex|opencode|agent)-[0-9a-z]{8}\b`)
 	agoRe := regexp.MustCompile(`last activity \d+[smhd] ago`)
@@ -492,13 +580,30 @@ func run() error {
 		t = tsRe.ReplaceAllString(t, "$1-<time>")
 		return agoRe.ReplaceAllString(t, "last activity <ago>")
 	}
-	r := &recorder{s: s, srv: srv, token: strings.TrimSpace(string(tok)), baseEnv: baseEnv, norm: norm}
-	return recordAll(r)
+	r := &recorder{port: port, s: s, srv: srv, token: strings.TrimSpace(string(tok)), baseEnv: baseEnv, norm: norm,
+		taken: len(startup)} // anything after them goes to the first operation
+	return recordAll(r, pick)
+}
+
+// startupDone: the bridge's startup lookups are in: each agent pane's account
+// (pane.process_info) and the agent.list after the snapshot that follows the subscription's ack.
+func startupDone(reqs []fakeherdr.Request, agents int) bool {
+	accounts, stage := 0, 0 // stage: 1 subscribed, 2 its snapshot, 3 that one's agent.list
+	for _, q := range reqs {
+		switch {
+		case q.Method == "pane.process_info":
+			accounts++
+		case q.Method == "events.subscribe" && stage == 0, q.Method == "session.snapshot" && stage == 1,
+			q.Method == "agent.list" && stage == 2:
+			stage++
+		}
+	}
+	return accounts >= agents && stage == 3
 }
 
 // waitConnected waits until our bridge (still running) reports itself connected and
 // our fake herdr has its subscription.
-func waitConnected(srv *fakeherdr.Server, exited <-chan struct{}) error {
+func waitConnected(srv *fakeherdr.Server, port string, exited <-chan struct{}) error {
 	for i := 0; i < 200; i++ {
 		select {
 		case <-exited:
@@ -521,12 +626,15 @@ func waitConnected(srv *fakeherdr.Server, exited <-chan struct{}) error {
 	return fmt.Errorf("the bridge never connected to the fake herdr")
 }
 
-func recordAll(r *recorder) error {
+type operation struct {
+	name string
+	f    func(*record) error
+}
+
+// recordAll records the operations pick takes, in order.
+func recordAll(r *recorder, pick func(op string) bool) error {
 	large := strings.Repeat("0123456789abcdef", 1024) // 16 KiB
-	ops := []struct {
-		name string
-		f    func(*record) error
-	}{
+	ops := []operation{
 		// sending a message: Ctrl+U ×30 (send_text) to clear the composer, then text + enter in one send_input
 		{"input-clear-single-line", func(rec *record) error {
 			return r.http(rec, "POST", "/api/panes/p1/input", map[string]any{"text": "hello", "enter": true, "clear": true})
@@ -600,7 +708,7 @@ func recordAll(r *recorder) error {
 		}},
 		{"profiles", func(rec *record) error { return r.http(rec, "GET", "/api/profiles", nil) }},
 		{"unauthorized", func(rec *record) error {
-			res, err := http.Get("http://127.0.0.1:" + port + "/api/state")
+			res, err := http.Get("http://127.0.0.1:" + r.port + "/api/state")
 			if err != nil {
 				return err
 			}
@@ -672,20 +780,22 @@ func recordAll(r *recorder) error {
 		{"cli-stop-not-running", func(rec *record) error { return r.cli(rec, nil, "stop") }},
 		{"cli-qr", func(rec *record) error { return r.cli(rec, nil, "qr") }},
 	}
-	for _, o := range ops {
-		if err := r.op(o.name, o.f); err != nil {
+	ops = slices.DeleteFunc(ops, func(o operation) bool { return !pick(o.name) })
+	for i, o := range ops {
+		if err := r.op(o.name, strings.HasPrefix(o.name, "ws-") || i == len(ops)-1, o.f); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// ws opens /ws, sends start, keeps it open for ~2.5 s (three 800 ms pane polls / the
-// transcript's first resolve and two 1 s ticks), sends stop and closes.
+// ws opens /ws, sends start once the connect-time state has come, keeps it open for ~2.5 s
+// (three 800 ms pane polls / the transcript's first resolve and two 1 s ticks), sends stop
+// and closes.
 func (r *recorder) ws(rec *record, start, stop string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	c, _, err := websocket.Dial(ctx, "ws://127.0.0.1:"+port+"/ws?token="+r.token, nil)
+	c, _, err := websocket.Dial(ctx, "ws://127.0.0.1:"+r.port+"/ws?token="+r.token, nil)
 	if err != nil {
 		return err
 	}
@@ -693,6 +803,8 @@ func (r *recorder) ws(rec *record, start, stop string) error {
 	c.SetReadLimit(1 << 20)
 	var mu sync.Mutex
 	var got []string
+	connected := make(chan struct{})
+	var once sync.Once
 	go func() {
 		for {
 			_, msg, err := c.Read(ctx)
@@ -704,6 +816,7 @@ func (r *recorder) ws(rec *record, start, stop string) error {
 			}
 			_ = json.Unmarshal(msg, &m)
 			if m.Type == "state" {
+				once.Do(func() { close(connected) })
 				continue // the full state on connect; covered by the contract fixtures
 			}
 			mu.Lock()
@@ -711,7 +824,11 @@ func (r *recorder) ws(rec *record, start, stop string) error {
 			mu.Unlock()
 		}
 	}()
-	time.Sleep(300 * time.Millisecond) // the connect-time state push first
+	select {
+	case <-connected:
+	case <-ctx.Done():
+		return fmt.Errorf("no state on connect")
+	}
 	_ = c.Write(ctx, websocket.MessageText, []byte(start))
 	time.Sleep(2500 * time.Millisecond)
 	_ = c.Write(ctx, websocket.MessageText, []byte(stop))

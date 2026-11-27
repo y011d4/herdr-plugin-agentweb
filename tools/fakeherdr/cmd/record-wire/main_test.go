@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/y011d4/herdr-yoicks/tools/fakeherdr"
@@ -23,15 +24,20 @@ const repoRoot = "../../../.."
 // testdata/README.md).
 func TestGoMatchesWireRecordings(t *testing.T) {
 	if testing.Short() {
-		t.Skip("drives a real bridge for ~40 s")
+		t.Skip("drives real bridges for ~5 s")
 	}
 	if runtime.GOOS != "linux" {
 		// recorded on Linux, where the account checks read /proc (elsewhere a clear skips them)
 		t.Skip("the recordings and the stand-in agents need Linux /proc")
 	}
+	t.Parallel() // beside TestGoLifecycleCommands: their own dirs, ports and fake herdrs
 	bin := buildYoicks(t)
-	defer func(p, o, b string) { port, outDir, goBin = p, o, b }(port, outDir, goBin)
+	defer func(p, o, b string, e func(string) (int, bool)) { port, outDir, goBin, expected = p, o, b, e }(port, outDir, goBin, expected)
 	port, outDir, goBin = freePort(t), t.TempDir(), bin
+	expected = func(op string) (int, bool) {
+		r, err := loadRecord(filepath.Join(repoRoot, "testdata", "wire", op+".json"))
+		return len(r.Herdr), err == nil
+	}
 	if err := run(); err != nil {
 		t.Fatal(err)
 	}
@@ -65,29 +71,50 @@ func TestGoMatchesWireRecordings(t *testing.T) {
 	}
 }
 
-// buildYoicks builds the Go yoicks into a temp dir (named yoicks: the
-// CLI knows a bridge by that name).
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if yoicksDir != "" {
+		os.RemoveAll(yoicksDir)
+	}
+	os.Exit(code)
+}
+
+// the Go yoicks, built once for the package into yoicksDir (TestMain removes it)
+var (
+	yoicksOnce sync.Once
+	yoicksDir  string
+	yoicksErr  error
+)
+
+// buildYoicks builds the Go yoicks (named yoicks: the CLI knows a bridge by that name).
 func buildYoicks(t *testing.T) string {
 	t.Helper()
-	// go test caches a pass by the files the test itself looked at, and the build
-	// below reads the sources in another process: stat them here, so a change to any
-	// of them reruns the test
-	filepath.WalkDir(repoRoot, func(p string, d os.DirEntry, err error) error {
-		if d != nil && d.IsDir() && slices.Contains([]string{".git", "node_modules", "dist", "testdata"}, d.Name()) {
-			return filepath.SkipDir
+	yoicksOnce.Do(func() {
+		// go test caches a pass by the files the test itself looked at, and the build
+		// below reads the sources in another process: stat them here, so a change to any
+		// of them reruns the test
+		filepath.WalkDir(repoRoot, func(p string, d os.DirEntry, err error) error {
+			if d != nil && d.IsDir() && slices.Contains([]string{".git", "node_modules", "dist", "testdata"}, d.Name()) {
+				return filepath.SkipDir
+			}
+			if err == nil && !d.IsDir() {
+				os.Stat(p)
+			}
+			return nil
+		})
+		if yoicksDir, yoicksErr = os.MkdirTemp("", "record-wire-yoicks"); yoicksErr != nil {
+			return
 		}
-		if err == nil && !d.IsDir() {
-			os.Stat(p)
+		build := exec.Command("go", "build", "-o", filepath.Join(yoicksDir, "yoicks"), "./cmd/yoicks")
+		build.Dir = repoRoot
+		if out, err := build.CombinedOutput(); err != nil {
+			yoicksErr = fmt.Errorf("%v\n%s", err, out)
 		}
-		return nil
 	})
-	bin := filepath.Join(t.TempDir(), "yoicks")
-	build := exec.Command("go", "build", "-o", bin, "./cmd/yoicks")
-	build.Dir = repoRoot
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("building yoicks: %v\n%s", err, out)
+	if yoicksErr != nil {
+		t.Fatalf("building yoicks: %v", yoicksErr)
 	}
-	return bin
+	return filepath.Join(yoicksDir, "yoicks")
 }
 
 func freePort(t *testing.T) string {
