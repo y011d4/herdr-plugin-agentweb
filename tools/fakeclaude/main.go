@@ -19,7 +19,9 @@
 //	crash     exit 1 mid-turn
 //	garbage N N lines (default 1) that aren't JSON, then the reply
 //	unknown   an event of a type Claude Code doesn't have, then the reply
-//	ask       an AskUserQuestion tool_use, then its permission call (approve) and the decision as the tool_result
+//	ask [N]   words to the user (a narration block), an AskUserQuestion of N (1-4) questions, then its
+//	          permission call (approve) and the decision as the tool_result
+//	askhold [N] the same, held between the tool_use and the permission call until a SIGUSR1
 //	askstdio  the same through a can_use_tool control_request instead (the route yoicks warns about)
 //	asknoroute an AskUserQuestion tool_use that never reaches the permission tool
 //	tool      call the yoicks overview tool; call <tool> <json args> any one: its text is the reply
@@ -331,8 +333,8 @@ func (f *fake) turn(q queued) {
 		}
 	case "unknown":
 		f.emit(map[string]any{"type": "mystery_event", "session_id": f.id})
-	case "ask":
-		f.askMCP(ctx)
+	case "ask", "askhold":
+		f.askMCP(ctx, seconds, word == "askhold")
 	case "asknoroute": // the question in the stream, never through the permission tool
 		f.emit(assistant([]any{map[string]any{"type": "tool_use", "id": "toolu_lost", "name": "AskUserQuestion", "input": map[string]any{"questions": []any{}}}}))
 	case "askstdio":

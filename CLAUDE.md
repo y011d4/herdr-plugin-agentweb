@@ -179,7 +179,7 @@ All in `internal/bridge/` (one package):
   are the CLI's orchestrator commands as functions (`overview`, `agent_get`, `agent_read`, `agent_prompt`, `agent_start`,
   `worktree_remove`), confined to the account its child runs under; `approve` is the child's
   `--permission-prompt-tool`: AskUserQuestion becomes state `headless.pending` (answered by
-  `POST …/answer`; a `/send` meanwhile answers it with its text, a free-text answer: a refusal reaches the model as an error), held open with progress, anything
+  `POST …/answer`: the panel's "Type something." is a question's own answer, its "Chat about this" (`{chat}`) refuses it with Claude Code's words; a `/send` meanwhile is written, then refuses it the same way), held open with progress, anything
   else is denied unasked. `agent_prompt` watches the worker (one goroutine, herdr's waits on a
   closable no-deadline connection, `HerdrClient.Wait`) and wakes the orchestrator with `[yoicks]
   <worker>: <from> → <to>` (names and status only, 3 s coalesced); the watches are saved and
@@ -397,6 +397,11 @@ vendor-neutrality is preserved.
   (`prompt`: string or content blocks); if it waits for the turn to end (`dequeue`) it
   becomes a normal `user` line. `normalizeLine` maps the human `queued_command` to a
   user item; `task-notification` / `peer` queued commands stay hidden (verified live).
+- **What the model says between tool calls can be a `thinking` block** (narration: the
+  explanation before a question, say). Only its `signature` tells it from thinking: base64
+  protobuf whose string at field 2 → 1 → 8 is `"narration"` (`"thinking"` otherwise; Claude Code
+  2.1.322's classifier, seen in a real session 11-27). `normalizeLine` makes it an assistant
+  item (`narration`), so the Home shows it; as thinking it was hidden.
 - The tailer reads new bytes from a byte cursor that always sits on a newline
   boundary (safe for multi-byte UTF-8); a trailing partial line is left for the
   next read. WS `watch_transcript` re-resolves the session id each tick so a
