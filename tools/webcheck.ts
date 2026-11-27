@@ -520,6 +520,7 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
   const shell = needs.has('shell') ? await newTab(c, ws, 'wc-shell') : '';
   const less = needs.has('less') ? await newTab(c, ws, 'wc-less') : '';
   const stop = needs.has('stop') ? await newTab(c, ws, 'wc-stop') : ''; // a shell for P15 to stop
+  const probe = needs.has('probe') ? await newTab(c, ws, 'wc-probe') : ''; // a second agent, for P18 to move above wc-less
   for (const id of [...c.rec.workspaces, ...c.rec.tabs, ...c.rec.panes]) {
     try { guard(c.rec, id); } catch { throw env(`wc- label not found for ${id}`); }
   }
@@ -531,7 +532,7 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     try { guard({ ...c.rec, tabs: [real.tab_id] }, real.tab_id); } catch { refused = true; }
     if (!refused) throw env(`guard accepted the non-wc- tab ${real.tab_id}`);
   }
-  for (const p of [shell, less, stop].filter(Boolean)) {
+  for (const p of [shell, less, stop, probe].filter(Boolean)) {
     if ((await waitFn(() => screen(p).trim(), 15_000, 300)).timeout) throw env(`no shell prompt in ${p}`);
   }
   if (shell) mutate(c.rec, shell, ['pane', 'run', shell, 'seq 1 3000; echo wc-A']);
@@ -548,6 +549,11 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     if (st.timeout) throw env('report-agent not reflected');
     const rd = await waitFn(async () => (await api(c, 'GET', `/api/panes/${enc(less)}/read?source=visible&lines=200&format=ansi`)).appScroll === true, 10_000, 300);
     if (rd.timeout) throw env('no appScroll pane');
+  }
+  if (probe) {
+    c.rec.reported.push(probe);
+    save(c.rec);
+    mutate(c.rec, probe, ['pane', 'report-agent', '--source', 'webcheck', '--agent', 'claude', '--state', 'idle', probe]);
   }
   if (shell && (await waitFn(() => /^wc-A$/m.test(screen(shell)), 15_000, 300)).timeout) throw env('wc-shell output missing');
   if (needs.has('claude')) {
@@ -1095,7 +1101,7 @@ async function p15(c: Ctx) {
 }
 
 /** P18: the list (390x400) under state pushes, each a rename of wc-less's tab (wc- kept), so its card changes:
- *  scrolled to 200px the scroller keeps its node and scrollTop; a finger down (moved 50px) holds every card until
+ *  scrolled to 200px the scroller keeps its node and scrollTop, also when wc-probe's change reorders the cards; a finger down (moved 50px) holds every card until
  *  it lifts; a still tap on wc-less's card with a push arriving while the finger is down still opens it. */
 async function p18(c: Ctx) {
   const { pg, rec } = c;
@@ -1125,6 +1131,25 @@ async function p18(c: Ctx) {
     const [top1, same] = await pg.ev(`[${SC}.scrollTop, ${SC} === window.__wcSc]`);
     result(c, top0 === 200 && p1 && Math.abs(top1 - top0) <= 1 && same, 'P18.scroll', `push=${p1},scrollTop=${top0}->${top1},sameNode=${same}`,
       'scrolled to 200px, a state push keeps #screen-agents (same node) and its scrollTop (+-1px)');
+
+    // a push that reorders the cards keeps it too: wc-less first and just above the top edge, wc-probe under it
+    // becomes the newest change and moves above it. Chrome's scroll anchoring (none in Safari) would scroll the list
+    // after the card it anchored on.
+    const probe = rec.names.probe;
+    const PROBE = `document.querySelector('.agent-card[data-pane-id=${js(probe)}]')`;
+    const before = (a: string, b: string) => `!!${a} && !!${b} && !!(${a}.compareDocumentPosition(${b}) & Node.DOCUMENT_POSITION_FOLLOWING)`;
+    await reportLess(c, 'working');
+    const up = await pg.until(before(CARD, PROBE), 5000);
+    const top2 = await pg.ev(`(() => { const s = ${SC};
+      s.scrollTop = ${CARD}.getBoundingClientRect().top - s.getBoundingClientRect().top + s.scrollTop + 44; return s.scrollTop; })()`);
+    await sleep(300);
+    mutate(rec, probe, ['pane', 'report-agent', '--source', 'webcheck', '--agent', 'claude', '--state', 'working', probe]);
+    const moved = await pg.until(before(PROBE, CARD), 5000);
+    await sleep(300);
+    const [top3, same3] = await pg.ev(`[${SC}.scrollTop, ${SC} === window.__wcSc]`);
+    await reportLess(c, 'idle');
+    result(c, !up.timeout && !moved.timeout && Math.abs(top3 - top2) <= 1 && same3, 'P18.reorder', `order=${!up.timeout && !moved.timeout},scrollTop=${top2}->${top3},sameNode=${same3}`,
+      "wc-less first, scrolled 44px into its card: wc-probe under it reported working moves above it within 5s, and #screen-agents keeps its node and scrollTop (+-1px)");
 
     // a finger down and moved 50px: a push changes nothing in the list until it lifts
     const p = await pg.at(CARD);
@@ -1937,7 +1962,7 @@ const ITEMS: Item[] = [
   { id: 'P17', tier: 1, run: p17 },
   { id: 'P16', tier: 1, run: p16 },
   { id: 'P7', tier: 1, needs: ['less'], run: p7 },
-  { id: 'P18', tier: 1, needs: ['less'], run: p18 },
+  { id: 'P18', tier: 1, needs: ['less', 'probe'], run: p18 },
   { id: 'W1', tier: 1, needs: ['less'], run: w1 },
   { id: 'M1', tier: 1, needs: ['less'], run: m1 },
   { id: 'M2', tier: 1, needs: ['less'], run: m2 },

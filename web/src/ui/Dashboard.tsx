@@ -88,7 +88,9 @@ export function Dashboard({ hash }: { hash: string }) {
   );
 }
 
-const SCROLLER = 'flex-1 overflow-y-auto pb-[calc(var(--safe-bottom)+8px)] min-[600px]:max-lg:mx-auto min-[600px]:max-lg:w-full min-[600px]:max-lg:max-w-[640px]';
+// no scroll anchoring: a push that reorders the cards would scroll the list after the card the browser
+// anchored on (Chrome's; Safari has none), so scrollTop holds as said above
+const SCROLLER = 'flex-1 overflow-y-auto [overflow-anchor:none] pb-[calc(var(--safe-bottom)+8px)] min-[600px]:max-lg:mx-auto min-[600px]:max-lg:w-full min-[600px]:max-lg:max-w-[640px]';
 // one column of cards, side by side from lg
 const LIST = 'agent-list mt-4 flex flex-col gap-2.5 px-4 min-[600px]:px-6 lg:grid lg:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]';
 

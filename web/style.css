@@ -706,6 +706,7 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
   #sidebar {
     grid-area: 1 / 1 / -1 / 2;
     overflow-y: auto;
+    overflow-anchor: none; /* its rows reorder with each status change: no scroll after a moved one (ui/Dashboard.tsx's SCROLLER) */
     overscroll-behavior: contain;
     padding: 0 8px 16px;
     background: var(--color-surface);
