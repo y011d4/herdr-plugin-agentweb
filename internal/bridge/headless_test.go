@@ -129,7 +129,12 @@ type hlBridge struct {
 // Send has looked for one the message was written behind; fakeclaude asks at once, and Send
 // would take its question for such a one and refuse it as Chat about this. So while a send is
 // in flight (hlBridge.send) the reader waits at a question's tool_use, and an approve call at
-// its start. A tweak's own lineHook replaces the reader's half.
+// its start and at its answer. A tweak's own lineHook replaces the reader's half.
+//
+// An interrupt with a question pending goes through it too (during): Interrupt refuses the
+// question before it writes the interrupt, and fakeclaude, answered, would end its turn done
+// before reading the interrupt, where Claude Code would be in its next API call when the
+// interrupt lands. Held until the interrupt is answered, the refusal comes after it.
 type sendGate struct {
 	mu   sync.Mutex
 	open chan struct{} // closed once the send in flight has returned; nil: none in flight

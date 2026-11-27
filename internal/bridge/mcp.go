@@ -327,6 +327,9 @@ func (r *headlessRunner) approve(ctx context.Context, req *mcp.CallToolRequest, 
 	for n := 1.0; ; n++ {
 		select {
 		case res := <-p.reply:
+			if r.approveHook != nil {
+				r.approveHook()
+			}
 			b, _ := json.Marshal(res)
 			return textResult(string(b), false), nil, nil
 		case <-ctx.Done(): // the call was cancelled (an interrupt) or its session ended

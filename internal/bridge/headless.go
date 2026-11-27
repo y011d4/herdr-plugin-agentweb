@@ -283,7 +283,7 @@ type headlessRunner struct {
 	interruptWait time.Duration
 	silence       time.Duration
 	lineHook      func([]byte) // tests: runs on each stdout line, in the reader
-	approveHook   func()       // tests: runs as an approve call begins, before its question is made
+	approveHook   func()       // tests: runs as an approve call begins (before its question is made) and as it answers
 	startedHook   func()       // tests: runs once the child has started, before spawn goes on
 	extraArgs     []string     // tests: more argv (the claudelive test's --model haiku); never set in production
 
