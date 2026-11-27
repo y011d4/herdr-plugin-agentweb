@@ -19,15 +19,17 @@ import { useMediaQuery } from '@mantine/hooks';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { closeAgent } from '../nav.ts';
 import { WIDE_QUERY } from '../theme.ts';
-import { AgentMenu, Pane, PaneTitle, ViewToggle, type AgentActions } from './Pane.tsx';
+import { AgentMenu, agentMenuOpen, Pane, PaneTitle, ViewToggle, type AgentActions } from './Pane.tsx';
 
 /** The pane on show (ui/App.tsx): `key` is new for each pane route (a fresh view); a closing drawer
  *  keeps its last pane, its view stopped, until it is gone. `opener`: what had the focus as it opened, and
  *  the pane it opened then (`openedPane`: pane to pane keeps both). */
 export interface Sheet { paneId: string; key: number; open: boolean; opener: HTMLElement | null; openedPane: string }
 
-// Another layer over the drawer: a dialog of Modals.tsx (Mantine's Modal) or ⋮'s menu.
-const OTHER_LAYER = '[data-modal-backdrop], [data-menu-dropdown]';
+// Another layer over the drawer: a dialog of Modals.tsx (Mantine's Modal), or ⋮'s menu while open (its
+// state, not its dropdown in the DOM: that stays through its closing transition, and takes the focus only a
+// moment after it opens).
+const otherLayer = (): boolean => agentMenuOpen || !!document.querySelector('[data-modal-backdrop]');
 
 // The content's one child, in place of Mantine's scroll area (100vh tall): a column the pane fills.
 const Fill = ({ children }: { children?: ReactNode }) => <div className="agent-drawer-fill">{children}</div>;
@@ -53,7 +55,7 @@ export function AgentDrawer({ sheet, actions }: { sheet: Sheet | null; actions: 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && !e.isComposing && !document.querySelector(OTHER_LAYER)) closeAgent();
+      if (e.key === 'Escape' && !e.isComposing && !otherLayer()) closeAgent();
     };
     // capture, as Mantine's: before a layer over it closes on the same key
     addEventListener('keydown', onKey, true);

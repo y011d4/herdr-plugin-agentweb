@@ -1192,18 +1192,25 @@ async function p4t1(c: Ctx) {
     other = await pg.cdp.send('Target.createTarget', { url: 'about:blank' });
     await pg.cdp.send('Target.activateTarget', { targetId: other!.targetId });
     if ((await pg.until('document.hidden', 3000)).timeout) throw env('could not hide the page');
+    // The evidence for a miss (it came once in 7 runs, then not in 40): wc-less before the report (already blocked:
+    // herdr sends no event), the pushes that reached the page, the page notifications the app fell back to (not in
+    // getNotifications), the service worker's state, and the WebSockets opened meanwhile (a reconnect drops a push).
+    const before = (await paneOf(c, less))?.agent?.status;
+    await pg.ev("(() => { const N = window.__wcN ??= Notification; window.__wcPage = 0; window.Notification = class extends N { constructor(...a) { super(...a); window.__wcPage++; } }; })()");
     const t0 = Date.now();
     await reportLess(c, 'blocked');
     const n = await pg.until(`${tagged}.then((k) => k === 1)`, 10_000, 200);
-    // what reached the page for wc-less: on a timeout, whether the push came at all
+    const diag = await pg.ev("navigator.serviceWorker.getRegistration().then((r) => `page=${window.__wcPage},sw=${r ? (r.active?.state ?? 'no-active') + (r.installing ? '+installing' : '') + (r.waiting ? '+waiting' : '') : 'none'},hidden=${document.hidden},perm=${Notification.permission},set=${localStorage.getItem('herdr_notifications')}`)");
+    const wsNew = pg.wsCreated.filter((t) => t >= t0).length;
     const pushes = pg.wsRecv.filter((f) => f.t >= t0 && f.msg?.type === 'agent_status' && f.msg.paneId === less).map((f) => `${f.msg.from}>${f.msg.to}@${f.t - t0}ms`);
     await pg.cdp.send('Target.activateTarget', { targetId: pg.targetId });
     await pg.until('!document.hidden', 3000);
     await pg.ev(`location.hash = ${js(`#/pane/${enc(less)}`)}`);
     const z = await pg.until(`${tagged}.then((k) => k === 0)`, 2000);
-    result(c, !n.timeout && !z.timeout, 'P4-T1', `notif=${ms(n)},cleared=${ms(z)},pushes=${pushes.join('+') || 'none'}`,
+    result(c, !n.timeout && !z.timeout, 'P4-T1', `notif=${ms(n)},cleared=${ms(z)},pushes=${pushes.join('+') || 'none'},before=${before},${diag},wsNew=${wsNew}`,
       'hidden page: wc-less reported blocked -> 1 OS notification tagged with its pane id within 10s; opening the pane clears it within 2s');
   } finally {
+    await pg.ev("window.__wcN && (window.Notification = window.__wcN)");
     await pg.ev(prev === null ? `localStorage.removeItem('herdr_notifications')` : `localStorage.setItem('herdr_notifications', ${js(prev)})`);
     await pg.cdp.send('Target.activateTarget', { targetId: pg.targetId });
     if (other) await pg.cdp.send('Target.closeTarget', { targetId: other.targetId }).catch(() => {});
