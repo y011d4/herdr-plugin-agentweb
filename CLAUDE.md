@@ -292,24 +292,24 @@ and run the bridge with `YOICKS_WEB_DIR=web/dist`.
 
 Deploying to the running bridge (the binary of the checkout herdr links, normally main's), in
 that checkout, with the PC at hand. The gate is CI, not a local webcheck: each push to main runs
-all of ci.yml, webcheck's Tier 1 included, so the run of main's head checks the merged PRs together:
+all of ci.yml, webcheck's Tier 1 included, so the run of main's head checks the merged PRs together,
+and `redeploy.sh main` deploys only a commit whose run passed:
 
 ```bash
-git fetch -q origin main && sha=$(git rev-parse origin/main) && gh run watch "$(gh run list --workflow ci.yml --commit "$sha" --limit 1 --json databaseId -q '.[0].databaseId')" --exit-status
-sh scripts/redeploy.sh main      # fetch, fast-forward main, rebuild, stop/start, wait for /healthz
-sh scripts/redeploy.sh <commit>  # rolling back: the same, to <commit> (detached)
+sh scripts/redeploy.sh main      # fetch, CI's run of origin/main, fast-forward, rebuild, stop/start, /healthz
+sh scripts/redeploy.sh <commit>  # rolling back: the same, to <commit> (detached), without CI
 ```
 
-Deploy only when that `gh run watch` exits 0. A run still going is waited for, not deployed past:
-it takes about 3 minutes, and a bad deploy is a restart the phone feels and a rollback by hand. A
-failed run, or none yet: don't deploy; say which. A cancelled one means main moved on (CI cancels
-the older run): fetch and check the new head. Then, with nothing in between, check that no Home is
-working or waiting on a question (`/api/state`; redeploy.sh only warns), run it, and report the
-`BUILD` and `CACHE` it prints, and any Home it interrupted anyway. It fetches again and prints the
-commit it switches to (`switching to main (<short sha>)`): one other than `$sha` means main moved in
-between, so check that commit's run the same way at once, and roll back to `$sha` if it fails.
+Before stopping anything, `main` waits for CI's run of the very commit it deploys (`gh run watch`)
+instead of deploying past it: the run takes about 3 minutes, and a bad deploy is a restart the phone
+feels and a rollback by hand. No run yet, a failed one, or a cancelled one (main moved on, so CI
+dropped it) refuses: run it again later. The other checks are the deployer's: once main's run has
+finished (`gh run list --workflow ci.yml --branch main --limit 1`; still going: wait first, or this
+check is minutes old at the stop), check that no Home is working or waiting on a question
+(`/api/state`; redeploy.sh only warns), run it with nothing in between, and report the `BUILD` and
+`CACHE` it prints, and any Home it interrupted anyway.
 
-It refuses (before stopping anything) outside the linked checkout, on a dirty tree, when local
+It also refuses (before stopping anything) outside the linked checkout, on a dirty tree, when local
 main can't fast-forward, and when `herdr-plugin.toml` would change: herdr caches the linked
 manifest, so that switch is by hand (it prints the steps: stop, switch, build, `herdr plugin link`,
 start). Any failure after the stop puts the old binary back and starts it. It prints the `BUILD`

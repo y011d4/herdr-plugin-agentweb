@@ -31,6 +31,15 @@ case "$1 $2" in
 esac
 `
 
+// fakeGh: CI's run 7 of any commit, passed; none with $FAKE/norun, failed with $FAKE/cifail
+const fakeGh = `#!/bin/sh
+echo "gh $*" >>"$FAKE/calls"
+case "$1 $2" in
+"run list") [ -e "$FAKE/norun" ] || echo 7 ;;
+"run watch") [ ! -e "$FAKE/cifail" ] ;;
+esac
+`
+
 const stubBuild = `#!/bin/sh
 set -e
 cd "$(dirname "$0")/.."
@@ -101,6 +110,7 @@ func TestRedeploy(t *testing.T) {
 		must(t, root, "git", "clone", "-q", origin, w.prod)
 		must(t, w.prod, "sh", "scripts/plugin-build.sh")
 		write(t, filepath.Join(w.fake, "herdr"), fakeHerdr)
+		write(t, filepath.Join(w.fake, "gh"), fakeGh)
 		write(t, filepath.Join(w.fake, "healthz"), `{"ok":true,"herdrConnected":true}`) // the bridge is up
 		return w
 	}
@@ -114,7 +124,7 @@ func TestRedeploy(t *testing.T) {
 	redeploy := func(t *testing.T, w world, ref string, extra ...string) (string, error) {
 		os.Remove(filepath.Join(w.fake, "calls"))
 		return sh(t, w.prod, append([]string{"FAKE=" + w.fake, "ROOT=" + w.prod,
-			"REDEPLOY_HERDR=" + filepath.Join(w.fake, "herdr"), "REDEPLOY_HEALTHZ=file://" + filepath.Join(w.fake, "healthz"),
+			"REDEPLOY_HERDR=" + filepath.Join(w.fake, "herdr"), "REDEPLOY_GH=" + filepath.Join(w.fake, "gh"), "REDEPLOY_HEALTHZ=file://" + filepath.Join(w.fake, "healthz"),
 			"REDEPLOY_HEALTHZ_WAIT=2", "XDG_STATE_HOME=" + filepath.Join(w.fake, "state")}, extra...), "sh", "scripts/redeploy.sh", ref)
 	}
 	// refused checks a run that stops nothing: an error saying want, no action invoked
@@ -162,8 +172,32 @@ func TestRedeploy(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(w.prod, "web/app.js")); err == nil {
 			t.Error("the ignored web/app.js was left")
 		}
-		if calls := read(filepath.Join(w.fake, "calls")); !strings.Contains(calls, "t.yoicks.stop") || !strings.Contains(calls, "start built "+head) {
+		calls := read(filepath.Join(w.fake, "calls"))
+		if !strings.Contains(calls, "t.yoicks.stop") || !strings.Contains(calls, "start built "+head) {
 			t.Errorf("calls:\n%s", calls)
+		}
+		// the gate: CI's run of the deployed commit, checked before the stop
+		gate := strings.Index(calls, "gh run list --workflow ci.yml --commit "+head)
+		if gate < 0 || gate > strings.Index(calls, "gh run watch 7 --exit-status") || strings.Index(calls, "gh run watch") > strings.Index(calls, "t.yoicks.stop") {
+			t.Errorf("want CI's run of %s checked before the stop:\n%s", head, calls)
+		}
+	})
+	t.Run("refuses a commit CI hasn't passed, before the stop", func(t *testing.T) {
+		for flag, want := range map[string]string{"norun": "no CI run of", "cifail": "CI run 7 of"} {
+			w := setup(t)
+			push(t, w, "README", "x")
+			write(t, filepath.Join(w.fake, flag), "")
+			out, err := redeploy(t, w, "main")
+			refused(t, w, out, err, want)
+		}
+	})
+	t.Run("a rollback doesn't ask CI", func(t *testing.T) {
+		w := setup(t)
+		old := must(t, w.seed, "git", "rev-parse", "--short", "HEAD")
+		push(t, w, "README", "x")
+		write(t, filepath.Join(w.fake, "cifail"), "")
+		if out, err := redeploy(t, w, old); err != nil || strings.Contains(read(filepath.Join(w.fake, "calls")), "gh ") {
+			t.Fatalf("err %v, calls:\n%s\n%s", err, read(filepath.Join(w.fake, "calls")), out)
 		}
 	})
 	t.Run("warns, then deploys, when a headless orchestrator is mid-turn", func(t *testing.T) {
