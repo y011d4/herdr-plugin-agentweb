@@ -196,8 +196,9 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   // The terminal's live screen, read again, and its scrollback with its first look (a pane opened on its chat,
   // or one suspended before its first read was done).
   function lookAtTerminal(): void {
+    const lookEpoch = epoch; // one from before a suspend leaves the scrollback to the resume's look
     void term.refresh().then(() => {
-      if (destroyed || suspended || historyLoaded) return;
+      if (destroyed || suspended || lookEpoch !== epoch || historyLoaded) return;
       historyLoaded = true;
       void term.loadHistory();
     });
