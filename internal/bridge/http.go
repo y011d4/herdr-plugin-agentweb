@@ -95,9 +95,15 @@ type server struct {
 	todos *todoStore
 	// the last claude check (<state>/canary.json; nil: none), read at the start and each minute
 	claudeCheck atomic.Pointer[ClaudeCheck]
-	stop        chan struct{}
-	stopOnce    sync.Once
-	bg          sync.WaitGroup // the PC notifications (notification.show) in flight; tests wait for them
+	// the PR watch (pr_watch, prwatch.go): gh's lookup (tests: a stand-in), the look in progress,
+	// and (touched only by that look) the last error alerted and the PRs told unreadable
+	prStates func(ctx context.Context, urls []string) (map[string]string, error)
+	prBusy   atomic.Bool
+	prErr    string
+	prUnread map[string]bool
+	stop     chan struct{}
+	stopOnce sync.Once
+	bg       sync.WaitGroup // the PC notifications (notification.show) in flight; tests wait for them
 	// the time a WS client's pane and transcript watches poll on (tests: a fakeherdr.FakeClock)
 	clock clock
 
@@ -119,6 +125,8 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 		clock:    realClock{},
 		clients:  map[*wsClient]struct{}{},
 		headless: map[string]*headlessRunner{},
+		prStates: ghPRStates,
+		prUnread: map[string]bool{},
 	}
 	var names []string
 	for _, d := range cfg.Orchestrators {
@@ -183,6 +191,9 @@ func newServer(cfg Config, client *HerdrClient, web fs.FS, rules string) *server
 			case <-t.C:
 				s.checkClaude()
 				s.remindTodos(nowMs())
+				if s.prBusy.CompareAndSwap(false, true) {
+					go func() { defer s.prBusy.Store(false); s.watchPRs() }()
+				}
 				s.broadcastState()
 			case <-s.stop:
 				return

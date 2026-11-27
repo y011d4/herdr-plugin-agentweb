@@ -287,6 +287,12 @@ func TestHeadlessRulesSections(t *testing.T) {
 		!strings.Contains(tui, "{{yoicks}}") || strings.Contains(tui, "agent_prompt") || strings.Contains(tui, "<!--") {
 		t.Error("rulesFor's sections")
 	}
+	// the PR watch's parts: only for a headless Home with pr_watch
+	pr := orchestratorFiles(OrchestratorDef{Name: "p", Mode: "headless", PRWatch: true}, string(rules), "yoicks")["rules.md"]
+	if strings.Contains(hl, "[yoicks] PR") || !strings.Contains(pr, "`[yoicks] PR merged: <url>") || strings.Contains(pr, "<!--") ||
+		strings.Contains(rulesFor(string(rules), "tui", "pr-watch"), "[yoicks] PR") || len(pr) <= len(hl) {
+		t.Error("rulesFor's pr-watch sections")
+	}
 }
 
 // ── wake-ups ─────────────────────────────────────────────────────────────────
@@ -310,8 +316,11 @@ func worker(t *testing.T, b *hlBridge, status string, script func(w *fakeherdr.W
 	return w
 }
 
-// wakes is the [yoicks] lines the orchestrator got.
-func (b *hlBridge) wakes(t *testing.T) []string {
+// wakes is the [yoicks] lines about w1 the orchestrator got.
+func (b *hlBridge) wakes(t *testing.T) []string { return b.wakesWith(t, "[yoicks] w1") }
+
+// wakesWith is the lines starting with prefix the orchestrator got.
+func (b *hlBridge) wakesWith(t *testing.T, prefix string) []string {
 	_, stdin := b.runs(t)
 	var out []string
 	for _, l := range stdin {
@@ -322,7 +331,7 @@ func (b *hlBridge) wakes(t *testing.T) []string {
 		}
 		json.Unmarshal([]byte(l), &m)
 		for _, line := range strings.Split(m.Message.Content, "\n") {
-			if strings.HasPrefix(line, "[yoicks] w1") {
+			if strings.HasPrefix(line, prefix) {
 				out = append(out, line)
 			}
 		}

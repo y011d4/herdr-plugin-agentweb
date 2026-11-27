@@ -139,6 +139,16 @@ another account's orchestrator, so point the user to that one.
 
 Follow-ups go the same way, with `agent_prompt` (herdr won't deliver to a worker that is
 waiting for approval).
+<!-- pr-watch -->
+
+yoicks also watches the PRs on the user's to-do list (see below) and wakes you when one is over:
+
+| the message | what to do |
+|---|---|
+| `[yoicks] PR merged: <url> (<worker>); its to-do item is removed` | the user merged it (yoicks has removed its item already). If your local rules allow a deploy after a merge in that repository, have that worker (or a new one there) deploy it as they say, with the checks they name, and tell the user the result in one line; otherwise tell the user in one line that it is merged. Then clean up the worker (below) |
+| `[yoicks] PR closed without merging: <url> (<worker>); …` | tell the user in one line, and ask before cleaning up its worker (the work may be redone) |
+| `[yoicks] PR <url> can't be read …` | tell the user in one line: its merge won't be noticed, so they need to tell you |
+<!-- /pr-watch -->
 
 ## Knowing what the other agents do
 
@@ -163,6 +173,9 @@ without asking.
 - A worker that opened a PR is done when the PR is merged and the change is deployed.
   Learn that from the user, or ask the worker to check (`agent_prompt` "check whether the
   PR is merged and deployed; answer briefly").
+<!-- pr-watch -->
+  For a PR on the to-do list, `[yoicks] PR merged` tells you of the merge.
+<!-- /pr-watch -->
 - To clean up:
   1. End it: `agent_prompt` with the text `/exit`.
   2. If it worked in a worktree, remove the worktree and its merged local branch:
@@ -200,4 +213,10 @@ chat. An item is one short line in the user's language, optionally with the work
   reports its PR merged. The user can tick items off too; `todo` then reports those ids as
   already gone.
 - Call `todo` with nothing to read the list, e.g. when asked what is left to do.
+<!-- pr-watch -->
+- A PR to merge always goes on with the PR's link as `url` and the worker that opened it as
+  `agent`: yoicks watches it, and once it is merged or closed removes the item and wakes you
+  (above). So give a PR's `url` only to the item for merging it, never to a later step such as
+  "deploy after #138".
+<!-- /pr-watch -->
 <!-- /headless -->

@@ -146,6 +146,10 @@ func loadConfig() Config {
 		u := strings.TrimRight(jsTrim(s), "/")
 		publicURL = &u
 	}
+	orchestrators := parseOrchestrators(file["orchestrators"], home, dataDir(home))
+	for i := range orchestrators { // config pr_watch: the headless Homes' to-do PRs are watched (prwatch.go)
+		orchestrators[i].PRWatch = file["pr_watch"] == true && orchestrators[i].Mode == "headless"
+	}
 
 	return Config{
 		Host:           firstNonEmpty(os.Getenv("HERDR_YOICKS_HOST"), fileHost, "127.0.0.1"),
@@ -155,6 +159,6 @@ func loadConfig() Config {
 		StateDir:       firstNonEmpty(os.Getenv("HERDR_PLUGIN_STATE_DIR"), defaultStateDir()),
 		SocketPath:     firstNonEmpty(os.Getenv("HERDR_SOCKET_PATH"), filepath.Join(home, ".config", "herdr", "herdr.sock")),
 		LaunchProfiles: parseLaunchProfiles(file["launch_profiles"]),
-		Orchestrators:  parseOrchestrators(file["orchestrators"], home, dataDir(home)),
+		Orchestrators:  orchestrators,
 	}
 }
