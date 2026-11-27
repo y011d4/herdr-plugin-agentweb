@@ -1,6 +1,7 @@
 /** ui/Settings.tsx — #/settings (in ui/SettingsSheet.tsx): notifications, the connection, the headless
  *  orchestrators (the last Claude Code check, the way back to the TUI), sign-out and the app's build. */
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { Button, Code, Group, Image, List, Paper, Stack, Switch, Text } from '@mantine/core';
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { clearToken } from '../api.ts';
 import { STORAGE_NOTIF } from '../notify.ts';
 import { setAppState, store, subscribe } from '../store.ts';
@@ -28,11 +29,11 @@ export function claudeCheckText(c: ClaudeCheck | null, now: number): string {
 /** The way back from headless to the TUI for the orchestrator `name`, by hand: the app never writes the config. */
 export function TuiSteps({ name }: { name: string }) {
   return (
-    <ol className="tui-steps">
-      <li>In the bridge's <code>config.json</code> (its folder: <code>{`herdr plugin config-dir ${PLUGIN}`}</code>), remove <code>"mode": "headless"</code> from the orchestrator <code>{`"${name}"`}</code>.</li>
-      <li>Restart the bridge: <code>{`herdr plugin action invoke ${PLUGIN}.stop`}</code>, wait until it has stopped, then <code>{`herdr plugin action invoke ${PLUGIN}.start`}</code>.</li>
-      <li>Open its Home and tap Start: it runs in a herdr pane again, in a fresh session.</li>
-    </ol>
+    <List type="ordered" className="tui-steps wrap-anywhere" fz={12} lh={1.5} pl={20} c="dark.0">
+      <List.Item>In the bridge's <Code fz={11}>config.json</Code> (its folder: <Code fz={11}>{`herdr plugin config-dir ${PLUGIN}`}</Code>), remove <Code fz={11}>"mode": "headless"</Code> from the orchestrator <Code fz={11}>{`"${name}"`}</Code>.</List.Item>
+      <List.Item>Restart the bridge: <Code fz={11}>{`herdr plugin action invoke ${PLUGIN}.stop`}</Code>, wait until it has stopped, then <Code fz={11}>{`herdr plugin action invoke ${PLUGIN}.start`}</Code>.</List.Item>
+      <List.Item>Open its Home and tap Start: it runs in a herdr pane again, in a fresh session.</List.Item>
+    </List>
   );
 }
 
@@ -81,76 +82,67 @@ export function Settings({ toast, onSignedOut }: { toast: (title: string, body: 
   };
 
   return (
-    <div id="screen-settings">
-      <div className="settings-section">
-        <div className="settings-section-title">Notifications</div>
-        <div className="settings-row">
-          <span className="settings-row-label">Enable notifications</span>
-          <label className="toggle">
-            <input type="checkbox" id="toggle-notif" checked={notif} onChange={(e) => setNotifications(e.target.checked)} />
-            <span className="toggle-track"></span>
-          </label>
-        </div>
-        <div className="settings-row">
-          <span className="settings-row-label">Permission status</span>
-          <span className="settings-row-value" id="notif-permission">{permission}</span>
-        </div>
-        <div className="settings-row">
-          <button className="btn-secondary" id="btn-request-notif" style={{ width: '100%' }} onClick={() => { void requestPermission(); }}>Request Notification Permission</button>
-        </div>
-      </div>
+    <div id="screen-settings" className="flex-1 overflow-y-auto px-4 pt-4 pb-[calc(var(--safe-bottom)+16px)]">
+      <Section title="Notifications">
+        <Row label="Enable notifications">
+          <Switch id="toggle-notif" className="toggle" size="lg" withThumbIndicator={false} aria-label="Enable notifications" checked={notif} onChange={(e) => setNotifications(e.currentTarget.checked)} />
+        </Row>
+        <Row label="Permission status" value={permission} valueId="notif-permission" />
+        <Row><Button id="btn-request-notif" variant="default" fullWidth fw={400} fz={14} h="auto" mih={44} py={8} classNames={{ label: 'whitespace-normal leading-snug' }} onClick={() => { void requestPermission(); }}>Request Notification Permission</Button></Row>
+      </Section>
 
-      <div className="settings-section">
-        <div className="settings-section-title">Connection</div>
-        <div className="settings-row">
-          <span className="settings-row-label">Bridge URL</span>
-          <span className="settings-row-value">{`${location.protocol}//${location.host}`}</span>
-        </div>
-        <div className="settings-row">
-          <span className="settings-row-label">herdr version</span>
-          <span className="settings-row-value">{String(state?.herdr?.version ?? '—')}</span>
-        </div>
-        <div className="settings-row">
-          <span className="settings-row-label">Protocol</span>
-          <span className="settings-row-value">{String(state?.herdr?.protocol ?? '—')}</span>
-        </div>
-        <div className="settings-row">
-          <span className="settings-row-label">WS status</span>
-          <span className="settings-row-value">{wsConnected ? 'Connected' : 'Disconnected'}</span>
-        </div>
-      </div>
+      <Section title="Connection">
+        <Row label="Bridge URL" value={`${location.protocol}//${location.host}`} />
+        <Row label="herdr version" value={String(state?.herdr?.version ?? '—')} />
+        <Row label="Protocol" value={String(state?.herdr?.protocol ?? '—')} />
+        <Row label="WS status" value={wsConnected ? 'Connected' : 'Disconnected'} />
+      </Section>
 
       {headless.length > 0 && (
-        <div className="settings-section" id="settings-headless">
-          <div className="settings-section-title">Headless orchestrators</div>
-          <div className="settings-row">
-            <span className="settings-row-label">Claude Code check</span>
-            <span className="settings-row-value" id="claude-check">{claudeCheckText(state?.claudeCheck ?? null, Date.now())}</span>
-          </div>
+        <Section title="Headless orchestrators" id="settings-headless">
+          <Row label="Claude Code check" value={claudeCheckText(state?.claudeCheck ?? null, Date.now())} valueId="claude-check" />
           {headless.map((o) => (
-            <div className="settings-row settings-steps" key={o.name}>
-              <span className="settings-row-label">{`Back to the TUI: ${o.label || o.name}`}</span>
-              <TuiSteps name={o.name} />
-            </div>
+            <Row key={o.name} stacked label={`Back to the TUI: ${o.label || o.name}`}><TuiSteps name={o.name} /></Row>
           ))}
-        </div>
+        </Section>
       )}
 
-      <div className="settings-section">
-        <div className="settings-section-title">Account</div>
-        <div className="settings-row">
-          <button className="btn-secondary" id="btn-clear-token" style={{ width: '100%', color: '#f47c2a' }} onClick={signOut}>Clear token &amp; sign out</button>
-        </div>
-      </div>
+      <Section title="Account">
+        <Row><Button id="btn-clear-token" variant="default" fullWidth fw={400} fz={14} c="blocked" onClick={signOut}>Clear token &amp; sign out</Button></Row>
+      </Section>
 
-      <div className="settings-section">
-        <div className="settings-section-title">About</div>
-        <div className="settings-row"><img className="about-lockup" src="/icons/lockup.svg" alt="Yoicks" /></div>
-        <div className="settings-row">
-          <span className="settings-row-label">App version</span>
-          <span className="settings-row-value" id="app-version">{`${APP_VERSION} (${BUILD})${cache === null ? '' : ` cache ${cache}`}`}</span>
-        </div>
-      </div>
+      <Section title="About">
+        <Row><Image src="/icons/lockup.svg" alt="Yoicks" h={28} w="auto" /></Row>
+        <Row label="App version" value={`${APP_VERSION} (${BUILD})${cache === null ? '' : ` cache ${cache}`}`} valueId="app-version" />
+      </Section>
     </div>
   );
+}
+
+/** A group of rows on the surface, under its title in small capitals. */
+function Section({ title, id, children }: { title: string; id?: string; children: ReactNode }) {
+  return (
+    <Paper id={id} className="settings-section overflow-hidden" withBorder radius={10} bg="dark.7" mb={20}>
+      <Text className="settings-section-title border-b border-(--color-border)" px={16} py={10} bg="dark.6" fz={11} fw={600} c="dimmed" tt="uppercase" lts="0.08em">
+        {title}
+      </Text>
+      {children}
+    </Paper>
+  );
+}
+
+/** A row: its label at the left, its value (or what is given) at the right, or under it (`stacked`); a rule
+ *  between rows. The class names are the hooks webcheck reads the rows by. */
+function Row({ label, value, valueId, stacked = false, children }: { label?: string; value?: string; valueId?: string; stacked?: boolean; children?: ReactNode }) {
+  const parts = (
+    <>
+      {label ? <Text className="settings-row-label" flex={stacked ? undefined : 1} fz={15}>{label}</Text> : null}
+      {value !== undefined ? <Text className="settings-row-value" id={valueId} fz={13} c="dimmed">{value}</Text> : null}
+      {children}
+    </>
+  );
+  const ROW = 'settings-row min-h-11 border-b border-(--color-border) px-4 py-3.5 last:border-b-0';
+  return stacked
+    ? <Stack className={ROW} gap={6}>{parts}</Stack>
+    : <Group className={ROW} gap={12} wrap="nowrap">{parts}</Group>;
 }
