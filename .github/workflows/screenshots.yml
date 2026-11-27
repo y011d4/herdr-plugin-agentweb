@@ -2,8 +2,8 @@ name: Screenshots
 
 # What a web change looks like, on its PR: the PR's web build and main's (as the PR merges into it) are shot
 # over tools/shots-fixture.ts's made-up data (`node tools/webcheck.ts shots`, headless Chrome, no herdr, no
-# bridge), on a phone and a PC, and the screens whose pixels changed go into one comment, before | after,
-# updated on each push. The fixture is all the shots ever see: they are public.
+# bridge), on a phone and a PC, and the screens whose pixels changed go into one comment, before | after and
+# where they differ (tools/webcheck.ts's diff: the after dimmed, the changed pixels magenta), updated on each push. The fixture is all the shots ever see: they are public.
 #
 # The `screens` job is a gate (a required check): it fails while a screen differs from main's and the user hasn't
 # approved exactly those pixels. The user approves by adding the `ui-change` label after looking at the comment
@@ -248,13 +248,16 @@ jobs:
           cd shots
           jq -e '(.shots | type) == "array" and (.shots | length) <= 100' manifest.json > /dev/null
           changed=() same=() notready=()
-          while IFS=$'\t' read -r n ch nr; do
-            if [[ ! $n =~ ^[a-z0-9-]{1,64}$ || ! $ch =~ ^(true|false|null)$ || ! $nr =~ ^(|before|after|before,after)$ ]]; then
+          declare -A px
+          # notReady last: read collapses a tab run, so an empty field anywhere else would shift the rest
+          while IFS=$'\t' read -r n ch p nr; do
+            if [[ ! $n =~ ^[a-z0-9-]{1,64}$ || ! $ch =~ ^(true|false|null)$ || ! $nr =~ ^(|before|after|before,after)$ || ! $p =~ ^([0-9]{1,8}|null)$ ]]; then
               echo "bad manifest entry"; exit 1
             fi
             if [[ -n $nr ]]; then notready+=("$n ($nr)"); fi
             if [[ $ch != true ]]; then same+=("$n"); continue; fi
-            for side in before after; do
+            px[$n]=$p
+            for side in before after diff; do
               f="$n.$side.png"
               if [[ ! -f $f || -L $f ]]; then continue; fi
               if [[ $(head -c 8 "$f" | od -An -tx1 | tr -d ' \n') != 89504e470d0a1a0a ]]; then echo "not a PNG: $f"; exit 1; fi
@@ -262,7 +265,7 @@ jobs:
               cp "$f" "$pub/"
             done
             changed+=("$n")
-          done < <(jq -r '.shots[] | [.name, (.changed | tostring), (.notReady | join(","))] | @tsv' manifest.json)
+          done < <(jq -r '.shots[] | [.name, (.changed | tostring), (.pixels | tostring), (.notReady | join(","))] | @tsv' manifest.json)
 
           if (( ${#changed[@]} )); then
             cd "$pub"
@@ -285,7 +288,9 @@ jobs:
               for n in "${changed[@]}"; do
                 w=260; if [[ $n == *-pc ]]; then w=440; fi
                 cell() { if [[ -f $pub/$n.$1.png ]]; then echo "<img src=\"https://raw.githubusercontent.com/$REPO/$sha/$n.$1.png\" width=\"$w\">"; else echo "(none)"; fi; }
-                printf '\n<details open><summary><code>%s</code></summary>\n\n| before | after |\n| --- | --- |\n| %s | %s |\n\n</details>\n' "$n" "$(cell before)" "$(cell after)"
+                # the diff under the pair, not beside it: three PC shots don't fit the comment's width
+                printf '\n<details open><summary><code>%s</code>: %s px differ</summary>\n\n| before | after |\n| --- | --- |\n| %s | %s |\n\nWhere they differ (magenta):<br>%s\n\n</details>\n' \
+                  "$n" "${px[$n]}" "$(cell before)" "$(cell after)" "$(cell diff)"
               done
             elif (( total )); then
               echo "**UI screenshots**: no screen changed ($total shots, ${HEAD_SHA:0:7})."

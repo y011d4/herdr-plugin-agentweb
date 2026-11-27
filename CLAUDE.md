@@ -672,7 +672,8 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
     written to fit the new code.
 - **PR screenshots** (`.github/workflows/screenshots.yml`): on a PR touching the web UI, CI shoots main's
   web build and the PR's (`node tools/webcheck.ts shots`) and posts the screens whose pixels changed,
-  before | after, in one comment it updates (images in `refs/screenshots/pr-<n>`, outside the branches).
+  before | after and where they differ (the after dimmed, the changed pixels magenta, with their count; Chrome
+  decodes and compares the PNGs), in one comment it updates (images in `refs/screenshots/pr-<n>`, outside the branches).
   No herdr, no bridge: a stand-in serves `tools/shots-fixture.ts` (made-up data, typed as the web's
   `State`, so `npm run check:contract` fails when it goes stale; the shots are public, so never real
   data in it). A new screen is a line in its `scenes`. The same build shoots the same bytes: a browser
