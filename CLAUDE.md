@@ -192,7 +192,9 @@ All in `internal/bridge/` (one package):
   model: each child gets an `initialize` control request at its start, whose answer lists Claude Code's `/model`
   choices (state `headless.models`; the answer also has the account's email: only `models` is read); `POST …/model`
   switches a running child in place with `set_model` (refused mid-turn; Claude Code applies it from the next turn),
-  and each start passes the saved choice as `--model`. `<state>/headless/<name>.mcp.json` (only the
+  and each start passes the saved choice as `--model` (the list's `default` entry is left out: the Home offers the
+  models themselves, the default's as its id when no other entry offers it). Without one, `--resume` keeps the model the session last ran on (2.1.322), not the settings' default, so the model in effect (`headless.activeModel`) comes from Claude Code: a
+  `get_settings` request at each start (`applied.model`), `set_model`'s answer and each turn's init. `<state>/headless/<name>.mcp.json` (only the
   bridge writes it, `--mcp-config` in the argv) is the marker that tells its own orphan from a user's
   `claude --resume`. Warnings also go out once per session and kind as WS `orchestrator_alert`, ntfy
   and herdr's `notification.show`; its working→done and →blocked go out as an agent's do, as

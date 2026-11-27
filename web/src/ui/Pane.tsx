@@ -303,16 +303,21 @@ function Usage({ usage }: { usage: HeadlessUsage }) {
 }
 
 // A headless orchestrator's model, from Claude Code's /model list (none until a child of this bridge gave
-// it): a pick switches it in place, or for its next start when stopped; not while a turn runs (the
-// bridge refuses that too). Default is named by the model it stands for.
+// it): it shows the model in effect (a resumed session keeps the one it last ran on), and a pick
+// switches to it in place, or for its next start when stopped; not while a turn runs (the bridge
+// refuses that too).
 function ModelPicker({ o }: { o: OrchestratorView }) {
   const h = o.headless!;
   if (!h.models.length) return null;
-  const label = (m: HeadlessModel): string => m.value !== 'default' ? m.displayName
-    : `Default (${h.models.find((x) => x.value !== 'default' && x.resolvedModel === m.resolvedModel)?.displayName ?? m.description})`;
-  // a saved model Claude Code no longer lists (it still runs on it) shows as itself, so Default is a change
-  const data = [...(h.models.some((m) => m.value === h.model) ? [] : [{ value: h.model, label: h.model }]),
-    ...h.models.map((m) => ({ value: m.value, label: label(m) }))];
+  // the entry for the model in effect: the choice when it stands for it, else the first that does, else
+  // the model itself, unlisted, so any pick is a change; not said yet (just started, or picked while
+  // stopped): the choice, or '…' for none
+  const base = (id: string): string => id.replace(/\[.*\]$/, ''); // opus[1m] is opus
+  const runs = (m?: HeadlessModel): boolean => !!m && base(m.resolvedModel) === base(h.activeModel);
+  const chosen = h.models.find((m) => m.value === h.model);
+  const current = !h.activeModel || runs(chosen) ? h.model : h.models.find(runs)?.value ?? h.activeModel;
+  const data = [...(h.models.some((m) => m.value === current) ? [] : [{ value: current, label: current || '…', disabled: true }]),
+    ...h.models.map((m) => ({ value: m.value, label: m.displayName }))];
   const pick = async (model: string): Promise<void> => {
     try {
       await orchestratorPost(o.name, 'model', { model });
@@ -322,7 +327,7 @@ function ModelPicker({ o }: { o: OrchestratorView }) {
     }
   };
   return (
-    <NativeSelect id="home-model" size="xs" w="max-content" aria-label="Model" value={h.model} disabled={h.status === 'working' || h.status === 'blocked'}
+    <NativeSelect id="home-model" size="xs" w="max-content" aria-label="Model" value={current} disabled={h.status === 'working' || h.status === 'blocked'}
       data={data} onChange={(e) => { void pick(e.currentTarget.value); }} />
   );
 }

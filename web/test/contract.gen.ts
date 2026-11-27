@@ -689,11 +689,12 @@ export const messages: WsMessage[] = [
        }
       ],
       "model": "sonnet",
+      "activeModel": "claude-sonnet-5-5",
       "models": [
        {
-        "value": "default",
-        "displayName": "Default (recommended)",
-        "description": "Opus 5.5 · Best for everyday, complex tasks",
+        "value": "opus",
+        "displayName": "Opus 5.5",
+        "description": "For complex work and everyday tasks",
         "resolvedModel": "claude-opus-5-5"
        },
        {

@@ -181,7 +181,7 @@ func TestHeadlessStream(t *testing.T) {
 		}
 	})
 
-	t.Run("the initialize answer lists the models (values fit for --model only); no other answer does", func(t *testing.T) {
+	t.Run("the initialize answer lists the models (values fit for --model only; default only as its model, when nothing else offers it); no other answer does", func(t *testing.T) {
 		m := hlModel{}
 		models := `"models":[{"value":"default","resolvedModel":"claude-opus-5-5","displayName":"Default (recommended)","description":"Opus 5.5 · Best for everyday, complex tasks","supportsEffort":true},` +
 			`{"value":"--dangerously-skip-permissions","displayName":"x"},{"value":"claude-haiku-4-5-20251001","resolvedModel":"claude-haiku-4-5-20251001","displayName":"Haiku 4.5","description":"Fastest"}]`
@@ -190,11 +190,33 @@ func TestHeadlessStream(t *testing.T) {
 			t.Errorf("another answer: %+v", m.models)
 		}
 		m.apply([]byte(`{"type":"control_response","response":{"subtype":"success","request_id":"yoicks-init","response":{"commands":[],`+models+`,"account":{"email":"someone@example.com"}}}}`), 0)
-		want := []HeadlessModel{{"default", "Default (recommended)", "Opus 5.5 · Best for everyday, complex tasks", "claude-opus-5-5"},
+		want := []HeadlessModel{{"claude-opus-5-5", "Opus 5.5", "Opus 5.5 · Best for everyday, complex tasks", "claude-opus-5-5"},
 			{"claude-haiku-4-5-20251001", "Haiku 4.5", "Fastest", "claude-haiku-4-5-20251001"}}
 		if !slices.Equal(m.models, want) {
 			t.Errorf("models %+v", m.models)
 		}
+		// with an entry for the default's model, the default adds nothing
+		opus := `{"value":"opus","resolvedModel":"claude-opus-5-5","displayName":"Opus","description":"Opus 5.5 · Best for everyday, complex tasks"}`
+		m.apply([]byte(`{"type":"control_response","response":{"subtype":"success","request_id":"yoicks-init","response":{`+strings.Replace(models, `[`, `[`+opus+`,`, 1)+`}}}`), 0)
+		if want := append([]HeadlessModel{{"opus", "Opus", "Opus 5.5 · Best for everyday, complex tasks", "claude-opus-5-5"}}, want[1]); !slices.Equal(m.models, want) {
+			t.Errorf("with opus: %+v", m.models)
+		}
+	})
+
+	t.Run("the model in effect: get_settings' answer, set_model's, each init; not a refusal or a synthetic message", func(t *testing.T) {
+		m := hlModel{}
+		active := func(line, want string) {
+			t.Helper()
+			m.apply([]byte(line), 0)
+			if m.active != want {
+				t.Errorf("%s: active %q, want %q", line, m.active, want)
+			}
+		}
+		active(`{"type":"control_response","response":{"subtype":"success","request_id":"yoicks-settings","response":{"effective":{},"sources":[],"applied":{"model":"claude-fable-5-2","effort":"medium"}}}}`, "claude-fable-5-2")
+		active(`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"You've reached your Fable limit."}]}}`, "claude-fable-5-2")
+		active(`{"type":"control_response","response":{"subtype":"error","request_id":"yoicks-model-1","error":"Model 'x' not found","model":"claude-fable-5-2"}}`, "claude-fable-5-2")
+		active(`{"type":"control_response","response":{"subtype":"success","request_id":"yoicks-model-2","response":{"model":"claude-opus-5-5"}}}`, "claude-opus-5-5")
+		active(lineInit, "claude-haiku-5-5")
 	})
 
 	t.Run("a yoicks tool's result is reported with its tool_use, an error's first line with it (or that it has none)", func(t *testing.T) {

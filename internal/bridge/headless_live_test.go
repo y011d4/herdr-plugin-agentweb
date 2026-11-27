@@ -170,6 +170,9 @@ func TestClaudeLive(t *testing.T) {
 		item("start", false, "the start: %d %s, status %s, warnings %+v", code, body, status(), b.view(t).Headless.Warnings)
 		return
 	}
+	// the model in effect before any turn: get_settings' answer (here --model haiku's)
+	startActive := ""
+	poll(15*time.Second, func() bool { startActive = b.view(t).Headless.ActiveModel; return startActive != "" })
 
 	// T1: a tool round trip, a word to remember, and a message sent while it works
 	t1 := count(isInit)
@@ -345,9 +348,10 @@ func TestClaudeLive(t *testing.T) {
 	if late("model") {
 		return
 	}
-	// the model: Claude Code's list (its initialize answer) and a switch in place (set_model) that
-	// the next turn's init reports (to haiku again: no dearer turn)
-	models, haiku := b.view(t).Headless.Models, ""
+	// the model: Claude Code's list (its initialize answer), the one in effect (get_settings, here
+	// --model haiku's) and a switch in place (set_model) that the next turn's init reports (to haiku
+	// again: no dearer turn)
+	models, active, haiku := b.view(t).Headless.Models, b.view(t).Headless.ActiveModel, ""
 	for _, m := range models {
 		if m.Value == "haiku" {
 			haiku = m.ResolvedModel
@@ -366,7 +370,8 @@ func TestClaudeLive(t *testing.T) {
 		}
 	}
 	mu.Unlock()
-	item("model", haiku != "" && switched && on == haiku, "%d models, haiku = %q; set: %d %s; the next turn on %v", len(models), haiku, code, body, on)
+	item("model", haiku != "" && startActive == haiku && active == haiku && switched && on == haiku && b.view(t).Headless.ActiveModel == haiku,
+		"%d models, haiku = %q, in effect %q (at the start, before a turn: %q); set: %d %s; the next turn on %v", len(models), haiku, active, startActive, code, body, on)
 
 	if late("mcp_failure") {
 		return
@@ -393,6 +398,21 @@ func TestClaudeLive(t *testing.T) {
 	}
 	mu.Unlock()
 	item("mcp_failure", turned && warning != "", "warning %q; Claude Code's tool_result: %q", warning, errText)
+
+	if late("resume_model") {
+		return
+	}
+	// a resume without --model keeps the model the session ran on (haiku), not the account's default,
+	// and get_settings says so before any turn (no turn here)
+	b.post(t, "stop", "")
+	poll(30*time.Second, func() bool { return status() == "stopped" })
+	h.mu.Lock()
+	h.extraArgs, h.modelChoice, h.model.active = nil, "", ""
+	h.mu.Unlock()
+	code, _ = b.post(t, "start", "")
+	kept := ""
+	poll(60*time.Second, func() bool { kept = b.view(t).Headless.ActiveModel; return kept != "" })
+	item("resume_model", code == 200 && kept == haiku, "resumed without --model: in effect %q, the session ran on %q", kept, haiku)
 
 	completed = true
 }
