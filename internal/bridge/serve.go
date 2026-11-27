@@ -54,8 +54,7 @@ func Serve(web fs.FS, rules string) error {
 			log.Printf("orchestrator %s: could not write %s: %s", def.Name, def.Dir, err)
 		}
 	}
-	token, err := initAuth(cfg.StateDir)
-	if err != nil {
+	if _, err := initAuth(cfg.StateDir); err != nil {
 		return err
 	}
 
@@ -94,7 +93,8 @@ func Serve(web fs.FS, rules string) error {
 	}
 	base := fmt.Sprintf("http://%s:%d", cfg.Host, cfg.Port)
 	fmt.Printf("yoicks %s listening on %s\n", Version, base)
-	fmt.Printf("connect: %s?token=%s\n", base, token)
+	// never the token: this goes to the run pane and bridge.log, which workers read
+	fmt.Printf("connect: %s (the link with its token: %s)\n", base, connectHint)
 	// direnv picks the accounts of dirs (dirAccount): without it, a dir's account is unknown
 	if p, err := exec.LookPath("direnv"); err == nil {
 		fmt.Println("[yoicks] direnv: " + p)
