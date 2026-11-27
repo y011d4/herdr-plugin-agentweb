@@ -115,7 +115,7 @@ All in `internal/bridge/` (one package):
   `orchestrator.go` writes `<data>/orchestrators/<name>/` (data = `$XDG_DATA_HOME` or
   `~/.local/share`, + `herdr-yoicks`; `herdr-agentweb`, the dir from before the rename, while it
   exists, so the orchestrators' cwds and with them Claude Code's memory/transcripts/folder trust
-  never move: `dataDir`) at bridge start and before each start: CLAUDE.md
+  never move: `dataDir`; moving it is by hand, README "Renamed from agentweb") at bridge start and before each start: CLAUDE.md
   (imports rules.md, then the user's local.md, which is created once and never overwritten),
   rules.md (the bundled `orchestrator/rules.md` with the real yoicks command filled in) and
   `.claude/settings.json` (dontAsk allowlist). It starts (phone Start button →
@@ -157,7 +157,8 @@ All in `internal/bridge/` (one package):
   such entry (start with the billing checks and the orphan scan; send, also mid-turn; interrupt as a
   `control_request`, no answer in 2 s → kill + `--resume`; stop = interrupt, close stdin, 1.5 s, SIGTERM
   the group, 0.5 s, SIGKILL; clear = a fresh session; a crash restarts with `--resume` after 2/10/30 s
-  (a session without a transcript, i.e. no message yet, can't be resumed: it begins again under its id),
+  (a session without a transcript, i.e. no message yet, can't be resumed: it begins again under its id; one in
+  another project dir of its account counts, as Claude Code resumes it from there),
   more than 3 in 10 min = `error`; the bridge's shutdown stops them in parallel within `yoicks stop`'s
   5 s, Pdeathsig as the backstop). `headless_state.go` is pure: a stdout line → status, completionSeq,
   usage, warnings (unknown events, unreadable lines, the init check). Its state's `paneId` is

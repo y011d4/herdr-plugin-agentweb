@@ -444,6 +444,39 @@ func TestHeadlessRestartsASessionWithNoMessage(t *testing.T) {
 	}
 }
 
+// The orchestrator's dir moved without its project dir (the data dir renamed by hand): its session
+// is resumed from the old project dir, as Claude Code does, not begun again as a new conversation.
+// The account's config dir has glob characters in its path.
+func TestHeadlessResumesFromAnotherProjectDir(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "cfg-[w]*")
+	b := startHeadless(t, t.TempDir(), map[string]string{"CLAUDE_CONFIG_DIR": cfg}, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	b.send(t, "hello")
+	b.waitStatus(t, "done")
+	if status, body := b.post(t, "stop", ""); status != 200 {
+		t.Fatalf("stop: %d %s", status, body)
+	}
+	projects := filepath.Join(cfg, "projects")
+	dir, _ := filepath.EvalSymlinks(filepath.Join(b.home, "orchestrators", b.name)) // the cwd as the child sees it (macOS: /private/var)
+	slug := slugForCwd(dir)
+	if err := os.Rename(filepath.Join(projects, slug), filepath.Join(projects, slug+"-old")); err != nil {
+		t.Fatal(err)
+	}
+	b.start(t)
+	var runs []procArgs
+	waitUntil(t, 5*time.Second, "the second run", func() bool { runs, _ = b.runs(t); return len(runs) == 2 })
+	if runs[1].argv[6] != "--resume" || runs[1].argv[7] != runs[0].argv[7] {
+		t.Fatalf("runs %v", runs)
+	}
+	before, _ := os.ReadFile(filepath.Join(projects, slug+"-old", runs[0].argv[7]+".jsonl"))
+	b.send(t, "again")
+	waitUntil(t, 5*time.Second, "the turn in the old project dir", func() bool {
+		after, _ := os.ReadFile(filepath.Join(projects, slug+"-old", runs[0].argv[7]+".jsonl"))
+		return len(after) > len(before)
+	})
+}
+
 func TestHeadlessDetectors(t *testing.T) {
 	var mu sync.Mutex
 	var logged []string
@@ -1003,23 +1036,41 @@ func TestHeadlessClaudeCheck(t *testing.T) {
 	}
 }
 
-// Whether a session can be resumed is where Claude Code looks: under the slug of its cwd as the
-// child sees it (a linked orchestrator dir resolved), and a project dir linked elsewhere counts.
+// Whether a session can be resumed is where Claude Code looks: any project dir of its account, a
+// linked one too, not only its cwd's slug (its dir moved without its project dir), and never another
+// account's. The config dir's path has glob characters.
 func TestHeadlessHasTranscript(t *testing.T) {
-	cfg, outside, real := t.TempDir(), t.TempDir(), t.TempDir()
-	real, _ = filepath.EvalSymlinks(real)
-	dir := filepath.Join(t.TempDir(), "orch") // a link to real, as a linked XDG_DATA_HOME makes it
-	os.Symlink(real, dir)
-	r := newHeadlessRunner(OrchestratorDef{Name: "h1", Dir: dir, Env: map[string]string{"CLAUDE_CONFIG_DIR": cfg}, Managed: true, Mode: "headless"}, t.TempDir(), "")
+	cfg, outside := filepath.Join(t.TempDir(), "cfg-[w]*"), t.TempDir()
+	def := func(dir, cfg string) OrchestratorDef {
+		return OrchestratorDef{Name: "h1", Dir: dir, Env: map[string]string{"CLAUDE_CONFIG_DIR": cfg}, Managed: true, Mode: "headless"}
+	}
+	r := newHeadlessRunner(def(filepath.Join(t.TempDir(), "moved"), cfg), t.TempDir(), "")
 	r.sessionID = newUUID()
 	if r.hasTranscript() {
 		t.Fatal("a transcript before any")
 	}
-	os.MkdirAll(filepath.Join(cfg, "projects"), 0o700)
-	os.Symlink(outside, filepath.Join(cfg, "projects", slugForCwd(real)))
+	os.MkdirAll(filepath.Join(cfg, "projects", "-some-other-dir"), 0o700)
+	os.Symlink(outside, filepath.Join(cfg, "projects", "-the-old-dir"))
 	os.WriteFile(filepath.Join(outside, r.sessionID+".jsonl"), []byte("{}\n"), 0o600)
 	if !r.hasTranscript() {
-		t.Error("the transcript under the resolved dir's slug, in a linked project dir")
+		t.Error("the transcript in another, linked project dir of the account")
+	}
+	other := newHeadlessRunner(def(r.def.Dir, t.TempDir()), t.TempDir(), "")
+	other.sessionID = r.sessionID
+	if other.hasTranscript() {
+		t.Error("a transcript of another account")
+	}
+	// under its own cwd's slug it needs no listing: a projects dir it may only traverse still counts
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	own := filepath.Join(t.TempDir(), "projects")
+	os.MkdirAll(filepath.Join(own, slugForCwd(dir)), 0o700)
+	os.WriteFile(filepath.Join(own, slugForCwd(dir), r.sessionID+".jsonl"), []byte("{}\n"), 0o600)
+	os.Chmod(own, 0o311)
+	t.Cleanup(func() { os.Chmod(own, 0o700) })
+	here := newHeadlessRunner(def(dir, filepath.Dir(own)), t.TempDir(), "")
+	here.sessionID = r.sessionID
+	if !here.hasTranscript() {
+		t.Error("the transcript under its cwd's slug, in a projects dir that can't be listed")
 	}
 }
 

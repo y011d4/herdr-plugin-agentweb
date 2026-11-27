@@ -405,18 +405,31 @@ func (r *headlessRunner) transcriptFile() string {
 
 // hasTranscript is whether Claude Code has its session's transcript where it looks for one: its
 // account's projects/<slug of its cwd as the child sees it, links resolved>/<id>.jsonl, followed
-// wherever that links (unlike the chat's read, no containment applies to what Claude Code resumes).
+// wherever that links (unlike the chat's read, no containment applies to what Claude Code resumes),
+// else any other project dir of that account: Claude Code (2.1.322) resumes a session from there
+// too, as after the orchestrator's dir moved without its project dir, where beginning again under
+// the same id would be a new conversation. A loop rather than a glob: a config dir's path may hold
+// glob characters.
 func (r *headlessRunner) hasTranscript() bool {
 	sid := r.session()
-	if sid == "" {
+	if sid == "" || !sessionIDRe.MatchString(sid) {
 		return false
 	}
 	dir := r.def.Dir
 	if real, err := filepath.EvalSymlinks(dir); err == nil {
 		dir = real
 	}
-	_, err := os.Stat(filepath.Join(accountForConfigDir(r.def.Env["CLAUDE_CONFIG_DIR"], ""), slugForCwd(dir), sid+".jsonl"))
-	return err == nil
+	projects := accountForConfigDir(r.def.Env["CLAUDE_CONFIG_DIR"], "")
+	if _, err := os.Stat(filepath.Join(projects, slugForCwd(dir), sid+".jsonl")); err == nil {
+		return true // without listing projects, which may be unreadable
+	}
+	entries, _ := os.ReadDir(projects)
+	for _, e := range entries {
+		if _, err := os.Stat(filepath.Join(projects, e.Name(), sid+".jsonl")); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *headlessRunner) wantsToRun() bool {
