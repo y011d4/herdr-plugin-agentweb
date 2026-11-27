@@ -28,7 +28,6 @@ import (
 )
 
 const (
-	requestTimeout         = 10 * time.Second
 	backoffInitial         = time.Second
 	backoffMax             = 30 * time.Second
 	paneRebuildDebounce    = 250 * time.Millisecond
@@ -42,6 +41,14 @@ const (
 var logf = log.Printf
 
 var rpcSeq atomic.Int64
+
+// how long a herdr request (its dial, its write and its answer) may take, 10 s; atomic so a test
+// can shorten it while goroutines of earlier tests may still be calling herdr
+var requestTimeoutNs atomic.Int64
+
+func init() { requestTimeoutNs.Store(int64(10 * time.Second)) }
+
+func requestTimeout() time.Duration { return time.Duration(requestTimeoutNs.Load()) }
 
 // Only non-sensitive identifiers reach the logs, never text/keys/prompts.
 func safeParamsForLog(params map[string]any) string {
@@ -57,7 +64,7 @@ func safeParamsForLog(params map[string]any) string {
 // herdrRPC sends one request on its own connection: herdr answers one request per
 // connection and closes it.
 func herdrRPC(socketPath, method string, params map[string]any) (json.RawMessage, error) {
-	return herdrCall(context.Background(), socketPath, method, params, requestTimeout)
+	return herdrCall(context.Background(), socketPath, method, params, requestTimeout())
 }
 
 // herdrCall is herdrRPC with a deadline of timeout (0: none, for herdr's waits, which have
@@ -67,7 +74,7 @@ func herdrCall(ctx context.Context, socketPath, method string, params map[string
 		params = map[string]any{}
 	}
 	id := fmt.Sprintf("yoicks:%d:%d", time.Now().UnixMilli(), rpcSeq.Add(1))
-	dialCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	dialCtx, cancel := context.WithTimeout(ctx, requestTimeout())
 	conn, err := (&net.Dialer{}).DialContext(dialCtx, "unix", socketPath)
 	cancel()
 	if err != nil {
@@ -85,7 +92,7 @@ func herdrCall(ctx context.Context, socketPath, method string, params map[string
 	if timeout > 0 {
 		_ = conn.SetDeadline(time.Now().Add(timeout))
 	} else {
-		_ = conn.SetWriteDeadline(time.Now().Add(requestTimeout)) // a wait's request still goes out promptly
+		_ = conn.SetWriteDeadline(time.Now().Add(requestTimeout())) // a wait's request still goes out promptly
 	}
 	line, err := json.Marshal(map[string]any{"type": "request", "id": id, "method": method, "params": params})
 	if err != nil {
@@ -570,7 +577,7 @@ func (c *HerdrClient) openSubscription(paneIDs []string, onReady func()) *subscr
 		}
 		s.mu.Unlock()
 		// a socket that connects but never acks would otherwise hang forever
-		ackTimer := time.AfterFunc(requestTimeout, func() {
+		ackTimer := time.AfterFunc(requestTimeout(), func() {
 			c.post(func() {
 				if !s.acked {
 					s.destroy()

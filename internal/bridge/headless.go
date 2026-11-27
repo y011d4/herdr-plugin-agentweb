@@ -240,6 +240,24 @@ func (w *tailWriter) String() string {
 
 // ── the runner ───────────────────────────────────────────────────────────────
 
+// clock is the time the runner's own timers run on: its restarts, the coalesced wake-ups, a
+// prompt's delivery window, the waits between a watch's looks, the silence and the question
+// checks. Not the deadlines on a real process or pipe (stopChild's signals, write deadlines):
+// those stay on the real time. Tests give it a fakeherdr.FakeClock, moved on when they say.
+type clock interface {
+	Now() time.Time
+	After(d time.Duration) <-chan time.Time
+	AfterFunc(d time.Duration, f func()) interface{ Stop() bool }
+}
+
+type realClock struct{}
+
+func (realClock) Now() time.Time                         { return time.Now() }
+func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
+func (realClock) AfterFunc(d time.Duration, f func()) interface{ Stop() bool } {
+	return time.AfterFunc(d, f)
+}
+
 type headlessRunner struct {
 	def      OrchestratorDef
 	stateDir string
@@ -258,7 +276,8 @@ type headlessRunner struct {
 	mcpURL, mcpBearer string
 	tools             bool
 
-	// timings (fields so tests can shorten them)
+	// timings: their timers run on clock (the real one; a test's moves when the test says)
+	clock         clock
 	restartDelays []time.Duration // before each restart after a crash; one more crash in the window: error
 	crashWindow   time.Duration
 	interruptWait time.Duration
@@ -280,7 +299,7 @@ type headlessRunner struct {
 	warnings     []HeadlessWarning
 	alerted      map[string]bool // kinds notified this session
 	crashes      []time.Time
-	restartTimer *time.Timer
+	restartTimer interface{ Stop() bool }
 	interrupts   map[string]chan struct{}
 	nInterrupt   int
 	lastEvent    time.Time
@@ -290,7 +309,7 @@ type headlessRunner struct {
 	watches      map[string]*hlWatch // by pane
 	saved        []hlWatch           // the watches saved by an earlier bridge, re-armed at the first start
 	wakes        []string
-	wakeTimer    *time.Timer
+	wakeTimer    interface{ Stop() bool }
 	gen          int // its workers' generation: Stop and Clear begin a new one (forgetWorkers)
 	// its child's epoch: each start (a restart's too), Stop and Clear begin a new one; a call
 	// or a question from another child registers nothing (watch, ask)
@@ -329,6 +348,7 @@ func newHeadlessRunner(def OrchestratorDef, stateDir, rules string) *headlessRun
 		onChange: func() {}, onAlert: func(string, string) {}, onStatus: func(string, string) {},
 		log:           func(f string, a ...any) { logf("[headless "+def.Name+"] "+f, a...) },
 		tools:         os.Getenv("YOICKS_HEADLESS_NO_TOOLS") != "1",
+		clock:         realClock{},
 		restartDelays: []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second},
 		crashWindow:   10 * time.Minute, interruptWait: 2 * time.Second, silence: 3 * time.Minute,
 		alerted: map[string]bool{}, interrupts: map[string]chan struct{}{}, asks: map[string]bool{}, served: map[string]bool{},
@@ -764,7 +784,7 @@ func (r *headlessRunner) spawn(argv, env []string) error {
 		// it is the running child before its first line is read or its exit seen: neither may
 		// find another child (the init check would be skipped, a dead child left as running)
 		r.mu.Lock()
-		r.child, r.lastEvent, c.epoch = c, time.Now(), r.epoch
+		r.child, r.lastEvent, c.epoch = c, r.clock.Now(), r.epoch
 		r.model.inited, r.model.unreadableRun, r.model.yoicksUses, r.served = false, 0, nil, map[string]bool{}
 		r.model.expectTools, r.model.expectMCP = headlessTools(r.tools), true
 		r.model.Status = "idle"
@@ -843,7 +863,7 @@ func (r *headlessRunner) onLine(c *hlChild, line []byte) {
 		return
 	}
 	epoch := c.epoch // its own: a Stop or Clear may already have begun the next epoch while it still talks
-	r.lastEvent = time.Now()
+	r.lastEvent = r.clock.Now()
 	r.warnings = slices.DeleteFunc(r.warnings, func(w HeadlessWarning) bool { return w.Kind == "silent" })
 	from, seq := r.model.Status, r.model.CompletionSeq
 	step := r.model.apply(line, nowMs())
@@ -926,17 +946,15 @@ func (r *headlessRunner) statusChanged(from, to string) {
 // for r.silence.
 func (r *headlessRunner) watchSilence(c *hlChild) {
 	defer r.recoverAt("the silence watch")
-	t := time.NewTicker(r.silence / 6)
-	defer t.Stop()
 	for {
 		select {
 		case <-c.done:
 			return
-		case <-t.C:
+		case <-r.clock.After(r.silence / 6):
 		}
 		r.mu.Lock()
 		alert := func() {}
-		silent := r.child == c && r.model.Status == "working" && time.Since(r.lastEvent) >= r.silence &&
+		silent := r.child == c && r.model.Status == "working" && r.clock.Now().Sub(r.lastEvent) >= r.silence &&
 			!slices.ContainsFunc(r.warnings, func(w HeadlessWarning) bool { return w.Kind == "silent" })
 		if silent {
 			alert = r.warn("silent", fmt.Sprintf("no event for %s while working", r.silence.Round(time.Second)))
@@ -975,7 +993,7 @@ func (r *headlessRunner) exited(c *hlChild, werr error) {
 		r.onChange()
 		return
 	}
-	now := time.Now()
+	now := r.clock.Now()
 	r.crashes = append(slices.DeleteFunc(r.crashes, func(t time.Time) bool { return now.Sub(t) > r.crashWindow }), now)
 	var alert func()
 	if n := len(r.crashes); n > len(r.restartDelays) {
@@ -985,7 +1003,7 @@ func (r *headlessRunner) exited(c *hlChild, werr error) {
 		delay := r.restartDelays[n-1]
 		r.model.Status = "stopped"
 		alert = r.warn("exited", fmt.Sprintf("Claude Code exited unexpectedly (%s); restarting in %s", how, delay))
-		r.restartTimer = time.AfterFunc(delay, func() { r.restart(busy) })
+		r.restartTimer = r.clock.AfterFunc(delay, func() { r.restart(busy) })
 	}
 	r.mu.Unlock()
 	alert()
@@ -1150,7 +1168,7 @@ func (r *headlessRunner) write(content any) error {
 func (r *headlessRunner) writeTo(c *hlChild, content any) error {
 	r.mu.Lock()
 	if r.child == c && r.model.Status != "working" && r.model.Status != "blocked" {
-		r.model.Status, r.lastEvent = "working", time.Now()
+		r.model.Status, r.lastEvent = "working", r.clock.Now()
 	}
 	r.mu.Unlock()
 	if err := c.write(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": content}}); err != nil {
@@ -1181,7 +1199,7 @@ func (r *headlessRunner) Interrupt() error {
 	case <-acked:
 		r.log("interrupt answered")
 		return nil
-	case <-time.After(r.interruptWait):
+	case <-r.clock.After(r.interruptWait):
 	}
 	r.op.Lock()
 	defer r.op.Unlock()
