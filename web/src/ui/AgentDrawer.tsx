@@ -14,7 +14,7 @@
  * Mantine scroll area: the chat and the terminal scroll themselves. The dimmed part starts at
  * --sidebar-w (a wide screen's sidebar stays usable).
  */
-import { Drawer } from '@mantine/core';
+import { CloseButton, Drawer } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { closeAgent } from '../nav.ts';
@@ -69,7 +69,7 @@ export function AgentDrawer({ sheet, actions }: { sheet: Sheet | null; actions: 
       <Drawer.Content aria-label="Agent" ref={(el: HTMLElement | null) => { if (el) { content.current = el; el.setAttribute('aria-modal', String(!wide)); } }}>
         {/* the focus starts here, not on ✕: opened by no tap (a notification), ✕ would show its focus ring */}
         <div className="agent-drawer-head" key={sheet.key} ref={focusHead} tabIndex={-1} data-autofocus>
-          <button className="topbar-action agent-drawer-close" id="btn-drawer-close" aria-label="Close" onClick={closeAgent}>&#10005;</button>
+          <CloseButton id="btn-drawer-close" aria-label="Close" size="xl" iconSize={18} className="shrink-0 text-(--color-text-dim) hover:text-(--color-text)" onClick={closeAgent} />
           <div className="topbar-title"><PaneTitle paneId={sheet.paneId} home={false} /></div>
           <ViewToggle paneId={sheet.paneId} home={false} />
           <AgentMenu actions={actions(sheet.paneId)} />

@@ -1732,9 +1732,10 @@ async function p11(c: Ctx) {
     const l = document.getElementById('chat-log'); l.scrollTop = l.scrollHeight - l.clientHeight - 200; return [l.querySelectorAll('.chat-item').length, l.scrollTop]; })()`);
   const app = await pg.until(`document.querySelectorAll('#chat-log .chat-item').length > ${items0}`, 90_000, 200);
   const [open, top1] = await pg.ev(`[window.__wcDet.open && document.contains(window.__wcDet), document.getElementById('chat-log').scrollTop]`);
-  await pg.tapEl(`document.getElementById('btn-view-toggle')`);
+  // the view toggle is Chat | Term: a tap on each segment
+  await pg.tapEl(`document.querySelector('#btn-view-toggle [data-mode="terminal"]')`);
   const term = await pg.until(`localStorage.getItem('herdr_pane_view') === 'terminal'`, 2000);
-  await pg.tapEl(`document.getElementById('btn-view-toggle')`);
+  await pg.tapEl(`document.querySelector('#btn-view-toggle [data-mode="chat"]')`);
   const chat = await pg.until(`localStorage.getItem('herdr_pane_view') === 'chat'`, 2000);
   result(c, !shown.timeout && readOnly && !user.timeout && same && !det.timeout && !app.timeout && open && Math.abs(top1 - top0) <= 1 && !term.timeout && !chat.timeout,
     'P11', `chat=${ms(shown)},readOnly=${readOnly},userAdded=${ms(user)},firstNodeKept=${same},result=${ms(det)},append=${ms(app)},detailsOpen=${open},scrollDelta=${top1 - top0},toggleSaved=${!term.timeout && !chat.timeout}`,
