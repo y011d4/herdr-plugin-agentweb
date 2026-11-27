@@ -104,9 +104,15 @@ describe('terminal', () => {
     const history = term.loadHistory(); // a scrollback read in flight across a hold
     term.setHeld(true);
     term.setHeld(false);
-    reqs.find((r) => r.url.includes('source=recent'))!.answer(200, { ansi: 'old-1\nold-2\nhello 日本語' });
+    const next = term.loadHistory(); // the resume's own: not held up by the old one
+    const recent = reqs.filter((r) => r.url.includes('source=recent'));
+    assert.equal(recent.length, 2);
+    recent[0].answer(200, { ansi: 'old-1\nold-2\nhello 日本語' });
     await history;
     assert.equal(el.querySelector('#term-history')!.textContent, '', 'not applied');
+    recent[1].answer(200, { ansi: `${Array.from({ length: 30 }, (_, i) => `new-${i + 1}`).join('\n')}\n${read[1].ansi ?? read[1].text}` });
+    await next;
+    assert.match(el.querySelector('#term-history')!.textContent!, /new-1/, 'the new one applied');
 
     const failing = term.refresh(); // a screen read failing after a hold and its release: no error drawn
     term.setHeld(true);
