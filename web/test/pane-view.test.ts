@@ -208,6 +208,19 @@ describe('pane view: chat', () => {
     assert.equal(calls.modes, modes, 'no modeChanged');
   });
 
+  it('a scrollback read dropped by a suspend is read again with the next look at the terminal', async () => {
+    open('p3'); // its terminal chosen above: the terminal first, then its scrollback
+    await answer('/api/panes/p3/read?source=visible', read[1]);
+    assert.equal(count('/api/panes/p3/read?source=recent'), 1);
+    view.setMode('chat', false);
+    view.suspend();
+    await answer('/api/panes/p3/read?source=recent', { ansi: Array.from({ length: 40 }, (_, i) => `old-${i}`).join('\n') }); // dropped (held)
+    view.resume();
+    view.setMode('terminal', false);
+    await answer('/api/panes/p3/read?source=visible', read[1]);
+    assert.equal(count('/api/panes/p3/read?source=recent'), 2, 'read again');
+  });
+
   it('a switch asked for while suspended (a typing option landing under a drawer) is made as it resumes', async () => {
     open('p1');
     await answer('/transcript', transcript[0]);

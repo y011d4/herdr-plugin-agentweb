@@ -121,7 +121,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   let epoch = 0; // bumped by each suspend: a response to a request from before it never applies
   let wanted: { mode: 'terminal' | 'chat'; persist: boolean } | null = null; // a setMode while suspended, for the resume
   const home = view.homeMode; // a Home's view (the global changes under a drawer)
-  let historyLoaded = false; // the terminal's scrollback (read with its first look)
+  let historyLoaded = false; // the terminal's scrollback is in (read with a look at the terminal until it is)
   let chatAvailable = false;
   let chatSessionId: string | null = null;
   let chatCursor = 0; // byte offset into the transcript for incremental fetches
@@ -200,8 +200,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     const lookEpoch = epoch; // one from before a suspend leaves the scrollback to the resume's look
     void term.refresh().then(() => {
       if (destroyed || suspended || lookEpoch !== epoch || historyLoaded) return;
-      historyLoaded = true;
-      void term.loadHistory();
+      void term.loadHistory().then((ok) => { if (ok) historyLoaded = true; });
     });
   }
 
@@ -511,8 +510,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     // Left (or suspended) while the first read was in flight: no history load against a gone view; a resume
     // looks at the terminal itself.
     if (destroyed || suspended || startEpoch !== epoch) return;
-    historyLoaded = true;
-    void term.loadHistory();
+    void term.loadHistory().then((ok) => { if (ok) historyLoaded = true; });
     startPaneRefresh();
     void initChatAvailability();
   })();
@@ -542,7 +540,6 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       opts.modeChanged();
       startPaneRefresh();
       updatePromptPanel();
-      if (mode === 'terminal') historyLoaded = false; // a scrollback read held under the drawer never applied: read it again
       const w = wanted;
       wanted = null;
       if (w && w.mode !== mode) { // asked for under the drawer (a typing option's press landing)

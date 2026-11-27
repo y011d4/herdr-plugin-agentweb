@@ -21,8 +21,8 @@ export interface Terminal {
   render(ansi: string): void;
   /** reads the current screen over HTTP and renders it */
   refresh(): Promise<void>;
-  /** fills #term-history with the scrollback above the screen */
-  loadHistory(): Promise<void>;
+  /** fills #term-history with the scrollback above the screen; true once it did (false: not read, or dropped) */
+  loadHistory(): Promise<boolean>;
   /** after input: re-reads the screen twice, so the echo shows at once */
   echo(): void;
   /** the bridge's app-scroll decision (pane_output / a visible read carry it) */
@@ -295,24 +295,24 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
   // Fetch the scrollback and place everything ABOVE the current screen into
   // #term-history. source=recent ends with the lines currently on screen, so
   // the live section's line count is dropped from its tail to avoid the overlap.
-  async function loadHistoryPrefix(): Promise<void> {
+  async function loadHistoryPrefix(): Promise<boolean> {
     // Requires a live screen: source=recent ends with the current screen, and
     // without lastLiveAnsi we can't trim it off, so we'd duplicate it into history.
     // (Bails harmlessly when the first pane read hasn't rendered yet; historyFetchedAt
     // stays 0 so the next above-bottom scroll retries once live output exists.)
-    if (destroyed || held || historyRefreshing || terminalTouchActive || !lastLiveAnsi) return;
+    if (destroyed || held || historyRefreshing || terminalTouchActive || !lastLiveAnsi) return false;
     historyRefreshing = true;
     const reqHolds = holds;
     try {
       const data = await apiGet<ReadResponse>(
         `/api/panes/${encodeURIComponent(paneId)}/read?source=recent&lines=${HISTORY_LINES}&format=ansi`
       );
-      if (destroyed) return; // navigated away
-      if (held || reqHolds !== holds) { historyFetchedAt = 0; return; } // under a drawer since: read again once back
+      if (destroyed) return false; // navigated away
+      if (held || reqHolds !== holds) { historyFetchedAt = 0; return false; } // under a drawer since: read again once back
       // A gesture may have started while the fetch was in flight; replacing the
       // history DOM / adjusting scrollTop now would cancel or jump it. Bail and
       // leave the cache dirty so the next above-bottom scroll refetches.
-      if (terminalTouchActive) { historyFetchedAt = 0; return; }
+      if (terminalTouchActive) { historyFetchedAt = 0; return false; }
       const recentLines = (data.ansi ?? data.text ?? '').split('\n');
       const liveLineCount = lastLiveAnsi ? lastLiveAnsi.split('\n').length : 0;
       const prefix = recentLines.slice(0, Math.max(0, recentLines.length - liveLineCount)).join('\n');
@@ -331,8 +331,9 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
       historyFetchedAt = Date.now();
       lastPrefixEmpty = !prefix;
       outputEl.scrollTop = outputEl.scrollHeight - fromBottom - outputEl.clientHeight;
+      return true;
     } catch {
-      // scrollback is best-effort; the live screen keeps working without it
+      return false; // scrollback is best-effort; the live screen keeps working without it
     } finally {
       if (reqHolds === holds) historyRefreshing = false; // a hold since freed it already (setHeld)
     }
