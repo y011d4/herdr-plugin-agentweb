@@ -5,6 +5,9 @@
  * terminal ⇄ chat toggle and ⋮; under it the pane (ui/Pane.tsx). ✕, a tap on the dimmed screen, Escape
  * and the phone's Back close it (nav.ts's closeAgent; Back is the hash change itself).
  *
+ * The focus starts on its header (not on ✕, whose ring would show). A phone's sheet traps it; a wide
+ * screen's drawer doesn't, so Tab reaches the sidebar, while the screen under it is inert (ui/App.tsx).
+ *
  * Escape is its own: Mantine's modals each close on any Escape outside a shared stack, so the drawer
  * would close with the confirm or the ⋮ menu over it. It closes only with no other layer open. No scroll
  * lock (react-remove-scroll would stop the wheel and touch outside it: a wide screen's sidebar), and no
@@ -13,7 +16,7 @@
  */
 import { Drawer } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { useEffect, type ReactNode } from 'react';
+import { useCallback, useEffect, type ReactNode } from 'react';
 import { closeAgent } from '../nav.ts';
 import { WIDE_QUERY } from '../theme.ts';
 import { AgentMenu, Pane, PaneTitle, ViewToggle, type AgentActions } from './Pane.tsx';
@@ -31,6 +34,8 @@ const Fill = ({ children }: { children?: ReactNode }) => <div className="agent-d
 export function AgentDrawer({ sheet, actions }: { sheet: Sheet | null; actions: (paneId: string) => AgentActions }) {
   const wide = useMediaQuery(WIDE_QUERY, undefined, { getInitialValueInEffect: false });
   const open = sheet?.open ?? false;
+  // each pane's header as it mounts (keyed): stable, so a re-render doesn't take the focus back
+  const focusHead = useCallback((el: HTMLDivElement | null) => { el?.focus({ preventScroll: true }); }, []);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent): void => {
@@ -44,11 +49,12 @@ export function AgentDrawer({ sheet, actions }: { sheet: Sheet | null; actions: 
   return (
     // its size is style.css's (--drawer-size): a CSS min() is no size prop Mantine reads as such
     <Drawer.Root opened={open} onClose={closeAgent} position={wide ? 'right' : 'bottom'} closeOnEscape={false} lockScroll={false} scrollAreaComponent={Fill}
+      trapFocus={!wide}
       classNames={{ root: 'agent-drawer', inner: 'agent-drawer-inner', content: 'agent-drawer-content' }}>
       <Drawer.Overlay color="#000" backgroundOpacity={0.55} className="agent-drawer-overlay" />
       <Drawer.Content aria-label="Agent">
         {/* the focus starts here, not on ✕: opened by no tap (a notification), ✕ would show its focus ring */}
-        <div className="agent-drawer-head" key={sheet.key} tabIndex={-1} data-autofocus>
+        <div className="agent-drawer-head" key={sheet.key} ref={focusHead} tabIndex={-1} data-autofocus>
           <button className="topbar-action agent-drawer-close" id="btn-drawer-close" aria-label="Close" onClick={closeAgent}>&#10005;</button>
           <div className="topbar-title"><PaneTitle paneId={sheet.paneId} home={false} /></div>
           <ViewToggle paneId={sheet.paneId} home={false} />

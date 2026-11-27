@@ -143,12 +143,16 @@ describe('App', () => {
     assert.match($('.agent-drawer-head')!.textContent!, /claude/);
     assert.ok(document.activeElement === $('.agent-drawer-head'), 'the focus starts on its header, not on ✕');
     assert.equal(store.view.activePaneId, 'p1');
+    const inert = (sel: string): boolean => $(sel)!.hasAttribute('inert');
+    assert.ok(inert('#screen') && inert('#topbar') && inert('#reconnect-banner'), 'the screen under it out of reach');
+    assert.ok(!$('#sidebar') || !inert('#sidebar'), "a wide screen's sidebar stays usable");
     await act(async () => push!({ type: 'pane_gone', paneId: 'p1' }));
     await settle();
     assert.deepEqual(toastTitles(), ['Pane closed']);
     assert.equal(location.hash, '#/agents/personal');
     assert.ok(!$('.agent-drawer #screen-pane'), 'the drawer closed');
     assert.ok($('#screen #screen-agents') === list, 'back on the same list');
+    assert.ok(!$('#screen')!.hasAttribute('inert') && !$('#topbar')!.hasAttribute('inert'));
     assert.equal(history.length, before + 1, 'the close went back: no entry left over');
   });
 
@@ -392,6 +396,20 @@ describe('App', () => {
     await act(async () => push!({ type: 'state', state: s }));
     await settle();
     assert.equal(store.view.activePaneId, 'p1');
+  });
+
+  it("a Stop answered after another pane opened leaves that pane's drawer open", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/agents');
+    await go('#/pane/p3');
+    await click($('#btn-agent-menu'));
+    await click($('#am-stop'));
+    await click($('#modal-root #cf-ok'));
+    await go('#/pane/p1'); // before the DELETE answers
+    await answer('DELETE /api/panes/p3', { ok: true });
+    assert.equal(location.hash, '#/pane/p1');
+    assert.ok($('.agent-drawer #screen-pane'));
+    await go('#/agents');
   });
 
   it("a Home's Stop button closes its orchestrator's pane after the confirm, and the Home stays, stopped", async () => {
