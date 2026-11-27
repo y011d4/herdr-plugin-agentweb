@@ -9,6 +9,14 @@
  *   node tools/webcheck.ts setup --gonogo --base URL   # go/no-go: wc-less + a blocked wc-claude, held until SIGINT/SIGTERM
  *   node tools/webcheck.ts block                       # go/no-go B5: report that wc-less as blocked
  *   node tools/webcheck.ts teardown                    # clean every unfinished run
+ *   node tools/webcheck.ts shots --after DIR [--before DIR] --out DIR [--only home,agents]   # the PR screenshots
+ *
+ * shots needs no herdr and no bridge: it serves tools/shots-fixture.ts's made-up data and a web build (DIR = a
+ * web/dist), shoots each scene on a phone and a PC, before and after, and writes <scene>-<phone|pc>.<side>.png and
+ * manifest.json (which changed: the PNGs' bytes differ) into --out. Each shot gets a browser context of its own
+ * (the app keeps seen-done, the last Home, drafts in localStorage), a frozen clock (the fixture's T0 + 30s), UTC,
+ * en-US, and no animations, so the same build shoots the same bytes. CI (.github/workflows/screenshots.yml) posts
+ * the changed ones on the PR.
  *
  * A preview is a throwaway bridge (state/config under $WC_ROOT/preview-<port>, `env -u HERDR_BIN_PATH`)
  * over the REAL herdr, which production also shows. check/setup/teardown take $WC_ROOT/lock
@@ -24,7 +32,9 @@
  * with YOICKS_HEADLESS_NO_TOOLS=1. Without --fake-claude the H items fail (ENV) and the rest runs.
  */
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -2198,10 +2208,157 @@ function block(): number {
   return 0;
 }
 
+// ── shots: the PR screenshots (tools/shots-fixture.ts's scenes; see the header) ──────────────────────
+
+const SIZES = [
+  { id: 'phone', metrics: { width: 390, height: 844, deviceScaleFactor: 2, mobile: true } },
+  { id: 'pc', metrics: { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false } },
+];
+
+/** A bridge's stand-in over the fixture, loopback only: its reads, a /ws that sends the State once, and the web build
+ *  use() last chose (but sw.js: a service worker would only add a step). Writes answer ok and change nothing. One
+ *  server for both builds: the origin shows on screen (Settings' Bridge URL). */
+async function fixtureServer(): Promise<{ url: string; use: (dist: string) => void; close: () => void }> {
+  const f = await import('./shots-fixture.ts');
+  let root = '';
+  let entry = '';
+  const types: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png',
+    '.svg': 'image/svg+xml', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.ico': 'image/x-icon' };
+  const send = (res: http.ServerResponse, status: number, type: string, body: string | Buffer) => {
+    res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
+    res.end(body);
+  };
+  const json = (res: http.ServerResponse, body: unknown) => send(res, 200, 'application/json', js(body));
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url ?? '/', 'http://x');
+    const p = u.pathname;
+    let m: RegExpMatchArray | null;
+    if (p === '/api/state') return json(res, f.state);
+    if (p === '/api/profiles') return json(res, f.profiles);
+    if ((m = p.match(/^\/api\/panes\/([^/]+)\/read$/))) {
+      const ansi = f.screen(decodeURIComponent(m[1]));
+      return json(res, { ansi, text: ansi.replace(/\u001b\[[0-9;]*m/g, ''), appScroll: false });
+    }
+    if ((m = p.match(/^\/api\/panes\/([^/]+)\/transcript$/))) {
+      const items = f.transcripts[decodeURIComponent(m[1])];
+      return json(res, !items ? { available: false } : u.searchParams.has('after') ? { available: true, sessionId: 's1', items: [], cursor: 1 }
+        : { available: true, sessionId: 's1', items, cursor: 1, reset: true });
+    }
+    if (p.startsWith('/api/')) return req.method === 'GET' ? send(res, 404, 'application/json', js({ error: { code: 'not_found', message: p } })) : json(res, { ok: true });
+    // the entry script under a fixed name: the app shows its file's hash (BUILD), which any code change changes
+    if (p === '/' || p === '/index.html') {
+      const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+      entry = html.match(/\/assets\/[\w-]+-[\w-]{8}\.js/)?.[0] ?? '';
+      return send(res, 200, 'text/html', entry ? html.replace(entry, '/assets/index-shots000.js') : html);
+    }
+    const file = path.join(root, p === '/assets/index-shots000.js' ? entry : p);
+    if (p === '/sw.js' || !file.startsWith(root + path.sep) || !fs.statSync(file, { throwIfNoEntry: false })?.isFile()) return send(res, 404, 'text/plain', 'not found');
+    send(res, 200, types[path.extname(file)] ?? 'application/octet-stream', fs.readFileSync(file));
+  });
+  server.on('upgrade', (req, sock) => { // the handshake, then the State once; what the page sends is read and dropped
+    const accept = createHash('sha1').update(`${req.headers['sec-websocket-key']}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+    sock.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    const body = Buffer.from(js({ type: 'state', state: f.state }));
+    const n = body.length;
+    const head = n < 126 ? [0x81, n] : n < 65536 ? [0x81, 126, n >> 8, n & 255] : [0x81, 127, 0, 0, 0, 0, n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255];
+    sock.write(Buffer.concat([Buffer.from(head), body]));
+    sock.on('data', () => {});
+    sock.on('error', () => {});
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  return {
+    url: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+    use: (dist) => { root = path.resolve(dist); },
+    close: () => { server.closeAllConnections(); server.close(); },
+  };
+}
+
+async function shots(o: Record<string, any>): Promise<number> {
+  if (!o.after || !o.out) throw new Error('shots needs --after DIR and --out DIR (and --before DIR to compare)');
+  const { T0, scenes } = await import('./shots-fixture.ts');
+  const only = o.only ? new Set(String(o.only).split(',')) : null;
+  const picked = scenes.filter((s) => !only || only.has(s.name));
+  // a frozen clock that still moves with the page's own time (timers run), and nothing animated
+  const init = `(() => { const T = ${T0 + 30_000}, p0 = performance.now(), R = Date;
+    class D extends R { constructor(...a) { super(...(a.length ? a : [T + performance.now() - p0])); } static now() { return T + performance.now() - p0; } }
+    globalThis.Date = D;
+    document.addEventListener('DOMContentLoaded', () => { const s = document.createElement('style');
+      s.textContent = '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}';
+      document.head.append(s); }); })()`;
+  const out = path.resolve(o.out);
+  fs.mkdirSync(out, { recursive: true });
+  const sides = [['before', o.before], ['after', o.after]].filter(([, d]) => d) as Array<[string, string]>;
+  for (const [, d] of sides) if (!fs.existsSync(path.join(d, 'index.html'))) throw env(`no index.html in ${d} (npx vite build)`);
+  const server = await fixtureServer();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yoicks-shots-'));
+  const proc = spawn('google-chrome-stable', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${dir}`, '--hide-scrollbars',
+    '--blink-settings=primaryPointerType=4,primaryHoverType=2,availablePointerTypes=4,availableHoverTypes=2',
+    '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' });
+  const failed = new Promise<never>((_, rej) => proc.on('error', (e) => rej(env(`chrome: ${e.message}`))));
+  failed.catch(() => {});
+  let cdp: Cdp | null = null;
+  try {
+    const port = await Promise.race([waitFn(() => fs.readFileSync(path.join(dir, 'DevToolsActivePort'), 'utf8').split('\n')[0], 15_000), failed]);
+    if (port.timeout) throw env('chrome did not start');
+    cdp = await connectCdp((await (await fetch(`http://127.0.0.1:${port.v}/json/version`)).json()).webSocketDebuggerUrl);
+    const c = cdp;
+    const shoot = async (scene: typeof scenes[number], size: typeof SIZES[number]) => {
+      const { browserContextId } = await c.send('Target.createBrowserContext');
+      try {
+        const { targetId } = await c.send('Target.createTarget', { url: 'about:blank', browserContextId });
+        const { sessionId } = await c.send('Target.attachToTarget', { targetId, flatten: true });
+        const S = (method: string, params: object = {}) => c.send(method, params, sessionId);
+        const ev = async (expression: string) => (await S('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })).result?.value;
+        await S('Page.enable');
+        await S('Page.addScriptToEvaluateOnNewDocument', { source: init });
+        await S('Emulation.setTimezoneOverride', { timezoneId: 'UTC' });
+        await S('Emulation.setLocaleOverride', { locale: 'en-US' });
+        await S('Emulation.setDeviceMetricsOverride', size.metrics);
+        await S('Emulation.setTouchEmulationEnabled', size.metrics.mobile ? { enabled: true, maxTouchPoints: 5 } : { enabled: false });
+        await S('Page.navigate', { url: `${server.url}/${scene.token === false ? '' : '?token=shots'}${scene.hash}` });
+        const ready = !(await waitFn(() => ev(`(() => { try { return !!(${scene.ready}); } catch { return false; } })()`), 10_000)).timeout;
+        await ev('document.fonts.ready.then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))');
+        await sleep(300);
+        const { data } = await S('Page.captureScreenshot', { format: 'png' });
+        return { png: Buffer.from(data, 'base64'), ready };
+      } finally {
+        await c.send('Target.disposeBrowserContext', { browserContextId }).catch(() => {});
+      }
+    };
+    const manifest: Array<{ name: string; changed: boolean | null; notReady: string[] }> = [];
+    for (const scene of picked) for (const size of SIZES) {
+      const name = `${scene.name}-${size.id}`;
+      const got: Record<string, Buffer> = {};
+      const notReady: string[] = [];
+      for (const [side, d] of sides) {
+        server.use(d);
+        const r = await shoot(scene, size);
+        fs.writeFileSync(path.join(out, `${name}.${side}.png`), r.png);
+        got[side] = r.png;
+        if (!r.ready) notReady.push(side);
+      }
+      const changed = got.before ? !got.before.equals(got.after) : null;
+      manifest.push({ name, changed, notReady });
+      console.log(`${changed === null ? 'shot   ' : changed ? 'CHANGED' : 'same   '} ${name}${notReady.length ? ` (not ready: ${notReady.join(', ')})` : ''}`);
+    }
+    fs.writeFileSync(path.join(out, 'manifest.json'), js({ shots: manifest }, null, 1));
+    console.log(`${manifest.filter((s) => s.changed).length} of ${manifest.length} changed; ${out}`);
+    return 0;
+  } finally {
+    cdp?.close();
+    proc.kill('SIGKILL');
+    server.close();
+    await sleep(300);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 async function main(): Promise<number> {
   const { values: o, positionals: [cmd, sub] } = parseArgs({ allowPositionals: true, options: {
     base: { type: 'string' }, tier: { type: 'string', multiple: true }, only: { type: 'string' }, profile: { type: 'string' },
-    gonogo: { type: 'boolean' }, bin: { type: 'string' }, port: { type: 'string' }, 'web-dir': { type: 'string' }, 'fake-claude': { type: 'string' } } });
+    gonogo: { type: 'boolean' }, bin: { type: 'string' }, port: { type: 'string' }, 'web-dir': { type: 'string' }, 'fake-claude': { type: 'string' },
+    before: { type: 'string' }, after: { type: 'string' }, out: { type: 'string' } } });
+  if (cmd === 'shots') return shots(o);
   if (cmd === 'preview') return previewCmd(sub, o);
   if (cmd === 'teardown') { const unlock = await lock(); try { teardownAll(); } finally { unlock(); } return 0; }
   if (cmd === 'block') return block();
