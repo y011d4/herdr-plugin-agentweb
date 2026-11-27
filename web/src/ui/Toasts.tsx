@@ -1,14 +1,24 @@
 /**
  * ui/Toasts.tsx — the toast stack (notify.ts's store), drawn into #toast-container, oldest
  * first, each one Mantine's Notification. A toast goes after 4s, on its ✕, or a right swipe past
- * 72px. Only the toasts take taps: a tap between or beside them reaches the screen under them.
+ * 72px. Only the toasts take taps: a tap between or beside them reaches the screen under them; while
+ * the stack overflows the container takes them too (data-overflow), so its scrollbar can be dragged.
  */
 import { Notification } from '@mantine/core';
-import { useRef, useSyncExternalStore } from 'react';
+import { useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { dismissToast, getToasts, removeToast, subscribeToasts, type Toast } from '../notify.ts';
 
 export function Toasts() {
   const toasts = useSyncExternalStore(subscribeToasts, getToasts);
+  // ponytail: checked as toasts come and go, not on a window resize (the cap is 100vh less a margin)
+  // Overflowing is at its height cap with more inside: more inside alone isn't, as a toast's entry
+  // slides up 8px (a transform) and so overflows a box that isn't full.
+  useLayoutEffect(() => {
+    const box = document.getElementById('toast-container');
+    if (!box) return;
+    const full = box.clientHeight >= parseFloat(getComputedStyle(box).maxHeight);
+    box.toggleAttribute('data-overflow', full && box.scrollHeight > box.clientHeight);
+  }, [toasts]);
   return <>{toasts.map((t) => <ToastItem key={t.id} toast={t} />)}</>;
 }
 
