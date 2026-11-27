@@ -246,6 +246,14 @@ func TestHerdrClientIgnoresAnAgentListFromBeforeADrop(t *testing.T) {
 	c := NewHerdrClient(srv.Path, HerdrClientCallbacks{})
 	c.clock = clock
 	handled := make(chan struct{}, 2)
+	wasHandled := func(what string) {
+		t.Helper()
+		select {
+		case <-handled:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s never handled", what)
+		}
+	}
 	c.agentListHook = func() { handled <- struct{}{} }
 	defer c.Destroy()
 	c.Start()
@@ -264,12 +272,12 @@ func TestHerdrClientIgnoresAnAgentListFromBeforeADrop(t *testing.T) {
 	}
 	pass(t, clock, "the reconnect", backoffInitial)
 	pass(t, clock, "agent.list's debounce", completionSeqDebounce)
-	<-handled // the reconnect's
+	wasHandled("the reconnect's answer")
 	if got := seq(); got != 2 {
 		t.Fatalf("p1's completion seq after the reconnect: %d, want 2", got)
 	}
 	close(stale)
-	<-handled // the one from before the drop
+	wasHandled("the answer from before the drop")
 	if got := seq(); got != 2 {
 		t.Errorf("p1's completion seq: want 2 from after the reconnect, got %d", got)
 	}
