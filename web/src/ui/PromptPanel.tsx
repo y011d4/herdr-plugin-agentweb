@@ -2,12 +2,14 @@
  * ui/PromptPanel.tsx — the answer panel of a blocked pane in chat, shown by ui/Pane.tsx while
  * pane-view.ts reports a prompt (it polls the screen and decides when the panel shows): the
  * question and a button per option of the menu read off the screen, with the raw screen as
- * collapsible context below. The composer and quick keys stay available.
+ * collapsible context below. A Home's composer stays available; a pane's chat has none (read-only).
  *
  * A tap presses the option's digit, one atomic keystroke that selects and submits it (CLAUDE.md),
  * with the prompt's identity as expect_prompt: the bridge re-reads the screen and presses only into
  * that prompt, else answers 409 (prompt_changed). The buttons are keyed on that identity, so a poll
- * can't swap a button out from under a tap, and a new prompt gets fresh ones.
+ * can't swap a button out from under a tap, and a new prompt gets fresh ones. An option that asks for
+ * typing ("Type something.", "Chat about this") switches the view to the terminal once it lands: the
+ * composer is there.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { apiPost, orchestratorPost } from '../api.ts';
@@ -19,7 +21,7 @@ import { BUILD } from './Settings.tsx';
 
 const COOLDOWN_MS = 1500; // the floor of the re-tap block after a sent answer
 
-export function PromptPanel({ paneId, prompt, view }: { paneId: string; prompt: PanelPrompt; view: Pick<PaneView, 'answered' | 'reread'> }) {
+export function PromptPanel({ paneId, prompt, view }: { paneId: string; prompt: PanelPrompt; view: Pick<PaneView, 'answered' | 'reread' | 'setMode'> }) {
   const { parsed, id, screen } = prompt;
   const busy = useRef(false); // an answer is in flight or just sent: taps are ignored
   const gen = useRef(0); // per answer, so a stale POST or timer can't release a newer answer's guard
@@ -66,8 +68,13 @@ export function PromptPanel({ paneId, prompt, view }: { paneId: string; prompt: 
     setSending(true);
     setSent(o.send);
     const post = apiPost(`/api/panes/${encodeURIComponent(paneId)}/input`, { press: String(to), expect_prompt: id });
-    // "Chat about this" hands the turn back to the user in this pane: no going Back after it
-    view.answered(id, /^Chat about this/i.test(o.label), post);
+    // "Chat about this" hands the turn back to the user in this pane (no closing the drawer after it);
+    // "Type something." opens a text field in the prompt, no answer yet (nothing to confirm). Both wait
+    // for typing, which is the terminal's (a pane's chat is read-only): it opens once the press lands.
+    const chat = /^Chat about this/i.test(o.label);
+    const typing = /^Type something/i.test(o.label);
+    if (!typing) view.answered(id, chat, post);
+    if (chat || typing) post.then(() => { if (alive.current) view.setMode('terminal', false); }, () => {});
     try {
       await post;
       if (!alive.current || mine !== gen.current) return;
