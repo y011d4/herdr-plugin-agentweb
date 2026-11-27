@@ -14,7 +14,7 @@
  * State pushes re-render it constantly. The composer's textarea is uncontrolled (React never sets its
  * value), so a push never resets what is being typed, an IME composition included.
  */
-import { Menu } from '@mantine/core';
+import { ActionIcon, Button, CloseButton, FileButton, Group, Image, Menu, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
@@ -27,7 +27,7 @@ import { openAgent, openAgentNamed } from '../nav.ts';
 import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
 import { emit, findPane, keptTasks, store, subscribe } from '../store.ts';
 import type { AppState, HeadlessUsage, OrchestratorView } from '../types.ts';
-import { agentCards, cardTitle, orchestratorLabel, relativeTime } from './Dashboard.tsx';
+import { TopbarIcon, agentCards, cardTitle, orchestratorLabel, relativeTime } from './Dashboard.tsx';
 import type { Topbar } from './App.tsx';
 import { previewImage } from './Modals.tsx';
 import { HeadlessPrompt, PromptPanel } from './PromptPanel.tsx';
@@ -161,17 +161,20 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
       )}
       {/* Esc: Claude Code's interrupt, the one key a read-only chat keeps */}
       {readOnly && working && (
-        <div className="input-bar pane-interrupt-bar">
-          <button className="btn-secondary" id="btn-pane-interrupt" onClick={() => { void sendKey(paneId, { keys: ['esc'] }); }}>&#9632; Interrupt</button>
+        <div className={`${BAR} px-3 pt-2 pb-[calc(var(--safe-bottom)+8px)]`}>
+          <Button variant="default" fullWidth id="btn-pane-interrupt" onClick={() => { void sendKey(paneId, { keys: ['esc'] }); }}>&#9632; Interrupt</Button>
         </div>
       )}
       {/* hidden, not unmounted: what is typed stays, as across a terminal ⇄ chat switch */}
-      <div className="input-bar" style={readOnly ? { display: 'none' } : undefined}>
+      <div className={`input-bar ${BAR} pb-(--safe-bottom)`} style={readOnly ? { display: 'none' } : undefined}>
         <Composer paneId={paneId} home={home} name={name} />
-        {/* Home hides the terminal keys while chatting; they come back with the terminal */}
-        <div className="quickkey-row" id="quickkey-row" style={home && mode !== 'terminal' ? { display: 'none' } : undefined}>
+        {/* Home hides the terminal keys while chatting; they come back with the terminal. A row that
+            scrolls sideways, its scrollbar hidden. */}
+        <div id="quickkey-row" className="flex gap-1.5 overflow-x-auto px-3 pb-2 [scrollbar-width:none] lg:px-(--wide-gutter)"
+          style={home && mode !== 'terminal' ? { display: 'none' } : undefined}>
           {KEYS.map(([label, payload]) => (
-            <button key={label} className="qkey" onClick={() => { void sendKey(paneId, payload); }}>{label}</button>
+            <Button key={label} className={QKEY} variant="default" size="compact-md" h={36} radius={6} ff="monospace" fz={12} fw={400}
+              onClick={() => { void sendKey(paneId, payload); }}>{label}</Button>
           ))}
         </div>
       </div>
@@ -284,6 +287,11 @@ function HeadlessWarnings({ o, clear }: { o: OrchestratorView; clear?: () => voi
   );
 }
 
+// the bottom bars: the composer's and a read-only chat's ■
+const BAR = 'shrink-0 border-t border-(--color-border) bg-(--color-surface)';
+// a quick key: dim, the accent while pressed
+const QKEY = 'qkey shrink-0 text-(--color-text-dim) active:border-(--color-accent) active:bg-(--color-accent) active:text-white';
+
 const autoGrow = (t: HTMLTextAreaElement): void => {
   t.style.height = 'auto';
   t.style.height = `${Math.min(t.scrollHeight, 120)}px`;
@@ -296,7 +304,7 @@ const autoGrow = (t: HTMLTextAreaElement): void => {
 // orchestrator's also takes images (+, or pasted), shown above it until sent (not kept as a draft).
 function Composer({ paneId, home, name }: { paneId: string; home: boolean; name: string }) {
   const input = useRef<HTMLTextAreaElement>(null);
-  const picker = useRef<HTMLInputElement>(null);
+  const resetPicker = useRef<() => void>(null);
   const key = draftKey(paneId, home ? name : undefined);
   const [placeholder] = useState(() => (home ? `Message ${orchestratorLabel(orchestratorOfPane(store.appState, paneId))}…` : 'Send text…'));
   const hl = headlessName(paneId); // no pane to type into: its message goes to the bridge's child
@@ -416,30 +424,35 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
   return (
     <>
       {images.length > 0 && (
-        <div className="input-images" id="input-images">
+        <div id="input-images" className="flex gap-2 overflow-x-auto px-3 pt-2 lg:px-(--wide-gutter)">
           {images.map((a, i) => {
             const src = `data:${a.mediaType};base64,${a.data}`;
             return (
-              <span key={i} className="input-image">
-                <button aria-label="View image" onClick={() => previewImage(src, 'Attached image')}><img src={src} alt="" /></button>
-                <button className="input-image-remove" aria-label="Remove image" onClick={() => setImages((cur) => cur.filter((x) => x !== a))}>&times;</button>
+              <span key={i} className="relative shrink-0">
+                <UnstyledButton aria-label="View image" onClick={() => previewImage(src, 'Attached image')}>
+                  <Image src={src} alt="" h={56} w="auto" maw={96} fit="cover" radius={6} className="border border-(--color-border)" />
+                </UnstyledButton>
+                <CloseButton className="absolute -top-1.5 -right-1.5" size={22} radius="xl" variant="filled" bg="dark.6" c="dark.0"
+                  aria-label="Remove image" onClick={() => setImages((cur) => cur.filter((x) => x !== a))} />
               </span>
             );
           })}
         </div>
       )}
-      <div className="input-row">
+      <Group gap={6} wrap="nowrap" pt={8} pb={6} className="px-3 lg:px-(--wide-gutter)">
         {hl && (
-          <>
-            <button className="input-attach-btn" id="btn-attach" aria-label="Attach images" onClick={() => picker.current!.click()}>+</button>
-            <input ref={picker} id="input-image-picker" type="file" accept="image/*" multiple hidden
-              onChange={(e) => { void attach([...(e.currentTarget.files ?? [])]); e.currentTarget.value = ''; }} />
-          </>
+          // the picker's input is hidden; picking the same file again works (reset after each pick)
+          <FileButton resetRef={resetPicker} accept="image/*" multiple inputProps={{ id: 'input-image-picker' }}
+            onChange={(files) => { void attach(files); resetPicker.current?.(); }}>
+            {(props) => <ActionIcon {...props} id="btn-attach" variant="default" size="xl" radius={8} fz={20} aria-label="Attach images">+</ActionIcon>}
+          </FileButton>
         )}
-        <textarea id="pane-input" ref={input} rows={1} placeholder={placeholder} autoCorrect="off" autoCapitalize="off" spellCheck={false}
-          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); keptTasks.edit(paneId, e.currentTarget.value); setDraft(key, e.currentTarget.value); }}></textarea>
-        <button className="input-send-btn" id="btn-send-enter" disabled={preparing > 0} onClick={() => { void send(); }}>Send</button>
-      </div>
+        {/* Mantine's look, the composer's own text: 14px (iOS zooms in on focus, as before), at most 120px tall (autoGrow) */}
+        <Textarea id="pane-input" ref={input} rows={1} placeholder={placeholder} autoCorrect="off" autoCapitalize="off" spellCheck={false}
+          className="flex-1" styles={{ input: { fontSize: 14, lineHeight: 1.4, maxHeight: 120, background: 'var(--color-bg)', paddingTop: 10, paddingBottom: 10 } }}
+          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); keptTasks.edit(paneId, e.currentTarget.value); setDraft(key, e.currentTarget.value); }} />
+        <Button id="btn-send-enter" miw={64} px={12} fz={13} disabled={preparing > 0} onClick={() => { void send(); }}>Send</Button>
+      </Group>
     </>
   );
 }
@@ -454,29 +467,43 @@ export function PaneTitle({ paneId, home }: { paneId: string; home: boolean }) {
     if (home) {
       const st = found?.pane?.agent?.status ?? '';
       const sub = st === 'working' ? 'working…' : st === 'blocked' ? 'needs you' : 'ready';
-      last.current = <>{orchestratorLabel(orchestratorOfPane(state, paneId))}<span className={`topbar-subtitle home-state ${st}`}>{`· ${sub}`}</span></>;
+      last.current = <>{orchestratorLabel(orchestratorOfPane(state, paneId))}<Subtitle className="home-state" c={st === 'working' || st === 'blocked' ? st : undefined}>{`· ${sub}`}</Subtitle></>;
     } else {
       const label = found?.pane?.agent?.displayName || found?.pane?.agent?.name || found?.pane?.title || paneId;
       const context = found ? `${found.ws.label} / ${found.tab.label}` : '';
-      last.current = <>{label}{context ? <span className="topbar-subtitle">{`· ${context}`}</span> : null}</>;
+      last.current = <>{label}{context ? <Subtitle>{`· ${context}`}</Subtitle> : null}</>;
     }
   }
   return last.current;
 }
 
-// terminal ⇄ chat, hidden until the pane has a transcript (on a Home: Esc / Ctrl+C / arrows live in the terminal's keys)
+// terminal ⇄ chat, hidden until the pane has a transcript. A pane's: Chat | Term, the one on show
+// marked (each segment's label carries data-mode). A Home's: one button to the terminal and back
+// (>_ / Chat; Esc, Ctrl+C and the arrows live in the terminal's keys), never remembered.
 export function ViewToggle({ paneId, home }: { paneId: string; home: boolean }) {
   const { shown, mode } = useToggle(paneId);
-  const label = home ? (mode === 'terminal' ? 'Chat' : '>_') : (mode === 'chat' ? 'Terminal' : 'Chat');
+  const hidden = shown ? undefined : { display: 'none' };
+  if (home) {
+    return (
+      <Button id="btn-view-toggle" variant="default" size="compact-sm" radius="xl" fw={400} style={hidden} aria-label="Toggle terminal"
+        onClick={() => paneView?.setMode(store.view.paneViewMode === 'chat' ? 'terminal' : 'chat', false)}>
+        {mode === 'terminal' ? 'Chat' : '>_'}
+      </Button>
+    );
+  }
   return (
-    <button className={`topbar-action view-toggle${home ? ' home-view-toggle' : ''}`} id="btn-view-toggle" style={shown ? undefined : { display: 'none' }}
-      aria-label={home ? 'Toggle terminal' : undefined} onClick={() => paneView?.setMode(store.view.paneViewMode === 'chat' ? 'terminal' : 'chat', !home)}>
-      {label}
-    </button>
+    <SegmentedControl id="btn-view-toggle" size="xs" radius="xl" style={hidden} value={mode ?? 'chat'}
+      data={[{ value: 'chat', label: <span data-mode="chat">Chat</span> }, { value: 'terminal', label: <span data-mode="terminal">Term</span> }]}
+      onChange={(m) => paneView?.setMode(m as Mode, true)} />
   );
 }
 
-const settingsButton = <button className="topbar-action" id="btn-settings" aria-label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</button>;
+// the dim part of a title: where the pane is, or what the Home is up to (`c`: its status's color)
+const Subtitle = ({ className = '', c, children }: { className?: string; c?: string; children: string }) => (
+  <Text span className={`topbar-subtitle ${className}`} fz={12} fw={400} ml={6} c={c ?? 'dimmed'}>{children}</Text>
+);
+
+const settingsButton = <TopbarIcon id="btn-settings" label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</TopbarIcon>;
 
 export interface AgentActions { rename: () => void; clear: () => void; stop: () => void }
 
@@ -485,7 +512,7 @@ export interface AgentActions { rename: () => void; clear: () => void; stop: () 
 export function AgentMenu({ actions }: { actions: AgentActions }) {
   return (
     <Menu id="btn-agent-menu" position="bottom-end" width={220} radius="md">
-      <Menu.Target><button className="topbar-action" aria-label="Agent actions">&#8942;</button></Menu.Target>
+      <Menu.Target><TopbarIcon label="Agent actions">&#8942;</TopbarIcon></Menu.Target>
       <Menu.Dropdown>
         <Menu.Item id="am-rename" className="min-h-11" fz="md" onClick={actions.rename}>Rename…</Menu.Item>
         <Menu.Item id="am-clear" className="min-h-11" fz="md" onClick={actions.clear}>Clear (fresh session)…</Menu.Item>
@@ -511,7 +538,7 @@ export const homeTopbar = (paneId: string): Topbar => ({
 
 function StoppedTitle({ name }: { name: string }) {
   const o = useAppState()?.orchestrators?.find((x) => x.name === name);
-  return <>{orchestratorLabel(o)}<span className="topbar-subtitle home-state stopped">· stopped</span></>;
+  return <>{orchestratorLabel(o)}<Subtitle className="home-state">· stopped</Subtitle></>;
 }
 
 export const stoppedHomeTopbar = (name: string): Topbar => ({
@@ -537,10 +564,10 @@ export function StoppedHome({ name, clear }: { name: string; clear?: () => void 
   return (
     <div id="screen-home-stopped" className="screen-home" style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       <HomeStatus name={name} state={state} clear={clear} />
-      <div className="home-stopped">
-        <p>{`${orchestratorLabel(state?.orchestrators?.find((o) => o.name === name))} is not running.`}</p>
-        <button className="btn-primary" id="btn-home-start" disabled={busy} onClick={() => { void start(); }}>{busy ? 'Starting…' : 'Start'}</button>
-      </div>
+      <Stack flex={1} align="center" justify="center" gap={12} px={16} py={24}>
+        <Text c="dimmed">{`${orchestratorLabel(state?.orchestrators?.find((o) => o.name === name))} is not running.`}</Text>
+        <Button id="btn-home-start" px={28} disabled={busy} onClick={() => { void start(); }}>{busy ? 'Starting…' : 'Start'}</Button>
+      </Stack>
     </div>
   );
 }

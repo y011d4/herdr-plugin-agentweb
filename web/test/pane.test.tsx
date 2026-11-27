@@ -49,6 +49,9 @@ async function show(paneId: string, home = false, back = '#/agents', name = home
 }
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => container.querySelector<T>(sel)!;
 const ta = () => $<HTMLTextAreaElement>('#pane-input');
+// a pane's view toggle (Chat | Term): the mode on show, and a tap on a segment
+const shownMode = (): string => $<HTMLInputElement>('#btn-view-toggle input:checked').value;
+const pick = (mode: 'chat' | 'terminal'): Promise<void> => fire(() => $(`#btn-view-toggle [data-mode="${mode}"]`).click());
 const type = (text: string) => fire(() => { ta().value = text; ta().dispatchEvent(new Event('input', { bubbles: true })); });
 /** A keydown on the composer; true when it was not prevented (a newline goes in). */
 async function key(init: KeyboardEventInit & { keyCode?: number }): Promise<boolean> {
@@ -341,7 +344,7 @@ describe('pane header', () => {
   it('names the agent and where it is, keeps that while the pane is gone, and ✕ closes it', async () => {
     location.hash = '#/pane/p1'; // opened afresh: its close replaces it with the screen under it
     await show('p1', false, '#/agents/personal');
-    assert.equal($('.agent-drawer-head').textContent!.replace(/[⋮]/g, ''), '✕claude· repo / oneChat');
+    assert.equal($('.agent-drawer-head').textContent!.replace(/[⋮]/g, ''), 'claude· repo / oneChatTerm'); // ✕ is an icon
     const s = fresh();
     s.workspaces[0].tabs[0].panes.splice(0, 1);
     await fire(() => setAppState(s));
@@ -357,10 +360,11 @@ describe('pane header', () => {
     await answer('/read?source=visible', read[1]);
     await answer('/transcript', transcript[0]);
     assert.equal(toggle.style.display, '');
-    assert.equal(toggle.textContent, 'Terminal');
+    assert.equal(toggle.textContent, 'ChatTerm');
+    assert.equal(shownMode(), 'chat');
     assert.equal($('#quickkey-row').style.display, '');
-    await fire(() => toggle.click());
-    assert.equal(toggle.textContent, 'Chat');
+    await pick('terminal');
+    assert.equal(shownMode(), 'terminal');
     assert.equal(localStorage.getItem('herdr_pane_view'), 'terminal');
   });
 });
@@ -376,13 +380,13 @@ describe('read-only chat', () => {
     assert.equal(bar().style.display, 'none', 'chat: read-only');
     await fire(() => $('#btn-pane-interrupt').click());
     assert.deepEqual(posts('p1'), [{ keys: ['esc'] }]);
-    await fire(() => $('#btn-view-toggle').click());
+    await pick('terminal');
     assert.equal(bar().style.display, '', 'terminal: the composer and keys');
     assert.ok(!$('#btn-pane-interrupt'), "■ is the chat's (the terminal has Esc)");
     await type('typed in the terminal');
-    await fire(() => $('#btn-view-toggle').click());
+    await pick('chat');
     assert.equal(bar().style.display, 'none');
-    await fire(() => $('#btn-view-toggle').click());
+    await pick('terminal');
     assert.equal(ta().value, 'typed in the terminal', 'hidden, not dropped');
   });
 
@@ -477,7 +481,7 @@ describe('Home', () => {
     await home(s);
     assert.equal($('#home-activity').style.display, '');
     assert.equal($('#home-activity').textContent, 'thinking…');
-    assert.equal($('.home-state').className, 'topbar-subtitle home-state working');
+    assert.match($('.home-state').style.color, /working/);
     assert.equal($('.home-state').textContent, '· working…');
     await fire(() => setAppState(fresh()));
     assert.equal($('#home-activity').style.display, 'none');

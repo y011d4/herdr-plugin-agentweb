@@ -8,8 +8,8 @@
  * what changed: scrollTop and iOS momentum hold. While a finger is down the list doesn't change at all
  * (a rewrite mid-drag can cancel the scroll); the latest State shows once it lifts.
  */
-import { ActionIcon, Badge, Card, Center, Group, Loader, Text } from '@mantine/core';
-import { useEffect, useRef, useState, useSyncExternalStore, type HTMLAttributes, type TouchEvent } from 'react';
+import { ActionIcon, Badge, Button, Card, Center, Group, Loader, Text } from '@mantine/core';
+import { useEffect, useRef, useState, useSyncExternalStore, type ComponentPropsWithRef, type HTMLAttributes, type TouchEvent } from 'react';
 import { dashboardCards, shownStatus, type DashboardCard } from '../dashboard-group.ts';
 import { openAgent } from '../nav.ts';
 import { agentsScope, defaultHome, homeHash } from '../routes.ts';
@@ -137,14 +137,14 @@ const useAppState = (): AppState | null => useSyncExternalStore(subscribe, () =>
 
 function Title({ hash }: { hash: string }) {
   const scope = agentsScope(hash, useAppState());
-  return <>Agents{scope && <span className="topbar-subtitle">&#183; {orchestratorLabel(scope)}</span>}</>;
+  return <>Agents{scope && <Text span className="topbar-subtitle" fz={12} fw={400} ml={6} c="dimmed">&#183; {orchestratorLabel(scope)}</Text>}</>;
 }
 
 // Orchestrators have no cards, so this is the way to a Home: its own, else the one used last
 function HomeButton({ hash }: { hash: string }) {
   const state = useAppState();
   const home = agentsScope(hash, state) ?? defaultHome(state, lastHome());
-  return home ? <button className="topbar-back" aria-label="Home" onClick={() => { location.hash = homeHash(home.name); }}>&#8592; Home</button> : null;
+  return home ? <BackButton label="Home" onClick={() => { location.hash = homeHash(home.name); }}>&#8592; Home</BackButton> : null;
 }
 
 export const dashboardTopbar = (hash: string): Topbar => ({
@@ -158,7 +158,13 @@ export const dashboardTopbar = (hash: string): Topbar => ({
   ),
 });
 
-/** A topbar's (or the sidebar's head's) icon button: 44px, dim, the text's color under the pointer. */
-export function TopbarIcon({ label, children, ...rest }: { label: string; children: string; id?: string; onClick: () => void; 'data-action'?: string }) {
+/** A topbar's (or the sidebar's head's, or a drawer's) icon button: 44px, dim, the text's color under the
+ *  pointer. A button's props pass on (a menu's target gets its handlers and ref). */
+export function TopbarIcon({ label, children, ...rest }: { label: string; children: string; 'data-action'?: string } & Omit<ComponentPropsWithRef<'button'>, 'children'>) {
   return <ActionIcon variant="subtle" color="gray" size="xl" fz={20} className="text-(--color-text-dim) hover:text-(--color-text)" aria-label={label} {...rest}>{children}</ActionIcon>;
+}
+
+/** A topbar's way back (to a Home, the list): the accent's text, 44px tall, flush with the bar's left edge. */
+export function BackButton({ label, children, onClick }: { label: string; children: string; onClick: () => void }) {
+  return <Button className="topbar-back -ml-2" variant="subtle" h={44} px={8} fz={16} fw={400} aria-label={label} onClick={onClick}>{children}</Button>;
 }
