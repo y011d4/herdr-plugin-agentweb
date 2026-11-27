@@ -105,4 +105,22 @@ describe('Toasts in #toast-container', () => {
     await unmount();
     vi.useRealTimers();
   });
+
+  it('a box just full, its newest toast still sliding in, is no overflow once the slide ends; a fractional cap is full', async () => {
+    clearToasts();
+    const { unmount } = await render(<div id="toast-container"><Toasts /></div>);
+    const box = document.getElementById('toast-container')!;
+    let slide = 8; // the entry's transform, until its animation ends
+    box.style.maxHeight = '250.4px'; // clientHeight rounds it down
+    Object.defineProperty(box, 'clientHeight', { get: () => Math.min(125 * box.children.length, 250) });
+    Object.defineProperty(box, 'scrollHeight', { get: () => 125 * box.children.length + slide });
+    await fire(() => { showToast('a', ''); showToast('b', ''); });
+    assert.equal(box.hasAttribute('data-overflow'), true, 'full, and the slide overflows it');
+    slide = 0;
+    await fire(() => box.lastElementChild!.dispatchEvent(new Event('animationend', { bubbles: true })));
+    assert.equal(box.hasAttribute('data-overflow'), false, 'the slide is over: no overflow');
+    await fire(() => showToast('c', ''));
+    assert.equal(box.hasAttribute('data-overflow'), true, 'a third toast overflows the 250.4px cap at clientHeight 250');
+    await unmount();
+  });
 });
