@@ -289,7 +289,8 @@ func TestHerdrClientDropsAnOlderAgentList(t *testing.T) {
 	}
 }
 
-// A failed agent.list is asked again once, without waiting for another status change.
+// A failed agent.list is asked again once, without waiting for another status change; a later
+// trigger gets its own retry.
 func TestHerdrClientRetriesAFailedAgentList(t *testing.T) {
 	dir, _ := os.MkdirTemp("", "fh")
 	defer os.RemoveAll(dir)
@@ -305,7 +306,7 @@ func TestHerdrClientRetriesAFailedAgentList(t *testing.T) {
 		calls++
 		n := calls
 		mu.Unlock()
-		if n <= 2 { // the first and its retry fail: no third without a trigger
+		if n <= 3 { // the first and its retry fail (no third without a trigger), then a trigger's first
 			return fakeherdr.Reply{Code: "internal", Message: "busy"}
 		}
 		return fakeherdr.Reply{Result: map[string]any{"agents": []any{map[string]any{"pane_id": "p1", "name": "w-x", "agent": "claude", "agent_status": "idle"}}}}
@@ -324,8 +325,8 @@ func TestHerdrClientRetriesAFailedAgentList(t *testing.T) {
 		t.Errorf("agent.list asked %d times: want the one retry only", n)
 	}
 	env.WaitSubscribed(1, 5*time.Second)
-	env.Status("p1", "working") // a trigger: asked again, and it answers
-	env.WaitCount("agent.list", 3, 5*time.Second)
+	env.Status("p1", "working") // a trigger: asked again (fails), and its own retry answers
+	env.WaitCount("agent.list", 4, 6*time.Second)
 	time.Sleep(300 * time.Millisecond)
 	if s := c.State(); s == nil || s.Pane("p1").Agent.HerdrName == nil || *s.Pane("p1").Agent.HerdrName != "w-x" {
 		t.Errorf("p1's herdr name: want w-x, got %+v", s.Pane("p1").Agent)

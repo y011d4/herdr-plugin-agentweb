@@ -167,7 +167,6 @@ type HerdrClient struct {
 	completionT   debounce
 	listSent      int64 // agent.list requests sent, and the number of the one whose answer was applied last:
 	listApplied   int64 // an older answer is dropped (a count, not the clock, which can step back)
-	listRetried   bool  // a failed agent.list was asked again once (until one succeeds)
 	coverageEpoch int // bumped whenever live event coverage is lost
 	// pane IDs covered by the currently acknowledged subscription; snapshot status
 	// replays skip these (live events deliver their changes) and cover the rest
@@ -734,7 +733,11 @@ func (c *HerdrClient) scheduleBroadcast() {
 // completion_seq and state_change_seq) after each snapshot and status change.
 // Trailing debounce: the request always goes out after the change that asked for
 // it, which applyCompletionSeqs' requestedAt guard relies on. Best-effort.
-func (c *HerdrClient) refreshCompletionSeqsSoon() {
+func (c *HerdrClient) refreshCompletionSeqsSoon() { c.refreshAgentList(false) }
+
+// refreshAgentList is refreshCompletionSeqsSoon's; `retry`: this is a failed one's second try, which
+// isn't tried again (each trigger gets one retry; the debounce merges a retry into a trigger's).
+func (c *HerdrClient) refreshAgentList(retry bool) {
 	if c.destroyed {
 		return
 	}
@@ -753,13 +756,11 @@ func (c *HerdrClient) refreshCompletionSeqsSoon() {
 				// failed: asked again once, a while later (or the names and seqs would wait for the
 				// next status change or snapshot)
 				if err != nil {
-					if !c.listRetried {
-						c.listRetried = true
-						time.AfterFunc(agentListRetry, func() { c.post(c.refreshCompletionSeqsSoon) })
+					if !retry {
+						time.AfterFunc(agentListRetry, func() { c.post(func() { c.refreshAgentList(true) }) })
 					}
 					return
 				}
-				c.listRetried = false
 				var r struct {
 					Agents []RawAgentSeqs `json:"agents"`
 				}
