@@ -183,4 +183,16 @@ describe('answer panel', () => {
     assert.deepEqual(modes, ['terminal']);
     assert.deepEqual(posts(), [{ press: '4', expect_prompt: promptIdentity(typed) }, { press: '4', expect_prompt: promptIdentity(typed) }]);
   });
+
+  it("a multi-select's \"[ ] Type something\" too; the terminal opens even when the panel went before the press answered", async () => {
+    const multi = ASK.replace('  3. cherry', '  3. cherry\n  4. [ ] Type something');
+    await mount(at(multi));
+    assert.equal(options()[3].textContent, '4[ ] Type something');
+    await tap(3);
+    assert.deepEqual(answered, []);
+    await unmount(); // the pane left `blocked`: the panel is gone
+    unmount = async () => {};
+    await answerPost({});
+    assert.deepEqual(modes, ['terminal']);
+  });
 });
