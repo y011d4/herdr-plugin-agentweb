@@ -35,7 +35,7 @@ var knownEvents = map[string][]string{
 var warningActions = map[string][]string{
 	"silent": {"interrupt", "clear"}, "permission_route": {"interrupt"}, "stream_broken": {"clear", "tui"},
 	"restart_limit": {"clear", "tui"}, "panic": {"clear", "tui"}, "init": {"tui"}, "billing": {"tui"}, "env": {"tui"},
-	"auth": {"tui"}, "version": {"tui"}, "start": {"tui"}, "question_route": {"interrupt"}, "rules": {"clear"},
+	"auth": {"tui"}, "version": {"tui"}, "start": {"tui"}, "question_route": {"interrupt"},
 	"mcp_call": {"clear"}, "canary": {"tui"},
 }
 

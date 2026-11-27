@@ -91,6 +91,7 @@ herdr plugin action invoke y011d4.yoicks.start
 
 Then restart each running orchestrator (**Clear** on its Home). The bridge rewrites their rules and
 allowlists with the new `yoicks` path when it starts, and a running orchestrator still calls the old one.
+A headless one needs nothing: the bridge's restart resumes it, and the resumed session reads the new rules.
 
 ### Rolling back
 
