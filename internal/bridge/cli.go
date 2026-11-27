@@ -926,31 +926,28 @@ func removeOwnWorktree(rpc, slow Rpc, own, path string) (string, error) {
 	} else {
 		// detached (a worker that deployed checks out the commit it deployed): the checkout
 		// goes once that commit is upstream, the branch it was made for only when that is
-		// merged too. That branch: its dir (<repo>-wt-<branch>) is named after it, and its
-		// HEAD's reflog, git's own record of this worktree, shows it left it (the name
-		// alone can't tell feat/x from feat-x)
+		// merged too. That branch is the one its oldest checkout moved away from, per its
+		// HEAD's reflog (git's own record of this worktree), and its dir (<repo>-wt-<branch>)
+		// must be named after it (the name alone can't tell feat/x from feat-x)
 		if !inUpstream(tip) {
 			return refuse("its HEAD is detached at a commit not in " + upstream)
 		}
-		name, named := strings.CutPrefix(filepath.Base(dir), filepath.Base(ws.Worktree.RepoRoot)+"-wt-")
-		refs, _ := git("for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads")
-		left, _ := git("reflog", "--format=%gs", "HEAD")
-		var match []string
-		for _, b := range strings.Fields(refs) {
-			if named && unsafePathChars.ReplaceAllString(b, "-") == name && strings.Contains(left, "checkout: moving from "+b+" to ") {
-				match = append(match, b)
+		log, _ := git("reflog", "--format=%gs", "HEAD")
+		first := ""
+		for _, l := range strings.Split(log, "\n") { // newest first
+			if from, ok := strings.CutPrefix(l, "checkout: moving from "); ok {
+				first, _, _ = strings.Cut(from, " ")
 			}
 		}
+		name, named := strings.CutPrefix(filepath.Base(dir), filepath.Base(ws.Worktree.RepoRoot)+"-wt-")
+		btip, isBranch := git("rev-parse", "-q", "--verify", "refs/heads/"+first)
 		switch {
-		case len(match) == 0:
-			kept = "no local branch both is named after it and was checked out in it, per its reflog"
-		case len(match) > 1:
-			kept = "branches " + strings.Join(match, ", ") + " kept: each matches it"
+		case first == "" || !isBranch || !named || unsafePathChars.ReplaceAllString(first, "-") != name:
+			kept = "no branch deleted: its reflog and name show no local branch it was made for"
+		case !merged(first, jsTrim(btip)):
+			kept = "branch " + first + " kept: git can't tell it is merged into " + upstream + " (nor gh that it is a merged PR's head)"
 		default:
-			branch = match[0]
-			if btip, _ := git("rev-parse", "refs/heads/"+branch); !merged(branch, jsTrim(btip)) {
-				kept = "branch " + branch + " kept: git can't tell it is merged into " + upstream + " (nor gh that it is a merged PR's head)"
-			}
+			branch = first
 		}
 	}
 

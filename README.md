@@ -390,7 +390,7 @@ its own Claude account. The account is an agent process's `CLAUDE_CONFIG_DIR` (d
   merged (an ancestor of `origin/HEAD`, or the head of a merged PR per `gh`, for squash merges).
   A worktree left on a detached HEAD (a worker that checked out what it deployed) is removed
   when that commit is in `origin/HEAD`, and the branch its dir is named after
-  (`<repo>-wt-<branch>`, and its reflog shows it was on) only when that branch is merged too;
+  (`<repo>-wt-<branch>`, and its reflog shows it started on) only when that branch is merged too;
   otherwise the branch is kept, and the answer says so. A shell left in the worktree doesn't
   hold it: herdr closes its workspace.
 
