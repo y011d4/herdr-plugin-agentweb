@@ -52,6 +52,9 @@ let unmount: () => Promise<void>;
 const mount = async (p: PanelPrompt) => { ({ container, unmount } = await render(<Host initial={p} />)); };
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => container.querySelector<T>(sel)!;
 const options = () => [...container.querySelectorAll<HTMLButtonElement>('#chat-prompt .ask-opt')];
+// the buttons while an answer settles: disabled; the tapped one marked
+const sending = (): boolean => options().every((b) => b.disabled);
+const marked = (): boolean[] => options().map((b) => b.classList.contains('ask-opt-sent'));
 const tap = (i: number) => fire(() => options()[i].click());
 
 beforeEach(() => {
@@ -92,7 +95,7 @@ describe('answer panel', () => {
     assert.equal(options().length, 0);
     assert.equal($('.chat-prompt-q').textContent, '');
     assert.equal($<HTMLDetailsElement>('.chat-prompt-term').open, true);
-    assert.ok($('.chat-prompt-screen .loading-spinner'), 'the spinner');
+    assert.ok($('.chat-prompt-screen .mantine-Loader-root'), 'the spinner');
     const bare = ASK.replace(/^.*Fruit\nPick a fruit\n/m, ''); // a menu with no question to read
     assert.equal(parsePrompt(bare)!.question, null);
     await fire(() => show(at(bare)));
@@ -107,8 +110,8 @@ describe('answer panel', () => {
     await tap(1);
     assert.deepEqual(posts(), [{ press: '2', expect_prompt: promptIdentity(ASK) }]);
     assert.deepEqual(answered, [{ id: promptIdentity(ASK), chat: false }]);
-    assert.equal($('#chat-prompt').className, 'chat-prompt chat-prompt-sending');
-    assert.deepEqual(options().map((b) => b.className), ['ask-opt', 'ask-opt ask-opt-sent', 'ask-opt']);
+    assert.ok(sending());
+    assert.deepEqual(marked(), [false, true, false]);
   });
 
   it('holds re-taps 1.5s after the press is sent, or until a new prompt shows', async () => {
@@ -120,7 +123,7 @@ describe('answer panel', () => {
     await tap(0);
     assert.equal(posts().length, 1, 'held');
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    assert.equal($('#chat-prompt').className, 'chat-prompt');
+    assert.ok(!sending());
     await tap(0);
     assert.equal(posts().length, 2, 'taken after the floor');
     await answerPost({ ok: true });
@@ -128,8 +131,8 @@ describe('answer panel', () => {
     assert.equal(posts().length, 2, 'held again');
     const next = menu('Pick another');
     await fire(() => show(at(next)));
-    assert.equal($('#chat-prompt').className, 'chat-prompt', 'a new prompt: live at once');
-    assert.deepEqual(options().map((b) => b.className), ['ask-opt', 'ask-opt', 'ask-opt'], 'fresh buttons');
+    assert.ok(!sending(), 'a new prompt: live at once');
+    assert.deepEqual(marked(), [false, false, false], 'fresh buttons');
     await tap(2);
     assert.deepEqual(posts()[2], { press: '3', expect_prompt: promptIdentity(next) });
   });
@@ -140,8 +143,8 @@ describe('answer panel', () => {
     await answerPost(errors.find((e) => e.error.code === 'prompt_changed'), 409);
     assert.equal(rereads, 1);
     assert.deepEqual(getToasts().map((t) => t.title), ['Prompt changed']);
-    assert.equal($('#chat-prompt').className, 'chat-prompt', 'the buttons are live again');
-    assert.deepEqual(options().map((b) => b.className), ['ask-opt', 'ask-opt', 'ask-opt']);
+    assert.ok(!sending(), 'the buttons are live again');
+    assert.deepEqual(marked(), [false, false, false]);
     await tap(0);
     assert.equal(posts().length, 2);
     assert.equal(posts()[1].press, '1');
@@ -177,7 +180,7 @@ describe('answer panel', () => {
     assert.deepEqual(answered, []);
     await answerPost({ error: 'boom' }, 500);
     assert.deepEqual(modes, [], 'a failed press: the panel stays');
-    await vi.waitFor(() => assert.ok(!$('.chat-prompt-sending')));
+    await vi.waitFor(() => assert.ok(!sending()));
     await tap(3);
     await answerPost({});
     assert.deepEqual(modes, ['terminal']);
