@@ -42,6 +42,9 @@ const (
 	wakeCoalesce    = 3 * time.Second
 	// how long the end of a turn a worker took up on its own must hold before it is told
 	resumeQuiet = 10 * time.Second
+	// how often a worker after its end is looked at again (a turn may end between a look and
+	// the wait after it)
+	resumeRecheck = time.Minute
 )
 
 // ── the listener ─────────────────────────────────────────────────────────────
@@ -679,18 +682,30 @@ func (r *headlessRunner) runWatch(ctx context.Context, w *hlWatch, text string, 
 			}
 			continue
 		}
+		params := map[string]any{"target": w.Pane, "until": until}
 		if slices.Equal(until, untilResumed) { // a turn of its own that ended unseen (a restart, a broken wait)
 			// ponytail: done only; ended and then looked at (idle) it passes for a look, untold
-			if raw, err := r.rpc("agent.get", map[string]any{"target": w.Pane}); err == nil {
-				if status, seq, _ := agentState(raw); status == "done" && seq != w.Seq {
-					if !r.tell(w, "", "working", w.Seq, false) { // its end, told next from working
-						return
-					}
-					until, resumed = untilSettled, true
+			raw, err := r.rpc("agent.get", map[string]any{"target": w.Pane})
+			if err != nil {
+				if !r.retryWatch(ctx, w, err) {
+					return
 				}
+				continue
+			}
+			if status, seq, _ := agentState(raw); status == "done" && seq != w.Seq {
+				if !r.tell(w, "", "working", w.Seq, false) { // its end, told next from working
+					return
+				}
+				until, resumed = untilSettled, true
+				params["until"] = until
+			} else {
+				params["timeout_ms"] = resumeRecheck.Milliseconds() // then looked at again
 			}
 		}
-		raw, err := r.waitRPC(ctx, "agent.wait", map[string]any{"target": w.Pane, "until": until})
+		raw, err := r.waitRPC(ctx, "agent.wait", params)
+		if herdrCode(err) == "timeout" { // (only the wait for a resume has one)
+			continue
+		}
 		if err != nil {
 			if !r.retryWatch(ctx, w, err) {
 				return

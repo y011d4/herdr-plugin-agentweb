@@ -583,7 +583,10 @@ func TestHeadlessWakeUps(t *testing.T) {
 		}
 		b.srv.client.Refresh() // a reconnect's fresh snapshot
 		w.Set("w1p", "idle")   // a look at its pane
-		b.clock.Advance(time.Minute)
+		for range 2 {          // each look again finds no turn ended: it waits on, quiet
+			b.pass(t, "the look again", resumeRecheck)
+		}
+		b.waiting(t, "the look again", resumeRecheck) // again
 		b.waitWakes(t, "[yoicks] w1: working → done")
 		w.Set("w1p", "working") // a turn of its own
 		b.watching(t, "working")
