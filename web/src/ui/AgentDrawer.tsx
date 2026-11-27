@@ -16,7 +16,7 @@
  */
 import { CloseButton, Drawer } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { closeAgent } from '../nav.ts';
 import { WIDE_QUERY } from '../theme.ts';
 import { AgentMenu, Pane, PaneTitle, ViewToggle, type AgentActions } from './Pane.tsx';
@@ -68,14 +68,18 @@ export function AgentDrawer({ sheet, actions }: { sheet: Sheet | null; actions: 
       <Drawer.Overlay color="#000" backgroundOpacity={0.55} className="agent-drawer-overlay" />
       {/* non-modal on a wide screen (the sidebar beside it is usable): Mantine sets aria-modal="true" whatever */}
       <Drawer.Content aria-label="Agent" ref={(el: HTMLElement | null) => { if (el) { content.current = el; el.setAttribute('aria-modal', String(!wide)); } }}>
+        {/* each pane's header and body, mounted afresh as the drawer switches to it: one key for both (two
+            siblings sharing one key leave the earlier one behind, a header per agent opened) */}
+        <Fragment key={sheet.key}>
         {/* the focus starts here, not on ✕: opened by no tap (a notification), ✕ would show its focus ring */}
-        <div className="agent-drawer-head" key={sheet.key} ref={focusHead} tabIndex={-1} data-autofocus>
+        <div className="agent-drawer-head" ref={focusHead} tabIndex={-1} data-autofocus>
           <CloseButton id="btn-drawer-close" aria-label="Close" size="xl" iconSize={18} className="shrink-0 text-(--color-text-dim) hover:text-(--color-text)" onClick={closeAgent} />
           <div className="topbar-title"><PaneTitle paneId={sheet.paneId} home={false} /></div>
           <ViewToggle paneId={sheet.paneId} home={false} />
           <AgentMenu actions={actions(sheet.paneId)} />
         </div>
-        <Pane key={sheet.key} paneId={sheet.paneId} home={false} />
+        <Pane paneId={sheet.paneId} home={false} />
+        </Fragment>
       </Drawer.Content>
     </Drawer.Root>
   );
