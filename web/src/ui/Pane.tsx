@@ -1,8 +1,8 @@
 /**
  * ui/Pane.tsx — an opened pane (#/pane/<id>, in ui/AgentDrawer.tsx's drawer, with the header pieces
  * here: PaneTitle, ViewToggle, AgentMenu) or an orchestrator's Home (#/home/<name>): Home's topbar,
- * Home's status bar (the switcher between running orchestrators, the agents waiting on the user,
- * the counts, Clear and Stop) and "doing now" line, the composer and the quick keys, around the pane's body. The
+ * Home's status bar (the switcher between running orchestrators, then one row: "Needs you · n", the
+ * counts, Clear and Stop) and "doing now" line, the composer and the quick keys, around the pane's body. The
  * body (terminal, chat) is pane-view.ts, imperative, in #pane-view: created on mount, destroyed on
  * unmount, one at a time. Below it, while the view reports a prompt, the answer panel (PromptPanel.tsx).
  * A pane's chat is read-only: its composer and keys show with its terminal (or for a kept first task),
@@ -23,13 +23,12 @@ import { homeSummary, orchestratorStatus } from '../dashboard-group.ts';
 import { fitImages, MAX_IMAGES, toAttachment, type ImageAttachment } from '../image.ts';
 import { showToast } from '../notify.ts';
 import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
-import { openAgent } from '../nav.ts';
 import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
 import { emit, findPane, keptTasks, store, subscribe } from '../store.ts';
 import type { AppState, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
-import { TopbarIcon, agentCards, cardTitle, orchestratorLabel, relativeTime } from './Dashboard.tsx';
+import { TopbarIcon, agentCards, orchestratorLabel, relativeTime } from './Dashboard.tsx';
 import { StatusDot } from './Status.tsx';
-import { NeedsBadge, needsYou, Todos, useMinute } from './Todos.tsx';
+import { NeedsBadge, NeedsButton, needsYou, useMinute } from './Todos.tsx';
 import type { Topbar } from './App.tsx';
 import { previewImage } from './Modals.tsx';
 import { answersSoFar, HeadlessPrompt, PromptPanel } from './PromptPanel.tsx';
@@ -203,18 +202,20 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
 }
 
 // Home status bar: with two or more orchestrators configured a switcher between their Homes (a
-// stopped one dimmed: its Home has Start), its account's agents waiting on the user (tap → that
-// agent) and counts of the rest (tap → its list), then the orchestrator's Clear and Stop; for a
-// headless one also its usage, its model and its warnings (`clear`: their Clear, on a stopped Home too).
+// stopped one dimmed: its Home has Start), then one row: "Needs you · n" (its account's blocked
+// agents, its own question, its to-do items: Todos.tsx's NeedsButton, a popover), the counts of its
+// agents (tap → its list), and at the right a headless one's usage and model and the orchestrator's
+// Clear and Stop (the row wraps where it must: a phone, a narrow PC); under it a headless one's
+// warnings (`clear`: their Clear, on a stopped Home too).
 function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: string; state: AppState | null; actions?: HomeActions; clear?: () => void }) {
   const now = useMinute();
   if (!state) return <Stack id="home-status" className={STATUS_BAR}></Stack>;
   const all = state.orchestrators ?? [];
   const self = all.find((o) => o.name === name);
   const s = homeSummary(agentCards(state, self), store.seenDone);
-  const open = (id: string): void => openAgent(id);
+  const usage = self?.headless?.usage ? <Usage usage={self.headless.usage} /> : null;
   return (
-    <Stack id="home-status" gap={8} py={10} className={`px-3.5 ${STATUS_BAR}`}>
+    <Stack id="home-status" gap={8} py={8} className={`px-3.5 ${STATUS_BAR}`}>
       {/* a PC's sidebar does this (style.css hides it there): the row scrolls sideways, its scrollbar hidden */}
       {all.length >= 2 && (
         <Group className="home-switch overflow-x-auto [scrollbar-width:none]" gap={6} wrap="nowrap">
@@ -233,38 +234,26 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
           })}
         </Group>
       )}
-      {/* at most ~3 rows of chips, so the counts row below (the way to the list) stays on screen; its
-          to-do items below them */}
-      {(s.blocked.length > 0 || !!self?.todos?.length) && (
-        <Group className="home-attn max-h-[88px] overflow-y-auto" gap={6}>
-          <Text fz={12} fw={700} c="blocked" mr={2}>Needs you</Text>
-          {s.blocked.map((c) => (
-            <Button key={c.pane.paneId} className="home-chip max-w-full text-(--color-text)" variant="outline" color="blocked" size="compact-sm" radius="xl"
-              fz={13} fw={600} data-pane-id={c.pane.paneId} onClick={() => open(c.pane.paneId)}>
-              {cardTitle(c)}<Text span fz={11} fw={500} c="dimmed" ml={6} truncate>{c.workspaceLabel}</Text>
-            </Button>
-          ))}
-        </Group>
-      )}
-      {self && <Todos o={self} now={now} />}
-      {/* the counts, then the orchestrator's Clear and Stop at the right end */}
-      <Group gap={10} wrap="nowrap">
-        <UnstyledButton className="home-counts flex min-w-0 flex-1 flex-wrap items-center gap-x-3.5 gap-y-1 text-left text-[13px] text-(--color-text-dim)"
-          data-go="agents" onClick={() => { location.hash = homeAgentsHash(location.hash); }}>
-          <span><Dot status="working" />{`${s.working} working`}</span>
-          <span><Dot status="done" />{`${s.done} done`}</span>
-          <span><Dot status="idle" />{`${s.idle} idle`}</span>
-          <span className="home-counts-more ml-auto font-semibold text-(--color-accent)">Agents &#8250;</span>
+      <Group className="home-row" gap="6px 14px">
+        {self && <NeedsButton o={self} s={s} n={needsYou(self, state, now)} now={now} />}
+        {/* below sm only the numbers: the words come back with the room */}
+        <UnstyledButton className="home-counts flex shrink-0 items-center gap-x-3 whitespace-nowrap text-[13px] text-(--color-text-dim)"
+          data-go="agents" aria-label={`${s.working} working, ${s.done} done, ${s.idle} idle: the agents`}
+          onClick={() => { location.hash = homeAgentsHash(location.hash); }}>
+          <span><Dot status="working" />{s.working}<span className="max-sm:hidden"> working</span></span>
+          <span><Dot status="done" />{s.done}<span className="max-sm:hidden"> done</span></span>
+          <span><Dot status="idle" />{s.idle}<span className="max-sm:hidden"> idle</span></span>
+          <span className="home-counts-more font-semibold text-(--color-accent)">Agents &#8250;</span>
         </UnstyledButton>
-        {actions && (
-          <Group gap={6} wrap="nowrap" className="shrink-0">
-            <Button id="btn-home-clear" {...SMALL} onClick={actions.clear}>Clear</Button>
-            <Button id="btn-home-stop" {...SMALL} c="blocked" onClick={actions.stop}>Stop</Button>
+        {(usage || self?.headless || actions) && (
+          <Group gap={10} className="ml-auto">
+            {usage}
+            {self?.headless && <ModelPicker o={self} />}
+            {actions && <Button id="btn-home-clear" {...SMALL} onClick={actions.clear}>Clear</Button>}
+            {actions && <Button id="btn-home-stop" {...SMALL} c="blocked" onClick={actions.stop}>Stop</Button>}
           </Group>
         )}
       </Group>
-      {self?.headless?.usage && <Usage usage={self.headless.usage} />}
-      {self?.headless && <ModelPicker o={self} />}
       {self?.headless && <HeadlessWarnings o={self} clear={clear} />}
     </Stack>
   );
