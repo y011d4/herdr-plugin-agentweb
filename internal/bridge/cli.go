@@ -260,8 +260,14 @@ func scrubTokenFromLog(logPath string) error {
 	} else if err != nil {
 		return err
 	}
-	// in place, not renamed over: a `tail -f` of the log keeps following it
-	return os.WriteFile(logPath, bytes.ReplaceAll(text, []byte(token), []byte("<redacted>")), 0o600)
+	// over the same bytes (same file, same length, nothing truncated or shifted): a
+	// `tail -f` of the log goes on, and a failed write loses nothing
+	f, err := os.OpenFile(logPath, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteAt(bytes.ReplaceAll(text, []byte(token), bytes.Repeat([]byte("*"), len(token))), 0)
+	return errors.Join(err, f.Close())
 }
 
 func notify(title, body string) {
