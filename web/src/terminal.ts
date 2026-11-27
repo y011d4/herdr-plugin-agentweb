@@ -332,7 +332,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
     } catch {
       // scrollback is best-effort; the live screen keeps working without it
     } finally {
-      historyRefreshing = false;
+      if (reqHolds === holds) historyRefreshing = false; // a hold since freed it already (setHeld)
     }
   }
 
@@ -440,7 +440,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
     setAppScroll(on) { appScrollPane = on; },
     setHeld(on) {
       held = on;
-      if (on) { refreshReqSeq++; holds++; } // a read in flight now never applies, also once released
+      if (on) { refreshReqSeq++; holds++; historyRefreshing = false; } // a read in flight now never applies, also once released; nor holds up the next
     },
     destroy() {
       destroyed = true;
