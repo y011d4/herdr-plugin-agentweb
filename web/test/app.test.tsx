@@ -548,7 +548,7 @@ describe('App', () => {
     assert.equal(location.hash, '#/settings');
     assert.ok($('#screen-settings'), 'Settings stays');
     assert.equal(store.view.activePaneId, 'p1');
-    assert.equal(watches.at(-1), 'p1:terminal', 'the watch follows');
+    assert.equal(watches.at(-1), 'p1:chat', 'the watch follows (a Claude pane: its chat)');
     const home = $('#screen #screen-pane.screen-home');
     s.orchestrators[0].paneId = null;
     await act(async () => push!({ type: 'state', state: structuredClone(s) }));
@@ -673,7 +673,7 @@ describe('App', () => {
     assert.equal(history.length, len, "in the drawer's entry");
     assert.ok(!$('.agent-drawer #screen-pane') && $('#screen-settings') && $('#screen #screen-pane.screen-home'), 'over the Home the drawer was over');
     assert.equal(store.view.activePaneId, 'p4', 'the Home running again under it');
-    assert.equal(watches.at(-1), 'p4:terminal');
+    assert.equal(watches.at(-1), 'p4:chat');
     await act(async () => { sw.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: '#/pane/p3' } })); });
     await settle();
     assert.equal(location.hash, '#/pane/p3');
