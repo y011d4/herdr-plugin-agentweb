@@ -543,8 +543,10 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   as it is. It keeps the scroll containers full width and makes the readable column with their padding
   (`--wide-gutter`; the bars and the composer around the chat take it as a `lg:px-(--wide-gutter)` class).
   At that width (`WIDE_QUERY`, `theme.ts`; theme.test checks it against style.css and `lg`) the shell
-  also draws the sidebar (`ui/Sidebar.tsx`) on every screen but the token one: each orchestrator's
-  Home a heading over its account's agents (`homeGroups`), then Other (Settings stays the topbar's ⚙, at
+  also draws the sidebar (`ui/Sidebar.tsx`) on every screen but the token one: on top, each orchestrator's
+  Home a heading over what waits there (`ui/Todos.tsx`'s `NeedsList`, the Needs you popover's), then Other's
+  blocked agents; under them the agents folded into one row (All agents, the count), a click unfolding them under Open the list (`#/agents`),
+  by Home (`homeGroups`), then Other (Settings stays the topbar's ⚙, at
   the screen's top right, as on a phone). It comes first in `#app`, in a
   slot of its own, so `#topbar`/`#reconnect-banner`/`#screen` stay the same elements as it comes and
   goes; while it is there `#app` is a two-column grid (`#app:has(> #sidebar)`) and `--sidebar-w` is its

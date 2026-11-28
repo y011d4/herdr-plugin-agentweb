@@ -1651,8 +1651,9 @@ async function p6(c: Ctx) {
 }
 
 /** W1: the PC sidebar. On a PC (1280px): #sidebar left of the topbar and #screen, --sidebar-w its
- *  width; a heading per orchestrator, in /api/state's order, over its account's agents, then Other with
- *  the agents no account has (when there are any); clicking wc-less there opens #/pane/<it> and marks it.
+ *  width; its agents, unfolded (All agents), a group per orchestrator, in /api/state's order, with its
+ *  account's agents, then Other with the agents no account has (when there are any); clicking wc-less
+ *  there opens #/pane/<it> and marks it.
  *  Down to a phone's width the sidebar goes, and #screen stays the same element. */
 async function w1(c: Ctx) {
   const { pg } = c;
@@ -1669,7 +1670,8 @@ async function w1(c: Ctx) {
       const want: Array<[string, string[]]> = orch.map((o) => [o.name, agents.filter((id) => o.agents?.includes(id)).sort()]);
       const other = agents.filter((id) => !orch.some((o) => o.agents?.includes(id))).sort();
       if (other.length) want.push(['', other]);
-      const dom = await pg.ev(`[...document.querySelectorAll('#sidebar section.sidebar-group')].map((s) =>
+      // folded at first: unfold them (React draws them on the next try)
+      const dom = await pg.ev(`document.querySelector('#sidebar .sidebar-all[aria-expanded=false]')?.click(), [...document.querySelectorAll('#sidebar section.sidebar-group')].map((s) =>
         [s.dataset.home, [...s.querySelectorAll('[data-sidebar-pane]')].map((e) => e.dataset.sidebarPane).sort()])`);
       groups = `${want.length}/${dom.length}`;
       return js(dom) === js(want);
@@ -1685,7 +1687,7 @@ async function w1(c: Ctx) {
     const gone = await pg.until(`!document.getElementById('sidebar') && document.getElementById('screen') === window.__wcScreen`, 2000);
     result(c, !g.timeout && geo.w === 300 && geo.topbar === 300 && geo.screen === 300 && geo.v === '300px' && screen === 1 && !open.timeout && !gone.timeout, 'W1',
       `groups=${groups}:${g.timeout ? 'mismatch' : 'ok'},width=${geo.w},topbarX=${geo.topbar},screenX=${geo.screen},--sidebar-w=${geo.v},open=${ms(open)},phone=${ms(gone)}`,
-      "1280px: #sidebar 300px left of #topbar and #screen (--sidebar-w 300px); its groups = /api/state's orchestrators (each its account's agents) + Other; " +
+      "1280px: #sidebar 300px left of #topbar and #screen (--sidebar-w 300px); its unfolded groups = /api/state's orchestrators (each its account's agents) + Other; " +
         "clicking wc-less there opens #/pane/<it> marked within 2s; at 390px no #sidebar and the same #screen within 2s");
   } finally {
     await mobile(pg, true);
