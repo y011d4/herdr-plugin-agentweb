@@ -519,7 +519,7 @@ function showHome(name: string, paneId: string | null, hash: string): void {
     markActivePaneSeen();
     view.paneViewMode = openingMode(paneId); // as openPaneRoute's
     const actions = { clear: () => { void clearAgentFlow(paneId); }, stop: () => { void stopAgentFlow(paneId); } };
-    show('pane', <Pane paneId={paneId} home actions={actions} name={name} />, homeTopbar(paneId), hash);
+    show('pane', <Pane paneId={paneId} home actions={actions} name={name} />, homeTopbar(paneId, name), hash);
   } else {
     // a headless one's warnings offer Clear while stopped too (a fresh session)
     show('pane', <StoppedHome name={name} clear={() => { void clearAgentFlow(`hl:${name}`); }} />, stoppedHomeTopbar(name), hash);

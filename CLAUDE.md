@@ -177,14 +177,17 @@ All in `internal/bridge/` (one package):
   orchestrator's Home (`StoppedHome`, no pane) shows its account's agents and **Start** (the only
   Start: the list has none); its account is `expectedAccount(def)` (the same rule `startOrchestrator`
   checks against), found once in the background at bridge start. A running one's is the pane view in
-  `homeMode` (Stop leaves the Home stopped; a Clear holds it ≤8s for the replacement) — a switcher
-  between the configured orchestrators (2+; stopped ones dimmed; each with its "needs you" count, `ui/Todos.tsx`'s `needsYou`:
-  its account's blocked agents, its question, its to-do items due now; the PC sidebar's Home headings have it too), a
+  `homeMode` (Stop leaves the Home stopped; a Clear holds it ≤8s for the replacement) — with 2+ configured, its
+  topbar (a stopped one's too) is the switcher between them (`HomeSwitcher`, in the title slot; stopped ones dimmed; each with
+  its "needs you" count, `ui/Todos.tsx`'s `needsYou`: its account's blocked agents, its question, its to-do items due now; the
+  PC sidebar's Home headings have it too; it scrolls sideways, keeps the Home on show in view, clear of its fades, and fades
+  an edge with more past it, `data-fade`), else the Home's name and status; then a
   status bar of one row (wrapping only where it must): "Needs you · n" (that count, orange; `To-do · n`, dim, while only items
   due later wait; none at all otherwise: `NeedsButton`), the counts of its account's agents (`homeSummary`; no orchestrators),
-  and at the right a headless one's usage and model, and its ⋮ (`HomeMenu`: a headless one's Compact, Clear, Stop; ■ stays on the
+  and at the right a headless one's usage and model, `>_` and its ⋮ (`HomeMenu`: a headless one's Compact, Clear, Stop; ■ stays on the
   "doing now" line). On a PC (`WIDE_QUERY`, as the sidebar) the bar has neither Needs you nor the counts: the sidebar
-  has both (under All agents a Home's heading opens `#/agents/<name>`), and the switcher and the rest share one row. Needs you opens a Mantine Popover (Escape, a tap outside
+  has both (under All agents a Home's heading opens `#/agents/<name>`); the Home's name and status take their place
+  under the switcher (a phone has them on its button there). Needs you opens a Mantine Popover (Escape, a tap outside
   and leaving the screen close it; as wide as a phone allows, no taller than the room below it): the blocked agents' chips, its
   question's line, and its to-do list (`ui/Todos.tsx` over the pure `todos.ts`: ✓ = `DELETE …/todos/:id`, an item due ahead under
   Later until its time, a link shown by its host, a worker's name opening its drawer; a stopped Home has them too), dialogue-only chat

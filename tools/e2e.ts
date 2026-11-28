@@ -1754,6 +1754,44 @@ async function p19(c: Ctx) {
   await pg.goto('#/agents');
 }
 
+/** P20: a Home's switcher, its topbar with two or more Homes (no view toggle there: the status bar has it), on a narrow
+ *  phone (320px), where three Homes overflow it: on the last Home and then the first, its button is in view and clear
+ *  of a fade (28px), and an edge fades out (data-fade) exactly while there is more past it. */
+async function p20(c: Ctx) {
+  const { pg } = c;
+  const names: string[] = (await api(c, 'GET', '/api/state')).orchestrators.map((o: any) => o.name);
+  if (names.length < 2) {
+    result(c, true, 'P20', `n/a(${names.length} Home)`, 'needs two or more orchestrators configured');
+    return;
+  }
+  const at: string[] = [];
+  let ok = true, over = false;
+  try {
+    await pg.S('Emulation.setDeviceMetricsOverride', { width: 320, height: 700, deviceScaleFactor: 3, mobile: true });
+    for (const name of [names.at(-1)!, names[0]]) {
+      await pg.goto(`#/home/${enc(name)}`);
+      const sw = `document.querySelector('#topbar .home-switch')`;
+      const r = await pg.until(`(() => {
+        const sw = ${sw}, b = sw?.querySelector('.home-switch-btn[aria-current="page"][data-orch=${js(name)}]');
+        if (!sw || !b || document.querySelector('#topbar #btn-view-toggle')) return false;
+        const s = sw.getBoundingClientRect(), r = b.getBoundingClientRect();
+        const start = sw.scrollLeft > 1, end = sw.scrollLeft + sw.clientWidth < sw.scrollWidth - 1;
+        const fade = start && end ? 'both' : start ? 'start' : end ? 'end' : undefined;
+        return sw.dataset.fade === fade && r.left >= s.left + (start ? 28 : 0) - 1 && r.right <= s.right - (end ? 28 : 0) + 1;
+      })()`, 3000);
+      const [fade, wide] = await pg.ev(`[${sw}?.dataset.fade ?? '', ${sw} ? ${sw}.scrollWidth > ${sw}.clientWidth : false]`);
+      over ||= wide;
+      ok &&= !r.timeout;
+      at.push(`${name}:${ms(r)}:${fade || 'none'}`);
+    }
+  } finally {
+    await mobile(pg, true);
+  }
+  result(c, ok && (over || names.length < 3), 'P20', `${at.join(',')},overflow=${over}`,
+    "320px: #/home/<the last> then #/home/<the first>: the topbar's .home-switch (no #btn-view-toggle in #topbar) has that Home's button in view, " +
+      "28px clear of a faded edge, and data-fade = the edges with more past them, each within 3s; three or more Homes overflow it");
+}
+
 // ── the headless orchestrators: wc-h1 on the fake claude (H1-H8), the real wc-h2 (H-T2) ──
 
 const hlView = async (c: Ctx, name: string): Promise<any> => (await api(c, 'GET', '/api/state')).orchestrators.find((o: any) => o.name === name);
@@ -2308,6 +2346,7 @@ const ITEMS: Item[] = [
   { id: 'P7', tier: 1, needs: ['less'], run: p7 },
   { id: 'P18', tier: 1, needs: ['less', 'probe'], run: p18 },
   { id: 'W1', tier: 1, needs: ['less'], run: w1 },
+  { id: 'P20', tier: 1, run: p20 },
   { id: 'M1', tier: 1, needs: ['less'], run: m1 },
   { id: 'M2', tier: 1, needs: ['less'], run: m2 },
   { id: 'M3', tier: 1, needs: ['shell', 'less'], run: m3 },

@@ -111,6 +111,12 @@ body { font-size: 15px; }
   gap: 8px;
 }
 
+/* A Home's switcher, the topbar's title with two or more Homes (ui/Pane.tsx's HomeSwitcher): an edge with more past
+   it fades out, over SWITCH_FADE (28px) */
+.home-switch[data-fade='end'] { mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.home-switch[data-fade='start'] { mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); }
+.home-switch[data-fade='both'] { mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+
 /* Connection status dot */
 .conn-dot {
   width: 10px;

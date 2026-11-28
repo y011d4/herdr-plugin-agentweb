@@ -1,8 +1,9 @@
 /**
  * ui/Pane.tsx — an opened pane (#/pane/<id>, in ui/AgentDrawer.tsx's drawer, with the header pieces
- * here: PaneTitle, ViewToggle, AgentMenu) or an orchestrator's Home (#/home/<name>): Home's topbar,
- * Home's status bar (the switcher between running orchestrators, then one row: "Needs you · n", the
- * counts, and ⋮: a headless one's Compact, Clear and Stop) and "doing now" line, the composer and the quick keys, around the pane's body. The
+ * here: PaneTitle, ViewToggle, AgentMenu) or an orchestrator's Home (#/home/<name>): Home's topbar (with two or more
+ * Homes their switcher, HomeSwitcher), Home's status bar (one row: "Needs you · n" and the counts on a phone, its name on
+ * a PC under the switcher, then usage, model, >_ and ⋮: a headless one's Compact, Clear and Stop) and "doing now" line,
+ * the composer and the quick keys, around the pane's body. The
  * body (terminal, chat) is pane-view.ts, imperative, in #pane-view: created on mount, destroyed on
  * unmount, one at a time. Below it, while the view reports a prompt, the answer panel (PromptPanel.tsx).
  * A pane's chat is read-only: its composer and keys show with its terminal,
@@ -191,7 +192,7 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
   const chatOn = !!pending && chatting === pending.id;
   return (
     <div id="screen-pane" className={home ? 'screen-home' : undefined} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-      {home && <HomeStatus name={name} state={state} actions={actions} />}
+      {home && <HomeStatus name={name} state={state} actions={actions} paneId={paneId} />}
       {/* the engine's (pane-view.ts): the terminal and the chat (its images and workers' names: ui/ChatLog.tsx) */}
       <div id="pane-view" ref={body} style={{ display: 'contents' }}></div>
       {/* over the chat's bottom-right corner, above whatever is under it; with nothing under it (a pane's chat
@@ -238,33 +239,48 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
   );
 }
 
-// Home status bar: with two or more orchestrators configured a switcher between their Homes (a
-// stopped one dimmed: its Home has Start), then one row: "Needs you · n" (its account's blocked
-// agents, its own question, its to-do items: Todos.tsx's NeedsButton, a popover), the counts of its
-// agents (AgentsButton, a popover of them), and at the right a headless one's usage and model and the orchestrator's ⋮ (HomeMenu:
-// Compact, Clear, Stop; the row wraps where it must); under it a headless one's warnings (`clear`: their Clear, on a stopped
-// Home too). On a PC (WIDE_QUERY: ui/App.tsx's sidebar beside it, with this Home's heading over what waits there and
-// its agents under All agents) neither Needs you nor the counts: the switcher and the rest share one row, and a bar
-// with none of them isn't drawn.
-function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: string; state: AppState | null; actions?: HomeActions; clear?: () => void }) {
+// With two or more orchestrators configured, a Home's topbar is their switcher (homeTopbar, stoppedHomeTopbar): every
+// Home, the one on show marked, a stopped one dimmed (its Home has Start), each with its status and what waits on the user
+// there (Todos.tsx's needsYou). It scrolls sideways, its scrollbar hidden: it keeps the Home on show in view, clear of the
+// fades (as it mounts: each route render mounts the topbar afresh), and an edge with more past it fades out (`data-fade`,
+// style.css).
+const SWITCH_FADE = 28; // px, style.css's .home-switch mask
+function HomeSwitcher({ name }: { name: string }) {
+  const state = useAppState();
   const now = useMinute();
-  const wide = useMediaQuery(WIDE_QUERY, false, { getInitialValueInEffect: false }); // as the sidebar's (App.tsx)
-  if (!state) return <Stack id="home-status" className={STATUS_BAR}></Stack>;
-  const all = state.orchestrators ?? [];
-  const self = all.find((o) => o.name === name);
-  const s = homeSummary(agentCards(state, self), store.seenDone);
-  const usage = self?.headless?.usage ? <Usage usage={self.headless.usage} now={now} /> : null;
-  // scrolls sideways, its scrollbar hidden
-  const switcher = all.length >= 2 && (
-    <Group className="home-switch min-w-0 overflow-x-auto [scrollbar-width:none]" gap={6} wrap="nowrap">
-      {all.map((o) => {
+  const box = useRef<HTMLDivElement>(null);
+  const fade = (): void => {
+    const el = box.current;
+    if (!el) return;
+    const start = el.scrollLeft > 1, end = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    const v = start && end ? 'both' : start ? 'start' : end ? 'end' : '';
+    if (v) el.dataset.fade = v; else delete el.dataset.fade;
+  };
+  useLayoutEffect(() => {
+    const el = box.current, on = el?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!el || !on) return;
+    const r = el.getBoundingClientRect(), b = on.getBoundingClientRect();
+    if (b.left < r.left + SWITCH_FADE) el.scrollLeft -= r.left + SWITCH_FADE - b.left;
+    else if (b.right > r.right - SWITCH_FADE) el.scrollLeft += b.right - (r.right - SWITCH_FADE);
+  }, [name]);
+  useLayoutEffect(fade); // each render: a Home or a count may have come or gone
+  useEffect(() => {
+    const el = box.current!;
+    el.addEventListener('scroll', fade, { passive: true });
+    const resized = new ResizeObserver(fade);
+    resized.observe(el);
+    return () => { el.removeEventListener('scroll', fade); resized.disconnect(); };
+  }, []);
+  return (
+    <Group ref={box} className="home-switch min-w-0 overflow-x-auto [scrollbar-width:none]" gap={6} wrap="nowrap">
+      {(state?.orchestrators ?? []).map((o) => {
         const pane = o.paneId ? findPane(o.paneId)?.pane : undefined;
         const on = o.name === name;
         return (
           <Button key={o.name} className={`home-switch-btn shrink-0 ${on ? 'border-(--color-accent) text-(--color-text)' : 'bg-transparent text-(--color-text-dim)'}`}
             variant="default" size="compact-sm" radius="xl" fz={13} fw={600} opacity={o.paneId ? undefined : 0.55}
             aria-current={on ? 'page' : undefined} data-stopped={o.paneId ? undefined : ''} data-orch={o.name} data-pane-id={o.paneId ?? undefined}
-            leftSection={<StatusDot status={orchestratorStatus(o, pane, store.seenDone)} />} rightSection={<NeedsBadge n={needsYou(o, state, now)} />}
+            leftSection={<StatusDot status={orchestratorStatus(o, pane, store.seenDone)} />} rightSection={<NeedsBadge n={needsYou(o, state!, now)} />}
             onClick={() => { location.hash = homeHash(o.name); }}>
             {orchestratorLabel(o)}
           </Button>
@@ -272,27 +288,53 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
       })}
     </Group>
   );
-  const end = (usage || self?.headless || actions) && (
+}
+
+// A Home's topbar title: the switcher with two or more Homes, else the Home's own (its name and status)
+function HomeTopTitle({ name, own }: { name: string; own: ReactNode }) {
+  return (useAppState()?.orchestrators?.length ?? 0) >= 2 ? <HomeSwitcher name={name} /> : own;
+}
+
+// Home status bar, one row (wrapping where it must): on a phone "Needs you · n" (its account's blocked agents, its own
+// question, its to-do items: Todos.tsx's NeedsButton, a popover) and the counts of its agents (AgentsButton, a popover of
+// them); on a PC (WIDE_QUERY: ui/App.tsx's sidebar beside it has both, this Home's heading over what waits there, its
+// agents under All agents) the Home's name and status in their place while the topbar is the switcher (a phone has them
+// on its button there). Then, at the right, a headless one's usage and model, the view toggle (`paneId`: a running
+// Home's) and the orchestrator's ⋮ (HomeMenu: Compact, Clear, Stop). Under it a headless one's warnings (`clear`: their
+// Clear, on a stopped Home too). On a PC a bar with nothing to show isn't drawn.
+function HomeStatus({ name, state, actions, clear = actions?.clear, paneId }:
+  { name: string; state: AppState | null; actions?: HomeActions; clear?: () => void; paneId?: string }) {
+  const now = useMinute();
+  const wide = useMediaQuery(WIDE_QUERY, false, { getInitialValueInEffect: false }); // as the sidebar's (App.tsx)
+  if (!state) return <Stack id="home-status" className={STATUS_BAR}></Stack>;
+  const all = state.orchestrators ?? [];
+  const self = all.find((o) => o.name === name);
+  const s = homeSummary(agentCards(state, self), store.seenDone);
+  const usage = self?.headless?.usage ? <Usage usage={self.headless.usage} now={now} /> : null;
+  const title = wide && all.length >= 2 && (
+    <Text span fw={600} fz={15} truncate className="home-title min-w-0">
+      {paneId ? <PaneTitle paneId={paneId} home /> : <StoppedTitle name={name} />}
+    </Text>
+  );
+  const end = (usage || self?.headless || paneId || actions) && (
     <Group gap={10} className={`ml-auto ${wide ? 'shrink-0' : ''}`}>
       {usage}
       {self?.headless && <ModelPicker o={self} />}
+      {paneId && <ViewToggle paneId={paneId} home />}
       {actions && <HomeMenu name={name} o={self} actions={actions} />}
     </Group>
   );
-  if (wide && !switcher && !end) return null; // (a headless one has its model: an end)
+  if (wide && !title && !end) return null;
   return (
     <Stack id="home-status" gap={8} py={8} className={`px-3.5 ${STATUS_BAR}`}>
       {wide ? (
-        <Group className="home-row" gap={14} wrap="nowrap">{switcher}{end}</Group>
+        <Group className="home-row" gap={14} wrap="nowrap">{title}{end}</Group>
       ) : (
-        <>
-          {switcher}
-          <Group className="home-row" gap="6px 14px">
-            {self && <NeedsButton o={self} s={s} n={needsYou(self, state, now)} now={now} />}
-            <AgentsButton name={name} s={s} />
-            {end}
-          </Group>
-        </>
+        <Group className="home-row" gap="6px 14px">
+          {self && <NeedsButton o={self} s={s} n={needsYou(self, state, now)} now={now} />}
+          <AgentsButton name={name} s={s} />
+          {end}
+        </Group>
       )}
       {self?.headless && <HeadlessWarnings o={self} clear={clear} />}
     </Stack>
@@ -833,16 +875,12 @@ export function AgentMenu({ actions, wide = false }: { actions: AgentActions; wi
   );
 }
 
-/** A running Home's topbar: the orchestrator, the view toggle and Settings (its agents' counts, the
- *  way to its list, its ⋮ (Compact, Clear, Stop) are on its status bar). A pane's header is its drawer's (ui/AgentDrawer.tsx). */
-export const homeTopbar = (paneId: string): Topbar => ({
-  title: <PaneTitle paneId={paneId} home />,
-  right: (
-    <>
-      <ViewToggle paneId={paneId} home />
-      {settingsButton}
-    </>
-  ),
+/** A running Home's topbar: the switcher between the Homes (two or more), else the orchestrator, and Settings (its
+ *  agents' counts, the way to its list, the view toggle and its ⋮ (Compact, Clear, Stop) are on its status bar).
+ *  A pane's header is its drawer's (ui/AgentDrawer.tsx). */
+export const homeTopbar = (paneId: string, name: string): Topbar => ({
+  title: <HomeTopTitle name={name} own={<PaneTitle paneId={paneId} home />} />,
+  right: settingsButton,
 });
 
 // ── A stopped orchestrator's Home ─────────────────────────────────────────────
@@ -853,7 +891,7 @@ function StoppedTitle({ name }: { name: string }) {
 }
 
 export const stoppedHomeTopbar = (name: string): Topbar => ({
-  title: <StoppedTitle name={name} />,
+  title: <HomeTopTitle name={name} own={<StoppedTitle name={name} />} />,
   right: settingsButton,
 });
 
