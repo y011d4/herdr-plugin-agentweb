@@ -6,8 +6,8 @@ yoicks は、たくさんのコーディングエージェントを、そのう�
 [herdr](https://herdr.dev) プラグインです。仕事は **orchestrator** に渡します。**Home** で話しかける Claude Code の
 エージェントで、残りを並行して進めます:
 
-- **ワーカーを起動します。** タスクごとに 1 つ (`yoicks agent start`)。どれも新しい herdr のタブで、リポジトリの作業なら
-  リポジトリの隣に作る専用の git worktree (`<repo>-wt-<branch>`) で動きます。ワーカーが終わると、ブリッジはそのために
+- **ワーカーを起動します。** タスクごとに 1 つ (`yoicks agent start`)。どれも新しい herdr のタブで動き、同じリポジトリで
+  ほかと並行してコードを変更するものは、リポジトリの隣に作る専用の git worktree (`<repo>-wt-<branch>`) で動きます。ワーカーが終わると、ブリッジはそのために
   開いたタブを閉じます。worktree のワーカーのタブは、ブランチがマージされて `yoicks worktree remove` が worktree、
   タブ、ブランチを消すまで残ります。
 - **ワーカーを追いかけます。** ワーカーが終わるか、答えを待って止まると orchestrator が起き、結果を読んで次のタスクを

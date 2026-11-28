@@ -7,7 +7,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>yoicks</title>
-<meta name="description" content="Hand the work to one orchestrator on its Home: it runs many coding agents in herdr at once, each in its own worktree, and comes back when one is done or needs you. Home の orchestrator に仕事を渡すと、herdr のコーディングエージェントを同時にいくつも動かし、終わったときやあなたが要るときに戻ってきます。">
+<meta name="description" content="Hand the work to one orchestrator on its Home: it runs many coding agents in herdr at once and comes back when one is done or needs you. Home の orchestrator に仕事を渡すと、herdr のコーディングエージェントを同時にいくつも動かし、終わったときやあなたが要るときに戻ってきます。">
 <link rel="canonical" href="https://yoicks.y011d4.com/">
 <link rel="icon" type="image/svg+xml" href="docs/favicon.svg">
 <script>
@@ -101,9 +101,9 @@
     </h1>
     <p class="lead">
       <span lang="en">Hand the work to an orchestrator, one Claude Code agent you talk to on its Home. It starts a worker
-        for each task, each in its own git worktree, follows them all at once, and comes back to you only when
+        for each task (several changing one repository each get a git worktree of their own), follows them all at once, and comes back to you only when
         something is done or needs you. A herdr plugin; from your phone or a PC's browser.</span>
-      <span lang="ja">仕事は orchestrator に渡します。Home で話しかける 1 つの Claude Code エージェントです。orchestrator はタスクごとにワーカーを起動し、それぞれ専用の git worktree で同時に進め、終わったときやあなたが要るときだけ戻ってきます。herdr のプラグインで、スマホや PC のブラウザから使えます。</span>
+      <span lang="ja">仕事は orchestrator に渡します。Home で話しかける 1 つの Claude Code エージェントです。orchestrator はタスクごとにワーカーを起動し (同じリポジトリを並行して変更するものは、それぞれ専用の git worktree で)、同時に進め、終わったときやあなたが要るときだけ戻ってきます。herdr のプラグインで、スマホや PC のブラウザから使えます。</span>
     </p>
     <div class="cta">
       <a class="button primary" lang="en" href="docs/en/">Get started</a>
@@ -118,8 +118,8 @@
       <div class="card">
         <h3 lang="en">Many workers at once</h3>
         <h3 lang="ja">ワーカーを同時にいくつも</h3>
-        <p lang="en">The orchestrator starts a worker per task, each in a new herdr tab and, for a repository, in its own git worktree next to it. They run side by side; a finished worker's tab is closed, and a merged worktree removed.</p>
-        <p lang="ja">orchestrator はタスクごとにワーカーを起動します。どれも新しい herdr のタブで、リポジトリの作業ならその隣に作る専用の git worktree で、並んで進みます。終わったワーカーのタブは閉じ、マージされた worktree は片付けます。</p>
+        <p lang="en">The orchestrator starts a worker per task, each in a new herdr tab; workers changing the same repository side by side each get a git worktree of their own next to it. All run at once; a finished worker's tab is closed, and a merged worktree removed.</p>
+        <p lang="ja">orchestrator はタスクごとにワーカーを起動します。どれも新しい herdr のタブで動き、同じリポジトリを並行して変更するものは、その隣に作る専用の git worktree で進みます。終わったワーカーのタブは閉じ、マージされた worktree は片付けます。</p>
         <a lang="en" href="docs/en/guide/orchestrators">Orchestrators</a>
         <a lang="ja" href="docs/ja/guide/orchestrators">orchestrator</a>
       </div>

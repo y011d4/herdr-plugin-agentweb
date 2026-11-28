@@ -6,8 +6,8 @@ yoicks is a [herdr](https://herdr.dev) plugin for running many coding agents at 
 hand the work to an **orchestrator**, a Claude Code agent you talk to on its **Home**, and it does the rest in
 parallel:
 
-- **It starts the workers.** One per task (`yoicks agent start`), each in a new herdr tab and, for a repository,
-  in its own git worktree next to the repo (`<repo>-wt-<branch>`). When a worker exits, the bridge closes the tab
+- **It starts the workers.** One per task (`yoicks agent start`), each in a new herdr tab; one that changes code
+  alongside others in the same repository gets its own git worktree next to it (`<repo>-wt-<branch>`). When a worker exits, the bridge closes the tab
   it opened; a worker in a worktree keeps its tab until its branch is merged and `yoicks worktree remove` takes
   the worktree, the tab and the branch away.
 - **It follows them.** A worker that finishes or stops for an answer wakes the orchestrator, which reads the
