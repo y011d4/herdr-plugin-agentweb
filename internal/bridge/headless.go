@@ -308,11 +308,11 @@ type headlessRunner struct {
 	switches     map[string]string // set_model requests awaiting their answer: request_id → the model
 	modelChoice  string            // chosen here, --model at each start; "" = none: --resume keeps the session's own
 	lastEvent    time.Time
-	pending      *hlPending                // the question waiting for the user
-	asks         map[string]bool           // AskUserQuestion tool_use ids: did each reach approve?
-	served       map[string]bool           // the tool_use ids of the tool calls that reached the bridge, until their result
-	watches      map[string]*hlWatch       // by pane
-	saved        []hlWatch                 // the watches saved by an earlier bridge, re-armed at the first start
+	pending      *hlPending          // the question waiting for the user
+	asks         map[string]bool     // AskUserQuestion tool_use ids: did each reach approve?
+	served       map[string]bool     // the tool_use ids of the tool calls that reached the bridge, until their result
+	watches      map[string]*hlWatch // by pane
+	saved        []hlWatch           // the watches saved by an earlier bridge, re-armed at the first start
 	wakes        []string
 	wakeTimer    interface{ Stop() bool }
 	gen          int // its workers' generation: Stop and Clear begin a new one (forgetWorkers)
@@ -1107,16 +1107,26 @@ func (r *headlessRunner) running() (*hlChild, error) {
 }
 
 // Send is the user's message, written also mid-turn (Claude Code takes it in at the next tool
-// boundary). Images (imageBlocks') go first, then the text, if any. With question (the id of the
-// one the user saw open as they wrote it: the web's composer says which), it is about that
-// question, not an answer (a question's own answer is the panel's "Type something."): once it is
-// written, the question is refused as Claude Code's "Chat about this" refuses it, with the answers
-// the panel had so far, so the model reads the two together at the boundary the refusal makes.
-// Without one, or once that question is gone, a question pending stays: Claude Code holds the
-// message until it is answered. Never a question the user didn't see: one that came as the
-// message was sent isn't about it. held: a question holds it (pending, or on its way: in the
-// stream, not at the permission route yet), which the chat won't show until it is answered.
-func (r *headlessRunner) Send(text string, images []any, answers map[string]any, question string) (held bool, err error) {
+// boundary). Images (imageBlocks') go first, then the text, if any. While a question waits (pending,
+// or on its way: in the stream, not at the permission route yet), only a message naming it
+// (question: its id, the web's Chat about this) is taken, not an answer (a question's own answer is
+// the panel's "Type something."): once it is written, the question is refused as Claude Code's "Chat
+// about this" refuses it, with the answers the panel had so far, so the model reads the two together
+// at the boundary the refusal makes. Any other is refused unwritten (409 question_pending): Claude
+// Code would hold it, unseen, until the question is answered.
+func (r *headlessRunner) Send(text string, images []any, answers map[string]any, question string) error {
+	r.mu.Lock()
+	waits := r.pending != nil && r.pending.id != question
+	for _, reached := range r.asks {
+		waits = waits || question == "" && !reached
+	}
+	r.mu.Unlock()
+	if waits {
+		return &LifecycleError{Status: 409, Code: "question_pending", Message: "a question waits for its answer: answer it, or send naming it (Chat about this)"}
+	}
+	// ponytail: a question the model asks after this check (its API call still running) holds the
+	// message unseen, until it is answered. Telling needs a mark from Claude Code it doesn't give.
+	var err error
 	if len(images) == 0 {
 		err = r.write(text)
 	} else {
@@ -1125,22 +1135,10 @@ func (r *headlessRunner) Send(text string, images []any, answers map[string]any,
 		}
 		err = r.write(images)
 	}
-	if err != nil {
-		return false, err
+	if err == nil && question != "" {
+		r.Chat(question, answers) // answered meanwhile (a 409): the message stands on its own
 	}
-	if question != "" {
-		r.Chat(question, answers) // answered or replaced meanwhile (a 409): the message stands on its own
-	}
-	// ponytail: only a question already read off stdout counts; one the model asks after the write
-	// (its API call still running) holds the message too, untold: the chat shows it once answered.
-	// Telling needs a mark from Claude Code it doesn't give.
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	held = r.pending != nil
-	for _, reached := range r.asks {
-		held = held || !reached
-	}
-	return held, nil
+	return err
 }
 
 // The images a message may carry: JPEG, PNG or GIF that decode whole (a broken one in the

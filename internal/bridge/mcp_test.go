@@ -170,8 +170,8 @@ func TestHeadlessAskAndAnswer(t *testing.T) {
 		t.Errorf("the tool_result: %s", tr)
 	}
 
-	// a message about the question the user saw (its id) is about it, not its answer (that is the
-	// panel's Type something.): it is written, then the question refused as Chat about this
+	// a message naming the question (the web's Chat about this) is about it, not its answer (that is
+	// the panel's Type something.): it is written, then the question refused as Chat about this
 	b.send(t, "ask 2")
 	v = b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
 	for _, body := range []string{`{"text":"x","answers":["cherry"]}`, `{"text":"x","question":1}`} {
@@ -192,30 +192,25 @@ func TestHeadlessAskAndAnswer(t *testing.T) {
 		!strings.Contains(tr, `"text":"echo: what is cherry?"`) {
 		t.Errorf("the tool_result: %s", tr)
 	}
-	// one sent without it (the question came as it was written), or naming another, leaves the
-	// question to the user: the message waits behind it, as Claude Code holds it, until it is answered
+	// while a question is open, one not naming it (sent as it came) or naming another is refused,
+	// unwritten: Claude Code would hold it, unseen, until the question is answered
 	b.send(t, "ask")
 	v = b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
-	b.send(t, "not about it")
-	if status, out := b.post(t, "send", `{"text":"nor this","question":"older","answers":{"Which fruit?":"cherry"}}`); status != 200 || out != `{"ok":true,"held":true}` {
-		t.Fatalf("send: %d %s", status, out)
-	}
-	b.waitStdin(t, `"content":"nor this"`)
-	if w := b.view(t); w.Headless.Pending == nil || w.Headless.Pending.ID != v.Headless.Pending.ID {
-		t.Fatalf("the question went: %+v", w.Headless)
+	for _, body := range []string{`{"text":"not about it"}`, `{"text":"nor this","question":"older","answers":{"Which fruit?":"cherry"}}`} {
+		if status, out := b.post(t, "send", body); status != 409 || !strings.Contains(out, `"question_pending"`) {
+			t.Errorf("%s: %d %s", body, status, out)
+		}
 	}
 	if status, body := b.post(t, "answer", `{"id":"`+v.Headless.Pending.ID+`","answers":{"Which fruit?":"apple"}}`); status != 200 {
 		t.Fatalf("answer: %d %s", status, body)
 	}
-	waitUntil(t, 5*time.Second, "the messages, after the answer", func() bool {
-		_, tr, _ = b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
-		return strings.Contains(tr, `"text":"echo: nor this"`)
-	})
-	if i, j := strings.Index(tr, `\"answers\":{\"Which fruit?\":\"apple\"}`), strings.Index(tr, `"text":"echo: not about it"`); i < 0 || j < i ||
-		strings.Count(tr, `The user wants to clarify these questions.`) != 2 {
-		t.Errorf("answered, then the messages: %s", tr)
-	}
 	b.waitStatus(t, "done")
+	b.send(t, "after it") // answered: a message goes as any
+	b.waitStdin(t, `"content":"after it"`)
+	b.waitStatus(t, "done")
+	if _, stdin := b.runs(t); strings.Contains(strings.Join(stdin, "\n"), "about it") || strings.Contains(strings.Join(stdin, "\n"), "nor this") {
+		t.Errorf("a refused message was written: %q", stdin)
+	}
 
 	// an interrupt cancels the call and the question
 	b.send(t, "ask")
@@ -229,9 +224,9 @@ func TestHeadlessAskAndAnswer(t *testing.T) {
 	b.waitFor(t, "no question", func(v OrchestratorView) bool { return v.Headless.Pending == nil && v.Headless.Status == "idle" })
 }
 
-// The race: a message written while a question is on its way (in the stream, not at approve yet,
-// so the user can't have seen it) isn't about it. The question reaches the Home and waits for the
-// user; the message waits behind it, until it is answered.
+// The race: a message sent as a question comes, still on its way (in the stream, not at approve yet,
+// so no one has seen it), is refused unwritten, as one while it is pending: the web keeps it as its
+// draft. The question reaches the Home and waits for the user.
 func TestHeadlessSendBehindAQuestion(t *testing.T) {
 	b := startHeadless(t, t.TempDir(), nil, nil)
 	b.start(t)
@@ -243,25 +238,20 @@ func TestHeadlessSendBehindAQuestion(t *testing.T) {
 		defer h.mu.Unlock()
 		return len(h.asks) == 1
 	})
-	if status, out := b.post(t, "send", `{"text":"and this?"}`); status != 200 || out != `{"ok":true,"held":true}` { // so the web says so
+	if status, out := b.post(t, "send", `{"text":"and this?"}`); status != 409 || !strings.Contains(out, `"question_pending"`) {
 		t.Fatalf("send: %d %s", status, out)
 	}
-	b.waitStdin(t, `"content":"and this?"`)
 	b.release(t)
 	v := b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
-	if w := b.view(t); w.Headless.Pending == nil || w.Headless.Status != "blocked" {
-		t.Fatalf("the question went: %+v", w.Headless)
+	if status, out := b.post(t, "send", `{"text":"and this?"}`); status != 409 {
+		t.Fatalf("send, the question pending: %d %s", status, out)
 	}
 	if status, body := b.post(t, "answer", `{"id":"`+v.Headless.Pending.ID+`","answers":{"Which fruit?":"apple"}}`); status != 200 {
 		t.Fatalf("answer: %d %s", status, body)
 	}
-	var tr string
-	waitUntil(t, 5*time.Second, "the message, after the answer", func() bool {
-		_, tr, _ = b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
-		return strings.Contains(tr, `"text":"echo: and this?"`)
-	})
-	if strings.Contains(tr, `The user wants to clarify these questions.`) || !strings.Contains(tr, `\"answers\":{\"Which fruit?\":\"apple\"}`) {
-		t.Errorf("the tool_result: %s", tr)
+	b.waitStatus(t, "done")
+	if _, stdin := b.runs(t); strings.Contains(strings.Join(stdin, "\n"), "and this?") {
+		t.Errorf("a refused message was written: %q", stdin)
 	}
 }
 
