@@ -159,7 +159,8 @@ function AgentCard({ card }: { card: DashboardCard }) {
 /** An agent in a Home's agents popover (ui/Pane.tsx's AgentsButton) and a PC's Home panel (ui/HomePanel.tsx): the name,
  *  then at the line's right end how long ago its status changed and the status; under it its purpose (two lines at most,
  *  all of it on hover) and the location and branch. A click opens it (nav.ts's openAgent: on a PC in herdr, with its ⋮
- *  beside it, AgentMore, for Show here, Ask the orchestrator (`ask`, on a running Home; off while `askOff`) and Stop). */
+ *  beside it, AgentMore, for Show here, Ask the orchestrator (`ask`, on a running Home whose account is known; off while
+ *  `askOff`) and Stop). */
 export function AgentRow({ card, ask, askOff = false }: { card: DashboardCard; ask?: (card: DashboardCard) => void; askOff?: boolean }) {
   const { pane, purpose } = card;
   const rel = relativeTime(pane.agent!.sinceUnixMs);

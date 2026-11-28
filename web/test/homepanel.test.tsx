@@ -125,7 +125,7 @@ describe('HomePanel', () => {
     assert.equal(posts.length, 2, 'Show here: nothing sent');
   });
 
-  it("its ⋮'s Ask quotes the agent (name, purpose, pane, status) in the running Home's composer; off while its question is open; none on a stopped Home", async () => {
+  it("its ⋮'s Ask quotes the agent (name, purpose, pane, status) in the running Home's composer; off while its question is open; none on a stopped Home or one whose account is unknown", async () => {
     const s = fresh();
     await show('personal', s);
     await fire(() => c.querySelector<HTMLElement>('[data-agent-menu="p3"]')!.click());
@@ -140,9 +140,17 @@ describe('HomePanel', () => {
     const ask = c.querySelector<HTMLButtonElement>('[data-agent-more="p3"] [data-action="ask"]')!;
     assert.deepEqual([ask.disabled, ask.textContent], [true, 'Ask the orchestratorAnswer its question first']);
     await unmount!();
+    const items = async (): Promise<string[]> => {
+      await fire(() => c.querySelector<HTMLElement>('[data-agent-menu="p3"]')!.click());
+      return [...c.querySelectorAll('[data-agent-more="p3"] [role="menuitem"]')].map((e) => e.textContent!);
+    };
     await show('work', fresh());
-    await fire(() => c.querySelector<HTMLElement>('[data-agent-menu="p3"]')!.click());
-    assert.deepEqual([...c.querySelectorAll('[data-agent-more="p3"] [role="menuitem"]')].map((e) => e.textContent), ['Open in herdr', 'Show here', 'Stop agent…']);
+    assert.deepEqual(await items(), ['Open in herdr', 'Show here', 'Stop agent…'], 'stopped: no composer');
+    await unmount!();
+    const unknown = fresh();
+    unknown.orchestrators[0].agents = null; // its account not known: every agent listed, which its tools may refuse
+    await show('personal', unknown);
+    assert.deepEqual(await items(), ['Open in herdr', 'Show here', 'Stop agent…'], 'running, its account unknown');
   });
 
   it("its ⋮'s Stop agent… asks first; Cancel sends nothing, Stop closes the pane", async () => {

@@ -37,7 +37,8 @@ export function HomePanel({ name }: { name: string }) {
   const rest = cards.filter((c) => !s.blocked.includes(c)); // the blocked ones are under Needs you
   // a running Home's composer, beside it, takes an item's quote
   const ask = o?.paneId ? (it: TodoItem): void => setQuote(draftKey('', o.name), todoQuote(it)) : undefined;
-  const askAgent = o?.paneId ? (c: DashboardCard): void => askAbout(o.name, c) : undefined;
+  // its account's agents only (`agents` known): the orchestrator's tools refuse any other
+  const askAgent = o?.paneId && o.agents ? (c: DashboardCard): void => askAbout(o.name, c) : undefined;
   const askOff = !!o?.headless?.pending; // the composer is the question's then
   return (
     <aside id="home-panel" aria-label={`${orchestratorLabel(o)}: what needs you, and its agents`} {...hold}

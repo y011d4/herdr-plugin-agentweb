@@ -370,7 +370,8 @@ function AgentsButton({ name, s }: { name: string; s: HomeSummary }) {
   }, [opened]);
   const o = held?.orchestrators.find((x) => x.name === name);
   const cards = byUrgency(agentCards(held, o), store.seenDone);
-  const ask = o?.paneId ? (c: DashboardCard): void => { askAbout(name, c); setAsked(true); setOpened(false); } : undefined;
+  // as the Home panel's: its account's agents only (`agents` known), the orchestrator's tools refuse any other
+  const ask = o?.paneId && o.agents ? (c: DashboardCard): void => { askAbout(name, c); setAsked(true); setOpened(false); } : undefined;
   return (
     <Popover opened={opened} onChange={setOpened} position="bottom-start" width="min(400px, calc(100vw - 24px))" radius="md" shadow="md"
       trapFocus returnFocus={!asked} middlewares={{ shift: { padding: 12 }, size: { padding: 12 } }}>
