@@ -690,7 +690,7 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
     `report-agent`ed as claude, so it takes the app-scroll path). The checks start from and come back to
     `BASE`, `wc-o2`'s stopped Home, and reach an agent as a phone does: its row in that Home's agents
     popover, or `#/pane/<id>` (a notification). On the private herdr `wc-o1`/`wc-o2` get its panes'
-    account (their HOME is its dir), so those Homes list the run's agents; a reported agent needs a
+    account (their HOME is its dir; `herdr start` drops `CLAUDE_CONFIG_DIR`), so those Homes list the run's agents; a reported agent needs a
     process in its foreground (`wc-probe` runs `cat`), or its account is unknown and no Home lists it. Tier 2 (`--tier 2`) drives a
     real Claude (`wc-claude`, orchestrators `wc-o1`/`wc-o2`) and refuses to run until
     `$E2E_ROOT/.envrc` sets the account's `CLAUDE_CONFIG_DIR` (`direnv allow`ed). `preview start`

@@ -283,12 +283,12 @@ function checkAccount(pane: string, name: string, account: string): void {
 /** The real claude on PATH, which the fake execs for wc-h2. */
 const realClaude = (): string => spawnSync('sh', ['-c', 'command -v claude'], { encoding: 'utf8' }).stdout.trim();
 
-// wc-h1 runs the fake claude, unverified version and all (H6); wc-h2 the real one, in the pinned account. With no account
-// pinned, on the private herdr (`priv`), wc-o1 and wc-o2 get the account its panes run under (their HOME is its dir), so
-// their Homes list the run's agents as a Home lists its own (they never start there: Tier 2 runs on the desktop's herdr)
+// wc-h1 runs the fake claude, unverified version and all (H6); wc-h2 the real one, in the pinned account. On the private
+// herdr (`priv`) wc-o1 and wc-o2 get the account its panes run under (its HOME's: `herdr start` drops CLAUDE_CONFIG_DIR),
+// so their Homes list the run's agents as a Home lists its own; they never start there (Tier 2 runs on the desktop's herdr)
 const orchConfig = (account: string | null, fake: string | null, priv = false) => js({ orchestrators: [
   ...['wc-o1', 'wc-o2'].map((name) => ({ name, label: name.toUpperCase(),
-    ...(account ? { env: { CLAUDE_CONFIG_DIR: account } } : account === null && priv ? { env: { CLAUDE_CONFIG_DIR: path.join(PRIV, '.claude') } } : {}) })),
+    ...(priv ? { env: { CLAUDE_CONFIG_DIR: path.join(PRIV, '.claude') } } : account ? { env: { CLAUDE_CONFIG_DIR: account } } : {}) })),
   ...(fake ? [{ name: 'wc-h1', label: 'WC-H1', mode: 'headless', env: { CLAUDE_CONFIG_DIR: path.join(E2E_ROOT, 'fake-claude'), FAKECLAUDE_VERSION: '0.0.0-e2e' } }] : []),
   ...(fake && account !== null ? [{ name: 'wc-h2', label: 'WC-H2', mode: 'headless', env: { ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), FAKECLAUDE_REAL: realClaude() } }] : []),
 ] });
@@ -386,6 +386,7 @@ async function herdrCmd(sub: string): Promise<number> {
       XDG_DATA_HOME: path.join(PRIV, '.local/share'), XDG_CACHE_HOME: path.join(PRIV, '.cache'), SHELL: '/bin/sh' };
     delete e.HERDR_SOCKET_PATH; // the server's own place, under its HOME (= PRIV_SOCK)
     delete e.DBUS_SESSION_BUS_ADDRESS;
+    delete e.CLAUDE_CONFIG_DIR; // its panes on its HOME's account, whoever starts it (orchConfig's priv)
     const log = fs.openSync(path.join(PRIV, 'server.log'), 'a');
     spawn('herdr', ['server'], { env: e, detached: true, stdio: ['ignore', log, log] }).unref();
     fs.closeSync(log);
@@ -671,7 +672,7 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     // preview start gives the orchestrators that account as env; a preview from before the .envrc has none
     let cfg = '';
     try { cfg = fs.readFileSync(path.join(previewDir(c.port), 'config', 'config.json'), 'utf8'); } catch { /* not ours */ }
-    if (cfg !== orchConfig(account, fake)) throw env(`the preview's orchestrators are not pinned to ${accountName(account)} (restart it with preview start)`);
+    if (cfg !== orchConfig(account, fake, !!c.preview?.herdr)) throw env(`the preview's orchestrators are not pinned to ${accountName(account)} (restart it with preview start)`);
   }
   if (!needs.size) return;
   fs.mkdirSync(WORK, { recursive: true });
