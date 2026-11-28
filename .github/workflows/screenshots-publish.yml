@@ -1,0 +1,233 @@
+name: Screenshots publish
+
+# The trusted half of the PR screenshots (screenshots.yml is the other): after each Screenshots run of a PR, this
+# takes its shots (the artifact), decides, publishes and sets the PR head's `screenshots` commit status, the gate
+# (a required check on main). `workflow_run` runs this file as it is on main, never a PR's copy, with main's token:
+# a PR changes what it does only once merged. It checks out nothing and runs none of the PR's code; the artifact
+# (made by the PR's code) is data: each manifest entry must match a strict pattern, each file must be a PNG of
+# bounded size, the PNGs are compared here (not the manifest's word for it), and the comment and the status are
+# built from those checked names only.
+#
+# The status: `pending` while shots changed and the user hasn't approved exactly those pixels, `success` when none
+# changed or the user approved them, `failure` only when something is broken (the shots didn't render, a screen
+# wasn't ready on the PR's side), `error` when this job fails. Its link goes to the viewer
+# (https://yoicks.y011d4.com/vrt/) on the changed shots, else to the Screenshots run. Pending is no failure: it
+# blocks the merge as a failure would, without a failed run (GitHub notifies of failed runs, not of statuses).
+#
+# The user approves by adding the `ui-change` label after looking at the comment (only the user: CLAUDE.md). The
+# approval is bound to a digest of the changed shots' before and after PNGs, which the comment's first line keeps
+# (`shown=` what it shows, `approved=` what the label approved): a label added after the comment last changed
+# approves what it shows (`shown`), and only if this run's shots are those; a label added while it showed other
+# pixels approves nothing, and a later push that changes them again takes the label off. A label change starts a
+# Screenshots run (screenshots.yml), and so this.
+#
+# The PNGs go to refs/screenshots/pr-<n> (outside refs/heads: not in a clone, not in the branch list; each run
+# replaces the last), which the viewer reads through raw.githubusercontent.com. A fork's PR (its Screenshots run
+# shoots nothing: no token that can write) isn't gated: the user looks at one by hand.
+on:
+  workflow_run:
+    workflows: [Screenshots]
+    types: [completed]
+
+permissions: {}
+
+# one at a time per PR branch, in order; a run whose PR has moved on does nothing
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+
+jobs:
+  publish:
+    # a cancelled run's PR has a newer one
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read # the Screenshots run's artifact
+      contents: write # refs/screenshots/pr-<n>
+      pull-requests: write # the comment, the label
+      statuses: write # the screenshots status
+    # only the event's own fields (numbers, SHAs, names, URLs GitHub made) reach the scripts, through env
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+      CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+    steps:
+      - name: Which PR, and is this its latest run?
+        id: pr
+        run: |
+          set -euo pipefail
+          status() { gh api "repos/$REPO/statuses/$HEAD_SHA" -f state="$1" -f context=screenshots -f "description=${2:0:140}" -f "target_url=$RUN_URL" > /dev/null; }
+          if [[ $HEAD_REPO != "$REPO" ]]; then status success "a fork's PR isn't shot: the user looks at it by hand"; exit 0; fi
+          if [[ ! $PR =~ ^[0-9]+$ ]]; then echo "::error::no PR for this run"; exit 1; fi
+          if [[ $(gh api "repos/$REPO/pulls/$PR" --jq 'select(.state == "open") | .head.sha') != "$HEAD_SHA" ]]; then
+            echo "the PR has moved on or is closed: nothing to do"; exit 0
+          fi
+          # the comment stays as it was
+          if [[ $CONCLUSION != success ]]; then status failure "the shots didn't render ($CONCLUSION): see the Screenshots run"; exit 0; fi
+          echo "go=1" >> "$GITHUB_OUTPUT"
+
+      # into the runner's temp dir, away from anything that runs
+      - name: Download the shots
+        if: steps.pr.outputs.go
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: shots
+          path: ${{ runner.temp }}/shots
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Decide, publish, set the status
+        if: steps.pr.outputs.go
+        run: |
+          set -euo pipefail
+          marker='<!-- yoicks-shots'
+          pub="$RUNNER_TEMP/pub"
+          body="$RUNNER_TEMP/body.md"
+          mkdir -p "$pub"
+          cd "$RUNNER_TEMP/shots"
+          if [[ -L manifest.json ]]; then echo "manifest.json is a link"; exit 1; fi
+          jq -e '(.shots | type) == "array" and (.shots | length) <= 100' manifest.json > /dev/null
+          parts=() screens=() same=() notready=() late=() lines=()
+          declare -A px
+          # notReady last: read collapses a tab run, so an empty field anywhere else would shift the rest
+          while IFS=$'\t' read -r n k p nr; do
+            if [[ ! $n =~ ^[a-z0-9-]{1,64}$ || ! $k =~ ^(screen|part)$ || ! $p =~ ^([0-9]{1,8}|null)$ || ! $nr =~ ^(|before|after|before,after)$ ]]; then
+              echo "bad manifest entry"; exit 1
+            fi
+            if [[ -n $nr ]]; then late+=("$n ($nr)"); fi
+            if [[ $nr == *after* ]]; then notready+=("$n"); fi
+            ok=()
+            for side in before after diff; do
+              f="$n.$side.png"
+              if [[ ! -f $f || -L $f ]]; then
+                if [[ $side == diff ]]; then continue; fi
+                echo "no PNG: $f"; exit 1
+              fi
+              if [[ $(head -c 8 "$f" | od -An -tx1 | tr -d ' \n') != 89504e470d0a1a0a ]]; then echo "not a PNG: $f"; exit 1; fi
+              if (( $(stat -c %s "$f") > 2000000 )); then echo "too big: $f"; exit 1; fi
+              ok+=("$f")
+            done
+            if cmp -s "$n.before.png" "$n.after.png"; then same+=("$n"); continue; fi
+            lines+=("$n $(sha256sum < "$n.before.png" | cut -c1-64) $(sha256sum < "$n.after.png" | cut -c1-64)")
+            px[$n]=$p
+            cp "${ok[@]}" "$pub/" # the checked files only
+            if [[ $k == part ]]; then parts+=("$n"); else screens+=("$n"); fi
+          done < <(jq -r '.shots[] | [.name, .kind, (.pixels | tostring), (.notReady | join(","))] | @tsv' manifest.json)
+          changed=("${parts[@]}" "${screens[@]}")
+          n=${#changed[@]} total=$(( ${#changed[@]} + ${#same[@]} ))
+          digest=-
+          if (( n )); then digest=$(printf '%s\n' "${lines[@]}" | sort | sha256sum | cut -c1-16); fi
+
+          # the bot's comment: its id, when it last changed, and its first line
+          # (<!-- yoicks-shots shown=<digest|-> approved=<digest|-> -->)
+          c=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --jq '.[]
+            | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- yoicks-shots")))
+            | [.id, .updated_at, (.body | split("\n")[0])] | @tsv' | sed -n 1p)
+          id= updated= first=
+          IFS=$'\t' read -r id updated first <<< "$c" || true
+          shown=$(sed -nE 's/.* shown=([0-9a-f]{16}|-) .*/\1/p' <<< "$first")
+          approved=$(sed -nE 's/.* approved=([0-9a-f]{16}|-) .*/\1/p' <<< "$first")
+          approved=${approved:--}
+          labels=$(gh api "repos/$REPO/issues/$PR/labels" --paginate --jq '.[].name')
+          label=
+          if grep -qx ui-change <<< "$labels"; then label=1; fi
+          # the label added after the comment last changed: it approves what the comment shows (the comment changes only
+          # when what it says does, below; ISO 8601 UTC times compare as strings)
+          added=$(gh api "repos/$REPO/issues/$PR/events" --paginate --jq '.[]
+            | select(.event == "labeled" and .label.name == "ui-change") | .created_at' | tail -n 1)
+          fresh=
+          if [[ -n $label && $added > $updated ]]; then fresh=1; fi
+
+          state=pending unlabel= s=s
+          if (( n == 1 )); then s=; fi
+          if (( ${#notready[@]} )); then
+            state=failure reason="not ready on the PR's side within 10 s: ${notready[*]} (a broken screen or component, or its ready/el in tools/shots-fixture.ts)"
+          elif (( n == 0 )); then
+            state=success reason="no shot changed"
+          elif [[ -n $fresh ]]; then
+            if [[ $digest == "$shown" ]]; then
+              state=success approved=$digest reason="the user approved the $n changed shot$s"
+            else
+              unlabel=1 approved=- reason="the shots changed since the comment showed them: look again, then add ui-change again"
+            fi
+          elif [[ -n $label && $digest == "$approved" ]]; then
+            state=success reason="the $n changed shot$s are the ones the user approved"
+          elif [[ -n $label ]]; then
+            unlabel=1 approved=- reason="the shots changed since the user approved them: look again, then add ui-change again"
+          else
+            reason="$n shot$s changed: waiting for the user's ui-change label"
+          fi
+          echo "**screenshots**: $state: $reason" >> "$GITHUB_STEP_SUMMARY"
+
+          # off it comes (a label event by this token starts no run). Should it fail, the next run sees the label with
+          # approved=- and takes it off again.
+          if [[ -n $unlabel ]]; then
+            gh api -X DELETE "repos/$REPO/issues/$PR/labels/ui-change" > /dev/null || echo "could not take the ui-change label off"
+          fi
+
+          target=$RUN_URL
+          if (( n )); then
+            # the same PNGs make the same commit (a fixed date), so a run that changes nothing leaves the comment as it was
+            (
+              cd "$pub"
+              git init -q -b shots
+              git add -A
+              GIT_AUTHOR_DATE='2000-01-01T00:00:00Z' GIT_COMMITTER_DATE='2000-01-01T00:00:00Z' git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -qm "screenshots of #$PR at $HEAD_SHA"
+              auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+              git -c http.extraheader="AUTHORIZATION: basic $auth" push -qf "https://github.com/$REPO.git" "HEAD:refs/screenshots/pr-$PR"
+            )
+            sha=$(git -C "$pub" rev-parse HEAD)
+            # the viewer (site/static/vrt/index.html, on the Pages site): this commit's changed shots, in this order, by
+            # slider, blink, diff or side by side
+            target="https://yoicks.y011d4.com/vrt/?sha=$sha&pr=$PR&s=$(IFS=,; echo "${changed[*]}")"
+          fi
+
+          {
+            echo "$marker shown=$digest approved=$approved -->"
+            echo "**screenshots $state**: $reason."
+            echo
+            if (( n )); then
+              echo "**UI screenshots**: $n of $total shots changed, ${#same[@]} unchanged (${HEAD_SHA:0:7}). Made-up data: \`tools/shots-fixture.ts\`."
+              echo
+              echo "[Step through the $n changed shot$s in the viewer]($target)"
+              echo
+              for c in "${changed[@]}"; do
+                k=screen; if [[ " ${parts[*]} " == *" $c "* ]]; then k=component; fi
+                echo "- \`$c\` ($k, ${px[$c]} px differ): [open comparison]($target#$c)"
+              done
+            elif (( total )); then
+              echo "**UI screenshots**: no screen changed ($total shots, ${HEAD_SHA:0:7})."
+            else
+              echo "**UI screenshots**: the PR no longer changes the web UI (${HEAD_SHA:0:7})."
+            fi
+            if (( ${#late[@]} )); then printf '\nNot ready within 10 s (shot anyway): %s\n' "${late[*]}"; fi
+          } > "$body"
+          cat "$body" >> "$GITHUB_STEP_SUMMARY"
+
+          # one comment per PR, updated in place only when what it says changes; none is made just to say that nothing
+          # changed and all is well
+          if [[ -n $id ]]; then
+            if [[ $(gh api "repos/$REPO/issues/comments/$id" --jq .body) != "$(cat "$body")" ]]; then
+              gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$body" > /dev/null
+            fi
+          elif (( n )) || [[ $state != success ]]; then
+            gh api "repos/$REPO/issues/$PR/comments" -F "body=@$body" > /dev/null
+          fi
+
+          # last, so that what it links to is there
+          gh api "repos/$REPO/statuses/$HEAD_SHA" -f state=$state -f context=screenshots -f "description=${reason:0:140}" \
+            -f "target_url=$target" > /dev/null
+
+      - name: Say so on the PR when this job fails
+        if: failure()
+        env:
+          JOB_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api "repos/$REPO/statuses/$HEAD_SHA" -f state=error -f context=screenshots \
+            -f "description=the screenshots publish job failed: see its log" -f "target_url=$JOB_URL" > /dev/null
