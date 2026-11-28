@@ -56,8 +56,9 @@ herdr plugin config-dir y011d4.yoicks
   `<plugin dir>/bin/yoicks orchestrator start <name>` で起動します。アプリを開くと orchestrator の **Home** が
   出ます。そこには、やりとりだけのチャット (ツールの呼び出しは隠します)、その Claude アカウントの
   エージェントのステータスバー (あなたを待っているものと、ほかの数)、動いている間は「doing now」の行が
-  あります。orchestrator 自身はエージェントの一覧に出ません。Home から開いたエージェントの一覧には、
-  そのアカウントのエージェントだけが並びます (`#/agents/<name>`。Back で Home に戻ります)。全体の一覧の
+  あります。orchestrator 自身はエージェントの一覧に出ません。数をタップすると、それらのエージェントが blocked、
+  working、done、idle の順に並びます (タップするとそのエージェントを開きます)。その **Open the list** で開く
+  エージェントの一覧には、そのアカウントのエージェントだけが並びます (`#/agents/<name>`。Back で Home に戻ります)。全体の一覧の
   **← Home** は、最後に使った Home を開きます。いくつも動いているときは、Home に切り替えボタン (`label` と
   その状態) が出て、最後に使ったものを開き直します (`#/home/<name>`)。1 つも動いていなければ、アプリは
   一覧で開きます。

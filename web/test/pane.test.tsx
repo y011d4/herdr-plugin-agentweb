@@ -467,17 +467,51 @@ describe('Home', () => {
   // happy-dom fires hashchange on a timer
   const hashSettled = (): Promise<void> => act(() => new Promise<void>((r) => { setTimeout(r, 0); }));
 
-  it('shows the counts of its account and goes to its list from them', async () => {
+  it('shows the counts of its account and opens its agents from them, then its list', async () => {
     await home(fresh());
     assert.equal($('#tb').textContent, 'Personal· ready>_⚙', "a Home's topbar: no Agents, ends with Settings, no ⋮");
-    assert.equal($('.home-counts').textContent, '1 working1 done0 idle›');
+    assert.equal($('.home-counts').textContent, '1 working1 done0 idle▾');
     assert.equal($('.home-counts').getAttribute('aria-label'), 'Agents: 1 working, 1 done, 0 idle'); // p1, p3 (p4 is the orchestrator)
     // two configured, one running: the switcher lists both, the stopped one dimmed
     const sw = [...container.querySelectorAll<HTMLElement>('.home-switch-btn')];
     assert.deepEqual(sw.map((b) => switcher(b, b.dataset.orch!)), ['on|personal|idle|Personal', 'stopped|work|stopped|work1']); // 1: p6 waits, and work's account is unknown (every agent)
     assert.equal(container.querySelector('[data-action="needs"]'), null, 'nothing waits on the user: no Needs you');
+    assert.equal(container.querySelector('[data-agents-list]'), null, 'closed until tapped');
     await fire(() => $('.home-counts').click());
+    assert.equal($('.home-counts').getAttribute('aria-expanded'), 'true');
+    assert.deepEqual(rows(), ['p1:working', 'p3:done'], 'its account\'s agents, never its orchestrator (p4)');
+    const list = $('[data-agents-list] .agents-open-list');
+    assert.equal(list.getAttribute('href'), '#/agents/personal');
+    await fire(() => list.click());
     assert.equal(location.hash, '#/agents/personal');
+  });
+
+  // the popover's rows: pane id and status shown, in order
+  const rows = (): string[] => [...container.querySelectorAll<HTMLElement>('[data-agents-list] .agent-row')]
+    .map((r) => `${r.dataset.paneId}:${r.querySelector<HTMLElement>('.status-badge')!.dataset.status}`);
+
+  it('lists its agents most urgent first, opens one in its drawer and closes on Escape, a tap outside and a tap on it again', async () => {
+    const s = fresh();
+    s.orchestrators[0].agents!.push('p6'); // blocked
+    await home(s);
+    const counts = $('.home-counts');
+    const shown = (): boolean => container.querySelector('[data-agents-list]') !== null;
+    await fire(() => counts.click());
+    assert.deepEqual(rows(), ['p6:blocked', 'p1:working', 'p3:done']);
+    await fire(() => counts.click());
+    assert.ok(!shown(), 'a tap on it again');
+    await fire(() => counts.click());
+    // Mantine's Escape is the dropdown's own (the focus is trapped in it): sent from inside, never from document
+    await fire(() => $('[data-agents-list] .agent-row').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    assert.ok(!shown(), 'Escape');
+    await fire(() => counts.click());
+    await fire(() => $('#home-status').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    assert.ok(!shown(), 'a tap outside');
+    await fire(() => counts.click());
+    await fire(() => $('[data-agents-list] .agent-row[data-pane-id="p1"]').click());
+    assert.equal(location.hash, '#/pane/p1');
+    await hashSettled();
+    assert.ok(!shown(), 'leaving the screen (its drawer) closes it');
   });
 
   it('counts the agents waiting on the user on Needs you and lists them in its popover; a switcher once two orchestrators run', async () => {

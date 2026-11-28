@@ -1,6 +1,6 @@
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
-import { dashboardCards, homeGroups, homeSummary, markSeen, orchestratorStatus, shownStatus } from '../src/dashboard-group.ts';
+import { byUrgency, dashboardCards, homeGroups, homeSummary, markSeen, orchestratorStatus, shownStatus } from '../src/dashboard-group.ts';
 import type { AgentStatus, OrchestratorView, PaneNode, WorkspaceNode, WorktreeInfo } from '../src/types.ts';
 
 function agentPane(id: string, sinceUnixMs: number, status: AgentStatus = 'idle', completionSeq: number | null = null, stateChangeSeq: number | null = null): PaneNode {
@@ -77,6 +77,17 @@ describe('homeSummary', () => {
     const ws = [wsNode('A', [agentPane('d1', 10, 'done', 5), agentPane('d2', 10, 'done', 6)])];
     const s = homeSummary(dashboardCards(ws), markSeen({}, ws, 'd1'));
     assert.deepEqual([s.done, s.idle], [1, 1]);
+  });
+});
+
+describe('byUrgency', () => {
+  it('puts blocked, then working, done, idle and unknown, each newest first; a done the phone has opened is idle', () => {
+    const ws = [wsNode('A', [
+      agentPane('i1', 900, 'idle'), agentPane('d1', 800, 'done', 5), agentPane('w1', 700, 'working'), agentPane('u1', 600, 'unknown'),
+      agentPane('b1', 500, 'blocked'), agentPane('w2', 400, 'working'), agentPane('d2', 300, 'done', 6), agentPane('b2', 200, 'blocked'),
+    ])];
+    assert.deepEqual(byUrgency(dashboardCards(ws)).map((c) => c.pane.paneId), ['b1', 'b2', 'w1', 'w2', 'd1', 'd2', 'i1', 'u1']);
+    assert.deepEqual(byUrgency(dashboardCards(ws), markSeen({}, ws, 'd1')).map((c) => c.pane.paneId), ['b1', 'b2', 'w1', 'w2', 'd2', 'i1', 'd1', 'u1']);
   });
 });
 

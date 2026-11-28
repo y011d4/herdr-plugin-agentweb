@@ -58,7 +58,8 @@ with defaults, is:
   is stopped) or with `<plugin dir>/bin/yoicks orchestrator start <name>`. Opening the app lands on an
   orchestrator's **Home**: its chat with only the dialogue (tool calls hidden), a status bar of its
   Claude account's agents (those that need you, and counts of the rest), and a "doing now" line while
-  it works. Orchestrators aren't listed among the agents. Opened from a Home, the agents list shows
+  it works. Orchestrators aren't listed among the agents. A tap on the counts lists those agents, blocked first,
+  then working, done and idle (a tap on one opens it); its **Open the list** opens the agents list with
   only that account's agents (`#/agents/<name>`, Back returns to the Home); the full list's
   **← Home** opens the Home used last. With several running, Home shows a switcher (`label`s, with their
   status) and reopens the one used last (`#/home/<name>`); with none, the app opens on the list.
