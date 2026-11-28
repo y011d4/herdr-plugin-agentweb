@@ -44,6 +44,9 @@ describe('Todos', () => {
   let container: HTMLElement;
   const home = (todos: TodoItem[]): OrchestratorView => ({ ...structuredClone(recorded.orchestrators[0]), todos });
   const show = async (o: OrchestratorView, now = NOW): Promise<void> => { ({ container, unmount } = await render(<Todos o={o} now={now} />)); };
+  const row = (id: string): HTMLElement => container.querySelector<HTMLElement>(`[data-todo="${id}"]`)!;
+  const menu = (): HTMLElement | null => container.querySelector<HTMLElement>('[role="menu"]');
+  const items = (): string[] => [...menu()!.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((b) => b.querySelector('.mantine-Menu-itemLabel')!.textContent!);
   const rows = (): string[] => [...container.querySelectorAll<HTMLElement>('.home-todo')].map((r) => `${r.dataset.todo}:${r.textContent}`);
 
   beforeEach(() => {
@@ -68,7 +71,7 @@ describe('Todos', () => {
       item('d4e5f6', 'delete ~/backup.tgz', { due: at('2026-11-28T09:00:00') }),
       item('0a0b0c', 'run /login in side', { due: at('2026-11-27T09:00:00') }),
     ]));
-    assert.deepEqual(rows(), ['a1b2c3:✓merge PR #119w-todogithub.com ↗', '0a0b0c:✓run /login in sidedue today 09:00']);
+    assert.deepEqual(rows(), ['a1b2c3:merge PR #119w-todogithub.com ↗⋮', '0a0b0c:run /login in sidedue today 09:00⋮']);
     const link = container.querySelector<HTMLAnchorElement>('[data-host="github.com"]')!;
     assert.equal(link.getAttribute('href'), 'https://github.com/y011d4/herdr-yoicks/pull/119');
     assert.equal(link.getAttribute('target'), '_blank');
@@ -79,7 +82,7 @@ describe('Todos', () => {
     assert.equal(later.textContent, 'Later (1) ›');
     await fire(() => later.click());
     assert.equal(later.getAttribute('aria-expanded'), 'true');
-    assert.deepEqual(rows().slice(2), ['d4e5f6:✓delete ~/backup.tgztomorrow 09:00']);
+    assert.deepEqual(rows().slice(2), ['d4e5f6:delete ~/backup.tgztomorrow 09:00⋮']);
   });
 
   it("doesn't link a url that isn't http(s)", async () => {
@@ -87,44 +90,85 @@ describe('Todos', () => {
     assert.equal(container.querySelector('.home-todo a'), null);
   });
 
-  it("opens the worker's drawer by its herdr name", async () => {
+  it("opens the worker's drawer by its herdr name, not the item's menu", async () => {
     await show(home([item('a1b2c3', 'merge it', { agent: 'w-review' })])); // p3's name in the recording
     location.hash = '#/home/personal';
     await fire(() => container.querySelector<HTMLElement>('[data-agent="w-review"]')!.click());
     assert.equal(location.hash, '#/pane/p3');
+    assert.equal(menu(), null);
+  });
+
+  it('a tap on an item opens its menu: Mark done, and Ask the orchestrator where the Home has a composer, off while its question is open', async () => {
+    const o = home([item('a1b2c3', 'merge it')]);
+    await show(o);
+    assert.equal(menu(), null);
+    await fire(() => row('a1b2c3').click());
+    assert.deepEqual(items(), ['Mark done']);
+    await unmount();
+    let asked = 0;
+    ({ container, unmount } = await render(<Todos o={o} now={NOW} ask={() => { asked++; }} />));
+    await fire(() => row('a1b2c3').click());
+    assert.deepEqual(items(), ['Mark done', 'Ask the orchestrator']);
+    await fire(() => menu()!.querySelector<HTMLElement>('[data-action="todo-ask"]')!.click());
+    assert.equal(asked, 1);
+    assert.equal(menu(), null, 'closed by it');
+    await unmount();
+    o.headless = { ...structuredClone(recorded.orchestrators[0]).headless!, pending: { id: 'q', questions: [] } } as OrchestratorView['headless'];
+    ({ container, unmount } = await render(<Todos o={o} now={NOW} ask={() => { asked++; }} />));
+    await fire(() => row('a1b2c3').click());
+    const ask = menu()!.querySelector<HTMLButtonElement>('[data-action="todo-ask"]')!;
+    assert.deepEqual([ask.disabled, items()[1]], [true, 'Ask the orchestratorAnswer its question first']);
+  });
+
+  it('the keyboard: Enter or Space on an item opens its menu, the arrows move in it, Escape closes it and puts the focus back', async () => {
+    await show(home([item('a1b2c3', 'merge it')]));
+    const r = row('a1b2c3');
+    assert.equal(r.tabIndex, 0);
+    for (const key of ['Enter', ' ']) {
+      r.focus();
+      await fire(() => r.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
+      assert.ok(menu(), key);
+      await fire(() => menu()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+      assert.ok(document.activeElement === menu()!.querySelector('[data-action="todo-done"]'), `${key}: on Mark done`);
+      // Mantine's Escape is the dropdown's own: sent from inside
+      await fire(() => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+      assert.equal(menu(), null, `${key}: Escape`);
+      await fire(() => new Promise<void>((res) => { setTimeout(res, 30); })); // Mantine puts the focus back after 10 ms
+      assert.ok(document.activeElement === r, `${key}: back on the item`);
+    }
   });
 
   it('✓ ticks it off; a gone one is no error, a failure says so', async () => {
     await show(home([item('a1b2c3', 'merge it'), item('d4e5f6', 'log in')]));
-    const tick = (id: string): Promise<void> => fire(() => container.querySelector<HTMLElement>(`[data-todo="${id}"] [data-action="todo-done"]`)!.click());
+    const tick = async (id: string): Promise<void> => {
+      await fire(() => row(id).click());
+      await fire(() => menu()!.querySelector<HTMLElement>('[data-action="todo-done"]')!.click());
+    };
     await tick('a1b2c3');
     assert.deepEqual(reqs.map((r) => `${r.method} ${r.url}`), ['DELETE /api/orchestrators/personal/todos/a1b2c3']);
-    assert.equal(container.querySelector('[data-todo="a1b2c3"] [data-action="todo-done"]')!.hasAttribute('data-loading'), true, 'busy until the State drops it');
+    assert.equal(row('a1b2c3').getAttribute('aria-busy'), 'true', 'busy until the State drops it');
+    await fire(() => row('a1b2c3').click());
+    assert.equal(menu(), null, 'no menu meanwhile');
     await fire(() => reqs[0].answer(404, { error: { code: 'not_found', message: 'no item' } }));
     assert.equal(getToasts().length, 0);
     await tick('d4e5f6');
     await fire(() => reqs[1].answer(500, { error: { code: 'error', message: 'could not save the to-do list: disk full' } }));
     assert.deepEqual(getToasts().map((t) => `${t.title}: ${t.body}`), ['Could not tick it off: could not save the to-do list: disk full']);
-    assert.equal(container.querySelector('[data-todo="d4e5f6"] [data-action="todo-done"]')!.hasAttribute('data-loading'), false, 'tappable again');
+    assert.equal(row('d4e5f6').hasAttribute('aria-busy'), false, 'tappable again');
   });
 
-  it("dense (the sidebar's): two lines of text at most, all of it on hover; Ask on the line of its worker, link and due, else beside the text", async () => {
+  it("dense (the sidebar's): two lines of text at most, all of it on hover; the popover's: all of it", async () => {
     const long = 'merge PR #119 once CI is green at /home/u/src/repo-wt-a-very-long-branch-name-that-wraps';
-    const o = home([item('a1b2c3', long, { agent: 'w-todo' }), item('d4e5f6', 'log in')]);
+    const o = home([item('a1b2c3', long, { agent: 'w-todo' })]);
     ({ container, unmount } = await render(<Todos o={o} now={NOW} ask={() => {}} dense />));
     const text = container.querySelector<HTMLElement>('[data-todo="a1b2c3"] .mantine-Text-root')!;
     assert.equal(text.dataset.lineClamp, 'true');
     assert.match(text.getAttribute('style')!, /--text-line-clamp: ?2/);
     assert.equal(text.title, long);
-    const ask = (id: string): HTMLElement => container.querySelector<HTMLElement>(`[data-todo="${id}"] [data-action="todo-ask"]`)!;
-    assert.ok(ask('a1b2c3').parentElement === container.querySelector('[data-todo="a1b2c3"] [data-agent="w-todo"]')!.parentElement, 'on its worker\'s line');
-    assert.ok(ask('d4e5f6').parentElement === container.querySelector('[data-todo="d4e5f6"]'), 'no such line: beside the text');
     await unmount();
-    // the popover's: all of the text, Ask at the row's end
     ({ container, unmount } = await render(<Todos o={o} now={NOW} ask={() => {}} />));
     const full = container.querySelector<HTMLElement>('[data-todo="a1b2c3"] .mantine-Text-root')!;
     assert.ok(!full.hasAttribute('data-line-clamp') && !full.title);
-    assert.ok(ask('a1b2c3').parentElement === container.querySelector('[data-todo="a1b2c3"]'));
   });
 
   it('counts what waits at a Home: its blocked agents, its orchestrator waiting itself, its items due now', () => {

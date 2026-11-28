@@ -575,6 +575,15 @@ describe('Home', () => {
     assert.equal(container.querySelector('.home-chip'), null, 'nothing blocked: no chip');
     assert.deepEqual([...container.querySelectorAll<HTMLElement>('[data-needs-list] .home-todo')].map((r) => r.dataset.todo), ['a1b2c3']);
     assert.equal($('[data-action="todo-later"]').textContent, 'Later (1) ›');
+    // an item's menu, inside the popover: a tap in it is no tap outside, its Escape closes it alone, the next one the popover
+    await fire(() => $('[data-needs-list] [data-todo="a1b2c3"]').click());
+    await fire(() => $('[data-needs-list] [role="menu"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    assert.ok(container.querySelector('[data-needs-list] [role="menu"]'), 'a tap in the menu keeps both');
+    await fire(() => $('[data-needs-list] [data-action="todo-done"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    assert.ok(container.querySelector('[data-needs-list]') && !container.querySelector('[role="menu"]'), 'Escape: the menu only');
+    await fire(() => $('[data-needs-list] [data-todo="a1b2c3"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    assert.equal(container.querySelector('[data-needs-list]'), null, 'Escape again: the popover');
+    await fire(() => $('[data-action="needs"]').click());
     // only an item due later: a dim To-do, no count of its own
     s.orchestrators[0].todos = [todo('d4e5f6', 'later on', Date.now() + 3_600_000)];
     await fire(() => setAppState(structuredClone(s)));

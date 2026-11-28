@@ -844,6 +844,7 @@ describe('replying on a Home, and asking about a to-do item', () => {
   it('Ask on a to-do item closes the popover and quotes the item (text, id, worker, link) in the composer, focused', async () => {
     await home(withPilot((p) => { idle(p); p.todos = [todo]; }));
     await fire(() => $('[data-action="needs"]').click());
+    await fire(() => $('[data-todo="t1"]').click()); // its menu
     await fire(() => $('[data-action="todo-ask"]').click());
     assert.ok(container.querySelector('[data-needs-list]') === null, 'closed');
     assert.deepEqual([$('#composer-quote').dataset.quoteOf, $('#composer-quote').textContent], ['todo', 'Asking about a to-domerge PR #7']);
@@ -857,12 +858,14 @@ describe('replying on a Home, and asking about a to-do item', () => {
   it('has Ask off while its question is open, and none on a stopped Home (no composer)', async () => {
     await home(withPilot((p) => { p.todos = [todo]; }));
     await fire(() => $('[data-action="needs"]').click());
+    await fire(() => $('[data-todo="t1"]').click());
     assert.equal($<HTMLButtonElement>('[data-action="todo-ask"]').disabled, true);
     await unmount();
     setAppState(withPilot((p) => { idle(p); p.paneId = null; p.headless!.status = 'stopped'; p.todos = [todo]; }));
     ({ container, unmount } = await render(<StoppedHome name="pilot" />));
     await fire(() => $('[data-action="needs"]').click());
-    assert.ok(container.querySelector('[data-todo="t1"]') && container.querySelector('[data-action="todo-ask"]') === null);
+    await fire(() => $('[data-todo="t1"]').click());
+    assert.ok(container.querySelector('[data-action="todo-done"]') && container.querySelector('[data-action="todo-ask"]') === null);
   });
 });
 
