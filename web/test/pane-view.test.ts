@@ -334,11 +334,14 @@ describe('pane view: the chat’s ↓', () => {
     assert.deepEqual(calls.jump.at(-1), 'end');
   });
 
-  it('a re-watch that moved on (a reconnect, a resume) keeps the reader where they were, and the dot says so', async () => {
+  it('a re-watch that moved on (a reconnect, a resume) keeps the reader where they were, with a dot only for new items', async () => {
     const log = await opened();
     scroll(300);
     assert.deepEqual(calls.jump, ['away']);
     const tail = { type: 'transcript_items', paneId: 'p1', available: true, sessionId: transcript[0].sessionId!, reset: true } as const;
+    push({ ...tail, items: transcript[0].items!, cursor: 800 }); // past lines never drawn only
+    assert.equal(log.scrollTop, 300);
+    assert.deepEqual(calls.jump, ['away'], 'no dot: nothing new on show');
     push({ ...tail, items: [...transcript[0].items!, { kind: 'assistant', text: 'meanwhile', sidechain: false }], cursor: 900 });
     assert.equal(log.scrollTop, 300);
     assert.deepEqual(calls.jump, ['away', 'away+new']);

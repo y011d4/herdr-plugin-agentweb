@@ -134,6 +134,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   // The ↓ (opts.jump) shows while it is unpinned, with a dot once items came meanwhile.
   let pinned = true;
   let unread = false;
+  let newest = ''; // the newest item on show (JSON): a reset keeping the reader's place has news when its own differs
   let lastTop = 0;
   let told = { away: false, unread: false };
   const fromBottom = (): number => chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight;
@@ -290,10 +291,12 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       items = conversationItems(items, calls);
     }
     chat.reset(items);
+    const last = JSON.stringify(items.at(-1) ?? null);
     if (preserveScroll && !pinned) {
       chatEl.scrollTop = prevTop;
-      unread = true; // the session moved on meanwhile (onTranscriptItems: no redraw for what is on show)
+      if (last !== newest) unread = true; // items came meanwhile (its cursor also moves over lines never drawn)
     } else toEnd();
+    newest = last;
     reportJump();
   }
 
@@ -307,6 +310,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     }
     // follow the end only while pinned there — don't yank the user out of history they've scrolled up to read
     chat.append(items);
+    newest = JSON.stringify(items.at(-1));
     if (pinned) toEnd();
     else unread = true;
     reportJump();
