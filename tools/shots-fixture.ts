@@ -171,7 +171,7 @@ export const scenes: Scene[] = [
   ] },
   { name: 'home', hash: '#/home/personal', ready: items(''), parts: [
     { name: 'topbar-home', el: q('#topbar') },
-    { name: 'home-status', el: q('#home-status') },
+    { name: 'home-status', el: q('#home-status'), sizes: ['phone'] }, // a PC's has none: the topbar is the Home's header
     { name: 'chat-notice', el: q('#chat-log .chat-notice') },
     { name: 'composer', el: q('.input-bar') },
   ] },
@@ -203,7 +203,8 @@ export const scenes: Scene[] = [
     { name: 'composer-quote', el: q('.input-bar') },
   ] },
   { name: 'home-headless', hash: '#/home/work', ready: `${items('')} && !!document.querySelector('.ask-opt')`, screen: false, parts: [
-    { name: 'home-status-headless', el: q('#home-status') },
+    { name: 'home-status-headless', el: q('#home-status') }, // a PC's: its warnings alone
+    { name: 'topbar-home-headless', el: q('#topbar'), sizes: ['pc'] }, // its header: name, status, usage, ⋮
     { name: 'headless-prompt', el: q('#headless-prompt') },
     { name: 'composer-locked', el: q('.input-bar') }, // its question open: no message but its Chat about this
   ] },
@@ -218,7 +219,7 @@ export const scenes: Scene[] = [
     { name: 'usage-popover', el: q('[data-usage-resets]') },
   ] },
   { name: 'home-stopped', hash: '#/home/side', ready: "!!document.querySelector('#screen-home-stopped')", screen: false, parts: [
-    { name: 'home-status-stopped', el: q('#home-status') },
+    { name: 'home-status-stopped', el: q('#home-status'), sizes: ['phone'] },
     { name: 'topbar-home-stopped', el: q('#topbar'), sizes: ['phone'] }, // its switcher scrolled to it, the start faded
     { name: 'home-stopped-text', el: `${q('#btn-home-start')}?.previousElementSibling` },
     { name: 'home-start', el: q('#btn-home-start') },

@@ -177,7 +177,7 @@ All in `internal/bridge/` (one package):
   orchestrator's Home (`StoppedHome`, no pane) shows its account's agents and **Start** (the only
   Start: the list has none); its account is `expectedAccount(def)` (the same rule `startOrchestrator`
   checks against), found once in the background at bridge start. A running one's is the pane view in
-  `homeMode` (Stop leaves the Home stopped; a Clear holds it ≤8s for the replacement) — with 2+ configured, its
+  `homeMode` (Stop leaves the Home stopped; a Clear holds it ≤8s for the replacement) — on a phone with 2+ configured, its
   topbar (a stopped one's too) is the switcher between them (`HomeSwitcher`, in the title slot; stopped ones dimmed; each with
   its "needs you" count, `ui/Todos.tsx`'s `needsYou`: its account's blocked agents, its question, its to-do items due now; the
   PC sidebar's Home headings have it too; it scrolls sideways, keeps the Home on show in view, clear of its fades, and fades
@@ -185,9 +185,10 @@ All in `internal/bridge/` (one package):
   status bar of one row (wrapping only where it must): "Needs you · n" (that count, orange; `To-do · n`, dim, while only items
   due later wait; none at all otherwise: `NeedsButton`), the counts of its account's agents (`homeSummary`; no orchestrators),
   and at the right a headless one's usage and model, `>_` and its ⋮ (`HomeMenu`: a headless one's Compact, Clear, Stop; ■ stays on the
-  "doing now" line). On a PC (`WIDE_QUERY`, as the sidebar) the bar has neither Needs you nor the counts: the sidebar
-  has both (under All agents a Home's heading opens `#/agents/<name>`); the Home's name and status take their place
-  under the switcher (a phone has them on its button there). Needs you opens a Mantine Popover (Escape, a tap outside
+  "doing now" line; those four are `HomeTools`). On a PC (`WIDE_QUERY`, as the sidebar: `theme.ts`'s `useWide`) there is
+  no switcher and no such bar: the sidebar has what waits at each Home and the agents (under All agents a Home's heading
+  opens `#/agents/<name>`), and the topbar is the Home's header, its name and status, then `HomeTools`; under it only a
+  headless one's warnings (no bar without any). Needs you opens a Mantine Popover (Escape, a tap outside
   and leaving the screen close it; as wide as a phone allows, no taller than the room below it): the blocked agents' chips, its
   question's line, and its to-do list (`ui/Todos.tsx` over the pure `todos.ts`: a tap on an item opens its menu, Mark done = `DELETE …/todos/:id`, an item due ahead under
   Later until its time, a link shown by its host, a worker's name opening its drawer; a stopped Home has them too), dialogue-only chat
@@ -553,8 +554,9 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   also draws the sidebar (`ui/Sidebar.tsx`) on every screen but the token one: on top, each orchestrator's
   Home a heading over what waits there (`ui/Todos.tsx`'s `NeedsList`, the Needs you popover's), then Other's
   blocked agents; under them the agents folded into one row (All agents, the count), a click unfolding them under Open the list (`#/agents`),
-  by Home (`homeGroups`; a Home's heading opens its list, `#/agents/<name>`), then Other (Settings stays the topbar's ⚙, at
-  the screen's top right, as on a phone). It comes first in `#app`, in a
+  by Home (`homeGroups`; a Home's heading opens its list, `#/agents/<name>`), then Other. Its top, the topbar's height, has
+  the app's name, the connection dot (`#conn-dot`: App.tsx draws it there, else in the topbar) and ⚙ (`SettingsButton`:
+  the topbar's on a phone, the sidebar's on a PC, one `#btn-settings`), so the topbar beside it is the screen's own. It comes first in `#app`, in a
   slot of its own, so `#topbar`/`#reconnect-banner`/`#screen` stay the same elements as it comes and
   goes; while it is there `#app` is a two-column grid (`#app:has(> #sidebar)`) and `--sidebar-w` is its
   width, for an overlay that should leave it usable. Like the list it holds still while a finger is

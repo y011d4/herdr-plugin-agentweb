@@ -63,10 +63,11 @@ with defaults, is:
   only that account's agents (`#/agents/<name>`, Back returns to the Home); the full list's
   **← Home** opens the Home used last. On a PC the status bar has neither: the sidebar beside it lists what needs
   you under each Home's heading, and the agents under **All agents**, where a Home's heading opens its list. With
-  two or more configured, the top bar is a switcher between the Homes (`label`s, with their status and what waits
-  on you there; it scrolls sideways when they don't fit), over the Home's status bar (on a PC with the Home's name and
-  status, which a phone has on its button), and the app reopens the Home used last (`#/home/<name>`); with none,
-  the app opens on the list.
+  two or more configured, a phone's top bar is a switcher between the Homes (`label`s, with their status and what waits
+  on you there; it scrolls sideways when they don't fit), over the Home's status bar; on a PC the sidebar's Home
+  headings switch between them, and the top bar is the Home's own: its name and status, then what a phone has at its
+  status bar's right (a headless one's usage and model, `>_` and **⋮**). The app reopens the Home used last
+  (`#/home/<name>`); with none, it opens on the list.
 - `notify_url` — optional [ntfy](https://ntfy.sh) topic URL for background push
   notifications, e.g. `https://ntfy.example.internal/herdr` for a **self-hosted**
   ntfy instance. When unset (default) the bridge performs no outbound requests at

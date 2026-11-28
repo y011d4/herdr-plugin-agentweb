@@ -608,14 +608,15 @@ describe('Home', () => {
     assert.equal(container.querySelectorAll('.qkey').length, 12);
   });
 
-  it('shows "doing now" only while the orchestrator works, and its state in the title: under the switcher on a PC, in the topbar alone', async () => {
+  it('shows "doing now" only while the orchestrator works, and its state in the title: in the topbar on a PC, its header', async () => {
     const s = fresh();
     s.workspaces[0].tabs[0].panes[1].agent!.status = 'working';
     const setWide = fakeMedia(WIDE_QUERY, true);
     await home(s);
     assert.equal($('#home-activity').style.display, '');
     assert.equal($('#home-activity').textContent, 'thinking…');
-    assert.ok($('#home-status .home-row .home-title .home-state') && !$('#tb .home-state'), 'a PC: on its status bar, the topbar its switcher');
+    assert.ok($('#tb .home-state') && !$('#tb .home-switch') && container.querySelector('#home-status') === null, 'a PC: in the topbar, no switcher (the sidebar lists the Homes), no bar');
+    assert.ok($('#tb #btn-view-toggle') && container.querySelector('#tb #btn-settings') === null, "its tools in the topbar; ⚙ is the sidebar's"); 
     assert.match($('.home-state').style.color, /working/);
     assert.equal($('.home-state').textContent, '· working…');
     await fire(() => setAppState(fresh()));
