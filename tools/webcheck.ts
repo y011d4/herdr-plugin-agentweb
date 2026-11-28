@@ -18,8 +18,10 @@
  * for each changed one <name>.diff.png (where its pixels differ), and manifest.json (screen or part; which changed:
  * the PNGs' bytes differ; how many pixels) into --out. Each shot gets a browser context of its own
  * (the app keeps seen-done, the last Home, drafts in localStorage), a frozen clock (the fixture's T0 + 30s), UTC,
- * en-US, no animations (CSS transitions off: Mantine's JS-timed ones then show their end state two frames in), and
- * its images decoded, so the same build shoots the same bytes. CI (.github/workflows/screenshots.yml) posts the
+ * en-US, no animations (CSS transitions off: Mantine's JS-timed ones then show their end state two frames in), its
+ * images decoded, and Chrome's software raster drawing every frame whole (no GPU, no partial raster: on CI's
+ * emulated GPU the anti-aliased rim of an overlay, the chat's ↓ over a card, once came out a step off in 18 pixels,
+ * main's side only, which failed an approval), so the same build shoots the same bytes. CI (.github/workflows/screenshots.yml) posts the
  * changed ones on the PR and fails its `screens` check until the user approves them with the ui-change label.
  *
  * A preview is a throwaway bridge (state/config under $WC_ROOT/preview-<port>, `env -u HERDR_BIN_PATH`)
@@ -2529,7 +2531,7 @@ async function shots(o: Record<string, any>): Promise<number> {
   for (const [, d] of sides) if (!fs.existsSync(path.join(d, 'index.html'))) throw env(`no index.html in ${d} (npx vite build)`);
   const server = await fixtureServer();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yoicks-shots-'));
-  const chrome = startChrome(dir, ['--hide-scrollbars',
+  const chrome = startChrome(dir, ['--hide-scrollbars', '--disable-gpu', '--disable-partial-raster',
     '--blink-settings=primaryPointerType=4,primaryHoverType=2,availablePointerTypes=4,availableHoverTypes=2']);
   const proc = chrome.proc;
   let cdp: Cdp | null = null;
