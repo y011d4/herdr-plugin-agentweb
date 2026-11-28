@@ -94,11 +94,3 @@ jobs:
           path: ${{ runner.temp }}/shots
           retention-days: 30 # a tick in the comment decides on them again
           if-no-files-found: error
-
-  # Transitional: main's branch protection requires a `screens` check until it requires the `screenshots` status
-  # instead. Delete this job once it does.
-  screens:
-    runs-on: ubuntu-latest
-    permissions: {}
-    steps:
-      - run: "true"
