@@ -716,6 +716,10 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   user's GitHub account, so GitHub can't tell them apart, and this rule is the only thing keeping the approval
   the user's. A failing `screens` check over intended changes is reported to the user, not worked around (no edit
   to the fixture, a scene or the workflow to make it pass).
+- **Neutral names only** (this repo is public): fixtures, tests, docs, commits, PR text and comments never carry the
+  user's work names (Homes, organisations, repositories), even ones seen in production data or a herdr pane; use
+  `personal`, `work`, `side`, `o/r`. A local git hook may refuse a commit or a push: report it to the user, never
+  bypass it (`--no-verify`).
 - Docs: the user-facing docs are `site/docs/en/` and `site/docs/ja/`, the same pages in both languages (a page in
   one only fails the build); a behavior change updates the page in both, in the same PR. The READMEs still carry the
   same text until they are cut down to a pointer to the site: change them too until then.
