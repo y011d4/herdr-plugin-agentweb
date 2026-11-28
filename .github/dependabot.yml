@@ -26,6 +26,12 @@ updates:
     # delay for every `npm install` / `npm ci` (CI included), not just Dependabot.
     cooldown:
       default-days: 7
+    # @mantine/core pins @mantine/hooks to its own exact version, so a bump of one alone
+    # fails `npm ci` (ERESOLVE): every @mantine/* package moves in one PR.
+    groups:
+      mantine:
+        patterns:
+          - "@mantine/*"
 
   # The Pages site's own npm project (site/: VitePress, pinned to an exact 2.0 alpha). ci.yml's docs job builds
   # each bump before it merges. Same 7-day cooldown.
