@@ -242,7 +242,7 @@ All in `internal/bridge/` (one package):
   or closed PR's item and wakes its Home with `[yoicks] PR merged: <url> (<worker>); its to-do item is removed`, an unreadable
   PR's once a run, a gh failure alerted once per error, kind `github`, to each Home with a PR); `approve` is the child's
   `--permission-prompt-tool`: AskUserQuestion becomes state `headless.pending` (answered by
-  `POST …/answer`: the panel's "Type something." is a question's own answer, its "Chat about this" opens the composer, locked while a question is open (its draft kept, back once the question goes), whose `/send` then names it (`question`): written, then the question refused with Claude Code's words; `/send` without it while a question is open or on its way is a 409 `question_pending`, unwritten; `…/answer {chat}` refuses it alone), held open with progress, anything
+  `POST …/answer`: the panel's "Type something." is a question's own answer (Enter on a PC: its Next/Send, as the composer's), its "Chat about this" opens the composer, locked while a question is open (its draft kept, back once the question goes), whose `/send` then names it (`question`): written, then the question refused with Claude Code's words; `/send` without it while a question is open or on its way is a 409 `question_pending`, unwritten; `…/answer {chat}` refuses it alone), held open with progress, anything
   else is denied unasked. `agent_prompt` watches the worker (one goroutine, herdr's waits on a
   closable no-deadline connection, `HerdrClient.Wait`) and wakes the orchestrator with `[yoicks]
   <worker>: <from> → <to>` (names and status only, 3 s coalesced); a watch outlives the worker's

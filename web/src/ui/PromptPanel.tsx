@@ -14,6 +14,7 @@
 import { Button, Loader, Text, Textarea, UnstyledButton } from '@mantine/core';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { apiPost, orchestratorPost } from '../api.ts';
+import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
 import { showToast } from '../notify.ts';
 import type { PaneView, PanelPrompt } from '../pane-view.ts';
 import type { PromptOption } from '../prompt.ts';
@@ -130,7 +131,9 @@ export const answersSoFar = new Map<string, Record<string, string>>();
  * (stale_question: answered, declined or interrupted meanwhile). The parent keys it on that id, so a
  * new question gets a fresh panel; the sent one stays disabled until the State takes it away.
  * Under each question's options, as in Claude Code's TUI: "Type something." opens a field whose text
- * is that question's answer (a multiSelect's: with the checked ones), and "Chat about this" answers
+ * is that question's answer (a multiSelect's: with the checked ones); Enter in it is the button under
+ * it, as the composer's Enter (composer-keys.ts): on a PC Next, Send only on the last question, so the
+ * others still get their answers; Shift+Enter, and a phone's return key, a newline. "Chat about this" answers
  * none: it opens the composer, locked while the question is open (`onChat`; `chatting` once pressed),
  * whose message then goes with the question's id and answersSoFar (the bridge's /send), and the
  * bridge refuses the question with Claude Code's words for it, the answers so far in them, so the
@@ -188,6 +191,7 @@ export function HeadlessPrompt({ name, pending, chatting, onChat }:
     setOwn('');
   }
 
+  const next = (): void => { if (chosen().length && !sending) answer(chosen().join(', ')); }; // Next, or Send on the last
   const toggle = (label: string): void => setPicked((p) => (p.includes(label) ? p.filter((l) => l !== label) : [...p, label]));
   return (
     <div className={PANEL} id="headless-prompt">
@@ -207,11 +211,16 @@ export function HeadlessPrompt({ name, pending, chatting, onChat }:
           onClick={() => setTyping(q.multiSelect ? !typing : true)} />
         {typing && (
           <Textarea id="headless-prompt-text" aria-label={`Your answer to: ${q.question}`} placeholder="Your answer" autoFocus
-            rows={3} value={own} onChange={(e) => setOwn(e.currentTarget.value)} />
+            rows={3} value={own} onChange={(e) => setOwn(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (!enterSends(e.nativeEvent, matchMedia(DESKTOP_QUERY).matches)) return;
+              e.preventDefault();
+              if (!e.nativeEvent.repeat) next(); // a held Enter: one question, not the next ones too
+            }} />
         )}
       </Options>
       {(q.multiSelect || typing) && (
-        <Button id="headless-prompt-next" fullWidth mt={2} disabled={!chosen().length || sending} onClick={() => answer(chosen().join(', '))}>
+        <Button id="headless-prompt-next" fullWidth mt={2} disabled={!chosen().length || sending} onClick={next}>
           {last ? 'Send' : 'Next'}
         </Button>
       )}
