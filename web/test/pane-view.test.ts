@@ -342,6 +342,8 @@ describe('pane view: the chat’s ↓', () => {
     push({ ...tail, items: transcript[0].items!, cursor: 800 }); // past lines never drawn only
     assert.equal(log.scrollTop, 300);
     assert.deepEqual(calls.jump, ['away'], 'no dot: nothing new on show');
+    push({ ...tail, items: [], cursor: 850 }); // a tail with nothing to show (a Home's, its hidden tools filling it)
+    assert.deepEqual(calls.jump, ['away'], 'nor for that');
     push({ ...tail, items: [...transcript[0].items!, { kind: 'assistant', text: 'meanwhile', sidechain: false }], cursor: 900 });
     assert.equal(log.scrollTop, 300);
     assert.deepEqual(calls.jump, ['away', 'away+new']);

@@ -294,7 +294,9 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     const last = JSON.stringify(items.at(-1) ?? null);
     if (preserveScroll && !pinned) {
       chatEl.scrollTop = prevTop;
-      if (last !== newest) unread = true; // items came meanwhile (its cursor also moves over lines never drawn)
+      // items came meanwhile (its cursor also moves over lines never drawn). A reset is a capped tail: what it shows
+      // is newer than an item on show that fell out of it, but a Home's may show nothing (its hidden tools filled it)
+      if (items.length && last !== newest) unread = true;
     } else toEnd();
     newest = last;
     reportJump();
