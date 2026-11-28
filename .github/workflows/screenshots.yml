@@ -1,7 +1,7 @@
 name: Screenshots
 
 # What a web change looks like, on its PR: the PR's web build and main's (as the PR merges into it) are shot
-# over tools/shots-fixture.ts's made-up data (`node tools/webcheck.ts shots`, headless Chrome, no herdr, no
+# over tools/shots-fixture.ts's made-up data (`node tools/e2e.ts shots`, headless Chrome, no herdr, no
 # bridge), on a phone and a PC: a full screen per kind of screen and the components cut out of them (agent card,
 # Home status bar, chat items, answer panel, settings sections…: tools/shots-fixture.ts's `parts`), so a diff names
 # the component that changed. The fixture is all the shots ever see: they are public.
@@ -50,13 +50,13 @@ jobs:
         id: diff
         run: |
           if git diff --quiet HEAD^1 HEAD -- web vite.config.ts package.json package-lock.json 'tsconfig*.json' \
-            tools/webcheck.ts tools/shots-fixture.ts .github/workflows/screenshots.yml; then
+            tools/e2e.ts tools/shots-fixture.ts .github/workflows/screenshots.yml; then
             mkdir -p "$RUNNER_TEMP/shots" && echo '{"shots": []}' > "$RUNNER_TEMP/shots/manifest.json"
           else
             echo "web=1" >> "$GITHUB_OUTPUT"
           fi
 
-      # as in ci.yml's webcheck job: Chrome's first start on a fresh runner's cold disk (0.6–17 s), here in the
+      # as in ci.yml's e2e parts: Chrome's first start on a fresh runner's cold disk (0.6–17 s), here in the
       # background while the builds run, so the shots' own start is a warm one
       - name: Warm Chrome up
         if: steps.diff.outputs.web
@@ -85,7 +85,7 @@ jobs:
       # the PR's harness and fixture shoot both builds: only the web build differs
       - name: Shoot
         if: steps.diff.outputs.web
-        run: node tools/webcheck.ts shots --before "$RUNNER_TEMP/before/web/dist" --after web/dist --out "$RUNNER_TEMP/shots"
+        run: node tools/e2e.ts shots --before "$RUNNER_TEMP/before/web/dist" --after web/dist --out "$RUNNER_TEMP/shots"
 
       - name: Upload the shots
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -71,7 +71,7 @@ import (
 
 func main() {
 	// one YOICKS_CLAUDE_BIN for the whole bridge: an orchestrator whose env names the real claude
-	// runs that one instead (webcheck's real wc-h2 beside the fake wc-h1)
+	// runs that one instead (e2e's real wc-h2 beside the fake wc-h1)
 	if real := os.Getenv("FAKECLAUDE_REAL"); real != "" {
 		err := syscall.Exec(real, append([]string{real}, os.Args[1:]...), os.Environ())
 		fmt.Fprintln(os.Stderr, "fakeclaude: exec", real+":", err)

@@ -84,7 +84,7 @@ if [ "$ref" = main ]; then
 	target=$(git rev-parse --verify --quiet 'origin/main^{commit}') || die "no origin/main"
 	switch="git switch main && git merge --ff-only $target" # the commit CI checked, even if origin/main moves
 	# The gate, before anything stops: CI's run of this very commit (ci.yml on its push to main,
-	# webcheck's Tier 1 included) passed. One still going is waited for (a few minutes); none yet,
+	# e2e's Tier 1 included) passed. One still going is waited for (a few minutes); none yet,
 	# a failed one, or a cancelled one (main moved on: run this again) refuses. A rollback skips it.
 	command -v "$gh" >/dev/null 2>&1 || die "needs $gh (CI's run of the commit is the deploy gate)"
 	short=$(git rev-parse --short "$target")

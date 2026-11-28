@@ -132,7 +132,7 @@ function Section({ title, id, children }: { title: string; id?: string; children
 }
 
 /** A row: its label at the left, its value (or what is given) at the right, or under it (`stacked`); a rule
- *  between rows. The class names are the hooks webcheck reads the rows by. */
+ *  between rows. The class names are the hooks e2e reads the rows by. */
 function Row({ label, value, valueId, stacked = false, children }: { label?: string; value?: string; valueId?: string; stacked?: boolean; children?: ReactNode }) {
   const parts = (
     <>

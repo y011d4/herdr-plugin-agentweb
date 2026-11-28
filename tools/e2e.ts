@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 /**
- * tools/webcheck.ts: the headless-Chrome checks of the web UI (the gate before every deploy).
- * Dependency-free; run as `node tools/webcheck.ts …` (Node >= 22.18 type stripping).
+ * tools/e2e.ts: the headless-Chrome checks of the web UI (the gate before every deploy).
+ * Dependency-free; run as `node tools/e2e.ts …` (Node >= 22.18 type stripping).
  *
- *   node tools/webcheck.ts preview start --bin bin/yoicks [--port 8395] [--web-dir DIR] [--fake-claude BIN]
- *   node tools/webcheck.ts preview stop [--port 8395]
- *   node tools/webcheck.ts check --base http://127.0.0.1:8395 [--tier 1|2|1,2] [--only P10,P12] [--profile DIR]
- *   node tools/webcheck.ts setup --gonogo --base URL   # go/no-go: wc-less + a blocked wc-claude, held until SIGINT/SIGTERM
- *   node tools/webcheck.ts block                       # go/no-go B5: report that wc-less as blocked
- *   node tools/webcheck.ts teardown                    # clean every unfinished run
- *   node tools/webcheck.ts herdr start|stop            # a private headless herdr for this WEBCHECK_ROOT
- *   node tools/webcheck.ts shots --after DIR [--before DIR] --out DIR [--only home,agents]   # the PR screenshots
+ *   node tools/e2e.ts preview start --bin bin/yoicks [--port 8395] [--web-dir DIR] [--fake-claude BIN]
+ *   node tools/e2e.ts preview stop [--port 8395]
+ *   node tools/e2e.ts check --base http://127.0.0.1:8395 [--tier 1|2|1,2] [--only P10,P12] [--from ID | --until ID] [--profile DIR]
+ *     (--from: that item and those after it; --until: the items before it. CI runs Tier 1 as both halves of one cut)
+ *   node tools/e2e.ts setup --gonogo --base URL   # go/no-go: wc-less + a blocked wc-claude, held until SIGINT/SIGTERM
+ *   node tools/e2e.ts block                       # go/no-go B5: report that wc-less as blocked
+ *   node tools/e2e.ts teardown                    # clean every unfinished run
+ *   node tools/e2e.ts herdr start|stop            # a private headless herdr for this E2E_ROOT
+ *   node tools/e2e.ts shots --after DIR [--before DIR] --out DIR [--only home,agents]   # the PR screenshots
  *
  * shots needs no herdr and no bridge: it serves tools/shots-fixture.ts's made-up data and a web build (DIR = a
  * web/dist), shoots each scene on a phone and a PC, before and after: its screen (<scene>-<phone|pc>.<side>.png,
@@ -25,18 +26,18 @@
  * (.github/workflows/screenshots.yml, then screenshots-publish.yml) posts the changed ones on the PR and keeps its
  * `screenshots` status pending until the user approves them with the box in its comment.
  *
- * A preview is a throwaway bridge (state/config under $WC_ROOT/preview-<port>, `env -u HERDR_BIN_PATH`)
+ * A preview is a throwaway bridge (state/config under $E2E_ROOT/preview-<port>, `env -u HERDR_BIN_PATH`)
  * over the REAL herdr, which production also shows, unless the root has a private herdr: `herdr start` runs a
- * headless `herdr server` under $WC_ROOT/herdr (its own HOME, so none of the desktop herdr's config or plugins),
+ * headless `herdr server` under $E2E_ROOT/herdr (its own HOME, so none of the desktop herdr's config or plugins),
  * and while that dir exists every herdr call of this root and its previews go to that server, never to the
- * desktop's. With a WEBCHECK_ROOT of its own (and a port of its own), a run then shows nowhere and waits for no
- * other worker's. Tier 1 runs there; Tier 2's Claude needs the desktop's (its HOME, direnv). check/setup/teardown take $WC_ROOT/lock
- * (WC_ROOT = $WEBCHECK_ROOT or ~/.local/state/herdr-yoicks-webcheck) through a separate
+ * desktop's. With an E2E_ROOT of its own (and a port of its own), a run then shows nowhere and waits for no
+ * other worker's. Tier 1 runs there; Tier 2's Claude needs the desktop's (its HOME, direnv). check/setup/teardown take $E2E_ROOT/lock
+ * (E2E_ROOT defaults to ~/.local/state/herdr-yoicks-e2e) through a separate
  * `flock -n -o` holder process, so the lock lasts from setup to teardown and never reaches the
  * preview bridge or Chrome. Every mutation goes through guard(): only ids this run recorded in
- * $RUN/webcheck.json whose live tab or workspace label starts with wc-. Each check prints
+ * $RUN/e2e.json whose live tab or workspace label starts with wc-. Each check prints
  * `PASS|FAIL <id> <measured> <condition>`; the exit code is the number of failures.
- * Tier 2 (real Claude) needs $WC_ROOT/.envrc pinning CLAUDE_CONFIG_DIR (direnv allow'ed).
+ * Tier 2 (real Claude) needs $E2E_ROOT/.envrc pinning CLAUDE_CONFIG_DIR (direnv allow'ed).
  * The headless orchestrators need --fake-claude (tools/fakeclaude built as `claude`): the preview then
  * has wc-h1 on it, for Tier 1's H items, and with an account pinned the real wc-h2 for H-T2 (the fake
  * execs the real claude for it: FAKECLAUDE_REAL; haiku, through its dir's settings.local.json). Both
@@ -50,13 +51,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
-const DEFAULT_ROOT = path.join(os.homedir(), '.local/state/herdr-yoicks-webcheck');
-const WC_ROOT = process.env.WEBCHECK_ROOT || DEFAULT_ROOT;
-const LOCK = path.join(WC_ROOT, 'lock');
-const WORK = path.join(WC_ROOT, 'work');
-// A private herdr (`herdr start`): while $WC_ROOT/herdr exists, everything this root runs (its herdr calls, the preview
+const DEFAULT_ROOT = path.join(os.homedir(), '.local/state/herdr-yoicks-e2e');
+const E2E_ROOT = process.env.E2E_ROOT || DEFAULT_ROOT;
+const LOCK = path.join(E2E_ROOT, 'lock');
+const WORK = path.join(E2E_ROOT, 'work');
+// A private herdr (`herdr start`): while $E2E_ROOT/herdr exists, everything this root runs (its herdr calls, the preview
 // bridge) goes to that server's socket and never to the desktop's; a stopped one fails closed, never falls back.
-const PRIV = path.join(WC_ROOT, 'herdr');
+const PRIV = path.join(E2E_ROOT, 'herdr');
 const PRIV_SOCK = path.join(PRIV, '.config', 'herdr', 'herdr.sock'); // where herdr puts it under its own HOME
 /** The env for a herdr CLI call to the private server: none of the desktop herdr's pane variables. */
 const privCliEnv = (): NodeJS.ProcessEnv => ({
@@ -105,7 +106,7 @@ function herdr(args: string[]): any {
 interface Rec { dir: string; base: string; gonogo?: { pid: number; start: string }; chrome?: { pid: number; dir: string };
   workspaces: string[]; tabs: string[]; panes: string[]; reported: string[]; names: Record<string, string> }
 
-const save = (rec: Rec) => fs.writeFileSync(path.join(rec.dir, 'webcheck.json'), js(rec, null, 1));
+const save = (rec: Rec) => fs.writeFileSync(path.join(rec.dir, 'e2e.json'), js(rec, null, 1));
 
 function labelOf(kind: 'tab' | 'workspace', id: string): string | null {
   const l = herdr([kind, 'get', id])[kind]?.label;
@@ -140,7 +141,7 @@ function record(rec: Rec, o: { workspace?: string; tab?: string; pane?: string }
  *  The record goes only once everything is closed or gone: what failed stays recorded for the next run. */
 function teardown(dir: string): void {
   let rec: Rec | null = null;
-  try { rec = JSON.parse(fs.readFileSync(path.join(dir, 'webcheck.json'), 'utf8')); } catch { /* nothing recorded */ }
+  try { rec = JSON.parse(fs.readFileSync(path.join(dir, 'e2e.json'), 'utf8')); } catch { /* nothing recorded */ }
   killChrome(rec);
   // a just-killed Chrome's helpers may still write to its profile: retry, and never stop the closing for it
   const rm = (p: string) => { try { fs.rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) { console.log(`WARN ${(e as Error).message}`); } };
@@ -157,13 +158,13 @@ function teardown(dir: string): void {
     };
     const left = {
       // herdr 0.9.5's release-agent parses the pane id only before the options
-      reported: r.reported.filter((p) => step(p, ['pane', 'release-agent', p, '--source', 'webcheck', '--agent', 'claude'])),
+      reported: r.reported.filter((p) => step(p, ['pane', 'release-agent', p, '--source', 'e2e', '--agent', 'claude'])),
       tabs: r.tabs.filter((t) => step(t, ['tab', 'close', t])),
       workspaces: r.workspaces.filter((w) => step(w, ['workspace', 'close', w])),
     };
     if (left.reported.length + left.tabs.length + left.workspaces.length) {
       save({ ...r, ...left, chrome: undefined, gonogo: undefined }); // a kept record is never an active go/no-go
-      console.log(`WARN kept ${path.join(dir, 'webcheck.json')}: ${js(left)} not closed`);
+      console.log(`WARN kept ${path.join(dir, 'e2e.json')}: ${js(left)} not closed`);
       rm(path.join(dir, 'chrome'));
       return;
     }
@@ -187,7 +188,7 @@ function stopHeadless(base: string, name: string): void {
 }
 
 function teardownAll(): void {
-  const runs = path.join(WC_ROOT, 'run');
+  const runs = path.join(E2E_ROOT, 'run');
   for (const d of fs.existsSync(runs) ? fs.readdirSync(runs) : []) {
     try { teardown(path.join(runs, d)); } catch (e) { console.log(`WARN teardown ${d}: ${(e as Error).message}`); }
   }
@@ -203,7 +204,7 @@ function teardownAll(): void {
 // ── lock: a detached `flock -n -o` holder lives as long as our pipe to it ────────
 
 async function lock(): Promise<() => void> {
-  fs.mkdirSync(WC_ROOT, { recursive: true });
+  fs.mkdirSync(E2E_ROOT, { recursive: true });
   const p = spawn('flock', ['-n', '-E', '75', '-o', LOCK, 'sh', '-c', 'echo locked; exec cat >/dev/null'],
     { stdio: ['pipe', 'pipe', 'inherit'], detached: true });
   const got = await new Promise<boolean>((res, rej) => {
@@ -211,7 +212,7 @@ async function lock(): Promise<() => void> {
     p.once('exit', () => res(false));
     p.once('error', (e) => rej(env(`flock: ${e.message}`)));
   });
-  if (!got) throw env('another webcheck run');
+  if (!got) throw env('another e2e run');
   if (spawnSync('flock', ['-n', LOCK, 'true']).status === 0) throw env('run without lock');
   // this process chose its herdr (its env) at its start; a herdr start|stop since then would leave it on the other
   if (fs.existsSync(PRIV) !== PRIV_AT_START) { p.stdin!.end(); throw env('the root switched herdr since this command started: run it again'); }
@@ -222,7 +223,7 @@ async function lock(): Promise<() => void> {
 
 /** herdr: the private herdr's socket it was started on (absent: the desktop's); a run refuses a preview on the other one */
 interface Preview { bin: string; port: string; webDir?: string; fakeClaude?: string; herdr?: string }
-const previewDir = (port: string) => path.join(WC_ROOT, `preview-${port}`);
+const previewDir = (port: string) => path.join(E2E_ROOT, `preview-${port}`);
 
 function previewEnv(p: Preview): NodeJS.ProcessEnv {
   const e: NodeJS.ProcessEnv = { ...process.env };
@@ -233,7 +234,7 @@ function previewEnv(p: Preview): NodeJS.ProcessEnv {
   e.YOICKS_HEADLESS_NO_TOOLS = '1';
   if (p.fakeClaude) e.YOICKS_CLAUDE_BIN = p.fakeClaude;
   Object.assign(e, { HERDR_PLUGIN_STATE_DIR: path.join(previewDir(p.port), 'state'), HERDR_PLUGIN_CONFIG_DIR: path.join(previewDir(p.port), 'config'),
-    XDG_DATA_HOME: path.join(WC_ROOT, 'data'), HERDR_YOICKS_PORT: p.port, HERDR_YOICKS_HOST: '127.0.0.1' });
+    XDG_DATA_HOME: path.join(E2E_ROOT, 'data'), HERDR_YOICKS_PORT: p.port, HERDR_YOICKS_HOST: '127.0.0.1' });
   if (p.webDir) e.YOICKS_WEB_DIR = p.webDir;
   return e;
 }
@@ -255,11 +256,11 @@ async function previewCtl(p: Preview, action: 'start' | 'stop'): Promise<void> {
   }
 }
 
-/** The account $WC_ROOT/.envrc pins: CLAUDE_CONFIG_DIR as direnv resolves it in wc-claude's dir. */
+/** The account $E2E_ROOT/.envrc pins: CLAUDE_CONFIG_DIR as direnv resolves it in wc-claude's dir. */
 /** '' when it leaves CLAUDE_CONFIG_DIR unset: the default account (set even to ~/.claude, Claude Code reads a
  *  stale ~/.claude/.claude.json instead of ~/.claude.json, so "default" means unset). */
 function pinnedAccount(): string {
-  const envrc = path.join(WC_ROOT, '.envrc');
+  const envrc = path.join(E2E_ROOT, '.envrc');
   if (!fs.existsSync(envrc)) throw env(`no account pinned (${envrc} missing)`);
   const e = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'CLAUDE_CONFIG_DIR' && !k.startsWith('DIRENV_')));
   fs.mkdirSync(path.join(WORK, 'wc-claude'), { recursive: true });
@@ -273,7 +274,7 @@ function pinnedAccount(): string {
 
 const accountName = (account: string) => account || 'the default account (CLAUDE_CONFIG_DIR unset)';
 
-/** Every Claude webcheck starts runs in the pinned account: the same CLAUDE_CONFIG_DIR, or none for the default. */
+/** Every Claude e2e.ts starts runs in the pinned account: the same CLAUDE_CONFIG_DIR, or none for the default. */
 function checkAccount(pane: string, name: string, account: string): void {
   const got = paneConfigDir(pane);
   if (got !== account) throw env(`${name} account mismatch (want ${accountName(account)}, got ${got === null ? 'no agent process' : got || 'unset'})`);
@@ -285,7 +286,7 @@ const realClaude = (): string => spawnSync('sh', ['-c', 'command -v claude'], { 
 // wc-h1 runs the fake claude, unverified version and all (H6); wc-h2 the real one, in the pinned account
 const orchConfig = (account: string | null, fake: string | null) => js({ orchestrators: [
   ...['wc-o1', 'wc-o2'].map((name) => ({ name, label: name.toUpperCase(), ...(account ? { env: { CLAUDE_CONFIG_DIR: account } } : {}) })),
-  ...(fake ? [{ name: 'wc-h1', label: 'WC-H1', mode: 'headless', env: { CLAUDE_CONFIG_DIR: path.join(WC_ROOT, 'fake-claude'), FAKECLAUDE_VERSION: '0.0.0-webcheck' } }] : []),
+  ...(fake ? [{ name: 'wc-h1', label: 'WC-H1', mode: 'headless', env: { CLAUDE_CONFIG_DIR: path.join(E2E_ROOT, 'fake-claude'), FAKECLAUDE_VERSION: '0.0.0-e2e' } }] : []),
   ...(fake && account !== null ? [{ name: 'wc-h2', label: 'WC-H2', mode: 'headless', env: { ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), FAKECLAUDE_REAL: realClaude() } }] : []),
 ] });
 
@@ -316,9 +317,9 @@ async function previewCmd(sub: string, o: Record<string, any>): Promise<number> 
     const p: Preview = { bin: path.resolve(o.bin), port, webDir: o['web-dir'] && path.resolve(o['web-dir']), fakeClaude: o['fake-claude'] && path.resolve(o['fake-claude']),
       herdr: fs.existsSync(PRIV) ? PRIV_SOCK : undefined };
     if (p.fakeClaude && path.basename(p.fakeClaude) !== 'claude') throw env('--fake-claude must be named claude (go build -o DIR/claude ./tools/fakeclaude)');
-    if (p.fakeClaude) fs.mkdirSync(path.join(WC_ROOT, 'fake-claude'), { recursive: true });
+    if (p.fakeClaude) fs.mkdirSync(path.join(E2E_ROOT, 'fake-claude'), { recursive: true });
     // the orchestrators start with Tier 2's account (the bridge checks the started agent against it)
-    const account = fs.existsSync(path.join(WC_ROOT, '.envrc')) ? pinnedAccount() : null;
+    const account = fs.existsSync(path.join(E2E_ROOT, '.envrc')) ? pinnedAccount() : null;
     fs.rmSync(previewDir(port), { recursive: true, force: true });
     for (const d of ['state', 'config']) fs.mkdirSync(path.join(previewDir(port), d), { recursive: true });
     fs.writeFileSync(path.join(previewDir(port), 'config', 'config.json'), orchConfig(account, p.fakeClaude ?? null));
@@ -337,7 +338,7 @@ async function previewCmd(sub: string, o: Record<string, any>): Promise<number> 
  *  no HERDR_* of the desktop's panes, no D-Bus (no desktop notifications), panes in /bin/sh. */
 async function herdrCmd(sub: string): Promise<number> {
   if (sub !== 'start' && sub !== 'stop') throw new Error('usage: herdr start|stop');
-  if (PRIV_SOCK.length > 100) throw env(`${PRIV_SOCK} is too long for a unix socket: set a shorter WEBCHECK_ROOT`);
+  if (PRIV_SOCK.length > 100) throw env(`${PRIV_SOCK} is too long for a unix socket: set a shorter E2E_ROOT`);
   // what herdr says, never a guess: a failed status call must not read as stopped (stop would drop a live server's dir)
   const running = (): boolean => {
     const r = spawnSync('herdr', ['status', 'server'], { encoding: 'utf8', env: privCliEnv() });
@@ -351,19 +352,19 @@ async function herdrCmd(sub: string): Promise<number> {
     const abs = path.resolve(d);
     try { return fs.realpathSync(abs); } catch { return path.dirname(abs) === abs ? abs : path.join(real(path.dirname(abs)), path.basename(abs)); }
   };
-  if (!process.env.WEBCHECK_ROOT || real(WC_ROOT) === real(DEFAULT_ROOT)) throw env('a private herdr needs a WEBCHECK_ROOT of its own (export WEBCHECK_ROOT=$(mktemp -d /tmp/wc-XXXX))');
+  if (!process.env.E2E_ROOT || real(E2E_ROOT) === real(DEFAULT_ROOT)) throw env('a private herdr needs an E2E_ROOT of its own (export E2E_ROOT=$(mktemp -d /tmp/e2e-XXXX))');
   const unlock = await lock();
   try {
     // a preview, and an unfinished run's record, stay on the herdr they began on: switching under them would guard ids
     // in one herdr and act on the other's
-    const previews = fs.readdirSync(WC_ROOT).filter((d) => /^preview-\d+$/.test(d) && fs.existsSync(path.join(WC_ROOT, d, 'preview.json')));
+    const previews = fs.readdirSync(E2E_ROOT).filter((d) => /^preview-\d+$/.test(d) && fs.existsSync(path.join(E2E_ROOT, d, 'preview.json')));
     if (previews.length) throw env(`stop this root's previews first (${previews.map((d) => `preview stop --port ${d.slice(8)}`).join(', ')})`);
     const live = fs.existsSync(PRIV) && running();
-    const runs = path.join(WC_ROOT, 'run');
+    const runs = path.join(E2E_ROOT, 'run');
     const unfinished = () => fs.existsSync(runs) && fs.readdirSync(runs).length > 0;
     if (fs.existsSync(PRIV) && !live) { // a gone private herdr took its panes: only the runs' Chrome is left to end
       for (const d of fs.existsSync(runs) ? fs.readdirSync(runs) : []) {
-        try { killChrome(JSON.parse(fs.readFileSync(path.join(runs, d, 'webcheck.json'), 'utf8'))); } catch { /* no record */ }
+        try { killChrome(JSON.parse(fs.readFileSync(path.join(runs, d, 'e2e.json'), 'utf8'))); } catch { /* no record */ }
       }
       fs.rmSync(runs, { recursive: true, force: true });
     }
@@ -671,7 +672,7 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
   }
   if (!needs.size) return;
   fs.mkdirSync(WORK, { recursive: true });
-  const w = herdr(['workspace', 'create', '--cwd', WORK, '--label', 'wc-webcheck', '--no-focus']);
+  const w = herdr(['workspace', 'create', '--cwd', WORK, '--label', 'wc-e2e', '--no-focus']);
   const ws = w.workspace.workspace_id;
   record(c.rec, { workspace: ws, tab: w.tab.tab_id, pane: w.root_pane.pane_id });
   const shell = needs.has('shell') ? await newTab(c, ws, 'wc-shell') : '';
@@ -697,11 +698,11 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     const file = path.join(WORK, 'wc-B.txt');
     fs.writeFileSync(file, Array.from({ length: 3000 }, (_, i) => `wc-B-${i + 1}\n`).join(''));
     // typed into the pane's shell (sh-like or fish): single quotes mean the same in both unless ' or \ is inside
-    if (/['\\]/.test(file)) throw env(`WC_ROOT must not contain ' or \\: ${WC_ROOT}`);
+    if (/['\\]/.test(file)) throw env(`E2E_ROOT must not contain ' or \\: ${E2E_ROOT}`);
     mutate(c.rec, less, ['pane', 'run', less, `less --mouse '${file}'`]);
     c.rec.reported.push(less);
     save(c.rec);
-    mutate(c.rec, less, ['pane', 'report-agent', '--source', 'webcheck', '--agent', 'claude', '--state', 'idle', less]);
+    mutate(c.rec, less, ['pane', 'report-agent', '--source', 'e2e', '--agent', 'claude', '--state', 'idle', less]);
     const st = await waitFn(async () => { const a = (await paneOf(c, less))?.agent; return a?.name === 'claude' && a.status === 'idle'; }, 10_000, 300);
     if (st.timeout) throw env('report-agent not reflected');
     const rd = await waitFn(async () => (await api(c, 'GET', `/api/panes/${enc(less)}/read?source=visible&lines=200&format=ansi`)).appScroll === true, 10_000, 300);
@@ -710,7 +711,7 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
   if (probe) {
     c.rec.reported.push(probe);
     save(c.rec);
-    mutate(c.rec, probe, ['pane', 'report-agent', '--source', 'webcheck', '--agent', 'claude', '--state', 'idle', probe]);
+    mutate(c.rec, probe, ['pane', 'report-agent', '--source', 'e2e', '--agent', 'claude', '--state', 'idle', probe]);
   }
   if (shell && (await waitFn(() => /^wc-A$/m.test(screen(shell)), 15_000, 300)).timeout) throw env('wc-shell output missing');
   if (needs.has('claude')) {
@@ -854,7 +855,7 @@ async function p2Round(c: Ctx, id: string) {
   // the served BUILD: a Vite build's JS hash, a legacy build's app.js constant
   const appBuild = c.build.vite ? c.build.hash : (await (await fetch(`${c.base}/app.js`)).text()).match(/BUILD\s*=\s*['"]([^'"]+)['"]/)?.[1];
   const served = { cache: c.build.swName, build: appBuild ?? '' };
-  const recFile = path.join(c.rec.chrome?.dir ?? c.rec.dir, 'webcheck-p2-old.json');
+  const recFile = path.join(c.rec.chrome?.dir ?? c.rec.dir, 'e2e-p2-old.json');
   let old: typeof served | null = null;
   if (id === 'P2.old') fs.writeFileSync(recFile, js(served));
   else try { old = JSON.parse(fs.readFileSync(recFile, 'utf8')); } catch { /* no P2.old in this profile */ }
@@ -1134,7 +1135,7 @@ async function p14(c: Ctx) {
 
 async function p12(c: Ctx) {
   const p = c.preview;
-  if (!p) { result(c, false, 'P12', `ENV:no-preview.json-for-${c.port}`, 'needs a preview started by `webcheck preview start` (to stop/start it)'); return; }
+  if (!p) { result(c, false, 'P12', `ENV:no-preview.json-for-${c.port}`, 'needs a preview started by `e2e.ts preview start` (to stop/start it)'); return; }
   const { pg } = c;
   await pg.goto(`#/pane/${enc(c.rec.names.shell)}`);
   await pg.until(`document.getElementById('term-live')?.textContent.length > 0`, 8000);
@@ -1152,9 +1153,8 @@ async function p12(c: Ctx) {
     const watch = pg.wsSent.filter((f) => f.t >= t1 && /"type":"watch_/.test(f.payload)).length;
     result(c, !gone.timeout && watch >= 1, 'P12.reconnect', `bannerGone=${gone.timeout ? 'timeout' : `${tUp - t1}ms`},watchSent=${watch}`,
       'after start the banner hides within 16s and >= 1 watch_* is sent');
-    await sleep(31_000);
-    const pings = pg.wsSent.filter((f) => f.t >= t1 && /"type":"ping"/.test(f.payload)).length;
-    result(c, pings >= 1, 'P12.ping', `pings31s=${pings}`, '>= 1 ping within 31s of reconnecting');
+    const ping = await waitFn(() => pg.wsSent.some((f) => f.t >= t1 && /"type":"ping"/.test(f.payload)), 31_000);
+    result(c, !ping.timeout, 'P12.ping', `ping=${ping.timeout ? 'none' : `${Date.now() - tUp}ms`}`, '>= 1 ping within 31s of reconnecting');
   } finally {
     await previewCtl(p, 'start'); // never leave the preview down (no-op when running)
   }
@@ -1231,7 +1231,7 @@ async function p17(c: Ctx) {
 async function reportLess(c: Ctx, state: string): Promise<void> {
   const less = c.rec.names.less;
   const want = state === 'idle' ? ['idle', 'done'] : [state];
-  mutate(c.rec, less, ['pane', 'report-agent', '--source', 'webcheck', '--agent', 'claude', '--state', state, less]);
+  mutate(c.rec, less, ['pane', 'report-agent', '--source', 'e2e', '--agent', 'claude', '--state', state, less]);
   if ((await waitFn(async () => want.includes((await paneOf(c, less))?.agent?.status), 5000, 100)).timeout) throw env(`wc-less not ${state}`);
 }
 
@@ -1347,7 +1347,7 @@ async function p18(c: Ctx) {
     const top2 = await pg.ev(`(() => { const s = ${SC};
       s.scrollTop = ${CARD}.getBoundingClientRect().top - s.getBoundingClientRect().top + s.scrollTop + 44; return s.scrollTop; })()`);
     await sleep(300);
-    mutate(rec, probe, ['pane', 'report-agent', '--source', 'webcheck', '--agent', 'claude', '--state', 'working', probe]);
+    mutate(rec, probe, ['pane', 'report-agent', '--source', 'e2e', '--agent', 'claude', '--state', 'working', probe]);
     const moved = await pg.until(before(PROBE, CARD), 5000);
     await sleep(300);
     const [top3, same3] = await pg.ev(`[${SC}.scrollTop, ${SC} === window.__wcSc]`);
@@ -1736,7 +1736,7 @@ async function hlItemsSince(c: Ctx, name: string, mark: { session?: string; curs
   return (await api(c, 'GET', `/api/panes/${enc(`hl:${name}`)}/transcript${q}`)).items ?? [];
 }
 
-const H_HINT = 'preview start --fake-claude DIR/claude (go build -o DIR/claude ./tools/fakeclaude), with $WC_ROOT/.envrc for wc-h2';
+const H_HINT = 'preview start --fake-claude DIR/claude (go build -o DIR/claude ./tools/fakeclaude), with $E2E_ROOT/.envrc for wc-h2';
 
 /** `name` runs (started when it isn't), recorded so that the run's teardown stops it. */
 async function hlUp(c: Ctx, name: string): Promise<void> {
@@ -1781,8 +1781,8 @@ async function h6(c: Ctx) {
   const { pg } = c;
   await hlHome(c, 'wc-h1');
   const row = `document.querySelector('.home-warning[data-kind="version"]')`;
-  const r = await pg.until(`${row}?.textContent.includes('0.0.0-webcheck') && !!${row}.querySelector('[data-action="tui"]')`, 3000);
-  result(c, !r.timeout, 'H6', `warning=${ms(r)}`, "Claude Code 0.0.0-webcheck: a version warning line on wc-h1's Home within 3s, with 'Back to TUI'");
+  const r = await pg.until(`${row}?.textContent.includes('0.0.0-e2e') && !!${row}.querySelector('[data-action="tui"]')`, 3000);
+  result(c, !r.timeout, 'H6', `warning=${ms(r)}`, "Claude Code 0.0.0-e2e: a version warning line on wc-h1's Home within 3s, with 'Back to TUI'");
 }
 
 /** H2: a message from the Home: working, then done (finishing on another screen), its reply in the chat; seen there, idle. */
@@ -1892,7 +1892,7 @@ async function ht2(c: Ctx) {
   const { pg } = c;
   if (!(await hlView(c, 'wc-h2'))) throw env(`no wc-h2 on this preview: ${H_HINT}`);
   // it answers on haiku: its dir's local settings (the bridge writes only settings.json there), read at its start
-  const local = path.join(WC_ROOT, 'data', 'herdr-yoicks', 'orchestrators', 'wc-h2', '.claude', 'settings.local.json');
+  const local = path.join(E2E_ROOT, 'data', 'herdr-yoicks', 'orchestrators', 'wc-h2', '.claude', 'settings.local.json');
   let settings: Record<string, unknown> = {};
   try { settings = JSON.parse(fs.readFileSync(local, 'utf8')); } catch { /* none yet */ }
   if (settings.model !== 'haiku') {
@@ -2327,7 +2327,7 @@ async function locked(base: string, body: (c: Ctx) => Promise<void>, needs: Set<
     throw env(`the preview on ${port} runs on ${pv ? (pv.herdr ? 'the private herdr' : 'the desktop herdr') : 'no record'} and this root on the other: start it again (preview start)`);
   }
   teardownAll();
-  const dir = path.join(WC_ROOT, 'run', String(Date.now()));
+  const dir = path.join(E2E_ROOT, 'run', String(Date.now()));
   fs.mkdirSync(dir, { recursive: true });
   const c: Ctx = { base, port, token: fs.readFileSync(tokenFile, 'utf8').trim(), preview: readPreview(port), failures: 0, out: [],
     rec: { dir, base, gonogo: gonogo ? { pid: process.pid, start: procStart(process.pid)! } : undefined,
@@ -2356,8 +2356,11 @@ async function locked(base: string, body: (c: Ctx) => Promise<void>, needs: Set<
 async function check(o: Record<string, any>): Promise<number> {
   const tiers = new Set(String((o.tier ?? ['1']).join(',')).split(',').map(Number));
   const only = o.only ? new Set(String(o.only).split(',')) : null;
-  const items = ITEMS.filter((i) => (only ? only.has(i.id) : tiers.has(i.tier) && !i.manual));
+  let items = ITEMS.filter((i) => (only ? only.has(i.id) : tiers.has(i.tier) && !i.manual));
   if (only) for (const id of only) if (!ITEMS.some((i) => i.id === id)) throw new Error(`unknown item ${id}`);
+  const at = (id: string) => { const i = items.findIndex((x) => x.id === id); if (i < 0) throw new Error(`no item ${id} in this run`); return i; };
+  if (o.from) items = items.slice(at(o.from));
+  if (o.until) items = items.slice(0, at(o.until));
   const needs = new Set(items.flatMap((i) => i.needs ?? []));
   const c = await locked(o.base, async (c) => {
     c.pg = await openPage(c, o.profile);
@@ -2406,7 +2409,7 @@ async function gonogo(o: Record<string, any>): Promise<number> {
     const b = await waitFn(async () => (await paneOf(c, cl))?.agent?.status === 'blocked', 90_000, 1000);
     if (b.timeout) throw env('wc-claude not blocked by the P9 prompt');
     console.log(`go/no-go ready (${Date.now() - t0}ms): wc-less ${c.rec.names.less}, blocked wc-claude ${cl}.`);
-    console.log('B5: `node tools/webcheck.ts block`. Holding until SIGINT/SIGTERM, then tearing down.');
+    console.log('B5: `node tools/e2e.ts block`. Holding until SIGINT/SIGTERM, then tearing down.');
     await new Promise(() => setInterval(() => {}, 1 << 30)); // until a signal: its handler tears down and exits
   }, new Set(['less', 'claude']), true);
   return 0;
@@ -2414,14 +2417,14 @@ async function gonogo(o: Record<string, any>): Promise<number> {
 
 function block(): number {
   if (!procStart(process.pid)) throw env('block needs Linux /proc (it checks the go/no-go holder by pid + start time)');
-  const runs = path.join(WC_ROOT, 'run');
+  const runs = path.join(E2E_ROOT, 'run');
   const rec: Rec | undefined = (fs.existsSync(runs) ? fs.readdirSync(runs) : [])
-    .map((d) => { try { return JSON.parse(fs.readFileSync(path.join(runs, d, 'webcheck.json'), 'utf8')); } catch { return null; } })
+    .map((d) => { try { return JSON.parse(fs.readFileSync(path.join(runs, d, 'e2e.json'), 'utf8')); } catch { return null; } })
     // only the run whose setup --gonogo still holds it (same pid AND start time), never a stale record
     .find((r) => typeof r?.gonogo?.pid === 'number' && !!r.gonogo.start && procStart(r.gonogo.pid) === r.gonogo.start);
   if (!rec?.names.less) throw env('no active go/no-go run (start `setup --gonogo` first)');
   if (spawnSync('flock', ['-n', LOCK, 'true']).status === 0) throw env('run without lock');
-  mutate(rec, rec.names.less, ['pane', 'report-agent', '--source', 'webcheck', '--agent', 'claude', '--state', 'blocked', rec.names.less]);
+  mutate(rec, rec.names.less, ['pane', 'report-agent', '--source', 'e2e', '--agent', 'claude', '--state', 'blocked', rec.names.less]);
   console.log(`wc-less ${rec.names.less} reported blocked`);
   return 0;
 }
@@ -2655,7 +2658,7 @@ async function shots(o: Record<string, any>): Promise<number> {
 
 async function main(): Promise<number> {
   const { values: o, positionals: [cmd, sub] } = parseArgs({ allowPositionals: true, options: {
-    base: { type: 'string' }, tier: { type: 'string', multiple: true }, only: { type: 'string' }, profile: { type: 'string' },
+    base: { type: 'string' }, tier: { type: 'string', multiple: true }, only: { type: 'string' }, from: { type: 'string' }, until: { type: 'string' }, profile: { type: 'string' },
     gonogo: { type: 'boolean' }, bin: { type: 'string' }, port: { type: 'string' }, 'web-dir': { type: 'string' }, 'fake-claude': { type: 'string' },
     before: { type: 'string' }, after: { type: 'string' }, out: { type: 'string' } } });
   if (cmd === 'shots') return shots(o);
@@ -2666,7 +2669,7 @@ async function main(): Promise<number> {
   if (!o.base) throw new Error('--base is required');
   if (cmd === 'check') return check(o);
   if (cmd === 'setup' && o.gonogo) return gonogo(o);
-  throw new Error('usage: see the header of tools/webcheck.ts');
+  throw new Error('usage: see the header of tools/e2e.ts');
 }
 
 process.stdout.on('error', () => {}); // a closed stdout must not kill the run before its teardown

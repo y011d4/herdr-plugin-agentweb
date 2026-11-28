@@ -6,7 +6,7 @@
  * the new DOM at once. A reset draws the log afresh (no <details> stays open across it); an append adds
  * to its end and leaves what is on show as it is (an open tool result stays open). The prose is
  * renderMarkdown's HTML, escaped (transcript.ts), in Mantine's Typography; everything else is React's
- * text. The class names the tests and webcheck read (chat-item, chat-user, chat-assistant,
+ * text. The class names the tests and e2e read (chat-item, chat-user, chat-assistant,
  * chat-result…) stay on their elements. On a Home (createChatLog's `reply`) a message can be replied to
  * (Repliable): its quote goes into the composer, and a reply shows what it quotes on top (QuoteRef), and
  * each message shows when it was sent (its transcript line's time: chatTime).

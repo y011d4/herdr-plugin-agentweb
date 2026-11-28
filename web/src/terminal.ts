@@ -130,7 +130,7 @@ export function createTerminal(outputEl: HTMLElement, { paneId }: { paneId: stri
   let wheelAccum = 0;
   let touchVelocity = 0; // px/ms, positive = finger moving down (scroll up)
   // when the finger last moved, by the event's own time (timeStamp), not when the page got to it: a page busy
-  // drawing handles a swipe's events late, and the lift then looked like a pause (no fling: webcheck P10.app-fling)
+  // drawing handles a swipe's events late, and the lift then looked like a pause (no fling: e2e P10.app-fling)
   let lastMoveAt = 0;
   const inputAt = (e: Event): number => e.timeStamp || performance.now();
   // Forward app-scroll wheel steps only for a gesture that began as a single

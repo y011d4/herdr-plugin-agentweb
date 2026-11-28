@@ -380,7 +380,7 @@ describe('App', () => {
     await click($('#btn-agent-menu'));
     assert.ok($('[data-menu-dropdown]'));
     // Mantine moves the focus into the menu a moment after it opens (a timer): an Escape before that comes from ⋮,
-    // which Mantine's own handler (the dropdown's) never sees (webcheck M2.escape under load)
+    // which Mantine's own handler (the dropdown's) never sees (e2e M2.escape under load)
     await act(async () => { $('#btn-agent-menu')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     await settle();
     assert.ok(!$('[data-menu-dropdown]') && !!$('.agent-drawer #screen-pane') && location.hash === '#/pane/p1', 'only the menu closed');
