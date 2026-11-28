@@ -705,8 +705,9 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   `pending` while a shot's bytes differ from main's and the user hasn't approved exactly those pixels by **ticking
   "Approve these N visual changes" in the bot's comment** (a tick counts only from a sender the API says may write,
   on the bot's comment, and only when the digest that comment shows, its first line's `shown=`, is that of the head's
-  shots now, recomputed from its latest Screenshots run's artifact; `approved=` then keeps it; a tick on an outdated
-  comment approves nothing, unticking takes it back, a push whose shots differ brings the box back unticked),
+  shots now, recomputed from its latest Screenshots run's artifact: the box as the comment has it now is the
+  approval; a tick on an outdated comment approves nothing, unticking takes it back, a push whose shots differ
+  brings the box back unticked; a run that finds the comment edited since it read it writes nothing),
   `success` when nothing changed or the user approved it, `failure` only when something is broken (the shots didn't
   render, a screen not ready on the PR's side), `error` when the publish job fails; it links to the viewer on the
   changed shots. Pending blocks the merge without a failed

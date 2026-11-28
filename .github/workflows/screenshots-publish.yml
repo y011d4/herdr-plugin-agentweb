@@ -16,11 +16,14 @@ name: Screenshots publish
 # blocks the merge as a failure would, without a failed run (GitHub notifies of failed runs, not of statuses).
 #
 # The user approves by ticking "Approve these N visual changes" in the comment after looking (only the user:
-# CLAUDE.md). A tick counts only when GitHub says its sender may write to the repository (the API, never the
-# comment's text), only on the bot's own comment, and only when the digest that comment shows (its first line's
-# `shown=`, a digest of the changed shots' before and after PNGs) is that of the head's shots now: the comment's
-# `approved=` then keeps it. A tick on an outdated comment approves nothing; unticking takes the approval back. A
-# push whose shots differ from the approved ones brings the comment back unticked and the status back to pending.
+# CLAUDE.md). The box, as the comment has it now, is the approval: it approves what the comment shows (its first
+# line's `shown=`, a digest of the changed shots' before and after PNGs), and only while that is the digest of the
+# head's shots. Only someone who may write to the repository ticks it: GitHub lets no one else edit the bot's comment,
+# and a tick from a sender the API doesn't say may write is put back (the API, never the comment's text); this job
+# ticks it only on an approval. A tick on an outdated comment approves nothing (the comment is drawn again, unticked,
+# on the shots now); unticking takes the approval back; a push whose shots differ brings the box back unticked and
+# the status back to pending. Each run reads the comment again just before writing it: when someone edited it
+# meanwhile, it writes nothing, and the run that edit starts decides (in turn: one at a time per PR).
 #
 # The PNGs go to refs/screenshots/pr-<n> (outside refs/heads: not in a clone, not in the branch list; each run
 # replaces the last), which the viewer reads through raw.githubusercontent.com. A fork's PR (its Screenshots run
@@ -70,6 +73,7 @@ jobs:
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           ISSUE: ${{ github.event.issue.number }}
           SENDER: ${{ github.event.sender.login }}
+          COMMENT: ${{ github.event.comment.id }}
         run: |
           set -euo pipefail
           if [[ $EVENT == workflow_run ]]; then
@@ -85,10 +89,19 @@ jobs:
             # the comment stays as it was
             if [[ $CONCLUSION != success ]]; then status failure "the shots didn't render ($CONCLUSION): see the Screenshots run"; exit 0; fi
           else
-            # a tick counts only from someone GitHub lets write to the repository
-            if [[ ! $SENDER =~ ^[A-Za-z0-9-]+(\[bot\])?$ ]]; then echo "::error::odd sender"; exit 1; fi
+            # a tick counts only from someone GitHub lets write to the repository; anyone else's is put back
+            if [[ ! $SENDER =~ ^[A-Za-z0-9-]+(\[bot\])?$ || ! $COMMENT =~ ^[0-9]+$ ]]; then echo "::error::odd event"; exit 1; fi
             perm=$(gh api "repos/$REPO/collaborators/$SENDER/permission" --jq .permission)
-            if [[ $perm != admin && $perm != write ]]; then echo "::notice::$SENDER may not approve ($perm): nothing done"; exit 0; fi
+            if [[ $perm != admin && $perm != write ]]; then
+              echo "::notice::$SENDER may not approve ($perm): the box goes back"
+              b=$(gh api "repos/$REPO/issues/comments/$COMMENT" --jq .body)
+              u=$(sed -E 's/^- \[[xX]\] Approve th/- [ ] Approve th/' <<< "$b")
+              if [[ $u != "$b" ]]; then
+                printf '%s\n' "$u" > "$RUNNER_TEMP/back.md"
+                gh api -X PATCH "repos/$REPO/issues/comments/$COMMENT" -F "body=@$RUNNER_TEMP/back.md" > /dev/null
+              fi
+              exit 0
+            fi
             pr=$ISSUE
             sha=$(gh api "repos/$REPO/pulls/$pr" --jq 'select(.state == "open") | .head.sha')
             if [[ -z $sha ]]; then echo "the PR is closed: nothing to do"; exit 0; fi
@@ -119,7 +132,6 @@ jobs:
           HEAD_SHA: ${{ steps.pr.outputs.sha }}
           RUN_URL: ${{ steps.pr.outputs.url }}
           TICKED: ${{ github.event.comment.id }} # the comment a tick event is about; empty after a Screenshots run
-          TICK_BODY: ${{ github.event.comment.body }} # as the user left it
         run: |
           set -euo pipefail
           marker='<!-- yoicks-shots'
@@ -163,25 +175,17 @@ jobs:
           digest=-
           if (( n )); then digest=$(printf '%s\n' "${lines[@]}" | sort | sha256sum | cut -c1-16); fi
 
-          # the bot's comment, whose first line is <!-- yoicks-shots shown=<digest|-> approved=<digest|-> -->
+          # the bot's comment, whose first line is <!-- yoicks-shots shown=<digest|-> -->, as it is now
           id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --jq '.[]
             | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- yoicks-shots"))) | .id' | sed -n 1p)
+          if [[ -n $TICKED && $TICKED != "$id" ]]; then echo "not the screenshots comment: nothing to do"; exit 0; fi
           old=
           if [[ -n $id ]]; then old=$(gh api "repos/$REPO/issues/comments/$id" --jq .body); fi
-          first=${old%%$'\n'*}
-          shown=$(sed -nE 's/.* shown=([0-9a-f]{16}|-) .*/\1/p' <<< "$first")
-          approved=$(sed -nE 's/.* approved=([0-9a-f]{16}|-) .*/\1/p' <<< "$first")
-          approved=${approved:--}
-          if [[ -n $TICKED ]]; then
-            if [[ $TICKED != "$id" ]]; then echo "not the screenshots comment: nothing to do"; exit 0; fi
-            # the comment as the user ticked or unticked it, not as it is now: a publish may have drawn it again since
-            if grep -qE '^- \[[xX]\] Approve th' <<< "$TICK_BODY"; then
-              # what the comment showed is what is approved, and only if those are the head's shots now
-              seen=$(sed -nE '1s/.* shown=([0-9a-f]{16}|-) .*/\1/p' <<< "$TICK_BODY")
-              if [[ $seen == "$digest" ]]; then approved=$digest; else echo "ticked on an outdated comment: nothing approved"; fi
-            else
-              approved=-
-            fi
+          shown=$(sed -nE '1s/.* shown=([0-9a-f]{16}|-) .*/\1/p' <<< "$old")
+          # its box approves what it shows, and only if those are the head's shots now (see the header)
+          approved=
+          if grep -qE '^- \[[xX]\] Approve th' <<< "$old"; then
+            if [[ $shown == "$digest" ]]; then approved=1; else echo "ticked on an outdated comment: nothing approved"; fi
           fi
 
           s=s these="these $n visual changes"
@@ -190,12 +194,11 @@ jobs:
           if (( ${#notready[@]} )); then
             state=failure reason="not ready on the PR's side within 10 s: ${notready[*]} (a broken screen or component, or its ready/el in tools/shots-fixture.ts)"
           elif (( n == 0 )); then
-            # changes coming back later are new ones
-            state=success approved=- reason="no shot changed"
-          elif [[ $digest == "$approved" ]]; then
+            state=success reason="no shot changed"
+          elif [[ -n $approved ]]; then
             state=success reason="the user approved the $n changed shot$s"
           else
-            approved=- reason="$n shot$s changed: tick the box in the PR's screenshots comment to approve"
+            reason="$n shot$s changed: tick the box in the PR's screenshots comment to approve"
           fi
           echo "**screenshots**: $state: $reason" >> "$GITHUB_STEP_SUMMARY"
 
@@ -218,7 +221,7 @@ jobs:
           fi
 
           {
-            echo "$marker shown=$digest approved=$approved -->"
+            echo "$marker shown=$digest -->"
             echo "**screenshots $state**: $reason."
             echo
             if (( n )); then
@@ -226,7 +229,7 @@ jobs:
               echo
               echo "[Look at the $n changed shot$s in the viewer]($target), then tick the box to approve them:"
               echo
-              box=' '; if [[ $state == success ]]; then box=x; fi
+              box=' '; if [[ -n $approved ]]; then box=x; fi
               echo "- [$box] Approve $these"
               echo
               echo "Changed:"
@@ -246,6 +249,8 @@ jobs:
           # one comment per PR, updated in place only when what it says changes (an edit by this token starts no run);
           # none is made just to say that nothing changed and all is well
           if [[ -n $id ]]; then
+            # edited since it was read above (a tick, say): that edit's run decides, after this one
+            if [[ $(gh api "repos/$REPO/issues/comments/$id" --jq .body) != "$old" ]]; then echo "the comment was edited meanwhile"; exit 0; fi
             if [[ $old != "$(cat "$body")" ]]; then gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$body" > /dev/null; fi
           elif (( n )) || [[ $state != success ]]; then
             gh api "repos/$REPO/issues/$PR/comments" -F "body=@$body" > /dev/null
