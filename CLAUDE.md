@@ -231,7 +231,9 @@ All in `internal/bridge/` (one package):
   bridge), and `todo`, its Home's to-do list for the user
   (`todo.go`: one list per orchestrator in `<state>/todos/<name>.json`, kept across Stop, Clear and restarts; an item
   `{id, text, agent, url (http(s) only), due, createdAt}`, sent as state `orchestrators[].todos`; the user ticks one off with
-  `DELETE /api/orchestrators/:name/todos/:id`; the items come due are reminded once from the bridge's minute tick, in one
+  `DELETE /api/orchestrators/:name/todos/:id`, which wakes a running Home with `[yoicks] to-do done by the user: <text> (<agent>,
+  <url>)` (`tickedOff`: coalesced as a worker's wake-ups; a stopped Home is never told, its next start neither: the user knows, and
+  the list shows it), unlike the orchestrator's own done or the PR watch's removal; the items come due are reminded once from the bridge's minute tick, in one
   `orchestrator_alert` of kind `todo` per Home (the phone tags notifications by Home), ntfy and `notification.show`; blocked workers and the Home's question are not
   items: the web shows those from the State; with config `pr_watch`, `prwatch.go` looks up the github.com PR links on
   those lists each minute, all in one `gh api graphql` call (the user's gh and login, the URLs as variables), removes a merged

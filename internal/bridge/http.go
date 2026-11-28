@@ -455,14 +455,17 @@ func (s *server) route(w http.ResponseWriter, r *http.Request, pathname string) 
 			jsonError(w, http.StatusNotFound, "not_found", "no such orchestrator")
 			return
 		}
-		found, err := s.todos.Done(name, id)
+		item, err := s.todos.Done(name, id)
 		if err != nil {
 			jsonError(w, http.StatusInternalServerError, "error", err.Error())
 			return
 		}
-		if !found {
+		if item == nil {
 			jsonError(w, http.StatusNotFound, "not_found", "no item "+id+" on "+name+"'s list")
 			return
+		}
+		if h := s.headless[name]; h != nil {
+			h.tickedOff(*item)
 		}
 		jsonOK(w, okWith(struct{}{}))
 		return
