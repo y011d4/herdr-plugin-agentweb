@@ -206,8 +206,9 @@ tailscale serve --bg 8390                        # tailnet 内限定の HTTPS、
 
 その後 `https://<machine>.<tailnet>.ts.net/?token=<token>` を開きます (停止は
 `tailscale serve reset`。`tailscale funnel` は使わないでください)。プレーンな VPN IP を使う
-場合 — 例: `"public_url": "http://100.x.y.z:8390"` — HTTP では動きますがセキュアコンテキストに
-ならないため、上記の PWA 機能は無効のままです。必要ならリバースプロキシを前段に置いてください。
+場合は、ブリッジがその IP で待ち受ける必要があります。`"public_url": "http://100.x.y.z:8390"` に加えて
+`"host": "100.x.y.z"` も設定してください (既定の `127.0.0.1` にはスマホから届きません)。HTTP では動きますが
+セキュアコンテキストにならないため、上記の PWA 機能は無効のままです。必要ならリバースプロキシを前段に置いてください。
 
 どれを選んでも、スマホで `<public_url>/?token=<token>` を開き (接続 QR ペインはまさにこの
 リンクを生成します)、Chrome の「ホーム画面に追加」を使います。
