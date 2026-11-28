@@ -157,7 +157,12 @@ export const scenes: Scene[] = [
     { name: 'agent-card-working', el: q('.agent-card[data-pane-id="p2"]') },
     { name: 'agent-card-done', el: q('.agent-card[data-pane-id="p3"]') },
     { name: 'agent-card-idle', el: q('.agent-card[data-pane-id="p5"]') },
-    { name: 'sidebar-home', el: q('.sidebar-group[data-home="personal"]'), sizes: ['pc'] },
+    { name: 'sidebar-home', el: q('.sidebar-home[data-home="personal"]'), sizes: ['pc'] },
+  ] },
+  // the PC sidebar with its agents unfolded: the ready check clicks All agents (once: then it's aria-expanded); a phone has none
+  { name: 'sidebar-unfolded', hash: '#/agents', ready: `innerWidth < 1024 || !!document.querySelector('#sidebar .sidebar-group [data-sidebar-pane]')
+    || void document.querySelector('#sidebar .sidebar-all[aria-expanded=false]')?.click()`, screen: false, parts: [
+    { name: 'sidebar-agents', el: q('#sidebar [data-sidebar-agents]'), sizes: ['pc'] },
   ] },
   { name: 'agents-home', hash: '#/agents/personal', ready: "!!document.querySelector('#screen-agents[data-ready]')", screen: false, parts: [
     { name: 'topbar-agents-home', el: q('#topbar') },

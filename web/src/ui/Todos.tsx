@@ -3,7 +3,8 @@
  * the badge on its switcher button and its PC sidebar heading, and on its status bar (Pane.tsx's
  * HomeStatus, on a running Home and a stopped one alike) "Needs you · n", which opens a popover: its
  * account's blocked agents (a tap: the drawer), its orchestrator's own question (answered below the
- * chat) and the to-do list, what its orchestrator wrote down (todos.ts). An item due later waits
+ * chat) and the to-do list, what its orchestrator wrote down (todos.ts); on a PC the sidebar shows the same
+ * (NeedsList) under the Home's heading, its blocked agents outside any Home under Other (Blocked). An item due later waits
  * under Later until its time; ✓ ticks one off (DELETE …/todos/:id, the State push then drops it). A
  * link shows its host; an agent's name opens its drawer. On a running Home, Ask puts an item's quote into the
  * composer (transcript.ts's todoQuote: its text, id, worker and link), to ask its orchestrator about it.
@@ -12,7 +13,7 @@ import { ActionIcon, Anchor, Badge, Button, Group, Popover, Stack, Text, Unstyle
 import { useEffect, useState, type ReactNode } from 'react';
 import { apiDelete } from '../api.ts';
 import { draftKey, setQuote } from '../drafts.ts';
-import { homeSummary, orchestratorStatus, type HomeSummary } from '../dashboard-group.ts';
+import { homeSummary, orchestratorStatus, type DashboardCard, type HomeSummary } from '../dashboard-group.ts';
 import { openAgent, openAgentNamed } from '../nav.ts';
 import { showToast } from '../notify.ts';
 import { findPane, store } from '../store.ts';
@@ -90,25 +91,34 @@ export function NeedsButton({ o, s, n, now }: { o: OrchestratorView; s: HomeSumm
   );
 }
 
-function NeedsList({ o, s, now, ask }: { o: OrchestratorView; s: HomeSummary; now: number; ask?: (it: TodoItem) => void }) {
-  const head = (text: string): ReactNode => <Text fz={11} fw={700} c="dimmed" tt="uppercase" lts="0.06em">{text}</Text>;
+const head = (text: string): ReactNode => <Text fz={11} fw={700} c="dimmed" tt="uppercase" lts="0.06em">{text}</Text>;
+
+/** What waits on the user at Home `o` (`s`: its agents' summary): its orchestrator's question, its blocked agents
+ *  and its to-do list. The popover's, and on a PC the sidebar's, under the Home's heading. */
+export function NeedsList({ o, s, now, ask }: { o: OrchestratorView; s: HomeSummary; now: number; ask?: (it: TodoItem) => void }) {
   return (
     <Stack gap={12}>
       {asksUser(o) && <Text data-asks="" fz={13} c="blocked" fw={600}>{`${orchestratorLabel(o)} is waiting for your answer, below the chat.`}</Text>}
-      {s.blocked.length > 0 && (
-        <Stack gap={6}>
-          {head('Waiting on you')}
-          <Group gap={6}>
-            {s.blocked.map((c) => (
-              <Button key={c.pane.paneId} className="home-chip max-w-full text-(--color-text)" variant="outline" color="blocked" size="compact-sm" radius="xl"
-                fz={13} fw={600} data-pane-id={c.pane.paneId} onClick={() => openAgent(c.pane.paneId)}>
-                {cardTitle(c)}<Text span fz={11} fw={500} c="dimmed" ml={6} truncate>{c.workspaceLabel}</Text>
-              </Button>
-            ))}
-          </Group>
-        </Stack>
-      )}
+      <Blocked cards={s.blocked} />
       {(o.todos?.length ?? 0) > 0 && <Stack gap={4}>{head('To-do')}<Todos o={o} now={now} ask={ask} /></Stack>}
+    </Stack>
+  );
+}
+
+/** Agents waiting on the user, under "Waiting on you", as chips (a tap: its drawer). Nothing without any. */
+export function Blocked({ cards }: { cards: DashboardCard[] }) {
+  if (!cards.length) return null;
+  return (
+    <Stack gap={6}>
+      {head('Waiting on you')}
+      <Group gap={6}>
+        {cards.map((c) => (
+          <Button key={c.pane.paneId} className="home-chip max-w-full text-(--color-text)" variant="outline" color="blocked" size="compact-sm" radius="xl"
+            fz={13} fw={600} data-pane-id={c.pane.paneId} onClick={() => openAgent(c.pane.paneId)}>
+            {cardTitle(c)}<Text span fz={11} fw={500} c="dimmed" ml={6} truncate>{c.workspaceLabel}</Text>
+          </Button>
+        ))}
+      </Group>
     </Stack>
   );
 }
