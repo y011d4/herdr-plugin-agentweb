@@ -1521,10 +1521,10 @@ async function m2(c: Ctx) {
   }
 }
 
-/** S1: Settings in front of the screen it came from, from the topbar's ⚙ at the screen's top right. Phone (390x844): on
- *  the list (scrolled) it opens over the whole screen; ✕ and Back close it back to the same list node at its scrollTop,
- *  the history as it was. PC (1280, the sidebar beside it): a centered 760px dialog; Escape closes it, and so does a click
- *  outside it. */
+/** S1: Settings in front of the screen it came from, from ⚙: the topbar's at the screen's top right on a phone, the
+ *  sidebar's at its top on a PC. Phone (390x844): on the list (scrolled) it opens over the whole screen; ✕ and Back close
+ *  it back to the same list node at its scrollTop, the history as it was. PC (1280, the sidebar beside it): a centered
+ *  760px dialog; Escape closes it, and so does a click outside it. */
 async function s1(c: Ctx) {
   const { pg } = c;
   const SC = `document.getElementById('screen-agents')`;
@@ -1558,7 +1558,7 @@ async function s1(c: Ctx) {
   await mobile(pg, false);
   try {
     await pg.goto('#/agents');
-    const gear = `document.querySelector('#topbar #btn-settings')`;
+    const gear = `document.querySelector('#sidebar #btn-settings')`;
     await pg.until(`!!${gear}`, 3000);
     const g = await pg.at(gear);
     await click(g.x, g.y);
@@ -1572,9 +1572,10 @@ async function s1(c: Ctx) {
     await sleep(400);
     await click(100, 800); // outside it (over the sidebar: a modal's backdrop covers it)
     const outside = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
-    result(c, corner(g, 1280) && !open.timeout && width === 760 && Math.abs(left - (1280 - 760) / 2) <= 1 && !escaped.timeout && !outside.timeout, 'S1.wide',
+    const side = await pg.ev(`Math.round(document.getElementById('sidebar').getBoundingClientRect().right)`);
+    result(c, g.x < side && g.y <= 52 && !open.timeout && width === 760 && Math.abs(left - (1280 - 760) / 2) <= 1 && !escaped.timeout && !outside.timeout, 'S1.wide',
       `gear=${Math.round(g.x)},${Math.round(g.y)},open=${ms(open)},x=${left}+${width},escape=${ms(escaped)},outside=${ms(outside)}`,
-      "1280px: the topbar's ⚙ (top right: x>=1220, y<=52) opens a centered 760px dialog; Escape closes it, and so does a click outside it, within 3s each");
+      "1280px: the sidebar's ⚙ (its top: x within it, y<=52) opens a centered 760px dialog; Escape closes it, and so does a click outside it, within 3s each");
   } finally {
     await mobile(pg, true);
   }
@@ -1653,8 +1654,8 @@ async function p6(c: Ctx) {
 /** W1: the PC sidebar. On a PC (1280px): #sidebar left of the topbar and #screen, --sidebar-w its
  *  width; All agents, folded, at its bottom; its agents, unfolded (All agents), a group per orchestrator, in /api/state's order, with its
  *  account's agents, then Other with the agents no account has (when there are any); clicking wc-less
- *  there opens #/pane/<it> and marks it. W1.switch: a Home there shows its switcher, as a phone does, and a click on
- *  another Home's button opens that Home.
+ *  there opens #/pane/<it> and marks it. W1.switch: a Home's topbar is its header, no switcher there (a phone's has one),
+ *  and a click on another Home's heading in the sidebar opens that Home.
  *  W1.home: that Home's Needs you and agent counts are a phone's only: they go as the sidebar comes (which has them),
  *  at its breakpoint too (1023px: no sidebar, the counts; 1024px: the sidebar, neither), and come back with a phone's width.
  *  Down to a phone's width the sidebar goes, and #screen stays the same element. */
@@ -1696,8 +1697,9 @@ async function w1(c: Ctx) {
     const open = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)} && ${row}?.getAttribute('aria-current') === 'page'`, 2000);
     const [first, second] = (await api(c, 'GET', '/api/state')).orchestrators.map((o: any) => o.name as string);
     await pg.goto(`#/home/${enc(first)}`);
-    const btn = `document.querySelector('.home-switch-btn[data-orch=${js(second)}]')`;
-    const shown = await pg.until(`(${btn}?.getBoundingClientRect().height ?? 0) > 0`, 5000);
+    const btn = `document.querySelector('#sidebar a[data-home=${js(second)}]')`;
+    const shown = await pg.until(`!document.querySelector('#topbar .home-switch') && !!document.querySelector('#topbar-title .home-state')
+      && (${btn}?.getBoundingClientRect().height ?? 0) > 0`, 5000);
     let switched = shown;
     if (!shown.timeout) {
       const b = await pg.at(btn);
@@ -1705,7 +1707,7 @@ async function w1(c: Ctx) {
       switched = await pg.until(`location.hash === ${js(`#/home/${enc(second)}`)}`, 2000);
     }
     result(c, !shown.timeout && !switched.timeout, 'W1.switch', `shown=${ms(shown)},switched=${ms(switched)}`,
-      `1280px: #/home/<the first orchestrator> shows the switcher's button for the second within 5s; a click on it opens #/home/<it> within 2s`);
+      `1280px: #/home/<the first orchestrator>: no .home-switch in #topbar, its title the Home's (.home-state), and the second's heading in #sidebar, within 5s; a click on it opens #/home/<it> within 2s`);
     // the sidebar there from 1024px on, and the Home's counts (and Needs you) exactly while it isn't
     const split = `(() => { const side = !!document.getElementById('sidebar'); return side === (innerWidth >= 1024)
       && side !== !!document.querySelector('#home-status .home-counts') && !(side && document.querySelector('#home-status [data-action="needs"]')); })()`;

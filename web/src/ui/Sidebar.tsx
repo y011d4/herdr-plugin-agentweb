@@ -1,21 +1,22 @@
 /**
  * ui/Sidebar.tsx — the PC sidebar, beside every screen but the token one on a wide screen
- * (WIDE_QUERY: ui/App.tsx draws it only then). On top, what waits on the user: each orchestrator's
+ * (WIDE_QUERY: ui/App.tsx draws it only then). At its top, over the topbar's height, the app's name, the connection's dot
+ * and ⚙ (Settings): the topbar beside it is the screen's own (a Home's header). Then what waits on the user: each orchestrator's
  * Home a heading (it opens the Home) over what waits there (Todos.tsx's NeedsList: its question, its
  * account's blocked agents, its to-do list), then Other, the blocked agents no Home's account lists.
  * The to-do items there are the dense ones (two lines at most, all of it on hover). Under them the agents, folded
  * into one row (All agents, their count), pinned at the sidebar's bottom (in reach however long the lists above get):
  * a click unfolds them below it, grouped by Home (homeGroups: a Home's heading opens its list, #/agents/<name>, which a
  * phone opens from the Home's counts), each opening its pane the list's way (nav.ts's openAgent: its drawer), under Open
- * the list (#/agents), scrolled into view, and folds them again. Settings is the
- * topbar's ⚙, at the screen's top right. The Home or the agent on show, from the hash, is marked (aria-current).
+ * the list (#/agents), scrolled into view, and folds them again. The Home or the agent on show, from the hash, is
+ * marked (aria-current).
  *
  * Like the agents list it gets every State push: it holds still while a finger is down
  * (useHeldState), and its rows are keyed by orchestrator and pane, so #sidebar, the scroll container,
  * stays the same element.
  */
 import { NavLink, Text } from '@mantine/core';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { homeGroups, homeSummary, orchestratorStatus, shownStatus, type DashboardCard, type HomeGroup } from '../dashboard-group.ts';
 import { draftKey, setQuote } from '../drafts.ts';
 import { openAgent } from '../nav.ts';
@@ -23,7 +24,7 @@ import { homeAgentsHash, homeHash } from '../routes.ts';
 import { findPane, store } from '../store.ts';
 import { todoQuote } from '../transcript.ts';
 import type { AppState, OrchestratorView, TodoItem } from '../types.ts';
-import { CardWhere, agentCards, cardTitle, orchestratorLabel, useHeldState } from './Dashboard.tsx';
+import { CardWhere, SettingsButton, agentCards, cardTitle, orchestratorLabel, useHeldState } from './Dashboard.tsx';
 import { StatusBadge, StatusDot } from './Status.tsx';
 import { Blocked, NeedsBadge, NeedsList, needsYou, useMinute } from './Todos.tsx';
 
@@ -45,7 +46,7 @@ const current = (on: boolean): 'page' | undefined => (on ? 'page' : undefined);
 
 const heading = (text: string) => <Text className="sidebar-heading" px={12} py={4} fz={12} fw={700} c="dimmed" tt="uppercase" lts="0.06em">{text}</Text>;
 
-export function Sidebar() {
+export function Sidebar({ dot }: { dot: ReactNode }) {
   const [state, hold] = useHeldState();
   const now = useMinute();
   const hash = useSyncExternalStore(subscribeHash, () => location.hash);
@@ -57,9 +58,12 @@ export function Sidebar() {
   const other = homeSummary(groups.find((g) => !g.home)?.cards ?? [], store.seenDone).blocked;
   return (
     <aside id="sidebar" aria-label="Homes and agents" {...hold}>
-      {/* the topbar's height, kept in view over the list */}
-      <div className="sticky top-0 z-1 -mx-2 flex h-[52px] shrink-0 items-center border-b border-(--color-border) bg-(--color-surface) px-4">
+      {/* the topbar's height, kept in view over the list: the app's name, the connection (App.tsx's dot) and Settings */}
+      <div className="sticky top-0 z-1 -mx-2 flex h-[52px] shrink-0 items-center gap-2.5 border-b border-(--color-border) bg-(--color-surface) pr-1 pl-4">
         <Text fw={700} fz={16}>Yoicks</Text>
+        {dot}
+        <span className="ml-auto" />
+        <SettingsButton sidebar />
       </div>
       {state?.orchestrators.map((o) => <Home key={o.name} o={o} state={state} now={now} on={hash === homeHash(o.name)} />)}
       {other.length > 0 && (

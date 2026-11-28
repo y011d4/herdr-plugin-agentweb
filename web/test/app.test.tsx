@@ -563,26 +563,27 @@ describe('App', () => {
     await go('#/agents');
   });
 
-  it("a Home's Needs you and agent counts are a phone's only: on a PC the sidebar has them, its name and ⋮ share a row under the switcher", async () => {
+  it("a Home's Needs you and agent counts are a phone's only: on a PC the sidebar has them, and the topbar is the Home's header", async () => {
     const s = fresh();
     s.orchestrators[0].todos = [{ id: 't1', text: 'Review the PR', agent: null, url: null, due: null, createdAt: 0 }];
     await act(async () => push!({ type: 'state', state: s }));
     await go('#/home/personal');
-    const bar = (): string => ['#sidebar', '#home-status [data-action="needs"]', '#home-status .home-counts', '#topbar .home-switch', '#home-status .home-title', '#btn-home-menu']
+    const bar = (): string => ['#sidebar', '#home-status [data-action="needs"]', '#home-status .home-counts', '#topbar .home-switch',
+      '#home-status #btn-home-menu', '#topbar-right #btn-home-menu', '#topbar #btn-settings', '#topbar #conn-dot', '#sidebar #btn-settings', '#sidebar #conn-dot']
       .map((sel) => ($(sel) ? 1 : 0)).join('');
-    assert.equal(bar(), '011101', 'a phone: no sidebar; Needs you, the counts, the switcher in the topbar (its button names the Home), ⋮');
+    assert.equal(bar(), '0111101100', 'a phone: no sidebar; Needs you, the counts, the switcher in the topbar (its button names the Home), ⋮ on its bar; ⚙ and the dot in the topbar');
     await setWide(true);
-    assert.equal(bar(), '100111', 'a PC: the sidebar; the switcher, the name, ⋮');
+    assert.equal(bar(), '1000010011', "a PC: the sidebar, ⚙ and the dot at its top; the topbar the Home's header, its ⋮ there");
     assert.ok($('#sidebar .sidebar-home[data-home="personal"] .home-todo'), "the sidebar has the Home's to-do item");
-    assert.equal($('#home-status')!.children.length, 1, 'one row');
-    assert.ok($('#home-status .home-row .home-title') && $('#home-status .home-row #btn-home-menu'), 'the name and ⋮ in it');
+    assert.match($('#topbar-title')!.textContent!, /^Personal· /, 'its name and status');
+    assert.ok(!$('#home-status'), 'no bar under it (a TUI Home: no warnings)');
     await click($('#sidebar .sidebar-all'));
     await click($('#sidebar .sidebar-group[data-home="personal"] .sidebar-home-list'));
     assert.equal(location.hash, '#/agents/personal', "the Home's list: its heading under All agents (a phone's is in the counts' popover)");
     assert.equal($('#sidebar .sidebar-home-list[aria-current="page"]')?.getAttribute('href'), '#/agents/personal', 'marked');
     await go('#/home/personal');
     await setWide(false);
-    assert.equal(bar(), '011101', 'a phone again');
+    assert.equal(bar(), '0111101100', 'a phone again');
     // a stopped TUI Home, the only one: on a PC nothing for its bar to show, so none
     const one = fresh();
     one.orchestrators = [one.orchestrators[1]];
@@ -591,6 +592,7 @@ describe('App', () => {
     assert.ok($('#screen-home-stopped #home-status .home-counts'), 'a phone: its counts');
     await setWide(true);
     assert.ok($('#screen-home-stopped') && !$('#home-status'), 'a PC: no bar');
+    assert.deepEqual([$('#topbar-title')!.textContent, $('#topbar-right')!.innerHTML], ['work· stopped', ''], 'its name and status; no tools to a stopped TUI Home');
     await setWide(false);
     await go('#/agents');
   });
@@ -616,6 +618,28 @@ describe('App', () => {
     assert.deepEqual(toastTitles(), ['Could not open in herdr']);
     await setWide(false);
     await go('#/agents');
+  });
+
+  it("a PC's ⚙ (the sidebar's, in reach under a drawer) takes the drawer's place, as an overlay over an overlay does", async () => {
+    const replace = vi.spyOn(location, 'replace').mockImplementation((url: string | URL) => { // as a browser's
+      const oldURL = location.href;
+      history.replaceState(history.state, '', String(url));
+      dispatchEvent(new HashChangeEvent('hashchange', { oldURL, newURL: location.href }));
+    });
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await setWide(true);
+    await go('#/agents');
+    await go('#/pane/p3');
+    const len = history.length;
+    await click($('#sidebar #btn-settings'));
+    await settle();
+    assert.equal(location.hash, '#/settings');
+    assert.equal(history.length, len, "in the drawer's entry");
+    await click($('#btn-settings-close'));
+    await settle();
+    assert.equal(location.hash, '#/agents', 'back to the list, past the drawer');
+    await setWide(false);
+    replace.mockRestore();
   });
 
   it("a Home's Stop (its ⋮) closes its orchestrator's pane after the confirm, and the Home stays, stopped", async () => {

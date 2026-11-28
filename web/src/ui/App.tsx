@@ -99,15 +99,18 @@ export function App() {
   // drawer (Settings is a modal: Mantine's overlay covers the sidebar too)
   const under = (drawer?.open || settings) && kind !== 'token' ? true : undefined;
   const slot = (content: ReactNode): ReactNode => <Fragment key={key}>{content}</Fragment>;
+  const side = wide && kind !== 'token';
+  // the connection: in the topbar, or at the sidebar's top while there is one (the topbar is the screen's own then)
+  const dot = <div id="conn-dot" className={link ? 'conn-dot connected' : 'conn-dot'} title={link === null ? 'Disconnected' : link ? 'Connected' : 'Reconnecting…'}></div>;
   return (
     <>
       {/* a PC's: never over the token screen. Its slot stays when it isn't drawn, so the elements
           after it (#topbar, #reconnect-banner, #screen) stay the same as it comes and goes. */}
-      {wide && kind !== 'token' && <Sidebar />}
+      {side && <Sidebar dot={dot} />}
       <header id="topbar" className="topbar" inert={under} style={topbar ? undefined : { display: 'none' }}>
         <div id="topbar-left">{slot(topbar?.left)}</div>
         <div className="topbar-title" id="topbar-title">{slot(topbar?.title)}</div>
-        <div id="conn-dot" className={link ? 'conn-dot connected' : 'conn-dot'} title={link === null ? 'Disconnected' : link ? 'Connected' : 'Reconnecting…'}></div>
+        {!side && dot}
         <div id="topbar-right">{slot(topbar?.right)}</div>
       </header>
       {/* never over the token screen: leaving it while the link is down shows it */}
@@ -519,7 +522,7 @@ function showHome(name: string, paneId: string | null, hash: string): void {
     markActivePaneSeen();
     view.paneViewMode = openingMode(paneId); // as openPaneRoute's
     const actions = { clear: () => { void clearAgentFlow(paneId); }, stop: () => { void stopAgentFlow(paneId); } };
-    show('pane', <Pane paneId={paneId} home actions={actions} name={name} />, homeTopbar(paneId, name), hash);
+    show('pane', <Pane paneId={paneId} home actions={actions} name={name} />, homeTopbar(paneId, name, actions), hash);
   } else {
     // a headless one's warnings offer Clear while stopped too (a fresh session)
     show('pane', <StoppedHome name={name} clear={() => { void clearAgentFlow(`hl:${name}`); }} />, stoppedHomeTopbar(name), hash);

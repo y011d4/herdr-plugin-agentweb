@@ -4,10 +4,11 @@ import assert from 'node:assert/strict';
 import { act } from 'react';
 import { clearToasts } from '../src/notify.ts';
 import { setAppState, store } from '../src/store.ts';
+import { WIDE_QUERY } from '../src/theme.ts';
 import type { AppState } from '../src/types.ts';
 import { Dashboard, dashboardTopbar } from '../src/ui/Dashboard.tsx';
 import { state as recorded } from './contract.gen.ts';
-import { fire, render } from './render.ts';
+import { fakeMedia, fire, render } from './render.ts';
 
 const fresh = (): AppState => structuredClone(recorded);
 /** Runs the (fake) timers due and lets React settle. */
@@ -198,12 +199,16 @@ describe('Dashboard topbar', () => {
     assert.equal(c.querySelector('.orch-start, .orch-start-btn'), null);
   });
 
-  it('⚙ (Settings) alone at the right', async () => {
+  it("⚙ (Settings) alone at the right on a phone; none on a PC (the sidebar's top has it)", async () => {
+    const setWide = fakeMedia(WIDE_QUERY, false);
     const c = await bar('#/agents', fresh());
     const btns = [...c.querySelectorAll<HTMLElement>('#r button')];
     assert.deepEqual(btns.map((b) => [b.id, b.classList.contains('mantine-ActionIcon-root'), b.getAttribute('aria-label'), b.textContent]),
       [['btn-settings', true, 'Settings', '⚙']]);
     await fire(() => btns[0].click());
     assert.equal(location.hash, '#/settings');
+    await setWide(true);
+    assert.equal(c.querySelector('#r')!.innerHTML, '');
+    vi.unstubAllGlobals();
   });
 });

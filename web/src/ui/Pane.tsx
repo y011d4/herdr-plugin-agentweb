@@ -18,7 +18,6 @@
  * value), so a push never resets what is being typed, an IME composition included.
  */
 import { ActionIcon, Button, CloseButton, FileButton, Group, Image, Indicator, Menu, NativeSelect, NavLink, Popover, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
@@ -30,11 +29,11 @@ import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts
 import { parseQuote, type QuoteOf } from '../transcript.ts';
 import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
 import { emit, findPane, store, subscribe } from '../store.ts';
-import { WIDE_QUERY } from '../theme.ts';
+import { useWide } from '../theme.ts';
 import { dueLabel } from '../todos.ts';
 import type { AppState, HeadlessCompact, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
 import { QuoteText } from './ChatLog.tsx';
-import { AgentRow, TopbarIcon, agentCards, orchestratorLabel, relativeTime, useHeldState } from './Dashboard.tsx';
+import { AgentRow, SettingsButton, TopbarIcon, agentCards, orchestratorLabel, relativeTime, useHeldState } from './Dashboard.tsx';
 import { StatusDot } from './Status.tsx';
 import { NeedsBadge, NeedsButton, needsYou, useMinute } from './Todos.tsx';
 import type { Topbar } from './App.tsx';
@@ -290,53 +289,58 @@ function HomeSwitcher({ name }: { name: string }) {
   );
 }
 
-// A Home's topbar title: the switcher with two or more Homes, else the Home's own (its name and status)
+// A Home's topbar title: on a phone with two or more Homes the switcher, else the Home's own (its name and status); on
+// a PC always its own (the sidebar beside it lists the Homes)
 function HomeTopTitle({ name, own }: { name: string; own: ReactNode }) {
-  return (useAppState()?.orchestrators?.length ?? 0) >= 2 ? <HomeSwitcher name={name} /> : own;
+  const wide = useWide();
+  const many = (useAppState()?.orchestrators?.length ?? 0) >= 2;
+  return many && !wide ? <HomeSwitcher name={name} /> : own;
 }
 
-// Home status bar, one row (wrapping where it must): on a phone "Needs you · n" (its account's blocked agents, its own
-// question, its to-do items: Todos.tsx's NeedsButton, a popover) and the counts of its agents (AgentsButton, a popover of
-// them); on a PC (WIDE_QUERY: ui/App.tsx's sidebar beside it has both, this Home's heading over what waits there, its
-// agents under All agents) the Home's name and status in their place while the topbar is the switcher (a phone has them
-// on its button there). Then, at the right, a headless one's usage and model, the view toggle (`paneId`: a running
-// Home's) and the orchestrator's ⋮ (HomeMenu: Compact, Clear, Stop). Under it a headless one's warnings (`clear`: their
-// Clear, on a stopped Home too). On a PC a bar with nothing to show isn't drawn.
-function HomeStatus({ name, state, actions, clear = actions?.clear, paneId }:
-  { name: string; state: AppState | null; actions?: HomeActions; clear?: () => void; paneId?: string }) {
+// A Home's topbar's right: on a PC the Home's own tools (HomeTools: its status bar has them on a phone), else ⚙
+function HomeTopRight({ name, paneId, actions }: { name: string; paneId?: string; actions?: HomeActions }) {
+  return useWide() ? <HomeTools name={name} paneId={paneId} actions={actions} /> : <SettingsButton />;
+}
+
+// A Home's own tools, in a row: a headless one's usage and model, the view toggle (`paneId`: a running Home's) and the
+// orchestrator's ⋮ (HomeMenu: Compact, Clear, Stop). Nothing when it has none (a stopped TUI Home).
+function HomeTools({ name, paneId, actions, className }: { name: string; paneId?: string; actions?: HomeActions; className?: string }) {
   const now = useMinute();
-  const wide = useMediaQuery(WIDE_QUERY, false, { getInitialValueInEffect: false }); // as the sidebar's (App.tsx)
-  if (!state) return <Stack id="home-status" className={STATUS_BAR}></Stack>;
-  const all = state.orchestrators ?? [];
-  const self = all.find((o) => o.name === name);
-  const s = homeSummary(agentCards(state, self), store.seenDone);
+  const self = useAppState()?.orchestrators?.find((o) => o.name === name);
   const usage = self?.headless?.usage ? <Usage usage={self.headless.usage} now={now} /> : null;
-  const title = wide && all.length >= 2 && (
-    <Text span fw={600} fz={15} truncate className="home-title min-w-0">
-      {paneId ? <PaneTitle paneId={paneId} home /> : <StoppedTitle name={name} />}
-    </Text>
-  );
-  const end = (usage || self?.headless || paneId || actions) && (
-    <Group gap={10} className={`ml-auto ${wide ? 'shrink-0' : ''}`}>
+  if (!usage && !self?.headless && !paneId && !actions) return null;
+  return (
+    <Group className={`home-tools ${className ?? ''}`} gap={10}>
       {usage}
       {self?.headless && <ModelPicker o={self} />}
       {paneId && <ViewToggle paneId={paneId} home />}
       {actions && <HomeMenu name={name} o={self} actions={actions} />}
     </Group>
   );
-  if (wide && !title && !end) return null;
+}
+
+// Home status bar on a phone, one row (wrapping where it must): "Needs you · n" (its account's blocked agents, its own
+// question, its to-do items: Todos.tsx's NeedsButton, a popover), the counts of its agents (AgentsButton, a popover of
+// them), then at the right the Home's own tools (HomeTools). Under it a headless one's warnings (`clear`: their Clear, on
+// a stopped Home too). On a PC (WIDE_QUERY: ui/App.tsx's sidebar beside it has what waits at each Home, and the topbar
+// is the Home's header, its name and status, then its tools) only the warnings, and no bar without any.
+function HomeStatus({ name, state, actions, clear = actions?.clear, paneId }:
+  { name: string; state: AppState | null; actions?: HomeActions; clear?: () => void; paneId?: string }) {
+  const now = useMinute();
+  const wide = useWide(); // as the sidebar's (App.tsx)
+  const self = state?.orchestrators?.find((o) => o.name === name);
+  const warnings = self?.headless && <HeadlessWarnings o={self} clear={clear} />;
+  if (wide) return self?.headless?.warnings?.length ? <Stack id="home-status" gap={8} py={8} className={`px-3.5 ${STATUS_BAR}`}>{warnings}</Stack> : null;
+  if (!state) return <Stack id="home-status" className={STATUS_BAR}></Stack>;
+  const s = homeSummary(agentCards(state, self), store.seenDone);
   return (
     <Stack id="home-status" gap={8} py={8} className={`px-3.5 ${STATUS_BAR}`}>
-      {wide ? (
-        <Group className="home-row" gap={14} wrap="nowrap">{title}{end}</Group>
-      ) : (
-        <Group className="home-row" gap="6px 14px">
-          {self && <NeedsButton o={self} s={s} n={needsYou(self, state, now)} now={now} />}
-          <AgentsButton name={name} s={s} />
-          {end}
-        </Group>
-      )}
-      {self?.headless && <HeadlessWarnings o={self} clear={clear} />}
+      <Group className="home-row" gap="6px 14px">
+        {self && <NeedsButton o={self} s={s} n={needsYou(self, state, now)} now={now} />}
+        <AgentsButton name={name} s={s} />
+        <HomeTools name={name} paneId={paneId} actions={actions} className="ml-auto" />
+      </Group>
+      {warnings}
     </Stack>
   );
 }
@@ -841,8 +845,6 @@ const Subtitle = ({ className = '', c, children }: { className?: string; c?: str
   <Text span className={`topbar-subtitle ${className}`} fz={12} fw={400} ml={6} c={c ?? 'dimmed'}>{children}</Text>
 );
 
-const settingsButton = <TopbarIcon id="btn-settings" label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</TopbarIcon>;
-
 export interface AgentActions { rename: () => void; clear: () => void; stop: () => void; openInHerdr: () => void }
 
 /** Whether ⋮'s menu is open: the drawer's Escape closes the drawer only while it isn't (ui/AgentDrawer.tsx). */
@@ -875,12 +877,13 @@ export function AgentMenu({ actions, wide = false }: { actions: AgentActions; wi
   );
 }
 
-/** A running Home's topbar: the switcher between the Homes (two or more), else the orchestrator, and Settings (its
- *  agents' counts, the way to its list, the view toggle and its ⋮ (Compact, Clear, Stop) are on its status bar).
- *  A pane's header is its drawer's (ui/AgentDrawer.tsx). */
-export const homeTopbar = (paneId: string, name: string): Topbar => ({
+/** A running Home's topbar. On a phone the switcher between the Homes (two or more), else the orchestrator, and
+ *  Settings (its agents' counts, the way to its list, the view toggle and its ⋮ (Compact, Clear, Stop) are on its
+ *  status bar). On a PC the Home's header: its name and status, then its tools (`actions`: its ⋮'s). A pane's header
+ *  is its drawer's (ui/AgentDrawer.tsx). */
+export const homeTopbar = (paneId: string, name: string, actions?: HomeActions): Topbar => ({
   title: <HomeTopTitle name={name} own={<PaneTitle paneId={paneId} home />} />,
-  right: settingsButton,
+  right: <HomeTopRight name={name} paneId={paneId} actions={actions} />,
 });
 
 // ── A stopped orchestrator's Home ─────────────────────────────────────────────
@@ -892,7 +895,7 @@ function StoppedTitle({ name }: { name: string }) {
 
 export const stoppedHomeTopbar = (name: string): Topbar => ({
   title: <HomeTopTitle name={name} own={<StoppedTitle name={name} />} />,
-  right: settingsButton,
+  right: <HomeTopRight name={name} />,
 });
 
 /** #/home/<name> while that orchestrator isn't running: its account's agents and Start (a headless

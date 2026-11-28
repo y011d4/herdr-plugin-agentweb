@@ -22,9 +22,9 @@ mobile-first PWA:
   main checkout, chipped as a worktree
 - Rename, clear, and stop agents from the phone: each pane's **⋮** menu renames, clears
   (fresh session), or stops it (an orchestrator's Home has **Clear** and **Stop**, and a headless
-  one's **Compact**, in the **⋮** on its status bar). On a PC's browser the **⋮** also has **Open in herdr**:
+  one's **Compact**, in the **⋮** on its status bar, on a PC in its top bar). On a PC's browser the **⋮** also has **Open in herdr**:
   herdr on the PC switches to that agent's workspace, tab and pane. Agents are started by the orchestrators, not by hand. **⚙** at the top right
-  opens the settings
+  (on a PC at the top of the sidebar) opens the settings
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
   scrollback by swiping down, multiline input, and quick keys
   (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …). On a PC's browser, Enter sends and
@@ -335,10 +335,11 @@ with defaults, is:
   only that account's agents (`#/agents/<name>`, Back returns to the Home); the full list's
   **← Home** opens the Home used last. On a PC the status bar has neither: the sidebar beside it lists what needs
   you under each Home's heading, and the agents under **All agents**, where a Home's heading opens its list. With
-  two or more configured, the top bar is a switcher between the Homes (`label`s, with their status and what waits
-  on you there; it scrolls sideways when they don't fit), over the Home's status bar (on a PC with the Home's name and
-  status, which a phone has on its button), and the app reopens the Home used last (`#/home/<name>`); with none,
-  the app opens on the list.
+  two or more configured, a phone's top bar is a switcher between the Homes (`label`s, with their status and what waits
+  on you there; it scrolls sideways when they don't fit), over the Home's status bar; on a PC the sidebar's Home
+  headings switch between them, and the top bar is the Home's own: its name and status, then what a phone has at its
+  status bar's right (a headless one's usage and model, `>_` and **⋮**). The app reopens the Home used last
+  (`#/home/<name>`); with none, it opens on the list.
 - `notify_url` — optional [ntfy](https://ntfy.sh) topic URL for background push
   notifications, e.g. `https://ntfy.example.internal/herdr` for a **self-hosted**
   ntfy instance. When unset (default) the bridge performs no outbound requests at
@@ -426,17 +427,17 @@ this boundary is about what each orchestrator, and so each account, sees.
 **Headless.** `"mode": "headless"` on an entry runs that orchestrator as the bridge's own `claude -p`
 instead of an agent in a herdr pane (your Claude subscription only: the bridge refuses API-key
 billing). Its Home is then the chat alone: messages go out also while it works, ■ on the
-"doing now" line interrupts it, its questions get an answer panel, and the status bar shows its
+"doing now" line interrupts it, its questions get an answer panel, and its status bar (on a PC its top bar) shows its
 usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable; a tap on it lists when each limit resets: the time left and the clock time; the limits stay across a bridge restart and a Clear until each resets), the model it runs on (a pick from
 Claude Code's `/model` list switches it between turns, or for its next start) and what went wrong, each with what to do.
-**Compact** in its status bar's **⋮** (with Clear and Stop; between turns; an optional focus says what the summary should keep) runs Claude Code's `/compact` in
+**Compact** in its **⋮** (with Clear and Stop; between turns; an optional focus says what the summary should keep) runs Claude Code's `/compact` in
 place: the session goes on from the summary, and the "doing now" line says `compacting…`, then `compacted: ctx 64% → 12%`.
 From 70% of the context in use, the ctx turns orange and a small orange dot marks the ⋮: a suggestion only (Claude Code compacts by itself near the
 limit). The chat marks where a compaction cut the conversation (`[yoicks] compacted`). It
 also keeps a to-do list for you (its `todo` tool), under "Needs you" on its Home: what only you can do, such
 as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; a tap on one opens its menu: **Mark done** ticks it off and tells the Home, which takes up what follows
-(a stopped Home isn't told), and **Ask the orchestrator** quotes it (with its id) in the composer, to ask the orchestrator about it. Each Home's switcher button
-(and its heading in the PC sidebar) counts what waits on you there. On a PC the sidebar lists it under that heading, in place of the Home's Needs you
+(a stopped Home isn't told), and **Ask the orchestrator** quotes it (with its id) in the composer, to ask the orchestrator about it. A phone's switcher button
+for each Home (and its heading in the PC sidebar) counts what waits on you there. On a PC the sidebar lists it under that heading, in place of the Home's Needs you
 (its blocked agents, its question, its to-do list: each item two lines at most, all of it on hover); the agents themselves are folded into one row, **All agents**, kept at the bottom of the sidebar, which a click unfolds. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a

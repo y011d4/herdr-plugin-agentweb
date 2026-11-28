@@ -4,6 +4,7 @@
  *  The root font size stays the browser's 16px (style.css sets 15px on the body, not on html), so
  *  Mantine's and Tailwind's rem sizes are their own, unscaled. */
 import { Button, Input, Portal, colorsTuple, createTheme, rem } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 
 // style.css's --touch-min: a button given no size, or an input at its default size (sm), is this tall
 // (Mantine's 36px)
@@ -47,3 +48,6 @@ export const theme = createTheme({
 /** The PC layout's width: style.css's last block, and the sidebar (ui/App.tsx) with it; the lg
  *  breakpoint (64em). Below it, every phone, nothing changes. theme.test.ts checks all three agree. */
 export const WIDE_QUERY = '(min-width: 1024px)';
+
+/** Whether the screen is that wide now (read at once: no first render without it). */
+export const useWide = (): boolean => useMediaQuery(WIDE_QUERY, false, { getInitialValueInEffect: false });

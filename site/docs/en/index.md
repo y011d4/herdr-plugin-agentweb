@@ -33,9 +33,9 @@ phone or a PC's browser:
   main checkout, chipped as a worktree
 - Rename, clear, and stop agents from the phone: each pane's **⋮** menu renames, clears
   (fresh session), or stops it (an orchestrator's Home has **Clear** and **Stop**, and a headless
-  one's **Compact**, in the **⋮** on its status bar). On a PC's browser the **⋮** also has **Open in herdr**:
+  one's **Compact**, in the **⋮** on its status bar, on a PC in its top bar). On a PC's browser the **⋮** also has **Open in herdr**:
   herdr on the PC switches to that agent's workspace, tab and pane. Agents are started by the orchestrators, not by hand. **⚙** at the top right
-  opens the settings
+  (on a PC at the top of the sidebar) opens the settings
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
   scrollback by swiping down, multiline input, and quick keys
   (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …). On a PC's browser, Enter sends and

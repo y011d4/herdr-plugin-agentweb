@@ -11,6 +11,7 @@ import { draftKey, getDraft, getQuote, setDraft, setQuote } from '../src/drafts.
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { orchestratorOfPane, resolveRoute } from '../src/routes.ts';
 import { findPane, markPaneSeen, setAppState, store } from '../src/store.ts';
+import { WIDE_QUERY } from '../src/theme.ts';
 import type { AppState, OrchestratorView, WsMessage, WsStateMessage } from '../src/types.ts';
 import { Modals } from '../src/ui/Modals.tsx';
 import { quoteLine } from '../src/transcript.ts';
@@ -18,7 +19,7 @@ import { compactLine, homeTopbar, Pane, resetRows, StoppedHome, untilText, usage
 import { claudeCheckText } from '../src/ui/Settings.tsx';
 import { watchMessages } from '../src/watch.ts';
 import { messages, state as recorded, transcript } from './contract.gen.ts';
-import { chatDom, fire, render, settle } from './render.ts';
+import { chatDom, fakeMedia, fire, render, settle } from './render.ts';
 
 vi.mock('../src/ws.ts', () => ({
   onWsMessage: (_fn: (msg: WsMessage) => void) => () => {},
@@ -60,7 +61,7 @@ async function home(s: AppState, actions?: { clear: () => void; stop: () => void
   location.hash = '#/home/pilot';
   store.view.activePaneId = 'hl:pilot';
   store.view.homeMode = true;
-  const t = homeTopbar('hl:pilot', 'pilot');
+  const t = homeTopbar('hl:pilot', 'pilot', actions);
   ({ container, unmount } = await render(<><div id="tb">{t.title}{t.right}</div><Pane paneId="hl:pilot" home={true} actions={actions} name="pilot" /><Modals /></>));
   await act(() => new Promise<void>((r) => { setTimeout(r, 0); })); // happy-dom's hashchange, on a timer: it would close a popover opened before it
 }
@@ -134,6 +135,23 @@ describe("a headless orchestrator's Home", () => {
     assert.equal($('#quickkey-row').style.display, 'none');
     assert.equal($<HTMLElement>('#tb .home-switch-btn[aria-current="page"]').dataset.orch, 'pilot', 'the topbar: the switcher');
     assert.ok(!$('#tb #btn-view-toggle') && $('#home-status #btn-view-toggle'), 'the toggle on its status bar, hidden');
+  });
+
+  it("on a PC its header is the topbar: its name and state, then its usage, model, toggle and ⋮; under it only its warnings", async () => {
+    const setWide = fakeMedia(WIDE_QUERY, true);
+    const actions = { clear: () => {}, stop: () => {} };
+    await home(withPilot(), actions);
+    assert.ok(container.querySelector('#tb .home-switch') === null, 'no switcher: the sidebar lists the Homes');
+    assert.equal($('#tb .home-state').textContent, '· needs you');
+    for (const id of ['#home-usage', '#home-model', '#btn-view-toggle', '#btn-home-menu']) assert.ok(container.querySelector(`#tb ${id}`), `${id} in the topbar`);
+    assert.ok(container.querySelector('#tb #btn-settings') === null, "⚙ is the sidebar's");
+    assert.ok($('#home-status #home-warnings') && container.querySelector('#home-status .home-row') === null, 'its bar: the warnings alone');
+    await unmount();
+    await home(withPilot(idle), actions);
+    assert.ok(container.querySelector('#home-status') === null, 'no warnings: no bar');
+    await setWide(false);
+    assert.ok($('#home-status .home-row #btn-home-menu') && $('#home-status #home-usage') && $('#tb #btn-settings') && container.querySelector('#tb #btn-home-menu') === null,
+      'a phone: the tools on its bar, ⚙ in the topbar');
   });
 
   it('sends the composer to /api/orchestrators/:name/send', async () => {

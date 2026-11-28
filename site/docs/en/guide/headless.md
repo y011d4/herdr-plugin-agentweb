@@ -3,16 +3,16 @@
 `"mode": "headless"` on an entry runs that orchestrator as the bridge's own `claude -p`
 instead of an agent in a herdr pane (your Claude subscription only: the bridge refuses API-key
 billing). Its Home is then the chat alone: messages go out also while it works, ■ on the
-"doing now" line interrupts it, its questions get an answer panel, and the status bar shows its
+"doing now" line interrupts it, its questions get an answer panel, and its status bar (on a PC its top bar) shows its
 usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable; a tap on it lists when each limit resets: the time left and the clock time; the limits stay across a bridge restart and a Clear until each resets), the model it runs on (a pick from
 Claude Code's `/model` list switches it between turns, or for its next start) and what went wrong, each with what to do.
-**Compact** in its status bar's **⋮** (with Clear and Stop; between turns; an optional focus says what the summary should keep) runs Claude Code's `/compact` in
+**Compact** in its **⋮** (with Clear and Stop; between turns; an optional focus says what the summary should keep) runs Claude Code's `/compact` in
 place: the session goes on from the summary, and the "doing now" line says `compacting…`, then `compacted: ctx 64% → 12%`.
 From 70% of the context in use, the ctx turns orange and a small orange dot marks the ⋮: a suggestion only (Claude Code compacts by itself near the
 limit). The chat marks where a compaction cut the conversation (`[yoicks] compacted`). It
 also keeps a to-do list for you (its `todo` tool), under "Needs you" on its Home: what only you can do, such
-as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; a tap on one opens its menu: **Mark done** ticks it off, and **Ask the orchestrator** quotes it (with its id) in the composer, to ask the orchestrator about it. Each Home's switcher button
-(and its heading in the PC sidebar) counts what waits on you there. On a PC the sidebar lists it under that heading, in place of the Home's Needs you
+as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; a tap on one opens its menu: **Mark done** ticks it off, and **Ask the orchestrator** quotes it (with its id) in the composer, to ask the orchestrator about it. A phone's switcher button
+for each Home (and its heading in the PC sidebar) counts what waits on you there. On a PC the sidebar lists it under that heading, in place of the Home's Needs you
 (its blocked agents, its question, its to-do list: each item two lines at most, all of it on hover); the agents themselves are folded into one row, **All agents**, kept at the bottom of the sidebar, which a click unfolds. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
