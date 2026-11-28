@@ -55,6 +55,8 @@ const reads = (paneId: string): number => reqs.filter((q) => q.url.startsWith(`/
 const transcripts = (paneId: string): number => reqs.filter((q) => q.url === `/api/panes/${encodeURIComponent(paneId)}/transcript`).length;
 
 const go = async (hash: string): Promise<void> => { location.hash = hash; await settle(); };
+// A screen to open panes over: a stopped Home (the recorded State's work), with no view of its own
+const BASE = '#/home/work';
 /** `hash` opened from no screen of the app (a link, a notification with the app closed): a hashchange from no hash.
  *  happy-dom's replaceState fires hashchange, as no browser does: the empty hash's own route (a replace by the default
  *  Home) is held back, and recorded by a spy on replace. */
@@ -154,18 +156,24 @@ describe('App', () => {
     assert.equal(store.view.activePaneId, 'p6');
   });
 
-  it("lists #/agents/<name>'s account; a pane opens in a drawer over it, which stays as it is, and closes back to it when the pane goes", async () => {
-    await go('#/agents/personal');
-    const ids = [...document.querySelectorAll<HTMLElement>('#screen-agents .agent-card')].map((c) => c.dataset.paneId).sort();
-    assert.deepEqual(ids, ['p1', 'p3'], 'its account, never the orchestrator');
-    assert.equal($('#topbar-title')!.textContent, 'Agents');
-    assert.equal($('#topbar-left')!.textContent, '← Personal', 'the way back names its Home');
-    const list = $('#screen #screen-agents');
+  it("a Home's agents popover lists its account; a pane opens in a drawer over the Home, which stays as it is, and closes back to it when the pane goes", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go(BASE);
+    await click($('#home-status .home-counts'));
+    const ids = [...document.querySelectorAll<HTMLElement>('[data-agents-list] .agent-row')].map((c) => c.dataset.paneId).sort();
+    assert.deepEqual(ids, ['p1', 'p3', 'p6', 'p7'], 'its account (unknown: every agent), never an orchestrator');
+    const home = $('#screen #screen-home-stopped');
     const before = history.length;
-    await click($('.agent-card[data-pane-id="p1"]'));
+    await click($('[data-agents-list] .agent-row[data-pane-id="p1"]'));
     assert.equal(location.hash, '#/pane/p1');
+    assert.ok(!$('[data-agents-list]') && $('#modal-root .agent-drawer #screen-pane'), 'the popover closed, the pane in the drawer');
+    history.back();
+    await settle();
+    assert.ok(location.hash === BASE && !$('.agent-drawer #screen-pane'));
+    // opened over it (a sidebar row, a notification): in the entry the one before left ahead
+    await go('#/pane/p1');
     assert.ok($('#modal-root .agent-drawer #screen-pane'), 'the pane, in the drawer');
-    assert.ok($('#screen #screen-agents') === list, 'the list under it, the same element');
+    assert.ok($('#screen #screen-home-stopped') === home, 'the Home under it, the same element');
     assert.match($('.agent-drawer-head')!.textContent!, /claude/);
     assert.ok(document.activeElement === $('.agent-drawer-head'), 'the focus starts on its header, not on ✕');
     assert.equal(store.view.activePaneId, 'p1');
@@ -175,15 +183,15 @@ describe('App', () => {
     await act(async () => push!({ type: 'pane_gone', paneId: 'p1' }));
     await settle();
     assert.deepEqual(toastTitles(), ['Pane closed']);
-    assert.equal(location.hash, '#/agents/personal');
+    assert.equal(location.hash, BASE);
     assert.ok(!$('.agent-drawer #screen-pane'), 'the drawer closed');
-    assert.ok($('#screen #screen-agents') === list, 'back on the same list');
+    assert.ok($('#screen #screen-home-stopped') === home, 'back on the same Home');
     assert.ok(!$('#screen')!.hasAttribute('inert') && !$('#topbar')!.hasAttribute('inert'));
     assert.equal(history.length, before + 1, 'the close went back: no entry left over');
   });
 
   it("titles a drawer by herdr's name for its agent, else by the agent kind, with the location beside and its purpose under them", async () => {
-    await go('#/agents');
+    await go(BASE);
     await go('#/pane/p3');
     assert.equal($('.agent-drawer-head .topbar-title')!.textContent, 'w-review· repo-wt-feat / featレビューの指摘を直す');
     assert.equal($<HTMLElement>('.agent-drawer-head .title-purpose')!.title, 'レビューの指摘を直す', 'all of it on hover');
@@ -196,26 +204,26 @@ describe('App', () => {
     await act(async () => push!({ type: 'state', state: structuredClone(s) }));
     assert.equal($('.agent-drawer-head .topbar-title')!.textContent, 'w-review· repo-wt-feat', 'no purpose: the name');
     await act(async () => push!({ type: 'state', state: was }));
-    await go('#/agents');
+    await go(BASE);
     await go('#/pane/p7');
     assert.equal($('.agent-drawer-head .topbar-title')!.textContent, 'codex· repo / 2');
   });
 
   it("a pane gone under an image preview closes both: the preview's entry, then the drawer's", async () => {
-    await go('#/agents');
+    await go(BASE);
     await go('#/pane/p1');
     await act(async () => previewImage('data:image/png;base64,AA==', 'shot'));
     assert.ok($('#modal-root .image-preview'));
     await act(async () => push!({ type: 'pane_gone', paneId: 'p1' }));
     await settle(50);
-    assert.equal(location.hash, '#/agents');
+    assert.equal(location.hash, BASE);
     assert.ok(!$('#modal-root .image-preview') && !$('.agent-drawer #screen-pane'));
 
     // the preview closed by hand, its Back still under way, as the pane goes: one Back each, no further.
     // A browser's Back lands a task later (happy-dom's at once).
     const realBack = history.back.bind(history);
     const later = vi.spyOn(history, 'back').mockImplementation(() => { setTimeout(realBack, 0); });
-    await go('#/agents/personal');
+    await go(BASE);
     await go('#/pane/p1');
     await act(async () => previewImage('data:image/png;base64,AA==', 'shot'));
     await act(async () => {
@@ -224,12 +232,12 @@ describe('App', () => {
     });
     await settle(50);
     later.mockRestore();
-    assert.equal(location.hash, '#/agents/personal');
+    assert.equal(location.hash, BASE);
     assert.ok(!$('#modal-root .image-preview') && !$('.agent-drawer #screen-pane'));
   });
 
   it('leaves a pane a State no longer has', async () => {
-    await go('#/agents');
+    await go(BASE);
     await go('#/pane/p2');
     assert.ok($('.agent-drawer #screen-pane'));
     const s = fresh();
@@ -239,7 +247,7 @@ describe('App', () => {
     await act(async () => push!({ type: 'state', state: s })); // a second State before the close lands says nothing again
     await settle();
     assert.deepEqual(toastTitles(), ['Pane closed']);
-    assert.equal(location.hash, '#/agents');
+    assert.equal(location.hash, BASE);
   });
 
   it("opens a pane over a Home, whose view waits under it; closing goes back to the Home as it was, its view going on", async () => {
@@ -274,7 +282,7 @@ describe('App', () => {
 
   it('a Home whose orchestrator stopped under the drawer is drawn afresh on close, its old view gone', async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
-    await go('#/agents');
+    await go(BASE);
     await go('#/home/personal');
     await answer('/api/panes/p4/transcript', transcript[0]);
     await go('#/pane/p1');
@@ -292,15 +300,16 @@ describe('App', () => {
     assert.equal(transcripts('p4') + reads('p4'), looks, 'the old view reads nothing');
   });
 
-  it("agents opened one after another from a list card, the sidebar, a [yoicks] notice and a notification: one drawer, its header the latest's; one Back closes it", async () => {
+  it("agents opened one after another from a Home's agents popover, the sidebar, a [yoicks] notice and a notification: one drawer, its header the latest's; one Back closes it", async () => {
     // happy-dom's replace() adds an entry, as assign() does: a browser's, in place
     const replace = vi.spyOn(location, 'replace').mockImplementation((url: string | URL) => {
       const oldURL = location.href;
       history.replaceState(history.state, '', String(url));
       dispatchEvent(new HashChangeEvent('hashchange', { oldURL, newURL: location.href }));
     });
-    await go('#/agents');
-    await click($('#screen [data-pane-id="p1"]')); // the list's card
+    await go(BASE);
+    await click($('#home-status .home-counts'));
+    await click($('[data-agents-list] .agent-row[data-pane-id="p1"]')); // the Home's agents popover
     await settle();
     const before = history.length;
     await act(async () => openAgent('p2')); // the sidebar's (and Clear's)
@@ -319,7 +328,7 @@ describe('App', () => {
     assert.equal(history.length, before, 'one entry: switched in place');
     history.back(); // the phone's Back: closes it
     await settle();
-    assert.equal(location.hash, '#/agents');
+    assert.equal(location.hash, BASE);
     assert.ok(!$('.agent-drawer #screen-pane') && !$('.agent-drawer .agent-drawer-head'));
     replace.mockRestore();
   });
@@ -331,7 +340,7 @@ describe('App', () => {
       history.replaceState(history.state, '', String(url));
       dispatchEvent(new HashChangeEvent('hashchange', { oldURL, newURL: location.href }));
     });
-    await go('#/agents');
+    await go(BASE);
     await go('#/pane/p1');
     const before = history.length;
     await act(async () => { sw.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: '#/pane/p2' } })); });
@@ -348,7 +357,7 @@ describe('App', () => {
     assert.equal(document.querySelectorAll('.agent-drawer #screen-pane').length, 1, 'one drawer');
     history.back(); // the phone's Back: closes it, through none of the agents seen before
     await settle();
-    assert.equal(location.hash, '#/agents');
+    assert.equal(location.hash, BASE);
     assert.ok(!$('.agent-drawer #screen-pane'));
 
     await openAfresh('#/pane/p2'); // not from a list or a Home: an empty screen under it, no Home's view beside the drawer's
@@ -364,7 +373,7 @@ describe('App', () => {
   });
 
   it("Escape closes the drawer, but not while the ⋮ menu or a confirm is over it; it closes those", async () => {
-    await go('#/agents');
+    await go(BASE);
     await go('#/pane/p1');
     const esc = (): Promise<void> => act(async () => { (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     await click($('#btn-agent-menu'));
@@ -383,12 +392,12 @@ describe('App', () => {
     assert.equal(location.hash, '#/pane/p1', "an IME's Escape doesn't close it");
     await esc();
     await settle();
-    assert.equal(location.hash, '#/agents');
+    assert.equal(location.hash, BASE);
     assert.ok(!$('.agent-drawer #screen-pane'));
   });
 
   it('an Escape from ⋮ right after its menu opens closes the menu, not the drawer; the next one closes the drawer', async () => {
-    await go('#/agents');
+    await go(BASE);
     await go('#/pane/p1');
     await click($('#btn-agent-menu'));
     assert.ok($('[data-menu-dropdown]'));
@@ -399,7 +408,7 @@ describe('App', () => {
     assert.ok(!$('[data-menu-dropdown]') && !!$('.agent-drawer #screen-pane') && location.hash === '#/pane/p1', 'only the menu closed');
     await act(async () => { (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     await settle();
-    assert.equal(location.hash, '#/agents', 'the next Escape closes the drawer');
+    assert.equal(location.hash, BASE, 'the next Escape closes the drawer');
   });
 
   it("a stopped orchestrator's Home has Start; its running Home opens once the State shows it", async () => {
@@ -491,16 +500,16 @@ describe('App', () => {
     await answer('POST /api/agents/p1/clear', { ok: true, paneId: 'p8' });
   });
 
-  it('Stop goes back to the list the pane came from; Clear goes to the new pane, or stays on a Home', async () => {
+  it('Stop goes back to the Home the pane came from; Clear goes to the new pane, or stays on a Home', async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
-    await go('#/agents/personal');
+    await go(BASE);
     await go('#/pane/p3');
     await click($('#btn-agent-menu'));
     await click($('#am-stop'));
     await click($('#modal-root #cf-ok'));
     await answer('DELETE /api/panes/p3', { ok: true });
     assert.deepEqual(toastTitles(), ['Stopped']);
-    assert.equal(location.hash, '#/agents/personal');
+    assert.equal(location.hash, BASE);
 
     await go('#/pane/p1');
     await click($('#btn-agent-menu'));
@@ -525,7 +534,7 @@ describe('App', () => {
 
   it("a Clear whose old pane goes before it answers opens the new pane, saying nothing of the old one's going", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
-    await go('#/agents');
+    await go(BASE);
     await go('#/pane/p1');
     await click($('#btn-agent-menu'));
     await click($('#am-clear'));
@@ -540,12 +549,12 @@ describe('App', () => {
     assert.equal(location.hash, '#/pane/p8');
     assert.deepEqual(toastTitles(), ['Cleared']);
     await act(async () => push!({ type: 'state', state: fresh() }));
-    await go('#/agents');
+    await go(BASE);
   });
 
   it('a Clear answered while its drawer is closing (its Back under way) opens nothing', async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
-    await go('#/agents');
+    await go(BASE);
     await go('#/pane/p1');
     await click($('#btn-agent-menu'));
     await click($('#am-clear'));
@@ -558,13 +567,13 @@ describe('App', () => {
     later.mockRestore();
     await act(async () => land());
     await settle();
-    assert.equal(location.hash, '#/agents');
+    assert.equal(location.hash, BASE);
     assert.ok(!$('.agent-drawer #screen-pane'));
   });
 
   it("a Stop answered after another pane opened leaves that pane's drawer open", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
-    await go('#/agents');
+    await go(BASE);
     await go('#/pane/p3');
     await click($('#btn-agent-menu'));
     await click($('#am-stop'));
@@ -573,7 +582,7 @@ describe('App', () => {
     await answer('DELETE /api/panes/p3', { ok: true });
     assert.equal(location.hash, '#/pane/p1');
     assert.ok($('.agent-drawer #screen-pane'));
-    await go('#/agents');
+    await go(BASE);
   });
 
   it("a Home's Needs you and agent counts are on its bar until its panel has them (1280px); on a PC the topbar is the Home's header", async () => {
@@ -594,9 +603,6 @@ describe('App', () => {
     assert.ok(!$('#home-status'), 'no bar under it (a TUI Home: no warnings)');
     assert.ok($('#screen > #home-panel')?.previousElementSibling === $('#screen-pane'), 'its panel after the Home, in #screen');
     assert.ok($('#home-panel .home-todo[data-todo="t1"]'), "the panel has the Home's to-do item");
-    await click($('#home-panel a.home-panel-list'));
-    assert.equal(location.hash, '#/agents/personal', "the Home's list: its panel's Open the list (a phone's is in the counts' popover)");
-    await go('#/home/personal');
     await setPanel(false);
     await setWide(false);
     assert.equal(bar(), '0111101100', 'a phone again');
@@ -612,12 +618,12 @@ describe('App', () => {
     assert.ok($('#screen-home-stopped') && !$('#home-status') && $('#screen > #home-panel'), 'from 1280px: no bar, its panel');
     await setPanel(false);
     await setWide(false);
-    await go('#/agents');
+    await go(BASE);
   });
 
   it("a pane's ⋮ has Open in herdr on a PC only: it focuses the pane in herdr and says so", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
-    await go('#/agents');
+    await go(BASE);
     await go('#/pane/p3');
     await click($('#btn-agent-menu'));
     assert.ok($('#am-rename') && !$('#am-herdr'), 'a phone: none (it would switch the PC out of sight)');
@@ -635,17 +641,18 @@ describe('App', () => {
     await answer('POST /api/panes/p3/focus', { error: { code: 'not_found', message: 'pane not found' } }, 404);
     assert.deepEqual(toastTitles(), ['Could not open in herdr']);
     await setWide(false);
-    await go('#/agents');
+    await go(BASE);
   });
 
-  it("on a PC a click on an agent opens it in herdr (a list card, a [yoicks] notice's name); its ⋮'s Show here, its drawer", async () => {
+  it("on a PC a click on an agent opens it in herdr (a Home panel's row, a [yoicks] notice's name); its ⋮'s Show here, its drawer", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await setWide(true);
-    await go('#/agents');
-    await click($('#screen .agent-card[data-pane-id="p3"]'));
+    await setPanel(true);
+    await go(BASE);
+    await click($('#home-panel .agent-row[data-pane-id="p3"]'));
     await answer('POST /api/panes/p3/focus', { ok: true });
     assert.deepEqual(toastTitles(), ['Opened in herdr']);
-    assert.equal(location.hash, '#/agents', 'no drawer');
+    assert.equal(location.hash, BASE, 'no drawer');
     clearToasts();
     await act(async () => openAgentNamed('w-review')); // p3
     await answer('POST /api/panes/p3/focus', { error: { code: 'not_found', message: 'pane not found' } }, 404);
@@ -653,17 +660,20 @@ describe('App', () => {
     await act(async () => openAgent('p4')); // an orchestrator's pane: its Home, at every width
     await settle();
     assert.equal(location.hash, '#/home/personal');
-    await go('#/agents');
-    await click($('#screen [data-agent-menu="p3"]'));
-    assert.equal(location.hash, '#/agents', "the ⋮ is its own: not the card's click");
-    await click($('#screen [data-agent-more="p3"] [data-action="show"]'));
+    await go(BASE);
+    await click($('#home-panel [data-agent-menu="p3"]'));
+    assert.equal(location.hash, BASE, "the ⋮ is its own: not the row's click");
+    await click($('#home-panel [data-agent-more="p3"] [data-action="show"]'));
     await settle();
     assert.equal(location.hash, '#/pane/p3');
     assert.ok($('.agent-drawer #screen-pane'));
     assert.ok(!reqs.some((q) => !q.answered && q.url.endsWith('/focus')), 'Show here sends nothing');
+    await setPanel(false);
     await setWide(false);
-    await go('#/agents');
-    assert.ok(!$('#screen [data-agent-menu]'), 'a phone: no ⋮ (a tap opens the drawer)');
+    await go(BASE);
+    await click($('#home-status .home-counts'));
+    assert.ok($('[data-agents-list] .agent-row') && !$('[data-agents-list] [data-agent-menu]'), 'a phone: no ⋮ (a tap opens the drawer)');
+    await click($('#home-status .home-counts'));
     clearToasts();
   });
 
@@ -675,7 +685,7 @@ describe('App', () => {
     });
     await act(async () => push!({ type: 'state', state: fresh() }));
     await setWide(true);
-    await go('#/agents');
+    await go(BASE);
     await go('#/pane/p3');
     const len = history.length;
     await click($('#sidebar #btn-settings'));
@@ -684,7 +694,7 @@ describe('App', () => {
     assert.equal(history.length, len, "in the drawer's entry");
     await click($('#btn-settings-close'));
     await settle();
-    assert.equal(location.hash, '#/agents', 'back to the list, past the drawer');
+    assert.equal(location.hash, BASE, 'back to the Home, past the drawer');
     await setWide(false);
     replace.mockRestore();
   });
@@ -824,15 +834,15 @@ describe('App', () => {
     await settle();
   });
 
-  it('Escape closes Settings; opened afresh (no list or Home before it) it is in front of an empty screen and closes to the default Home', async () => {
-    await go('#/agents');
-    const list = $('#screen #screen-agents');
+  it('Escape closes Settings; opened afresh (no Home before it) it is in front of an empty screen and closes to the default Home', async () => {
+    await go(BASE);
+    const home = $('#screen #screen-home-stopped');
     await go('#/settings');
-    assert.ok($('#screen #screen-agents') === list);
+    assert.ok($('#screen #screen-home-stopped') === home);
     await act(async () => { (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     await settle();
-    assert.equal(location.hash, '#/agents');
-    assert.ok(!$('#screen-settings') && $('#screen #screen-agents') === list);
+    assert.equal(location.hash, BASE);
+    assert.ok(!$('#screen-settings') && $('#screen #screen-home-stopped') === home);
 
     const replace = vi.spyOn(location, 'replace');
     await openAfresh('#/settings');
@@ -847,7 +857,7 @@ describe('App', () => {
 
   it("Settings taking the place of a drawer over a Home whose orchestrator's pane changed meanwhile draws the Home afresh", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
-    await go('#/agents');
+    await go(BASE);
     await go('#/home/personal');
     const home = $('#screen #screen-pane.screen-home');
     await go('#/pane/p1');
@@ -984,11 +994,11 @@ describe('App', () => {
   });
 
   it("draws the PC sidebar on a wide screen only, before the shell's elements, which stay as it comes and goes", async () => {
-    await go('#/agents');
+    await go(BASE);
     const shell = (): Array<HTMLElement | null> => ['#topbar', '#reconnect-banner', '#screen'].map($);
     const before = shell();
-    const list = $('#screen-agents');
-    assert.ok(!$('#sidebar'), 'no sidebar');
+    const home = $('#screen-home-stopped');
+    assert.ok(home && !$('#sidebar'), 'no sidebar');
     await setWide(true);
     assert.ok($('#app > #sidebar')!.nextElementSibling === before[0], 'first in #app, before #topbar');
     assert.ok($('#sidebar [data-home="personal"]'), 'its Homes');
@@ -996,11 +1006,11 @@ describe('App', () => {
     assert.ok(!$('#sidebar'), 'no sidebar');
     await setWide(true); // and the 401 below goes to the token screen with it wide
     assert.ok(shell().every((el, i) => el === before[i]), '#topbar, #reconnect-banner and #screen are the same elements');
-    assert.ok($('#screen-agents') === list, 'the screen on show stays');
+    assert.ok($('#screen-home-stopped') === home, 'the screen on show stays');
   });
 
   it('a 401 shows the token screen with its message, without the topbar or the banner (or the PC sidebar)', async () => {
-    await go('#/agents');
+    await go(BASE);
     assert.ok($('#sidebar'), 'wide, from the test before');
     store.wsConnected = false;
     await act(async () => emit()); // the link is down

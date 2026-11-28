@@ -14,7 +14,7 @@ export const STORAGE_HOME = 'herdr_home'; // the orchestrator whose Home was ope
 
 export interface View {
   /** what #screen shows */
-  screen: 'loading' | 'token' | 'agents' | 'pane';
+  screen: 'loading' | 'token' | 'pane';
   /** the pane on screen (a pane view or a Home), else null */
   activePaneId: string | null;
   /** the pane on screen is an orchestrator's Home (#/home/<name>) */

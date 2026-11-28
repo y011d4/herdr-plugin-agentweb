@@ -250,15 +250,15 @@ describe('Image preview', () => {
   it('a hash change closes it; Back shows it again and Forward still reaches the later route', async () => {
     location.hash = '#/home/pilot';
     await fire(() => previewImage('data:image/png;base64,x', 'image'));
-    await hashChange('#/agents'); // e.g. a notification's link
+    await hashChange('#/pane/p1'); // e.g. a notification's link
     assert.ok(!open());
-    assert.equal(location.hash, '#/agents', 'no step back');
+    assert.equal(location.hash, '#/pane/p1', 'no step back');
     await go(-1);
     assert.ok(open());
     assert.equal(location.hash, '#/home/pilot');
     await go(1);
     assert.ok(!open());
-    assert.equal(location.hash, '#/agents');
+    assert.equal(location.hash, '#/pane/p1');
   });
 
   it('shows only the last 5 again: an older entry stays blank', async () => {

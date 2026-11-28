@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // ui/HomePanel.tsx, a PC's Home panel (from 1280px, beside the Home): Needs you (its count), the orchestrator's question,
-// the blocked agents as rows and the to-do list; then the other agents by urgency, and Open the list. An agent's row opens
+// the blocked agents as rows and the to-do list; then the other agents by urgency. An agent's row opens
 // it in herdr on a PC, its ⋮ Open in herdr, Show here, Ask the orchestrator and Stop agent… (Dashboard.tsx's AgentRow). The recorded State: personal (p4,
 // running; its account p1 p3 p4) and work (stopped, its account unknown: every agent); agents p1 (working) p7 (unknown)
 // p6 (blocked) p3 (done, herdr's name w-review).
@@ -57,7 +57,7 @@ afterEach(async () => {
 });
 
 describe('HomePanel', () => {
-  it('shows what needs you (its blocked agents as rows, its to-do list), then its other agents by urgency, and its list', async () => {
+  it('shows what needs you (its blocked agents as rows, its to-do list), then its other agents by urgency', async () => {
     const s = fresh();
     s.workspaces[0].tabs[0].panes[0].agent!.status = 'blocked'; // p1
     s.orchestrators[0].todos = [item('t1', 'Merge the PR'), item('t2', 'Later on', Date.now() + 3_600_000)];
@@ -71,7 +71,7 @@ describe('HomePanel', () => {
     assert.deepEqual([...c.querySelectorAll<HTMLElement>('[data-panel="agents"] > :first-child .status-counts [data-count]')]
       .map((e) => `${e.textContent}${e.classList.contains('opacity-40') ? ' (dimmed)' : ''}`),
     ['0 working (dimmed)', '1 done', '0 idle (dimmed)'], 'its counts after the heading, each, a zero dimmed');
-    assert.equal(c.querySelector('a.home-panel-list')!.getAttribute('href'), '#/agents/personal');
+    assert.ok(!c.querySelector('aside#home-panel a'), 'no link to a list: these are its agents');
   });
 
   it('says so when nothing waits and there are no agents', async () => {
@@ -80,7 +80,7 @@ describe('HomePanel', () => {
     await show('personal', s);
     assert.equal(head('needs'), 'Needs you');
     assert.equal(c.querySelector('[data-panel="needs"]')!.textContent, 'Needs youNothing waits on you.');
-    assert.match(c.querySelector('[data-panel="agents"]')!.textContent!, /^Agents0 working0 done0 idleNo agents\.Open the list/);
+    assert.match(c.querySelector('[data-panel="agents"]')!.textContent!, /^Agents0 working0 done0 idleNo agents\.$/);
   });
 
   it("lists a stopped Home's: its account unknown, every agent; its items without Ask", async () => {

@@ -63,8 +63,7 @@ All in `internal/bridge/` (one package):
   `#app` over index.html's static first paint (the same topbar, banner and `#screen`): hash routing
   (`routes.ts`, pure `resolveRoute`; each route render gives the screen and its topbar a new key,
   so they mount afresh; `#/pane/<id>` opens the pane in `ui/AgentDrawer.tsx`, Mantine's Drawer, over the
-  screen it was opened from, `view.paneBackRoute`, which stays as it is: a list live and at its scroll,
-  a Home with its view suspended, resumed as it was on close (`suspendPaneView`/`resumePaneView`: no new view, no
+  screen it was opened from, `view.paneBackRoute`, which stays as it is: a Home with its view suspended, resumed as it was on close (`suspendPaneView`/`resumePaneView`: no new view, no
   flicker); a sheet from the bottom on a phone, from the right at 1024px and up; a Claude pane opens on its chat,
   its terminal only when chosen for it, remembered per pane for the app's life (pane-view's `chosenView`);
   `#/settings` likewise opens Settings in `ui/SettingsSheet.tsx`, Mantine's Modal, centered at 1024px and
@@ -84,8 +83,9 @@ All in `internal/bridge/` (one package):
   drops those of panes and orchestrators it no longer has), `ws.ts`
   (socket, ping, backoff, state polling, watches) and `notify.ts` (the toast store: short-lived
   results of the user's actions, and the OS notifications; a status push or an alert never
-  toasts). The screens are in `web/src/ui/`: Settings, Token, the agents list `Dashboard.tsx`,
-  `Pane.tsx` and `PromptPanel.tsx`, and on a PC the rail of Homes `Sidebar.tsx` beside them and a Home's panel
+  toasts). The screens are in `web/src/ui/`: Settings, Token,
+  `Pane.tsx` and `PromptPanel.tsx` (`Dashboard.tsx`, named for the agents list there was, has an agent's row, `AgentRow`, and its
+  pieces), and on a PC the rail of Homes `Sidebar.tsx` beside them and a Home's panel
   `HomePanel.tsx`; `Status.tsx` is an agent's status as they show it (`StatusBadge`, `StatusDot`, a Home's `StatusCounts`); `Toasts.tsx` draws into `#toast-container` (each toast
   Mantine's Notification; only the toasts take taps, the box too while the stack overflows) and `Modals.tsx`
   (Confirm, Rename and the image preview, all on Mantine's Modal) is portalled into `#modal-root`;
@@ -154,7 +154,7 @@ All in `internal/bridge/` (one package):
   the theme's `cursorType`, a `summary` or `[role=button]` by reset.css, a disabled one `not-allowed` (style.css). Mantine's style props (`px`, `c`, `bg`…) are inline
   styles, so they beat any class, a Tailwind `lg:` one too: a value that changes with the width goes in
   classes only. A class (Tailwind's layer, or `app`) beats Mantine's own CSS. Ids stay; the class names the
-  tests and e2e select on stay on their elements as hooks without CSS (`agent-card`, `home-chip`,
+  tests and e2e select on stay on their elements as hooks without CSS (`agent-row`, `home-chip`,
   `qkey`, `toast`, `ask-opt`…); a new hook is a `data-*` attribute. Mantine's focus trap focuses in a
   `setTimeout`: `autoFocus` where the focus must be there as it mounts. Tailwind never finds a class written
   right before `${…}` in a template string (`self-end${x}`): leave a space. With no preflight, `border-dashed`
@@ -178,7 +178,7 @@ All in `internal/bridge/` (one package):
   A fresh app open (empty hash) lands on a **Home** (`#/home/<name>`; bare `#/home` = the one used
   last on this phone, running or not, else the first running, else the first configured). A stopped
   orchestrator's Home (`StoppedHome`, no pane) shows its account's agents and **Start** (the only
-  Start: the list has none); its account is `expectedAccount(def)` (the same rule `startOrchestrator`
+  Start); its account is `expectedAccount(def)` (the same rule `startOrchestrator`
   checks against), found once in the background at bridge start. A running one's is the pane view in
   `homeMode` (Stop leaves the Home stopped; a Clear holds it ≤8s for the replacement) — on a phone with 2+ configured, its
   topbar (a stopped one's too) is the switcher between them (`HomeSwitcher`, in the title slot; stopped ones dimmed; each with
@@ -192,23 +192,23 @@ All in `internal/bridge/` (one package):
   no switcher (the rail lists the Homes) and the topbar is the Home's header, its name and status, then `HomeTools`; the bar
   keeps Needs you and the counts until, from `PANEL_QUERY` (1280px, `usePanel`), the Home's panel at its right
   (`ui/HomePanel.tsx`, drawn after the screen in `#screen`, a row then: its needs, the blocked agents as `AgentRow`s, the
-  to-do list, its other agents by urgency, Open the list) has them; then only a headless one's warnings (no bar without
+  to-do list, its other agents by urgency) has them; then only a headless one's warnings (no bar without
   any). Needs you opens a Mantine Popover (Escape, a tap outside
   and leaving the screen close it; as wide as a phone allows, no taller than the room below it): the blocked agents' chips, its
   question's line, and its to-do list (`ui/Todos.tsx` over the pure `todos.ts`: a tap on an item opens its menu, Mark done = `DELETE …/todos/:id`, Dismiss = `…?dismiss=1`, an item due ahead under
   Later until its time, a link shown by its host, a worker's name opening its drawer; a stopped Home has them too), dialogue-only chat
   (`conversationItems` hides tools/injected turns, but for questions and worker starts), a "doing now" line (`latestActivity`) and a
   composer (the terminal + quick keys stay one `>_` tap away — the only way to send Esc/Ctrl+C, and
-  the fallback when there's no transcript). Orchestrators get no card in any agents list (`agentCards`
-  in `ui/Dashboard.tsx` feeds both the list and `homeSummary`); the full list's ← Home opens `defaultHome()`.
+  the fallback when there's no transcript). Orchestrators get no row among the agents (`agentCards`
+  in `ui/Dashboard.tsx` feeds the rows and `homeSummary`). There is no list of every agent: each Home lists its own, and the
+  agents list's old routes (`#/agents`, `#/agents/<name>`) go to the default Home and to that Home.
   Home's counts (its status bar's: an outlined pill with a ▾, `Pane.tsx`'s `AgentsButton`) open a popover as Needs you's: those
   agents, blocked first, then working, done, idle (`byUrgency`), as the Home panel's rows (`AgentRow`, with the time; a tap
   opens it, `openAgent`; on a PC its ⋮, `AgentMore`: Open in herdr, Show here, on a running Home's rows (its account known) Ask the orchestrator
   (`askAbout`: `agentQuote`'s name, purpose, pane id and status into the Home's composer, as a to-do item's Ask), and Stop agent…
-  (`Modals.tsx`'s `stopAgentFlow`, the drawer's: a confirm, then `DELETE /api/panes/:id`, herdr's `pane.close`)), and at its bottom Open the list, `#/agents/<name>`: only the panes in its state `agents` (its Claude
+  (`Modals.tsx`'s `stopAgentFlow`, the drawer's: a confirm, then `DELETE /api/panes/:id`, herdr's `pane.close`)): only the panes in its state `agents` (its Claude
   account's, via `paneAccount`, cached per agent pane and re-checked every 60s by `paneAccountCache`;
-  `null` = unknown → every agent),
-  with `← <its Home>` (`Back to …`; at every width) to that Home; a pane opened from there opens over that list. Any route to
+  `null` = unknown → every agent). Any route to
   its pane (`#/pane/<id>`: notification clicks, stale links) is replaced by its Home. herdr's
   `pane.agent_detected` (fires on detect *and* release) is rebuild-triggering, so agent presence and
   `launchCwd` stay current across exit/`cd`/relaunch in one shell. Its behavior (delegating via `yoicks agent …`, waking on background
@@ -465,11 +465,10 @@ Verified live against herdr 0.7.3 / protocol 16:
   row) shows the agent's herdr name (`herdrName`, else its tab name), under it its purpose
   (state `purposes`, when given: two lines at most, all of it on hover), then one dim line,
   its location and git branch, its kind and (a linked worktree's) the `worktree` chip; the drawer title is the name and location, the purpose a small
-  line under them. The dashboard is one flat list of every agent, most
-  recent status change first, so each card names its own location (`cardLocation`); a linked
-  worktree's card adds a `worktree` chip. The order is herdr's `stateChangeSeq` (a change
+  line under them. Rows of one status are most recent status change first, each naming its own location (`cardLocation`).
+  The order is herdr's `stateChangeSeq` (a change
   not fetched yet counts as newest), then `sinceUnixMs`: that one lives only in bridge memory,
-  so a bridge restart resets every card to "just now" — ordering by it alone sank agents
+  so a bridge restart resets every row to "just now" — ordering by it alone sank agents
   working since before the restart. A cwd git can't resolve just renders plain (graceful degradation).
 
 ## The two scrolling mechanisms (phone pane view)
@@ -532,13 +531,12 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   the in-progress scroll gesture. Renders defer via `pendingAnsi` while
   `terminalTouchActive` or scrolled above the bottom, and flush on touchend /
   return-to-bottom.
-- **`ui/Dashboard.tsx`: the agents list has the same hazard.** `#screen-agents` is the scroll
-  container; state pushes (agent_status_changed etc.) arrive constantly, so it must stay the
-  **same element** while the list is shown, with the cards keyed by pane id (`data-ready` marks
-  the real container; the loading spinner lacks it). Recreating `#screen-agents` snaps
-  `scrollTop` to 0 (the "scroll jumps to top" bug) and cancels an in-progress drag. Like the
-  terminal, the list holds still while a finger is down and shows the latest State on the
-  macrotask after touchend (`setTimeout(0)`, so a still tap's click lands first).
+- **Lists of agents have the same hazard** (a Home's agents popover, its panel, the PC rail). State pushes
+  (agent_status_changed etc.) arrive constantly, so the scroll container must stay the **same element**, with
+  the rows keyed by pane id (a recreated one snaps `scrollTop` to 0 and cancels an in-progress drag), and opt out of
+  scroll anchoring (`[overflow-anchor:none]`: Chrome's scrolls it after a row a push moved). Like the terminal, it
+  holds still while a finger is down and shows the latest State on the macrotask after touchend (`useHeldState`,
+  `setTimeout(0)`, so a still tap's click lands first). e2e's P18 checks it on the popover.
 - **`pane-view.ts` / `terminal.ts`: one instance per opened pane.** Each opened pane gets its own
   `createPaneView` / `createTerminal`, and the shell destroys it on leaving (`ui/App.tsx`'s
   `handleRoute` → `closePaneView`): `destroy()` stops its timers and listeners, and
@@ -565,15 +563,15 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   also draws the rail of Homes (`#sidebar`, `ui/Sidebar.tsx`, 248px) on every screen but the token one: a row per
   orchestrator's Home (its dot, its name, its needs count, under them its agents' counts, `StatusCounts`; a click opens
   the Home), then Other: the agents no Home's account lists, of every status, blocked first, as `AgentRow`s (`homeGroups`;
-  no Home has them, and a phone has only their notifications), and at its bottom, pinned, All agents (`#/agents`). Its top, the topbar's height, has
+  no Home has them, and a phone has only their notifications). Its top, the topbar's height, has
   the app's name, the connection dot (`#conn-dot`: App.tsx draws it there, else in the topbar) and ⚙ (`SettingsButton`:
   the topbar's on a phone, the sidebar's on a PC, one `#btn-settings`), so the topbar beside it is the screen's own. It comes first in `#app`, in a
   slot of its own, so `#topbar`/`#reconnect-banner`/`#screen` stay the same elements as it comes and
   goes; while it is there `#app` is a two-column grid (`#app:has(> #sidebar)`) and `--sidebar-w` is its
   width, for an overlay that should leave it usable (an agent's drawer, from Show here or a notification: the dimmed part
-  starts at `--sidebar-w`, so the rail stays usable under it). Like the list it holds still while a finger is down
-  (`useHeldState`). A click on an agent at this width (a list card, a panel's row, a blocked chip, a worker's name) opens
-  it in herdr (`openAgent` → `focusInHerdr`), and its ⋮ (`AgentMore`, on a card and a row) has Show here, the drawer, and Stop agent… (a Home's rows: Ask the orchestrator too).
+  starts at `--sidebar-w`, so the rail stays usable under it). It holds still while a finger is down
+  (`useHeldState`). A click on an agent at this width (a row, a blocked chip, a worker's name) opens
+  it in herdr (`openAgent` → `focusInHerdr`), and a row's ⋮ (`AgentMore`) has Show here, the drawer, and Stop agent… (a Home's rows: Ask the orchestrator too).
 
 ## Security invariants
 

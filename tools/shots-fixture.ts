@@ -159,22 +159,13 @@ const section = (title: string) => `[...document.querySelectorAll('.settings-sec
 /** Each one is shot on a phone and on a PC: its screen (unless `screen: false`), then each part, so a diff names the
  *  component that changed, and the screen shows how they sit together. */
 export const scenes: Scene[] = [
-  { name: 'agents', hash: '#/agents', ready: "!!document.querySelector('#screen-agents[data-ready]')", parts: [
-    { name: 'agent-card-blocked', el: q('.agent-card[data-pane-id="p1"]') },
-    { name: 'agent-card-working', el: q('.agent-card[data-pane-id="p2"]') },
-    { name: 'agent-card-done', el: q('.agent-card[data-pane-id="p3"]') },
-    { name: 'agent-card-idle', el: q('.agent-card[data-pane-id="p5"]') },
-    { name: 'sidebar-home', el: q('.sidebar-home[data-home="personal"]'), sizes: ['pc'] },
-  ] },
-  { name: 'agents-home', hash: '#/agents/personal', ready: "!!document.querySelector('#screen-agents[data-ready]')", screen: false, parts: [
-    { name: 'topbar-agents-home', el: q('#topbar') },
-  ] },
   { name: 'home', hash: '#/home/personal', ready: items(''), parts: [
     { name: 'topbar-home', el: q('#topbar') },
     { name: 'home-status', el: q('#home-status'), sizes: ['phone'] }, // a PC's has none: the topbar is the Home's header
     { name: 'chat-notice', el: q('#chat-log .chat-notice') },
     { name: 'composer', el: q('.input-bar') },
     { name: 'home-panel', el: q('#home-panel'), sizes: ['pc'] }, // a PC's, beside it: what waits there, its agents
+    { name: 'sidebar-home', el: q('.sidebar-home[data-home="personal"]'), sizes: ['pc'] },
     { name: 'sidebar-other', el: q('#sidebar .sidebar-other'), sizes: ['pc'] }, // the rail's agents no Home's account lists
   ] },
   // a PC's agent row menu (Open in herdr, Show here) in the Home's panel: the ready check clicks flaky-test's ⋮ (once: then it's

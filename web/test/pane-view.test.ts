@@ -474,12 +474,12 @@ describe('pane view: answer panel', () => {
 
   it('closes its drawer once a sent answer has the agent working, not for "Chat about this" nor on a Home', async () => {
     await blocked();
-    store.view.paneBackRoute = '#/agents/personal';
+    store.view.paneBackRoute = '#/home/personal';
     location.hash = '#/pane/p6';
     view.answered(shown()!.id, false, Promise.resolve());
     await flush();
     push({ type: 'agent_status', paneId: 'p6', agent: 'claude', from: 'blocked', to: 'working', workspaceLabel: null, tabLabel: null });
-    assert.equal(location.hash, '#/agents/personal');
+    assert.equal(location.hash, '#/home/personal');
 
     location.hash = '#/pane/p6';
     view.answered(shown()!.id, true, Promise.resolve()); // Chat about this

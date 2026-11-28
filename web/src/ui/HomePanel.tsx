@@ -3,17 +3,16 @@
  * (ui/Pane.tsx draws it after the screen, in #screen, which style.css makes a row then). What that Home has for the user:
  * Needs you (its count: Todos.tsx's needsYou), its orchestrator's question, its account's blocked agents (as rows) and
  * its to-do list (Ask the orchestrator quotes an item in the composer beside it); then its other agents, working, done
- * and idle (byUrgency), and Open the list (#/agents/<name>). An agent's row opens it in herdr, its ⋮ also here, asks a
- * running Home's orchestrator about it (Ask the orchestrator, into the composer beside it) and stops it (Dashboard.tsx's
- * AgentRow). Narrower, the Home's status bar has the same in its popovers (Needs you, the counts).
- * Like the agents list it holds still while a finger is down (useHeldState), and keeps its scrollTop when a push reorders
- * the rows (no scroll anchoring).
+ * and idle (byUrgency). An agent's row opens it in herdr, its ⋮ also here, asks a running Home's orchestrator about it
+ * (Ask the orchestrator, into the composer beside it) and stops it (Dashboard.tsx's AgentRow). Narrower, the Home's
+ * status bar has the same in its popovers (Needs you, the counts).
+ * It holds still while a finger is down (useHeldState), and keeps its scrollTop when a push reorders the rows (no
+ * scroll anchoring).
  */
-import { NavLink, Text } from '@mantine/core';
+import { Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { byUrgency, homeSummary, type DashboardCard } from '../dashboard-group.ts';
 import { draftKey, setQuote } from '../drafts.ts';
-import { homeAgentsHash, homeHash } from '../routes.ts';
 import { store } from '../store.ts';
 import { todoQuote } from '../transcript.ts';
 import type { TodoItem } from '../types.ts';
@@ -56,7 +55,6 @@ export function HomePanel({ name }: { name: string }) {
             {heading('Agents', <StatusCounts n={s} />)}
             {rest.map((c) => <AgentRow key={c.pane.paneId} card={c} ask={askAgent} askOff={askOff} />)}
             {!rest.length && <Text fz={13} c="dimmed" px={12}>{s.blocked.length ? 'Only the ones waiting on you.' : 'No agents.'}</Text>}
-            <NavLink href={homeAgentsHash(homeHash(name))} className="home-panel-list mt-1 rounded-lg" label="Open the list" rightSection="›" />
           </section>
         </>
       )}

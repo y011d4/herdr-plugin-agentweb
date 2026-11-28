@@ -17,7 +17,7 @@
  * State pushes re-render it constantly. The composer's textarea is uncontrolled (React never sets its
  * value), so a push never resets what is being typed, an IME composition included.
  */
-import { ActionIcon, Button, CloseButton, FileButton, Group, Image, Indicator, Menu, NativeSelect, NavLink, Popover, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Button, CloseButton, FileButton, Group, Image, Indicator, Menu, NativeSelect, Popover, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
@@ -27,7 +27,7 @@ import { fitImages, MAX_IMAGES, toAttachment, type ImageAttachment } from '../im
 import { showToast } from '../notify.ts';
 import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
 import { parseQuote, type QuoteOf } from '../transcript.ts';
-import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
+import { homeHash, orchestratorOfPane } from '../routes.ts';
 import { emit, findPane, store, subscribe } from '../store.ts';
 import { usePanel, useWide } from '../theme.ts';
 import { dueLabel } from '../todos.ts';
@@ -355,10 +355,10 @@ function HomeStatus({ name, state, actions, clear = actions?.clear, paneId }:
 // buttons (below sm only the numbers: the words come back with the room). A tap opens the popover under it, as Needs you's
 // does (Todos.tsx's NeedsButton: as wide as a phone allows, no taller than the room below it; Escape, a tap outside, a tap
 // on it again and leaving the screen close it; the focus goes into it and back): its account's agents, blocked first, then
-// working, done and idle (byUrgency), each opening its drawer, then Open the list (#/agents/<name>); on a PC a row's ⋮ also
-// asks the orchestrator about it (on a running Home: the popover closes, the focus stays in the composer) or stops it. Like
-// the agents list it holds still while a finger is down (useHeldState), and keeps its scrollTop when a push reorders the
-// rows (no scroll anchoring: Chrome's would scroll it after the row it anchored on).
+// working, done and idle (byUrgency), each opening its drawer: a phone's list of them; on a PC a row's ⋮ also asks the
+// orchestrator about it (on a running Home: the popover closes, the focus stays in the composer) or stops it. It holds
+// still while a finger is down (useHeldState), and keeps its scrollTop when a push reorders the rows (no scroll
+// anchoring: Chrome's would scroll it after the row it anchored on).
 function AgentsButton({ name, s }: { name: string; s: HomeSummary }) {
   const [opened, setOpened] = useState(false);
   const [asked, setAsked] = useState(false); // closed by an Ask: the focus stays in the composer
@@ -387,9 +387,6 @@ function AgentsButton({ name, s }: { name: string; s: HomeSummary }) {
       </Popover.Target>
       <Popover.Dropdown className="overflow-y-auto overscroll-contain [overflow-anchor:none]" p={6} data-agents-list="" {...hold}>
         {cards.length ? cards.map((c) => <AgentRow key={c.pane.paneId} card={c} ask={ask} askOff={!!o?.headless?.pending} />) : <Text c="dimmed" fz={13} px={12} py={8}>No active agents.</Text>}
-        <div className="mt-1 border-t border-(--color-border) pt-1">
-          <NavLink href={homeAgentsHash(homeHash(name))} className="agents-open-list rounded-lg" label="Open the list" rightSection="›" />
-        </div>
       </Popover.Dropdown>
     </Popover>
   );
