@@ -610,10 +610,13 @@ func TestHeadlessWakeUps(t *testing.T) {
 	t.Run("a stalled prompt goes on with the level wait", func(t *testing.T) {
 		b := startHeadless(t, t.TempDir(), nil, nil)
 		w := worker(t, b, "idle", nil)
-		w.StallAfter(300 * time.Millisecond)
+		w.StallAfter(2 * time.Second) // after the delivery window, as herdr's 5 s after 1.5 s
 		b.start(t)
 		b.waitStatus(t, "idle")
-		b.prompt(t) // the delivery window passes the stall: herdr answers stalled
+		b.prompt(t) // delivered: the window passes
+		// the stall on an advance of its own: inside prompt's (the stall, then the window), the
+		// wait for a move could be armed before the clock's last step, so never 8 s from now
+		b.clock.Advance(2*time.Second - deliveryWindow) // herdr answers stalled
 		// the level wait finds it idle as before: it waits for a move
 		b.waiting(t, "the wait for a move", 8*time.Second)
 		w.Set("w1p", "working") // later than the stall
@@ -629,10 +632,14 @@ func TestHeadlessWakeUps(t *testing.T) {
 		b.waitStatus(t, "idle")
 		b.prompt(t)
 		b.srv.shutdownHeadless()
-		saved, _ := os.ReadFile(headlessPath(state, "h1", ".json"))
-		if !strings.Contains(string(saved), `"pane":"w1p"`) {
-			t.Fatalf("saved %s", saved)
-		}
+		// the watch, cancelled, notes the delivered task's working as its wait ends, after
+		// Shutdown has saved the status from before the send: b2 reads that last save
+		waitUntil(t, 10*time.Second, "the watch saved at working", func() bool {
+			saved, _ := os.ReadFile(headlessPath(state, "h1", ".json"))
+			var st struct{ Watches []hlWatch }
+			json.Unmarshal(saved, &st)
+			return len(st.Watches) == 1 && st.Watches[0].Pane == "w1p" && st.Watches[0].Status == "working"
+		})
 		w.Set("w1p", "done") // while no bridge runs
 
 		b2 := startHeadless(t, state, nil, nil) // another herdr world: the worker there, done
@@ -693,6 +700,7 @@ func TestHeadlessNotifications(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		readUntil(t, c, "state") // registered: Dial returns before the server adds the client
 		b.start(t)
 		b.waitStatus(t, "idle")
 		b.send(t, "hello")

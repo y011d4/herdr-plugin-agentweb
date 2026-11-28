@@ -425,7 +425,8 @@ Verified live against herdr 0.7.3 / protocol 16:
   herdr's state alone. herdr's TUI clients likewise track viewed completions per client.
   The record is keyed on herdr's `completion_seq` (which completion it is), which is
   **only in `agent.list`/`agent.get`** — not in snapshots or `pane.agent_status_changed` —
-  so the bridge fetches `agent.list` after each snapshot and each status change
+  so the bridge fetches `agent.list` after each snapshot (a connect's or a rebuild's: after
+  the reconcile snapshot its subscription's ack brings, so once) and each status change
   (`applyCompletionSeqs` → `completionSeq`, plus `state_change_seq` → `stateChangeSeq`, a
   server-wide counter that orders status changes; verified live on 0.9.5). Not `sinceUnixMs`:
   that resets on a bridge restart.

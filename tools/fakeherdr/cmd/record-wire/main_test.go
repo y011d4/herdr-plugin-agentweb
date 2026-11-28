@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -119,12 +118,10 @@ func buildYoicks(t *testing.T) string {
 
 func freePort(t *testing.T) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	p, err := pickPort()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
-	_, p, _ := net.SplitHostPort(ln.Addr().String())
 	return p
 }
 

@@ -275,7 +275,12 @@ func (c *HerdrClient) Refresh() error {
 			done <- nil
 			return
 		}
-		c.fetchSnapshot(false, c.subscribed, func(err error) { done <- err })
+		c.fetchSnapshot(false, c.subscribed, func(err error) {
+			if err == nil {
+				c.refreshCompletionSeqsSoon()
+			}
+			done <- err
+		})
 	})
 	select {
 	case err := <-done:
@@ -429,7 +434,9 @@ func (c *HerdrClient) applySnapshot(res json.RawMessage, replay bool, coverage m
 	// delivered at once (not debounced), so a flood of held events can't starve it
 	c.emitState(next)
 	c.refreshWorktreesSoon()
-	c.refreshCompletionSeqsSoon()
+	// no agent.list here: a connect's or a rebuild's snapshot is always followed by its
+	// subscription's reconcile, whose agent.list would only repeat it (two, once the ack takes
+	// longer than the debounce). The reconcile and Refresh ask for it.
 	return nil
 }
 
@@ -635,11 +642,13 @@ func (c *HerdrClient) onSubLine(s *subscription, line []byte, paneIDs []string, 
 			c.subscribed[id] = true
 		}
 		c.fetchSnapshot(true, prevCoverage, func(err error) {
-			if err != nil {
-				logf("[herdr-client] subscription reconcile failed: %s", err)
-				if s == c.subConn && !c.destroyed {
-					s.destroy()
-				}
+			if err == nil {
+				c.refreshCompletionSeqsSoon()
+				return
+			}
+			logf("[herdr-client] subscription reconcile failed: %s", err)
+			if s == c.subConn && !c.destroyed {
+				s.destroy()
 			}
 		})
 		if onReady != nil {
@@ -740,7 +749,8 @@ func (c *HerdrClient) scheduleBroadcast() {
 }
 
 // refreshCompletionSeqsSoon fetches agent.list (the only place herdr reports
-// completion_seq and state_change_seq) after each snapshot and status change.
+// completion_seq and state_change_seq) after each status change and each snapshot (a
+// connect's or a rebuild's: the reconcile after its subscription's ack).
 // Trailing debounce: the request always goes out after the change that asked for
 // it, which applyCompletionSeqs' requestedAt guard relies on. Best-effort.
 func (c *HerdrClient) refreshCompletionSeqsSoon() { c.refreshAgentList(false) }

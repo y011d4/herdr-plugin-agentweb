@@ -241,6 +241,7 @@ func TestHeadlessTodo(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.CloseNow()
+	readUntil(t, c, "state") // registered: Dial returns before the server adds the client
 	at := time.Now().Add(2 * time.Hour).UnixMilli()
 	b.srv.remindTodos(at)
 	b.srv.remindTodos(at)

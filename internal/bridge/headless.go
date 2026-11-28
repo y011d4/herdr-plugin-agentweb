@@ -980,12 +980,11 @@ func (r *headlessRunner) canUse(c *hlChild, cu *hlCanUse, epoch int) {
 		reply(map[string]any{"behavior": "deny", "message": "yoicks allows no tool but its own"})
 		return
 	}
-	p := r.ask(cu.Input, epoch)
+	p := r.ask(cu.Input, cu.ToolUseID, epoch)
 	if p == nil {
 		reply(map[string]any{"behavior": "deny", "message": "this orchestrator's session has ended"})
 		return
 	}
-	r.asked(cu.ToolUseID)
 	go func() { reply(<-p.reply) }() // every pending question gets its reply (answer, deny, the child's end)
 }
 
