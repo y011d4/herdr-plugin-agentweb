@@ -88,7 +88,8 @@ func withHeadless(state ClientState) ClientState {
 		Warnings: []HeadlessWarning{{Kind: "silent", Message: "no event for 3m0s while working", Since: now, Actions: []string{"interrupt", "clear"}},
 			{Kind: "unknown_event", Message: "Claude Code sent an event yoicks doesn't know (mystery)", Since: now, Actions: []string{}}},
 		Model: "sonnet", ActiveModel: "claude-sonnet-5-5", Models: []HeadlessModel{{"opus", "Opus 5.5", "For complex work and everyday tasks", "claude-opus-5-5"},
-			{"sonnet", "Sonnet 5.5", "Most efficient for simpler tasks", "claude-sonnet-5-5"}}}
+			{"sonnet", "Sonnet 5.5", "Most efficient for simpler tasks", "claude-sonnet-5-5"}},
+		Compact: &HeadlessCompact{State: "done", From: new(64.0), To: new(12.5)}}
 	due := int64(now + 86_400_000)
 	v.Todos = []TodoItem{{ID: "a1b2c3", Text: "merge PR #108", Agent: new("w-review"), URL: new("https://github.com/o/r/pull/108"), CreatedAt: now},
 		{ID: "d4e5f6", Text: "delete ~/backup.tgz", Due: &due, CreatedAt: now}}

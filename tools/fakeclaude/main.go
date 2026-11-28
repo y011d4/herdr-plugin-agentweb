@@ -27,6 +27,11 @@
 //	tool      call the yoicks overview tool; call <tool> <json args> any one: its text is the reply
 //	deaf      stop reading stdin (what's written to it backs up)
 //	other     the reply "echo: <text>"
+//	/compact [focus]  a compaction, as 2.1.322 runs one (no turn, no init first): status compacting,
+//	          then status null with compact_result, init, compact_boundary (written to the transcript
+//	          with the summary and the command) and a local command's result; a session with no
+//	          transcript yet fails ("Not enough messages to compact."); focus "hold" waits for a
+//	          SIGUSR1 first, and an interrupt then fails it as Claude Code's does
 //
 //	hold      its turn begins only at a SIGUSR1 (then the reply)
 //	replyhold send the reply, then hold its result until an interrupt
@@ -40,7 +45,8 @@
 // assistant messages report it: --model's at first, else FAKECLAUDE_MODEL (a resumed session's), else fake.
 // Stdin's end while idle exits 0; while working, after the turn. FAKECLAUDE_START=init sends
 // an init at once, before any message; =exit exits 1 at once. FAKECLAUDE_LOG, when set, gets
-// a JSON line for the argv (and env keys) and each stdin line. FAKECLAUDE_REAL=<path> execs that
+// a JSON line for the argv (and env keys) and each stdin line. A get_context_usage control_request
+// says 2000 of 200000 tokens (what each assistant message reports), 1000 once compacted. FAKECLAUDE_REAL=<path> execs that
 // (real) claude instead, whatever the arguments.
 package main
 
@@ -337,6 +343,10 @@ func (f *fake) turn(q queued) {
 		f.finish(ctx, aborted("aborted_streaming"))
 		return
 	}
+	if word, focus, _ := strings.Cut(text, " "); word == "/compact" {
+		f.compact(ctx, focus)
+		return
+	}
 	f.emit(f.init())
 	f.record(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": q.content}})
 	word, arg, _ := strings.Cut(text, " ")
@@ -407,7 +417,7 @@ func (f *fake) finish(ctx context.Context, result map[string]any) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancel = nil
-	if ctx.Err() != nil && result["subtype"] == "success" {
+	if ctx.Err() != nil && result["subtype"] == "success" && result["local_command"] == nil { // an interrupted compaction ends as Claude Code's does
 		result = aborted("aborted_streaming")
 	}
 	result["session_id"] = f.id
@@ -435,6 +445,51 @@ func (f *fake) reply(ctx context.Context, text string) {
 	}
 	f.finish(ctx, map[string]any{"type": "result", "subtype": "success", "is_error": false, "terminal_reason": "completed", "result": text,
 		"session_id": f.id, "modelUsage": map[string]any{"fake": map[string]any{"contextWindow": 200000}}})
+}
+
+var compacted atomic.Bool // its context is what a compaction left
+
+// compact runs /compact (see the header).
+func (f *fake) compact(ctx context.Context, focus string) {
+	status := func(res, err string) {
+		f.emit(map[string]any{"type": "system", "subtype": "status", "status": nil, "compact_result": res, "compact_error": err, "session_id": f.id})
+	}
+	result := map[string]any{"type": "result", "subtype": "success", "is_error": false, "num_turns": 0, "result": "", "local_command": "compact",
+		"modelUsage": map[string]any{model(): map[string]any{"contextWindow": 200000}}}
+	f.emit(map[string]any{"type": "system", "subtype": "status", "status": "compacting", "session_id": f.id})
+	fail := ""
+	if _, err := os.Stat(f.transcript); err != nil {
+		fail = "Not enough messages to compact."
+	} else if focus == "hold" {
+		select {
+		case <-release:
+		case <-ctx.Done():
+			fail = "API Error: Request was aborted."
+		}
+	}
+	if fail != "" {
+		status("failed", fail)
+		f.emit(f.init())
+		f.emit(map[string]any{"type": "assistant", "local_command_run": map[string]any{"command": "compact", "args": focus},
+			"message": map[string]any{"role": "assistant", "model": "<synthetic>", "content": []any{map[string]any{"type": "text", "text": fail}},
+				"usage": map[string]any{"input_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0}}})
+		f.finish(ctx, result)
+		return
+	}
+	compacted.Store(true)
+	status("success", "")
+	f.emit(f.init())
+	meta := map[string]any{"trigger": "manual", "pre_tokens": 2005, "post_tokens": 300, "duration_ms": 1}
+	f.emit(map[string]any{"type": "system", "subtype": "compact_boundary", "session_id": f.id, "compact_metadata": meta})
+	summary := "This session is being continued from a previous conversation that ran out of context.\n\nSummary: fake"
+	f.record(map[string]any{"type": "system", "subtype": "compact_boundary", "content": "Conversation compacted",
+		"compactMetadata": map[string]any{"trigger": "manual", "preTokens": 2005, "postTokens": 300}})
+	f.record(map[string]any{"type": "user", "isCompactSummary": true, "isVisibleInTranscriptOnly": true, "message": map[string]any{"role": "user", "content": summary}})
+	f.record(map[string]any{"type": "user", "message": map[string]any{"role": "user",
+		"content": "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args>" + focus + "</command-args>"}})
+	f.record(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "<local-command-stdout>Compacted </local-command-stdout>"}})
+	f.emit(map[string]any{"type": "user", "isSynthetic": true, "session_id": f.id, "message": map[string]any{"role": "user", "content": summary}})
+	f.finish(ctx, result)
 }
 
 func aborted(reason string) map[string]any {
@@ -500,6 +555,12 @@ func control(req map[string]any) map[string]any {
 	case "initialize":
 		return map[string]any{"subtype": "success", "response": map[string]any{"models": fakeModels,
 			"account": map[string]any{"email": "someone@example.com"}}}
+	case "get_context_usage": // only what yoicks reads
+		total := 2000
+		if compacted.Load() {
+			total = 1000
+		}
+		return map[string]any{"subtype": "success", "response": map[string]any{"totalTokens": total, "maxTokens": 200000, "percentage": total * 100 / 200000}}
 	case "get_settings": // only what yoicks reads
 		return map[string]any{"subtype": "success", "response": map[string]any{"effective": map[string]any{}, "applied": map[string]any{"model": model()}}}
 	case "set_model":

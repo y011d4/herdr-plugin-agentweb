@@ -70,7 +70,7 @@ var (
 	paneRoute   = regexp.MustCompile(`^/api/panes/([^/]+)/(\w+)$`)
 	paneIDRoute = regexp.MustCompile(`^/api/panes/([^/]+)$`) // DELETE = stop the agent
 	agentRoute  = regexp.MustCompile(`^/api/agents/([^/]+)/(\w+)$`)
-	orchRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/(start|send|answer|interrupt|clear|stop|model)$`)
+	orchRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/(start|send|answer|interrupt|clear|stop|model|compact)$`)
 	todoRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/todos/([^/]+)$`) // DELETE = the user did it
 )
 
@@ -651,6 +651,17 @@ func (s *server) headlessRoute(w http.ResponseWriter, r *http.Request, h *headle
 		}
 		model, _ := body["model"].(string)
 		err = h.SetModel(model)
+	case "compact": // {focus?: its instructions}
+		body := readBody(w, r)
+		if body == nil {
+			return
+		}
+		focus, ok := body["focus"].(string)
+		if !ok && body["focus"] != nil {
+			jsonError(w, http.StatusBadRequest, "invalid_params", "focus, if any, must be a string")
+			return
+		}
+		err = h.Compact(focus)
 	case "stop":
 		err = h.Stop()
 	}

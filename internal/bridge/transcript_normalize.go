@@ -419,17 +419,25 @@ func normalizeLine(rawLine string) []TimelineItem {
 	if _, ok := o.(*jsObject); !ok {
 		return nil
 	}
-	// Injected context / bookkeeping lines are not conversation.
-	if jsGet(o, "isMeta") == true {
+	// Injected context / bookkeeping lines are not conversation, nor the summary a compaction
+	// leaves for the model (Claude Code shows it only on request).
+	if jsGet(o, "isMeta") == true || jsGet(o, "isCompactSummary") == true {
 		return nil
 	}
 	typ := jsGet(o, "type")
+	sidechain := jsGet(o, "isSidechain") == true
+	ts := toMs(jsGet(o, "timestamp"))
+	// where a compaction cut the conversation (/compact, or Claude Code's own as the context fills up)
+	if typ == "system" && jsGet(o, "subtype") == "compact_boundary" {
+		text := "[yoicks] compacted"
+		if jsGet(jsGet(o, "compactMetadata"), "trigger") == "auto" {
+			text += " automatically"
+		}
+		return []TimelineItem{{Kind: "user", Text: text, Sidechain: sidechain, TS: ts}}
+	}
 	if typ == "system" || typ == "summary" || typ == "file-history-snapshot" {
 		return nil
 	}
-
-	sidechain := jsGet(o, "isSidechain") == true
-	ts := toMs(jsGet(o, "timestamp"))
 
 	// A message the user sent while the agent was working, taken in mid-turn (at a tool
 	// boundary): Claude Code records it only as this attachment, never as a `user` line.
