@@ -172,6 +172,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # A fresh runner's disk is cold: Chrome's first start reads much of its install from it (0.6–17 s measured; its
+      # second 0.1 s). One started here, in the background, does those reads while the builds run.
+      - name: Warm Chrome up
+        run: google-chrome-stable --headless=new --user-data-dir="$RUNNER_TEMP/chrome-warm" --dump-dom about:blank > /dev/null 2>&1 &
+
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:

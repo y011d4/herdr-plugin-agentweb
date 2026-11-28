@@ -67,6 +67,12 @@ jobs:
             echo "web=1" >> "$GITHUB_OUTPUT"
           fi
 
+      # as in ci.yml's webcheck job: Chrome's first start on a fresh runner's cold disk (0.6–17 s), here in the
+      # background while the builds run, so the shots' own start is a warm one
+      - name: Warm Chrome up
+        if: steps.diff.outputs.web
+        run: google-chrome-stable --headless=new --user-data-dir="$RUNNER_TEMP/chrome-warm" --dump-dom about:blank > /dev/null 2>&1 &
+
       - name: Set up Node.js
         if: steps.diff.outputs.web
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
