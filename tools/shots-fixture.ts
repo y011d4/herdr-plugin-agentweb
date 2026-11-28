@@ -52,7 +52,7 @@ export const state: AppState = {
       todo('0a0b0c', 'Delete ~/backup.tgz', { due: at(1, 9) }),
     ] },
     { name: 'work', label: 'work', paneId: 'hl:work', agents: [], mode: 'headless', todos: [todo('1a2b3c', 'Approve the deploy of #123 at the PC')], headless: {
-      status: 'blocked', completionSeq: 4, model: '', activeModel: 'claude-opus-5-5', models: [],
+      status: 'blocked', completionSeq: 4, model: '', activeModel: 'claude-opus-5-5', models: [], compact: null,
       pending: { id: 'q1', questions: [{ question: 'Which PR should go first?', header: 'Order', multiSelect: false,
         options: [{ label: '#112', description: 'the toast scrollbar fix' }, { label: 'PR3', description: 'the agents list' }] }] },
       usage: { fiveHour: { utilization: 0.42, resetsAt: T0 + 3_600_000 }, sevenDay: { utilization: 0.18, resetsAt: T0 + 86_400_000 }, fable: null, contextPct: 23, at: T0 - 60_000 },

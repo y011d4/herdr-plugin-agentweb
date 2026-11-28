@@ -181,7 +181,8 @@ All in `internal/bridge/` (one package):
   its account's blocked agents, its question, its to-do items due now; the PC sidebar's Home headings have it too), a
   status bar of one row (wrapping only where it must): "Needs you · n" (that count, orange; `To-do · n`, dim, while only items
   due later wait; none at all otherwise: `NeedsButton`), the counts of its account's agents (`homeSummary`; no orchestrators),
-  and at the right a headless one's usage and model, Clear and Stop. Needs you opens a Mantine Popover (Escape, a tap outside
+  and at the right a headless one's usage and model, and its ⋮ (`HomeMenu`: a headless one's Compact, Clear, Stop; ■ stays on the
+  "doing now" line). Needs you opens a Mantine Popover (Escape, a tap outside
   and leaving the screen close it; as wide as a phone allows, no taller than the room below it): the blocked agents' chips, its
   question's line, and its to-do list (`ui/Todos.tsx` over the pure `todos.ts`: ✓ = `DELETE …/todos/:id`, an item due ahead under
   Later until its time, a link shown by its host, a worker's name opening its drawer; a stopped Home has them too), dialogue-only chat
@@ -214,6 +215,9 @@ All in `internal/bridge/` (one package):
   model: each child gets an `initialize` control request at its start, whose answer lists Claude Code's `/model`
   choices (state `headless.models`; the answer also has the account's email: only `models` is read); `POST …/model`
   switches a running child in place with `set_model` (refused mid-turn; Claude Code applies it from the next turn),
+  `POST …/compact {focus?}` writes `/compact` between turns (refused mid-turn or with a question open; the stream's
+  `status`/`compact_boundary` give state `headless.compact`, the context left comes from `get_context_usage`, as
+  `post_tokens` lacks the system prompt; a local command's result is no completion; the chat shows `[yoicks] compacted`),
   and each start passes the saved choice as `--model` (the list's `default` entry is left out: the Home offers the
   models themselves, the default's as its id when no other entry offers it). Without one, `--resume` keeps the model the session last ran on (2.1.322), not the settings' default, so the model in effect (`headless.activeModel`) comes from Claude Code: a
   `get_settings` request at each start (`applied.model`), `set_model`'s answer and each turn's init. `<state>/headless/<name>.mcp.json` (only the

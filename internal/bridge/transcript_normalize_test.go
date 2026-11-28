@@ -247,6 +247,24 @@ func TestTranscriptNormalize(t *testing.T) {
 			}
 		})
 
+		// as Claude Code 2.1.322 writes a compaction (scrubbed): its boundary, the summary for the model, the command
+		t.Run("a compaction: a notice at its boundary, never its summary", func(t *testing.T) {
+			lines := []string{
+				`{"type":"system","subtype":"compact_boundary","content":"Conversation compacted","isMeta":false,"level":"info","compactMetadata":{"trigger":"manual","preTokens":10397,"durationMs":7512,"postTokens":3059},"timestamp":"2026-07-15T00:00:00.000Z"}`,
+				`{"type":"user","isCompactSummary":true,"isVisibleInTranscriptOnly":true,"message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context. Summary: …"}}`,
+				`{"type":"system","subtype":"compact_boundary","content":"Conversation compacted","compactMetadata":{"trigger":"auto","preTokens":180000,"postTokens":9000}}`,
+			}
+			var items []TimelineItem
+			for _, l := range lines {
+				items = append(items, normalizeLine(l)...)
+			}
+			ts := time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC).UnixMilli()
+			want := fmt.Sprintf(`[{"kind":"user","text":"[yoicks] compacted","sidechain":false,"ts":%d},{"kind":"user","text":"[yoicks] compacted automatically","sidechain":false,"ts":null}]`, ts)
+			if got := itemsJSON(t, items); got != want {
+				t.Fatalf("got %s, want %s", got, want)
+			}
+		})
+
 		t.Run("returns [] for unparseable JSON", func(t *testing.T) {
 			if items := normalizeLine("not json{"); len(items) != 0 {
 				t.Fatalf("got %s", itemsJSON(t, items))

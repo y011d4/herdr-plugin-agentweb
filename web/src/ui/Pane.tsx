@@ -2,7 +2,7 @@
  * ui/Pane.tsx — an opened pane (#/pane/<id>, in ui/AgentDrawer.tsx's drawer, with the header pieces
  * here: PaneTitle, ViewToggle, AgentMenu) or an orchestrator's Home (#/home/<name>): Home's topbar,
  * Home's status bar (the switcher between running orchestrators, then one row: "Needs you · n", the
- * counts, Clear and Stop) and "doing now" line, the composer and the quick keys, around the pane's body. The
+ * counts, and ⋮: a headless one's Compact, Clear and Stop) and "doing now" line, the composer and the quick keys, around the pane's body. The
  * body (terminal, chat) is pane-view.ts, imperative, in #pane-view: created on mount, destroyed on
  * unmount, one at a time. Below it, while the view reports a prompt, the answer panel (PromptPanel.tsx).
  * A pane's chat is read-only: its composer and keys show with its terminal,
@@ -26,12 +26,12 @@ import { showToast } from '../notify.ts';
 import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
 import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
 import { emit, findPane, store, subscribe } from '../store.ts';
-import type { AppState, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
+import type { AppState, HeadlessCompact, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
 import { TopbarIcon, agentCards, orchestratorLabel, relativeTime } from './Dashboard.tsx';
 import { StatusDot } from './Status.tsx';
 import { NeedsBadge, NeedsButton, needsYou, useMinute } from './Todos.tsx';
 import type { Topbar } from './App.tsx';
-import { previewImage } from './Modals.tsx';
+import { openCompact, previewImage } from './Modals.tsx';
 import { answersSoFar, HeadlessPrompt, PromptPanel } from './PromptPanel.tsx';
 import { TuiSteps } from './Settings.tsx';
 
@@ -128,7 +128,7 @@ async function interrupt(name: string): Promise<void> {
   }
 }
 
-/** A Home's Clear and Stop (App.tsx's confirm flows), on its status bar: a Home has no ⋮. */
+/** A Home's Clear and Stop (App.tsx's confirm flows), in its status bar's ⋮ (HomeMenu). */
 export type HomeActions = { clear: () => void; stop: () => void };
 
 /** A pane, or (with `home`: the orchestrator `name`) a running orchestrator's Home. */
@@ -167,7 +167,11 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
   // (hiding one grows the chat).
   const readOnly = !home && mode === 'chat';
   const hl = headlessName(paneId);
-  const pending = hl ? state?.orchestrators?.find((o) => o.name === hl)?.headless?.pending : null;
+  const headless = hl ? state?.orchestrators?.find((o) => o.name === hl)?.headless : null;
+  const pending = headless?.pending;
+  // a compaction: "compacting…" while it runs, then how it went, until the next turn begins
+  const compacting = headless?.compact?.state === 'running';
+  const compacted = headless?.compact && !compacting ? compactLine(headless.compact) : null;
   const [chatting, setChatting] = useState(''); // the question whose Chat about this was pressed: the composer writes about it
   const chatOn = !!pending && chatting === pending.id;
   return (
@@ -191,8 +195,8 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
       {hl && pending && <HeadlessPrompt key={pending.id} name={hl} pending={pending} chatting={chatOn} onChat={() => setChatting(pending.id)} />}
       {home && (
         <Group id="home-activity" gap={8} wrap="nowrap" py={6} className="shrink-0 px-4 border-t border-(--color-border) bg-(--color-bg) lg:px-(--wide-gutter)"
-          style={working ? undefined : { display: 'none' }}>
-          <Text flex={1} ff="monospace" fz={12} c="dimmed" truncate>{working ? (activity ? `▸ ${activity}` : 'thinking…') : null}</Text>
+          style={working || compacted ? undefined : { display: 'none' }}>
+          <Text flex={1} ff="monospace" fz={12} c="dimmed" truncate>{working ? (compacting ? 'compacting…' : activity ? `▸ ${activity}` : 'thinking…') : compacted}</Text>
           {hl && working && <Button id="btn-home-interrupt" {...SMALL} c="blocked" aria-label="Interrupt" onClick={() => { void interrupt(hl); }}>&#9632;</Button>}
         </Group>
       )}
@@ -222,8 +226,8 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
 // Home status bar: with two or more orchestrators configured a switcher between their Homes (a
 // stopped one dimmed: its Home has Start), then one row: "Needs you · n" (its account's blocked
 // agents, its own question, its to-do items: Todos.tsx's NeedsButton, a popover), the counts of its
-// agents (tap → its list), and at the right a headless one's usage and model and the orchestrator's
-// Clear and Stop (the row wraps where it must: a phone, a narrow PC); under it a headless one's
+// agents (tap → its list), and at the right a headless one's usage and model and the orchestrator's ⋮ (HomeMenu:
+// Compact, Clear, Stop; the row wraps where it must: a phone, a narrow PC); under it a headless one's
 // warnings (`clear`: their Clear, on a stopped Home too).
 function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: string; state: AppState | null; actions?: HomeActions; clear?: () => void }) {
   const now = useMinute();
@@ -268,8 +272,7 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
           <Group gap={10} className="ml-auto">
             {usage}
             {self?.headless && <ModelPicker o={self} />}
-            {actions && <Button id="btn-home-clear" {...SMALL} onClick={actions.clear}>Clear</Button>}
-            {actions && <Button id="btn-home-stop" {...SMALL} c="blocked" onClick={actions.stop}>Stop</Button>}
+            {actions && <HomeMenu name={name} o={self} actions={actions} />}
           </Group>
         )}
       </Group>
@@ -280,7 +283,7 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
 
 // Home's status bar, on the surface below the topbar (padding as classes: Mantine's px, inline, would beat lg:)
 const STATUS_BAR = 'shrink-0 border-b border-(--color-border) bg-(--color-surface) lg:px-(--wide-gutter)';
-// Home's small outlined buttons (Clear, Stop, ■, a warning's): dim text unless given a color
+// Home's small outlined buttons (its ⋮, ■, a warning's): dim text unless given a color
 const SMALL = { variant: 'default', size: 'compact-xs', radius: 'xl', fz: 12, fw: 600, c: 'dimmed', className: 'bg-transparent hover:bg-(--color-surface-2)' } as const;
 // a count's dot, before its number
 const Dot = ({ status }: { status: string }) => <span className="mr-[5px] inline-block align-[1px]"><StatusDot status={status} /></span>;
@@ -290,13 +293,13 @@ const pct = (n: number): string => `${Math.round(n)}%`;
 
 /** The usage parts a headless Home shows: 5h, 7d and fable (stale: read over 10 min ago) and the context,
  *  each only when known. */
-export function usageParts(u: HeadlessUsage, now: number): Array<{ text: string; stale: boolean }> {
+export function usageParts(u: HeadlessUsage, now: number): Array<{ text: string; stale: boolean; high?: boolean }> {
   const stale = !u.at || now - u.at > STALE_LIMITS_MS;
-  const parts: Array<{ text: string; stale: boolean }> = [];
+  const parts: Array<{ text: string; stale: boolean; high?: boolean }> = [];
   if (u.fiveHour) parts.push({ text: `5h ${pct(u.fiveHour.utilization * 100)}`, stale });
   if (u.sevenDay) parts.push({ text: `7d ${pct(u.sevenDay.utilization * 100)}`, stale });
   if (u.fable) parts.push({ text: `fable ${pct(u.fable.utilization * 100)}`, stale });
-  if (u.contextPct != null) parts.push({ text: `ctx ${pct(u.contextPct)}`, stale: false });
+  if (u.contextPct != null) parts.push({ text: `ctx ${pct(u.contextPct)}`, stale: false, ...(u.contextPct >= COMPACT_HINT_PCT && { high: true }) });
   return parts;
 }
 
@@ -305,8 +308,49 @@ function Usage({ usage }: { usage: HeadlessUsage }) {
   if (!parts.length) return null;
   return (
     <Text id="home-usage" fz={12} c="dimmed" className="tabular-nums">
-      {parts.map((p, i) => <span key={p.text} className={p.stale ? 'stale opacity-50' : undefined}>{i ? ` · ${p.text}` : p.text}</span>)}
+      {parts.map((p, i) => <span key={p.text} className={p.stale ? 'stale opacity-50' : p.high ? 'high text-(--color-blocked)' : undefined}>{i ? ` · ${p.text}` : p.text}</span>)}
     </Text>
+  );
+}
+
+/** From this much of its context in use, the Home suggests a Compact (the ctx and the button in orange); it never runs one. */
+export const COMPACT_HINT_PCT = 70;
+
+/** A compaction that has ended, as the "doing now" line says it. */
+export function compactLine(c: HeadlessCompact): string {
+  if (c.state === 'failed') return `compact failed: ${c.error}`;
+  if (c.to == null) return 'compacted';
+  return `compacted: ctx ${c.from == null ? '' : `${pct(c.from)} → `}${pct(c.to)}`;
+}
+
+// A Home's ⋮, at its status bar's end (as a pane's is in its drawer's header: AgentMenu): a headless one's Compact…
+// (Modals.tsx's dialog: its focus, then /compact; between turns only, as the bridge allows), Clear and Stop, each
+// through its confirmation. ■ stays one tap away on the "doing now" line: it only ends the turn. Once the context is
+// COMPACT_HINT_PCT full, a small orange dot on ⋮ and the context on Compact… suggest it.
+function HomeMenu({ name, o, actions }: { name: string; o?: OrchestratorView; actions: HomeActions }) {
+  const h = o?.headless;
+  const ctx = h?.usage?.contextPct;
+  const hint = ctx != null && ctx >= COMPACT_HINT_PCT;
+  const busy = h?.status === 'working' || h?.status === 'blocked';
+  const item = { className: 'min-h-11', fz: 'md' } as const;
+  return (
+    <Indicator color="blocked" size={7} offset={3} disabled={!hint} data-hint={hint ? '' : undefined}>
+      <Menu id="btn-home-menu" position="bottom-end" width={240} radius="md">
+        <Menu.Target>
+          <Button {...SMALL} px={9} fz={14} aria-label={hint ? `Orchestrator actions (ctx ${pct(ctx)}: Compact suggested)` : 'Orchestrator actions'}>&#8942;</Button>
+        </Menu.Target>
+        <Menu.Dropdown>
+          {h && (
+            <Menu.Item id="hm-compact" {...item} disabled={busy} onClick={() => openCompact(name)}
+              rightSection={busy ? <Text span fz={12} c="dimmed">after this turn</Text> : hint ? <Text span fz={12} c="blocked">ctx {pct(ctx)}</Text> : null}>
+              Compact…
+            </Menu.Item>
+          )}
+          <Menu.Item id="hm-clear" {...item} onClick={actions.clear}>Clear (fresh session)…</Menu.Item>
+          <Menu.Item id="hm-stop" {...item} color="var(--color-blocked)" onClick={actions.stop}>Stop…</Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+    </Indicator>
   );
 }
 
@@ -656,7 +700,7 @@ export function AgentMenu({ actions }: { actions: AgentActions }) {
 }
 
 /** A running Home's topbar: the orchestrator, the view toggle and Settings (its agents' counts, the
- *  way to its list, Clear and Stop are on its status bar). A pane's header is its drawer's (ui/AgentDrawer.tsx). */
+ *  way to its list, its ⋮ (Compact, Clear, Stop) are on its status bar). A pane's header is its drawer's (ui/AgentDrawer.tsx). */
 export const homeTopbar = (paneId: string): Topbar => ({
   title: <PaneTitle paneId={paneId} home />,
   right: (

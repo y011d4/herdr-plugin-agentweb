@@ -22,6 +22,19 @@ const (
 	lineCanUse    = `{"type":"control_request","request_id":"c1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","display_name":"AskUserQuestion","input":{"questions":[]},"tool_use_id":"toolu_2","requires_user_interaction":true}}`
 )
 
+// A compaction's lines as 2.1.322 sent them for /compact between turns (scrubbed; the hooks' left out):
+// success, then a failure (a fresh session's, or an interrupt's).
+const (
+	lineCompacting = `{"type":"system","subtype":"status","status":"compacting","session_id":"00000000-0000-4000-8000-000000000001","uuid":"u9"}`
+	lineCompacted  = `{"type":"system","subtype":"status","status":null,"compact_result":"success","session_id":"00000000-0000-4000-8000-000000000001","uuid":"u10"}`
+	lineBoundary   = `{"type":"system","subtype":"compact_boundary","session_id":"00000000-0000-4000-8000-000000000001","uuid":"u11","compact_metadata":{"trigger":"manual","pre_tokens":640000,"post_tokens":3059,"cumulative_dropped_tokens":7338,"duration_ms":7512},"logical_parent_uuid":"u4"}`
+	lineSummary    = `{"type":"user","session_id":"00000000-0000-4000-8000-000000000001","parent_tool_use_id":null,"uuid":"u12","isReplay":false,"isSynthetic":true,"message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context."}}`
+	lineCompactEnd = `{"type":"result","subtype":"success","is_error":false,"duration_api_ms":0,"num_turns":0,"stop_reason":null,"result":"","local_command":"compact","modelUsage":{"claude-haiku-5-5":{"contextWindow":1000000,"inputTokens":2180}},"session_id":"00000000-0000-4000-8000-000000000001","uuid":"u13"}`
+	lineContext    = `{"type":"control_response","response":{"subtype":"success","request_id":"yoicks-context-1","response":{"categories":[],"totalTokens":120000,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":12}}}`
+	lineCompactBad = `{"type":"system","subtype":"status","status":null,"compact_result":"failed","compact_error":"Not enough messages to compact.","session_id":"00000000-0000-4000-8000-000000000001","uuid":"u14"}`
+	lineSynthetic  = `{"type":"assistant","local_command_run":{"command":"compact","args":""},"message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Not enough messages to compact."}],"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}},"session_id":"00000000-0000-4000-8000-000000000001","uuid":"u15"}`
+)
+
 func applyAll(m *hlModel, lines ...string) []hlStep {
 	var steps []hlStep
 	for _, l := range lines {
@@ -38,6 +51,100 @@ func warningKinds(steps []hlStep) []string {
 		}
 	}
 	return kinds
+}
+
+func TestHeadlessCompactStream(t *testing.T) {
+	pct := func(p *float64) any {
+		if p == nil {
+			return nil
+		}
+		return *p
+	}
+	t.Run("a compaction: running, done, then the context Claude Code reports; no completion", func(t *testing.T) {
+		m := hlModel{}
+		applyAll(&m, lineInit, lineAssistant, lineResult) // ctx 2.8%
+		m.Status = "working"                              // as Compact's write makes it
+		applyAll(&m, lineCompacting)
+		if c := m.compact; c == nil || c.State != "running" || pct(c.From) != 2.8 || c.To != nil {
+			t.Fatalf("compacting: %+v", c)
+		}
+		steps := applyAll(&m, lineCompacted, lineInit, lineBoundary, lineSummary, lineCompactEnd)
+		req, _ := json.Marshal(steps[2].Reply)
+		if string(req) != `{"request":{"subtype":"get_context_usage"},"request_id":"yoicks-context-1","type":"control_request"}` {
+			t.Errorf("the boundary asks %s", req)
+		}
+		// the result after it: the old context, never recomputed from it, until Claude Code says the new one
+		if m.Status != "idle" || m.CompletionSeq != 1 || m.compact.State != "done" || pct(m.Usage.ContextPct) != 2.8 || m.ctxTokens != 0 {
+			t.Fatalf("ended: %s %d %+v %v", m.Status, m.CompletionSeq, m.compact, pct(m.Usage.ContextPct))
+		}
+		applyAll(&m, lineContext)
+		if c := m.compact; pct(c.From) != 64.0 || pct(c.To) != 12.0 || pct(m.Usage.ContextPct) != 12.0 || c.Error != "" {
+			t.Fatalf("its context: %+v %v→%v, ctx %v", c, pct(c.From), pct(c.To), pct(m.Usage.ContextPct))
+		}
+		// kept while idle; the next turn's end drops it
+		applyAll(&m, lineInit)
+		if m.compact == nil {
+			t.Fatal("dropped at the next turn's start")
+		}
+		applyAll(&m, lineAssistant, lineResult)
+		if m.compact != nil || m.CompletionSeq != 2 || m.Status != "done" {
+			t.Errorf("after the next turn: %+v %d %s", m.compact, m.CompletionSeq, m.Status)
+		}
+	})
+
+	t.Run("an answer late for its compaction sets nothing: a turn begun meanwhile reports its own context", func(t *testing.T) {
+		m := hlModel{Status: "working"}
+		applyAll(&m, lineCompacting, lineCompacted, lineInit, lineBoundary, lineCompactEnd, lineInit, lineAssistant)
+		applyAll(&m, lineContext) // mid-turn: the compaction's context, until the turn ends
+		applyAll(&m, lineResult)
+		if pct(m.Usage.ContextPct) != 2.8 || m.compact != nil {
+			t.Fatalf("the turn's end: %v %+v", pct(m.Usage.ContextPct), m.compact)
+		}
+		m2 := hlModel{Status: "working"}
+		applyAll(&m2, lineCompacting, lineCompacted, lineInit, lineBoundary, lineCompactEnd, lineInit, lineAssistant, lineResult, lineContext)
+		if pct(m2.Usage.ContextPct) != 2.8 {
+			t.Errorf("after the turn: %v", pct(m2.Usage.ContextPct))
+		}
+		// a turn that reported no context of its own (interrupted: its result has none) leaves it shown
+		for _, turn := range [][]string{{lineInit, lineAborted}, {lineInit, lineAssistant, lineAborted}} {
+			m := hlModel{Status: "working"}
+			applyAll(&m, append(append([]string{lineCompacting, lineCompacted, lineInit, lineBoundary, lineCompactEnd}, turn...), lineContext)...)
+			if m.Usage == nil || pct(m.Usage.ContextPct) != 12.0 {
+				t.Errorf("after an interrupted turn (%d lines): %+v", len(turn), m.Usage)
+			}
+		}
+		// a later compaction, running or failed, isn't given the one before's context; the Home is
+		m4 := hlModel{Status: "working"}
+		applyAll(&m4, lineCompacting, lineCompacted, lineInit, lineBoundary, lineCompactEnd, lineCompacting, lineContext)
+		if c := m4.compact; c.State != "running" || c.To != nil || pct(m4.Usage.ContextPct) != 12.0 {
+			t.Errorf("the next compaction: %+v %v", c, pct(m4.Usage.ContextPct))
+		}
+		applyAll(&m4, lineCompactBad)
+		if c := m4.compact; c.State != "failed" || c.To != nil {
+			t.Errorf("the next compaction failed: %+v", c)
+		}
+		m5 := hlModel{Status: "working"} // the answer between the next one's success and its boundary
+		applyAll(&m5, lineCompacting, lineCompacted, lineInit, lineBoundary, lineCompactEnd, lineCompacting, lineCompacted, lineContext)
+		if c := m5.compact; c.State != "done" || c.To != nil {
+			t.Errorf("the next compaction done: %+v", c)
+		}
+	})
+
+	t.Run("a failed one says why, and changes nothing else", func(t *testing.T) {
+		m := hlModel{Status: "working"}
+		steps := applyAll(&m, lineCompacting, lineCompactBad, lineInit, lineSynthetic, lineCompactEnd)
+		if c := m.compact; c == nil || c.State != "failed" || c.Error != "Not enough messages to compact." || c.From != nil || c.To != nil {
+			t.Fatalf("%+v", c)
+		}
+		if m.Status != "idle" || m.CompletionSeq != 0 || m.Usage != nil {
+			t.Errorf("%s %d %+v", m.Status, m.CompletionSeq, m.Usage)
+		}
+		for _, s := range steps {
+			if s.Reply != nil || len(s.Warnings) != 0 {
+				t.Errorf("a step %+v", s)
+			}
+		}
+	})
 }
 
 func TestHeadlessStream(t *testing.T) {

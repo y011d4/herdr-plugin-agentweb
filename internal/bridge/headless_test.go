@@ -447,6 +447,98 @@ func TestHeadlessInterruptAndStop(t *testing.T) {
 	}
 }
 
+func TestHeadlessCompact(t *testing.T) {
+	var mu sync.Mutex
+	var changes []string // its done and blocked changes, as the notifications get them
+	b := startHeadless(t, t.TempDir(), nil, func(h *headlessRunner) {
+		next := h.onStatus
+		h.onStatus = func(from, to string) {
+			mu.Lock()
+			changes = append(changes, from+"→"+to)
+			mu.Unlock()
+			next(from, to)
+		}
+	})
+	told := func() []string { mu.Lock(); defer mu.Unlock(); return slices.Clone(changes) }
+	compact := func(body string) (int, string) { return b.post(t, "compact", body) }
+	compactOf := func(v OrchestratorView) *HeadlessCompact { return v.Headless.Compact }
+	if status, body := compact(""); status != 409 || !strings.Contains(body, "not_running") {
+		t.Errorf("stopped: %d %s", status, body)
+	}
+	b.start(t)
+	b.waitStatus(t, "idle")
+
+	// a fresh session has nothing to compact: Claude Code says so
+	if status, body := compact(""); status != 200 {
+		t.Fatalf("compact: %d %s", status, body)
+	}
+	b.waitStdin(t, `"content":"/compact"`)
+	v := b.waitFor(t, "the failure", func(v OrchestratorView) bool { return compactOf(v) != nil && compactOf(v).State == "failed" })
+	if c := compactOf(v); c.Error != "Not enough messages to compact." || v.Headless.Status != "idle" || v.Headless.CompletionSeq != 0 {
+		t.Fatalf("%+v %+v", c, v.Headless)
+	}
+
+	b.send(t, "hello")
+	v = b.waitStatus(t, "done")
+	if *v.Headless.Usage.ContextPct != 1 || compactOf(v) != nil || !slices.Equal(told(), []string{"working→done"}) {
+		t.Fatalf("a turn: %+v, %v", v.Headless, told())
+	}
+
+	// with focus, on one line; refused while it runs, as a model change is; then the context it left
+	for body, want := range map[string]int{`{"focus":7}`: 400, `{"focus":"` + strings.Repeat("x", 2001) + `"}`: 400} {
+		if status, out := compact(body); status != want {
+			t.Errorf("%.40s: %d %s", body, status, out)
+		}
+	}
+	if status, body := compact(`{"focus":" hold\n "}`); status != 200 {
+		t.Fatalf("compact: %d %s", status, body)
+	}
+	b.waitStdin(t, `"content":"/compact hold"`)
+	v = b.waitFor(t, "compacting", func(v OrchestratorView) bool { return compactOf(v) != nil && compactOf(v).State == "running" })
+	if c := compactOf(v); v.Headless.Status != "working" || c.From == nil || *c.From != 1 || c.To != nil {
+		t.Fatalf("running: %+v %+v", c, v.Headless)
+	}
+	if status, body := compact(""); status != 409 || !strings.Contains(body, "busy") {
+		t.Errorf("a second one: %d %s", status, body)
+	}
+	if status, _ := b.post(t, "model", `{"model":"fake-big"}`); status != 409 {
+		t.Errorf("a model change while compacting: %d", status)
+	}
+	b.release(t)
+	v = b.waitFor(t, "its context", func(v OrchestratorView) bool { return compactOf(v) != nil && compactOf(v).To != nil })
+	if c := compactOf(v); c.State != "done" || *c.From != 1 || *c.To != 0.5 || *v.Headless.Usage.ContextPct != 0.5 {
+		t.Fatalf("done: %+v %+v", c, v.Headless.Usage)
+	}
+	v = b.waitStatus(t, "idle")
+	runs, _ := b.runs(t)
+	if v.Headless.CompletionSeq != 1 || len(runs) != 1 || !slices.Equal(told(), []string{"working→done"}) {
+		t.Fatalf("no completion, the same session: %+v, %d runs, %v", v.Headless, len(runs), told())
+	}
+	// the chat: a notice where it cut, never the summary
+	waitUntil(t, 5*time.Second, "the notice", func() bool {
+		_, body, _ := b.do(t, "GET", "/api/panes/hl:h1/transcript", b.token, nil)
+		return strings.Contains(body, `"text":"[yoicks] compacted"`) && !strings.Contains(body, "being continued")
+	})
+
+	// ■ while it compacts fails it, as Claude Code's interrupt does
+	compact(`{"focus":"hold"}`)
+	b.waitFor(t, "compacting again", func(v OrchestratorView) bool { return compactOf(v) != nil && compactOf(v).State == "running" })
+	if status, body := b.post(t, "interrupt", ""); status != 200 {
+		t.Fatalf("interrupt: %d %s", status, body)
+	}
+	v = b.waitFor(t, "the interrupt", func(v OrchestratorView) bool { return compactOf(v).State == "failed" })
+	if compactOf(v).Error != "API Error: Request was aborted." {
+		t.Errorf("%+v", compactOf(v))
+	}
+
+	// the next turn's end drops it
+	b.send(t, "next")
+	v = b.waitFor(t, "the next turn", func(v OrchestratorView) bool { return v.Headless.CompletionSeq == 2 })
+	if compactOf(v) != nil {
+		t.Errorf("kept past the next turn: %+v", compactOf(v))
+	}
+}
+
 func TestHeadlessCrashes(t *testing.T) {
 	b := startHeadless(t, t.TempDir(), nil, nil)
 	b.start(t)

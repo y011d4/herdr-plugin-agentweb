@@ -57,7 +57,14 @@ type hlModel struct {
 	models        []HeadlessModel   // the models Claude Code offers (its answer to initRequest)
 	// the model in effect, Claude Code's id: get_settings' answer at the start, set_model's, each
 	// turn's init. A resumed session keeps the model it last ran on, whatever the default says.
-	active string
+	active    string
+	compact   *HeadlessCompact // its last compaction, until the next turn ends
+	preTokens float64          // the context that compaction began with (compact_boundary's)
+	// the context a compaction left (contextRequest): the latest request, until its answer (an older one's
+	// is ignored), the compaction that asked it, and how many contexts the results had reported then
+	nContext, measured, askedAt int
+	contextAsk                  string
+	askedFor                    *HeadlessCompact
 }
 
 // initRequest is the request_id of the initialize control request each child gets at its start:
@@ -68,6 +75,12 @@ const initRequest = "yoicks-init"
 // settingsRequest is the get_settings control request each child gets at its start: its answer's
 // applied.model is the model in effect, known before any turn.
 const settingsRequest = "yoicks-settings"
+
+// contextRequest begins the request_id of the get_context_usage control request each compaction's
+// boundary brings: its answer is the context left (totalTokens of maxTokens). compact_boundary's
+// post_tokens is only the summary, without the system prompt and the tools (measured on 2.1.322:
+// 3059 of an 11645 total).
+const contextRequest = "yoicks-context"
 
 // modelRe is a model value fit for --model: one of Claude Code's aliases or ids (opus,
 // claude-opus-4-8, opus[1m]), never a flag.
@@ -135,7 +148,9 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 	m.unreadableRun = 0
 	switch typ {
 	case "system":
-		if sub == "init" {
+		res, _ := ev["compact_result"].(string)
+		switch {
+		case sub == "init":
 			if model, _ := ev["model"].(string); model != "" {
 				m.active = model
 			}
@@ -144,6 +159,27 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 				m.inited = true
 				return m.checkInit(ev)
 			}
+		// a compaction (2.1.322): status compacting; then status null with compact_result (success, or
+		// failed with compact_error); on success compact_boundary, whose context Claude Code is asked for
+		case sub == "status" && ev["status"] == "compacting":
+			m.compact = &HeadlessCompact{State: "running", From: m.contextPct()}
+		case sub == "status" && res != "":
+			if m.compact == nil {
+				m.compact = &HeadlessCompact{From: m.contextPct()}
+			}
+			m.compact.State = "done"
+			if res != "success" {
+				m.compact.State = "failed"
+				msg, _ := ev["compact_error"].(string)
+				m.compact.Error, _ = truncateUnits(firstNonEmpty(msg, res), 200)
+			}
+		case sub == "compact_boundary":
+			meta, _ := ev["compact_metadata"].(map[string]any)
+			m.preTokens = num(meta["pre_tokens"])
+			m.ctxTokens = 0 // the context before it: the result after it must not report that one
+			m.nContext++
+			m.contextAsk, m.askedAt, m.askedFor = fmt.Sprintf("%s-%d", contextRequest, m.nContext), m.measured, m.compact
+			st.Reply = map[string]any{"type": "control_request", "request_id": m.contextAsk, "request": map[string]any{"subtype": "get_context_usage"}}
 		}
 	case "assistant":
 		msg := ev["message"].(map[string]any)
@@ -186,11 +222,19 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 			st.Results = append(st.Results, res)
 		}
 	case "result":
-		if reason, _ := ev["terminal_reason"].(string); strings.HasPrefix(reason, "aborted") {
+		reason, _ := ev["terminal_reason"].(string)
+		cmd, _ := ev["local_command"].(string)
+		switch {
+		case cmd != "":
+			m.Status = "idle" // a local command (/compact): no turn, no completion to report
+		case strings.HasPrefix(reason, "aborted"):
 			m.Status = "idle" // interrupted: no completion to report
-		} else {
+		default:
 			m.Status = "done"
 			m.CompletionSeq++
+		}
+		if cmd == "" {
+			m.compact = nil // a turn ended: the compaction before it, or in it, has been shown
 		}
 		usage, _ := ev["modelUsage"].(map[string]any)
 		mu, _ := usage[m.model].(map[string]any)
@@ -200,7 +244,8 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 			}
 		}
 		if window := num(mu["contextWindow"]); window > 0 && m.ctxTokens > 0 {
-			m.usage().ContextPct = new(math.Round(1000*m.ctxTokens/window) / 10)
+			m.usage().ContextPct = pctOf(m.ctxTokens, window)
+			m.measured++
 		}
 	case "rate_limit_event":
 		windows, _ := ev["rate_limit_info"].(map[string]any)["unifiedWindows"].(map[string]any)
@@ -241,6 +286,21 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 		for _, model := range []any{inner["model"], applied["model"]} { // set_model's answer, get_settings'
 			if model, _ := model.(string); model != "" && st.AckError == "" {
 				m.active = model
+			}
+		}
+		// the context a compaction left: the context shown unless a result has reported a newer one since it was
+		// asked (not ctxTokens, which a turn begun meanwhile has set), and that of the compaction on show if it
+		// is the one that asked (a later one has a request of its own, or none: it failed)
+		if total, window := num(inner["totalTokens"]), num(inner["maxTokens"]); st.Acked != "" && st.Acked == m.contextAsk && st.AckError == "" && total > 0 && window > 0 {
+			m.contextAsk = ""
+			if m.measured == m.askedAt {
+				m.usage().ContextPct = pctOf(total, window)
+			}
+			if c := m.compact; c != nil && c == m.askedFor {
+				c.To = pctOf(total, window)
+				if m.preTokens > 0 {
+					c.From = pctOf(m.preTokens, window)
+				}
 			}
 		}
 		if list, ok := inner["models"].([]any); ok && st.Acked == initRequest {
@@ -361,6 +421,17 @@ func (m *hlModel) usage() *HeadlessUsage {
 }
 
 func num(v any) float64 { f, _ := v.(float64); return f }
+
+// pctOf is tokens as a percent of window, to a tenth.
+func pctOf(tokens, window float64) *float64 { return new(math.Round(1000*tokens/window) / 10) }
+
+// contextPct is a copy of the context's percent (nil: unknown).
+func (m *hlModel) contextPct() *float64 {
+	if m.Usage == nil || m.Usage.ContextPct == nil {
+		return nil
+	}
+	return new(*m.Usage.ContextPct)
+}
 
 func controlResponse(id any, response map[string]any) map[string]any {
 	response["request_id"] = id

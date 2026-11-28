@@ -8,8 +8,11 @@
   `"mode": "headless"`) なら `"headless"` です。`"headless"` のものは、動いている間 `paneId` が `"hl:<name>"` になり、
   `headless` が `{ status: stopped|idle|working|blocked|done|error, completionSeq, pending: { id, questions } | null,
   usage: { fiveHour, sevenDay, fable: { utilization (0–1), resetsAt (ms) } | null, contextPct | null, at } | null,
-  warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }], model, activeModel, models: [{ value, displayName, description, resolvedModel }] }` になります。
-  tui のものでは `null` です。`models` は Claude Code の `/model` の一覧から `default` を除いたものです (`default` のモデルは、ほかのどの項目にも
+  warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }], model, activeModel, models: [{ value, displayName, description, resolvedModel }],
+  compact: { state: running|done|failed, from, to, error } | null }` になります。
+  tui のものでは `null` です。`compact` は最後の compact (Home からのもの、入力した `/compact`、上限の近くで Claude Code が自分で行うもの) で、
+  次のターンが終わるまで残ります。`from` と `to` は前後のコンテキストのウィンドウに対する割合 (%) で、わからない間は `null` です。
+  `error` は失敗した理由で、失敗していなければ `""` です。`models` は Claude Code の `/model` の一覧から `default` を除いたものです (`default` のモデルは、ほかのどの項目にも
   無ければ、その id のまま残ります)。このブリッジの子プロセスが返すまでは `[]` です。`model` はここで選んだモデルで、選んでいなければ `""` です。`activeModel` は実際に使われているモデル (Claude Code の id) で、
   わかるまでは `""` です。何も選んでいなければ、再開したセッションは最後に動いたときのモデルのままです。`todos` はその Home にあるユーザーの
   やることリストです (`[{ id, text, agent, url, due, createdAt }]`、古い順、`null` にはなりません。その
@@ -63,6 +66,10 @@
   `headless.models` のどれかに設定します (それ以外は 400)。動いているものはその場で切り替わります (Claude Code の `set_model` で、次の
   ターンから)。ターンの実行中は 409、Claude Code が 10 s 以内に答えなければ 504 を返します (答えた時点で保存されます)。止まっているものは、
   次にそのモデルで起動します。設定は再起動と Clear をまたいで保たれます (起動のたびに `--model` を渡します)。
+- `POST /api/orchestrators/:name/compact` `{"focus"?: "<要約に残してほしいこと>"}` — ヘッドレスの orchestrator の会話を
+  その場で compact します (Claude Code の `/compact`。focus は 1 行にまとめ、2000 バイトまで)。セッションは要約から続き、
+  `headless.compact` がその経過を示します。ターンの合間だけです。ターンの実行中や質問を待っている間は 409 `busy`、止まっているときは
+  409 `not_running` を返します。完了としては数えません。
 - `POST /api/orchestrators/:name/answer` `{"id": "…", "answers": {"<question>": "<label>"}}` または
   `{"id": "…", "deny": "<message>"}` または `{"id": "…", "chat": true, "answers"?: {…}}` — ヘッドレスの
   orchestrator の保留中の質問 (`headless.pending`、その AskUserQuestion) に答えます (または断ります)。multiSelect のラベルは

@@ -8,8 +8,11 @@
   `"mode": "headless"`), whose `paneId` is `"hl:<name>"` while it runs and whose
   `headless` is `{ status: stopped|idle|working|blocked|done|error, completionSeq, pending: { id, questions } | null,
   usage: { fiveHour, sevenDay, fable: { utilization (0–1), resetsAt (ms) } | null, contextPct | null, at } | null,
-  warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }], model, activeModel, models: [{ value, displayName, description, resolvedModel }] }`,
-  `null` for a tui one; `models` is Claude Code's `/model` list without its `default` (whose model, if nothing else
+  warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }], model, activeModel, models: [{ value, displayName, description, resolvedModel }],
+  compact: { state: running|done|failed, from, to, error } | null }`,
+  `null` for a tui one; `compact` is its last compaction (the Home's, a typed `/compact`, or Claude Code's own near the
+  limit) until the next turn ends: `from` and `to` the context before and after, percent of the window (`null` while
+  unknown), `error` why it failed (`""` when it didn't); `models` is Claude Code's `/model` list without its `default` (whose model, if nothing else
   offers it, stays as its id), `[]` until a child of this bridge has given it; `model` the one chosen here, `""` for none; `activeModel` the model in effect, Claude Code's id, `""`
   until known: with none chosen, a resumed session keeps the model it last ran on), `todos` the user's
   to-do list on its Home (`[{ id, text, agent, url, due, createdAt }]`, oldest first, never `null`: what its
@@ -65,6 +68,10 @@
   `headless.models` (400 for another): a running one switches in place (Claude Code's `set_model`, from its next
   turn), 409 while a turn runs, 504 when Claude Code hasn't answered within 10 s (kept once it does); a stopped one
   starts on it. Kept across restarts and Clear (`--model` at each start).
+- `POST /api/orchestrators/:name/compact` `{"focus"?: "<what the summary should keep>"}` — compact a headless
+  orchestrator's conversation in place (Claude Code's `/compact`, the focus on one line, at most 2000 bytes): the session goes
+  on from the summary; `headless.compact` follows it. Between turns only: 409 `busy` while a turn runs or a question waits,
+  409 `not_running` when stopped. It counts no completion.
 - `POST /api/orchestrators/:name/answer` `{"id": "…", "answers": {"<question>": "<label>"}}` or
   `{"id": "…", "deny": "<message>"}` or `{"id": "…", "chat": true, "answers"?: {…}}` — answer (or refuse) the
   headless orchestrator's pending question (`headless.pending`, its AskUserQuestion): a multiSelect's labels

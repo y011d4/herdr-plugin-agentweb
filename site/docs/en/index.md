@@ -32,8 +32,8 @@ phone or a PC's browser:
   each card shows its git branch, and a linked worktree's agents appear inside their
   main checkout, chipped as a worktree
 - Rename, clear, and stop agents from the phone: each pane's **⋮** menu renames, clears
-  (fresh session), or stops it (an orchestrator's Home has **Clear** and **Stop** buttons
-  instead). Agents are started by the orchestrators, not by hand. **⚙** at the top right
+  (fresh session), or stops it (an orchestrator's Home has **Clear** and **Stop**, and a headless
+  one's **Compact**, in the **⋮** on its status bar). Agents are started by the orchestrators, not by hand. **⚙** at the top right
   opens the settings
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
   scrollback by swiping down, multiline input, and quick keys

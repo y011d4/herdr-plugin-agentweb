@@ -60,6 +60,8 @@ const click = async (el: Element | null): Promise<void> => {
   await settle();
 };
 const $ = (sel: string): HTMLElement | null => document.querySelector<HTMLElement>(sel);
+/** A running Home's Clear or Stop: its status bar's ⋮, then the item. */
+const homeAction = async (item: 'clear' | 'stop'): Promise<void> => { await click($('#btn-home-menu')); await click($(`#hm-${item}`)); };
 const fresh = (): AppState => structuredClone(recorded); // p4 runs the orchestrator "personal"; "work" isn't running
 const toastTitles = (): string[] => getToasts().map((t) => t.title);
 
@@ -394,7 +396,7 @@ describe('App', () => {
     assert.ok($('#screen #screen-home-stopped'));
     assert.equal(store.view.activePaneId, null);
     assert.equal($('#topbar-right')!.textContent, '⚙', 'a stopped Home\'s topbar: Settings alone');
-    assert.ok(!$('#btn-home-clear') && $('#btn-settings'), 'no Clear/Stop to a stopped Home; Settings');
+    assert.ok(!$('#btn-home-menu') && $('#btn-settings'), 'no Clear/Stop to a stopped Home; Settings');
     await click($('#btn-home-start'));
     await answer('POST /api/orchestrators/work/start', { ok: true, paneId: 'p6' });
     assert.equal(($('#btn-home-start') as HTMLButtonElement).disabled, true, 'starting until the State shows it');
@@ -418,7 +420,7 @@ describe('App', () => {
   it("a Clear that ends with no gap seen still lets go within 8s: a later exit shows the stopped Home at once", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/home/personal');
-    await click($('#btn-home-clear'));
+    await homeAction('clear');
     await click($('#modal-root #cf-ok'));
     const r = reqs.find((q) => !q.answered && q.method === 'POST' && q.url === '/api/agents/p4/clear')!;
     await act(async () => { r.answered = true; r.answer(200, { ok: true, paneId: 'p8' }); for (let i = 0; i < 20; i++) await Promise.resolve(); });
@@ -447,7 +449,7 @@ describe('App', () => {
     assert.equal(store.view.activePaneId, 'p4');
 
     // a Clear: the gap before the replacement holds the Home, the replacement re-routes onto it
-    await click($('#btn-home-clear'));
+    await homeAction('clear');
     await click($('#modal-root #cf-ok'));
     await act(async () => push!({ type: 'state', state: s })); // a push while the old pane is still there
     s.orchestrators[0].paneId = null;
@@ -461,7 +463,7 @@ describe('App', () => {
     assert.ok($('#screen #screen-pane.screen-home'));
 
     // a Clear whose replacement never shows: the stopped Home after 8s
-    await click($('#btn-home-clear'));
+    await homeAction('clear');
     await click($('#modal-root #cf-ok'));
     s.orchestrators[0].paneId = null;
     await act(async () => push!({ type: 'state', state: s }));
@@ -497,7 +499,7 @@ describe('App', () => {
     // a Home has no ⋮: Settings in its topbar, Clear and Stop on its status bar
     await go('#/home/personal');
     assert.ok(!$('#btn-agent-menu') && $('#btn-settings'), "a Home's topbar: Settings, no agent-actions menu");
-    await click($('#btn-home-clear'));
+    await homeAction('clear');
     await click($('#modal-root #cf-ok'));
     await answer('POST /api/agents/p4/clear', { ok: true, paneId: 'p9' });
     assert.equal(location.hash, '#/home/personal', 'the State routes onto the replacement');
@@ -561,10 +563,10 @@ describe('App', () => {
     await go('#/agents');
   });
 
-  it("a Home's Stop button closes its orchestrator's pane after the confirm, and the Home stays, stopped", async () => {
+  it("a Home's Stop (its ⋮) closes its orchestrator's pane after the confirm, and the Home stays, stopped", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/home/personal');
-    await click($('#btn-home-stop'));
+    await homeAction('stop');
     await click($('#modal-root #cf-ok'));
     await answer('DELETE /api/panes/p4', { ok: true });
     assert.deepEqual(toastTitles(), ['Stopped']);
@@ -626,7 +628,7 @@ describe('App', () => {
     store.seenDone = {};
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/home/personal');
-    await click($('#btn-home-clear'));
+    await homeAction('clear');
     await click($('#modal-root #cf-ok')); // its POST waits
     await click($('#btn-settings'));
     await answer('POST /api/agents/p4/clear', { error: { code: 'boom', message: 'boom' } }, 500);
@@ -652,7 +654,7 @@ describe('App', () => {
   it("a Home's Clear under Settings holds through the gap: closing Settings then shows no Start, and the replacement comes in", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/home/personal');
-    await click($('#btn-home-clear'));
+    await homeAction('clear');
     await click($('#modal-root #cf-ok'));
     await click($('#btn-settings'));
     await answer('POST /api/agents/p4/clear', { ok: true, paneId: 'p9' });
@@ -677,7 +679,7 @@ describe('App', () => {
   it("a Home's Clear under Settings whose replacement never shows: the toast after 8s, and the stopped Home under it", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/home/personal');
-    await click($('#btn-home-clear'));
+    await homeAction('clear');
     await click($('#modal-root #cf-ok'));
     await click($('#btn-settings'));
     await answer('POST /api/agents/p4/clear', { ok: true, paneId: 'p9' });
@@ -829,7 +831,7 @@ describe('App', () => {
     const pilot = (running: boolean): AppState => {
       const s = fresh();
       s.orchestrators.push({ name: 'pilot', label: 'Pilot', paneId: running ? 'hl:pilot' : null, agents: [], mode: 'headless',
-        headless: { status: running ? 'idle' : 'stopped', completionSeq: 0, pending: null, usage: null, warnings: [], model: '', activeModel: '', models: [] } });
+        headless: { status: running ? 'idle' : 'stopped', completionSeq: 0, pending: null, usage: null, warnings: [], model: '', activeModel: '', models: [], compact: null } });
       return s;
     };
     await act(async () => push!({ type: 'state', state: pilot(true) }));
@@ -839,7 +841,7 @@ describe('App', () => {
     await answer('GET /api/panes/hl%3Apilot/transcript', { available: false });
     assert.equal($('#chat-log')!.textContent, 'No messages yet.');
 
-    await click($('#btn-home-stop'));
+    await homeAction('stop');
     await click($('#modal-root #cf-ok'));
     await answer('POST /api/orchestrators/pilot/stop', { ok: true });
     await act(async () => push!({ type: 'state', state: pilot(false) }));
@@ -848,7 +850,7 @@ describe('App', () => {
 
     await act(async () => push!({ type: 'state', state: pilot(true) }));
     await settle();
-    await click($('#btn-home-clear'));
+    await homeAction('clear');
     await click($('#modal-root #cf-ok'));
     await answer('POST /api/orchestrators/pilot/clear', { ok: true, paneId: 'hl:pilot', name: 'pilot' });
     assert.equal(location.hash, '#/home/pilot');

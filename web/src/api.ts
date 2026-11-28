@@ -94,7 +94,7 @@ export const headlessName = (paneId: string): string | null => (paneId.startsWit
 
 /** A headless orchestrator's action: it has no herdr pane, so its send, answer, interrupt, Clear and
  *  Stop go to POST /api/orchestrators/:name/<action> (start too, as for any orchestrator). */
-export const orchestratorPost = <T = unknown>(name: string, action: 'start' | 'send' | 'answer' | 'interrupt' | 'clear' | 'stop' | 'model', body: Record<string, unknown> = {}): Promise<T> =>
+export const orchestratorPost = <T = unknown>(name: string, action: 'start' | 'send' | 'answer' | 'interrupt' | 'clear' | 'stop' | 'model' | 'compact', body: Record<string, unknown> = {}): Promise<T> =>
   apiPost<T>(`/api/orchestrators/${encodeURIComponent(name)}/${action}`, body);
 
 export async function apiDelete(path: string): Promise<unknown> {

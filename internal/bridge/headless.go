@@ -416,6 +416,10 @@ func (r *headlessRunner) view() (HeadlessView, bool) {
 	if p := r.pending; p != nil {
 		v.Pending = &HeadlessPending{ID: p.id, Questions: p.questions}
 	}
+	if c := r.model.compact; c != nil {
+		cc := *c
+		v.Compact = &cc
+	}
 	return v, r.child != nil
 }
 
@@ -814,6 +818,7 @@ func (r *headlessRunner) spawn(argv, env []string) error {
 		r.mu.Lock()
 		r.child, r.lastEvent, c.epoch = c, r.clock.Now(), r.epoch
 		r.model.inited, r.model.unreadableRun, r.model.yoicksUses, r.served = false, 0, nil, map[string]bool{}
+		r.model.compact = nil // one the child before was in the middle of ended with it
 		r.model.expectTools, r.model.expectMCP = headlessTools(r.tools), true
 		r.model.Status = "idle"
 		r.mu.Unlock()
@@ -1329,6 +1334,41 @@ func (r *headlessRunner) SetModel(value string) error {
 	case <-r.clock.After(10 * time.Second):
 		return &LifecycleError{Status: 504, Code: "model_pending", Message: "Claude Code hasn't answered within 10s: the Home shows the new model once it does"}
 	}
+}
+
+// maxCompactFocus is how long Compact's instructions may be (bytes).
+const maxCompactFocus = 2000
+
+// Compact compacts its conversation in place (Claude Code's /compact; focus, if any, its
+// instructions, on one line), keeping the session: only between turns, refused while one runs or a
+// question waits, so it never queues behind one. The stream tells how it goes (hlModel's compact)
+// and the context it leaves; no completion is counted.
+func (r *headlessRunner) Compact(focus string) error {
+	focus = strings.Join(strings.Fields(focus), " ")
+	if len(focus) > maxCompactFocus {
+		return &LifecycleError{Status: 400, Code: "invalid_params", Message: fmt.Sprintf("focus is over %d bytes", maxCompactFocus)}
+	}
+	r.gate.Lock() // no message goes out between the check and the write
+	defer r.gate.Unlock()
+	r.mu.Lock()
+	c, err := r.running()
+	if err == nil && (r.model.Status == "working" || r.model.Status == "blocked" || r.pending != nil) { // a question comes mid-turn
+		err = &LifecycleError{Status: 409, Code: "busy", Message: "it is working: compact once its turn has ended"}
+	}
+	if err == nil {
+		r.model.Status, r.lastEvent = "working", r.clock.Now()
+	}
+	r.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	text := strings.TrimSpace("/compact " + focus)
+	if err := c.write(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}}); err != nil {
+		return &LifecycleError{Status: 502, Code: "write_failed", Message: "could not write to claude: " + err.Error()}
+	}
+	r.log("compact")
+	r.onChange()
+	return nil
 }
 
 // chooseModel keeps value as its model; r.mu held.

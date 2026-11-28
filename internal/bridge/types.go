@@ -172,6 +172,16 @@ type HeadlessView struct {
 	// the models Claude Code offers the account, as its /model lists them (but its "default"); []
 	// until a child of this bridge has said
 	Models []HeadlessModel `json:"models"`
+	// its last compaction (/compact: the Home's Compact, or Claude Code's own as the context fills up),
+	// until the next turn ends; null: none
+	Compact *HeadlessCompact `json:"compact"`
+}
+
+type HeadlessCompact struct {
+	State string   `json:"state"` // running | done | failed
+	From  *float64 `json:"from"`  // the context before, percent of the window (null: unknown)
+	To    *float64 `json:"to"`    // and after (null until Claude Code has said)
+	Error string   `json:"error"` // why it failed ("" = it didn't)
 }
 
 type HeadlessModel struct {

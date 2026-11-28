@@ -685,7 +685,13 @@ export const messages: WsMessage[] = [
         "description": "Most efficient for simpler tasks",
         "resolvedModel": "claude-sonnet-5-5"
        }
-      ]
+      ],
+      "compact": {
+       "state": "done",
+       "from": 64,
+       "to": 12.5,
+       "error": ""
+      }
      },
      "todos": [
       {
