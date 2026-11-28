@@ -4,3 +4,4 @@ dist/
 bin/
 testdata/wire/DONE
 testdata/wire/FAILED
+site/docs/.vitepress/cache/
