@@ -768,8 +768,8 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   `personal`, `work`, `side`, `o/r`. A local git hook may refuse a commit or a push: report it to the user, never
   bypass it (`--no-verify`).
 - Docs: the user-facing docs are `site/docs/en/` and `site/docs/ja/`, the same pages in both languages (a page in
-  one only fails the build); a behavior change updates the page in both, in the same PR. The READMEs still carry the
-  same text until they are cut down to a pointer to the site: change them too until then.
+  one only fails the build); a behavior change updates the page in both, in the same PR. The READMEs are short (the pitch,
+  install, the docs' page list): a new docs page goes into both of their tables.
 - TS sources use explicit `.ts` relative-import extensions (`node` runs `tools/vectors/*.ts`
   on them directly; Vite bundles them). No raw control bytes in
   source — write ESC as the literal six characters `\u001b` in string escapes.
