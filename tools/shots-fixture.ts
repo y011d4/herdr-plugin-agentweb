@@ -63,6 +63,7 @@ export const state: AppState = {
   claudeCheck: { at: T0 - 3_600_000, version: '2.1.322', ok: true, failed: [] },
   // the workers' (p3, an agent the user runs, has none: its name shows)
   purposes: { p1: 'Review PR #119 before it merges', p2: 'Find why the sidebar test flakes on CI and fix it for good', p5: 'Paste images into the Home chat' },
+  version: '0.1.0',
 };
 
 type Item = TimelineItem;
@@ -246,7 +247,6 @@ export const scenes: Scene[] = [
   { name: 'settings', hash: '#/settings', ready: "!!document.querySelector('#screen-settings')", parts: [
     { name: 'settings-notifications', el: section('Notifications') },
     { name: 'settings-connection', el: section('Connection') },
-    { name: 'settings-headless', el: section('Headless orchestrators') },
     { name: 'settings-account', el: section('Account') },
   ] },
   { name: 'token', hash: '', ready: "!!document.querySelector('#token-input')", token: false, parts: [

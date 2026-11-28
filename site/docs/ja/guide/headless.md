@@ -18,7 +18,7 @@ PC で幅が 1280px 以上なら、Home の Needs you の代わりに、チャ�
 herdr のペインはありません。PC では、同じ Home をブラウザで開いてください。
 アプリを閉じている間も知らせを受けるには、`notify_url` (ntfy) を設定します。
 TUI に戻すには、`"mode": "headless"` を外し、ブリッジを再起動して、その Home で **Start** をタップします (新しいセッションになります)。
-同じ手順は Home の警告と Settings にも出ます。
+同じ手順は Home の ⋮ (**Back to the TUI…**) と警告にも出ます。
 
 ## Claude Code の確認 {#checking-claude-code}
 

@@ -197,5 +197,6 @@
  "claudeCheck": null,
  "purposes": {
   "p3": "レビューの指摘を直す"
- }
+ },
+ "version": "0.1.0"
 }

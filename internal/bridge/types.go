@@ -360,6 +360,8 @@ type ClientState struct {
 	ClaudeCheck *ClaudeCheck `json:"claudeCheck"`
 	// what each worker is for (pane id → one line its orchestrator gave; purpose.go): never null
 	Purposes map[string]string `json:"purposes"`
+	// this bridge's release (Version: "dev" for a source build), shown in the app's Settings
+	Version string `json:"version"`
 }
 
 // ClaudeCheck is the last periodic check of Claude Code's headless mode: what

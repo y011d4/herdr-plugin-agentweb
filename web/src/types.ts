@@ -81,6 +81,8 @@ export interface AppState {
   claudeCheck: ClaudeCheck | null;
   /** what each worker is for, by pane id: the one line its orchestrator gave (agent_start) */
   purposes: Record<string, string>;
+  /** this bridge's release ('dev' for a source build) */
+  version: string;
 }
 
 export interface ClaudeCheck {

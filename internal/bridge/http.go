@@ -265,7 +265,7 @@ func (s *server) clientState(st *State) ClientState {
 			break
 		}
 	}
-	return ClientState{State: st, Orchestrators: views, OrchestratorPaneID: first, ClaudeCheck: s.claudeCheck.Load(), Purposes: s.purposes.Purposes()}
+	return ClientState{State: st, Orchestrators: views, OrchestratorPaneID: first, ClaudeCheck: s.claudeCheck.Load(), Purposes: s.purposes.Purposes(), Version: Version}
 }
 
 func (s *server) workspaces() []*WorkspaceNode {

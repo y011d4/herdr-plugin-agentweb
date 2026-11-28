@@ -203,7 +203,8 @@ export const state: AppState = {
  "claudeCheck": null,
  "purposes": {
   "p3": "レビューの指摘を直す"
- }
+ },
+ "version": "0.1.0"
 };
 
 export const messages: WsMessage[] = [
@@ -408,7 +409,8 @@ export const messages: WsMessage[] = [
    "claudeCheck": null,
    "purposes": {
     "p3": "レビューの指摘を直す"
-   }
+   },
+   "version": "0.1.0"
   }
  },
  {
@@ -725,7 +727,8 @@ export const messages: WsMessage[] = [
    },
    "purposes": {
     "p3": "レビューの指摘を直す"
-   }
+   },
+   "version": "0.1.0"
   }
  },
  {

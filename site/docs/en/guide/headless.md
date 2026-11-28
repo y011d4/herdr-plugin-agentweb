@@ -16,7 +16,7 @@ for each Home (and its row in the PC's left rail) counts what waits on you there
 Home's Needs you (its blocked agents, its question, its to-do list), then its other agents. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
-fresh session); the Home's warnings and Settings show the same steps.
+fresh session); its Home's ⋮ (**Back to the TUI…**) and its warnings show the same steps.
 
 ## Checking Claude Code {#checking-claude-code}
 

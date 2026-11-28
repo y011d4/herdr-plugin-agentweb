@@ -38,9 +38,8 @@ import { StatusDot } from './Status.tsx';
 import { NeedsBadge, NeedsButton, needsYou, useMinute } from './Todos.tsx';
 import type { Topbar } from './App.tsx';
 import { HomePanel } from './HomePanel.tsx';
-import { openCompact, previewImage } from './Modals.tsx';
+import { openCompact, openTuiSteps, previewImage } from './Modals.tsx';
 import { answersSoFar, HeadlessPrompt, PromptPanel } from './PromptPanel.tsx';
-import { TuiSteps } from './Settings.tsx';
 
 type Mode = 'terminal' | 'chat';
 
@@ -307,7 +306,8 @@ function HomeTopRight({ name, paneId, actions }: { name: string; paneId?: string
 }
 
 // A Home's own tools, in a row: a headless one's usage and model, the view toggle (`paneId`: a running Home's) and the
-// orchestrator's ⋮ (HomeMenu: Compact, Clear, Stop). Nothing when it has none (a stopped TUI Home).
+// orchestrator's ⋮ (HomeMenu: Compact, Clear, Stop, a headless one's Back to the TUI, which a stopped headless Home has
+// alone). Nothing when it has none (a stopped TUI Home).
 function HomeTools({ name, paneId, actions, className }: { name: string; paneId?: string; actions?: HomeActions; className?: string }) {
   const now = useMinute();
   const self = useAppState()?.orchestrators?.find((o) => o.name === name);
@@ -318,7 +318,7 @@ function HomeTools({ name, paneId, actions, className }: { name: string; paneId?
       {usage}
       {self?.headless && <ModelPicker o={self} />}
       {paneId && <ViewToggle paneId={paneId} home />}
-      {actions && <HomeMenu name={name} o={self} actions={actions} />}
+      {(actions || self?.headless) && <HomeMenu name={name} o={self} actions={actions} />}
     </Group>
   );
 }
@@ -479,12 +479,13 @@ export function compactLine(c: HeadlessCompact): string {
 
 // A Home's ⋮, at its status bar's end (as a pane's is in its drawer's header: AgentMenu): a headless one's Compact…
 // (Modals.tsx's dialog: its focus, then /compact; between turns only, as the bridge allows), Clear and Stop, each
-// through its confirmation. ■ stays one tap away on the "doing now" line: it only ends the turn. Once the context is
+// through its confirmation, and Back to the TUI… (the steps, in a dialog; a stopped headless Home's ⋮ has it alone,
+// `actions` unset). ■ stays one tap away on the "doing now" line: it only ends the turn. Once the context is
 // COMPACT_HINT_PCT full, a small orange dot on ⋮ and the context on Compact… suggest it.
-function HomeMenu({ name, o, actions }: { name: string; o?: OrchestratorView; actions: HomeActions }) {
+function HomeMenu({ name, o, actions }: { name: string; o?: OrchestratorView; actions?: HomeActions }) {
   const h = o?.headless;
   const ctx = h?.usage?.contextPct;
-  const hint = ctx != null && ctx >= COMPACT_HINT_PCT;
+  const hint = !!actions && ctx != null && ctx >= COMPACT_HINT_PCT;
   const busy = h?.status === 'working' || h?.status === 'blocked';
   const item = { className: 'min-h-11', fz: 'md' } as const;
   return (
@@ -494,14 +495,15 @@ function HomeMenu({ name, o, actions }: { name: string; o?: OrchestratorView; ac
           <Button {...SMALL} px={9} fz={14} aria-label={hint ? `Orchestrator actions (ctx ${pct(ctx)}: Compact suggested)` : 'Orchestrator actions'}>&#8942;</Button>
         </Menu.Target>
         <Menu.Dropdown>
-          {h && (
+          {h && actions && (
             <Menu.Item id="hm-compact" {...item} disabled={busy} onClick={() => openCompact(name)}
               rightSection={busy ? <Text span fz={12} c="dimmed">after this turn</Text> : hint ? <Text span fz={12} c="blocked">ctx {pct(ctx)}</Text> : null}>
               Compact…
             </Menu.Item>
           )}
-          <Menu.Item id="hm-clear" {...item} onClick={actions.clear}>Clear (fresh session)…</Menu.Item>
-          <Menu.Item id="hm-stop" {...item} color="var(--color-blocked)" onClick={actions.stop}>Stop…</Menu.Item>
+          {actions && <Menu.Item id="hm-clear" {...item} onClick={actions.clear}>Clear (fresh session)…</Menu.Item>}
+          {actions && <Menu.Item id="hm-stop" {...item} color="var(--color-blocked)" onClick={actions.stop}>Stop…</Menu.Item>}
+          {h && <Menu.Item id="hm-tui" {...item} onClick={() => openTuiSteps(name)}>Back to the TUI…</Menu.Item>}
         </Menu.Dropdown>
       </Menu>
     </Indicator>
@@ -539,10 +541,9 @@ function ModelPicker({ o }: { o: OrchestratorView }) {
 }
 
 // A headless orchestrator's warnings, one line each (what went wrong, since when) with what it
-// offers: ■ (interrupt), Clear, and the steps back to the TUI, shown in place (the config is edited
-// by hand: the app never writes it).
+// offers: ■ (interrupt), Clear, and the steps back to the TUI (the ⋮'s dialog: the config is edited by
+// hand, the app never writes it).
 function HeadlessWarnings({ o, clear }: { o: OrchestratorView; clear?: () => void }) {
-  const [steps, setSteps] = useState(false);
   const warnings = o.headless?.warnings ?? [];
   if (!warnings.length) return null;
   return (
@@ -553,11 +554,10 @@ function HeadlessWarnings({ o, clear }: { o: OrchestratorView; clear?: () => voi
           <Group gap={6}>
             {w.actions.includes('interrupt') && <Button {...SMALL} data-action="interrupt" onClick={() => { void interrupt(o.name); }}>&#9632; Interrupt</Button>}
             {w.actions.includes('clear') && clear && <Button {...SMALL} data-action="clear" onClick={clear}>Clear</Button>}
-            {w.actions.includes('tui') && <Button {...SMALL} data-action="tui" onClick={() => setSteps(!steps)}>Back to TUI</Button>}
+            {w.actions.includes('tui') && <Button {...SMALL} data-action="tui" onClick={() => openTuiSteps(o.name)}>Back to TUI</Button>}
           </Group>
         </Group>
       ))}
-      {steps && <TuiSteps name={o.name} />}
     </Stack>
   );
 }

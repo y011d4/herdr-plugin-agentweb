@@ -105,9 +105,9 @@ All in `internal/bridge/` (one package):
   found" goes by those), `api.ts`'s `orchestratorPost` sends its composer, Clear, Stop, ■ and answers to
   `/api/orchestrators/:name/*`, `watch.ts` watches only its transcript, pane-view has no terminal for
   it (the chat, empty until its session's first line) and `PromptPanel.tsx`'s `HeadlessPrompt` answers
-  `headless.pending`; its usage and warnings (■, Clear, the steps back to the TUI) sit on the status
+  `headless.pending`; its usage and warnings (■, Clear, the steps back to the TUI: `Modals.tsx`'s `openTuiSteps`, as its ⋮'s) sit on the status
   bar. `orchestrator_alert` raises an OS notification while hidden (`notifyOrchestratorAlert`);
-  Settings shows the last Claude Code check and the TUI steps; the `[yoicks] …` lines at either end of a user turn render as dim lines (`splitNotices`), the rest as its bubble; an `agent_start`, `agent_prompt` (`sent to <name>: <the task's first line, cut short>`, or `not sent to <name>: <why>`) or `worktree_remove` result shows as such a line (`conversationItems`), and a worker's name in one is a button that opens its drawer (`ui/ChatLog.tsx`'s `Notice`; the State's `agent.herdrName`, from `agent.list`, `nav.ts`'s `openAgentNamed`). Its composer
+  Settings' Connection shows the last Claude Code check; the `[yoicks] …` lines at either end of a user turn render as dim lines (`splitNotices`), the rest as its bubble; an `agent_start`, `agent_prompt` (`sent to <name>: <the task's first line, cut short>`, or `not sent to <name>: <why>`) or `worktree_remove` result shows as such a line (`conversationItems`), and a worker's name in one is a button that opens its drawer (`ui/ChatLog.tsx`'s `Notice`; the State's `agent.herdrName`, from `agent.list`, `nav.ts`'s `openAgentNamed`). Its composer
   takes images (+ or paste; `image.ts` scales them to JPEG, the bridge's `imageBlocks` checks them); a tap on one, attached or sent, opens it full screen (`previewImage`: its own history entry, so Back closes it). `ansi.ts` — pure ANSI→HTML,
   `transcript.ts` — pure: the chat's markdown as escaped HTML and what a Home's chat keeps, drawn by
   `ui/ChatLog.tsx` (the items as React components on Mantine's: bubbles and cards are Paper, the prose
@@ -185,7 +185,7 @@ All in `internal/bridge/` (one package):
   an edge with more past it, `data-fade`), else the Home's name and status; then a
   status bar of one row (wrapping only where it must): "Needs you · n" (that count, orange; `To-do · n`, dim, while only items
   due later wait; none at all otherwise: `NeedsButton`), the counts of its account's agents (`homeSummary`; no orchestrators),
-  and at the right a headless one's usage and model, `>_` and its ⋮ (`HomeMenu`: a headless one's Compact, Clear, Stop; ■ stays on the
+  and at the right a headless one's usage and model, `>_` and its ⋮ (`HomeMenu`: a headless one's Compact, Clear, Stop, Back to the TUI, a stopped headless one's that alone; ■ stays on the
   "doing now" line; those four are `HomeTools`). On a PC (`WIDE_QUERY`, as the rail: `theme.ts`'s `useWide`) there is
   no switcher (the rail lists the Homes) and the topbar is the Home's header, its name and status, then `HomeTools`; the bar
   keeps Needs you and the counts until, from `PANEL_QUERY` (1280px, `usePanel`), the Home's panel at its right
@@ -352,7 +352,8 @@ it, and a resumed session reads the CLAUDE.md and rules.md of its start (checked
 **Service worker cache**: the build generates `CACHE_VERSION` (`herdr-yoicks-` + 8 hex of a hash
 over every built file's name and content) and the SW's asset list: never bump or edit them by
 hand. Any change to a served file renames the cache, so phones pick the new build up; Settings →
-App version shows `<version> (<BUILD = the JS hash>) cache <8 hex>`. Headless-browser checks keep
+App version shows `<version> (<BUILD = the JS hash>) cache <8 hex>` (the version: the State's, the bridge's
+`Version`, `dev` for a source build). Headless-browser checks keep
 a registered SW across runs — always use a fresh `--user-data-dir` profile.
 
 ## Verified herdr socket API behavior (hard-won; don't rediscover)

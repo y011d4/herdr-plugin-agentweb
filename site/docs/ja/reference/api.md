@@ -21,7 +21,8 @@
   ほかに `orchestratorPaneId` (最初に動いている tui のもののペイン、無ければ `null`)、`claudeCheck` (最後の Claude Code の確認。
   `{ at (ms), version, ok, failed: [items] }`、一度も実行されていなければ `null`)、`purposes` (`{ <paneId>: <one line> }`、
   `null` にはなりません。各ワーカーの目的で、ヘッドレスの orchestrator の `agent_start` か `agent_prompt` が渡したものです。
-  アプリはエージェントの名前の下に表示し、エージェントがいなくなると消えます) も返します。各エージェントの `completionSeq` は herdr の
+  アプリはエージェントの名前の下に表示し、エージェントがいなくなると消えます)、`version` (このブリッジのリリース。ソースからのビルドでは `dev`。
+  Settings の App version に出ます) も返します。各エージェントの `completionSeq` は herdr の
   `completion_seq` (その idle/done のステータスがどの完了のものか。取得するまでは `null`)、
   `stateChangeSeq` は herdr の `state_change_seq` (herdr でのステータス変化の順序で、アプリはこの順に並べます。
   取得するまでは `null`)、`herdrName` は herdr でのそのエージェントの名前 (`agent.start` で付けた名前で、

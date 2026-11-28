@@ -443,7 +443,7 @@ for each Home (and its row in the PC's left rail) counts what waits on you there
 Home's Needs you (its blocked agents, its question, its to-do list), then its other agents. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
-fresh session); the Home's warnings and Settings show the same steps.
+fresh session); its Home's ⋮ (**Back to the TUI…**) and its warnings show the same steps.
 
 ## Security model
 
@@ -535,7 +535,8 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   and `orchestratorPaneId` (the first running tui one's, or `null`), and `claudeCheck`, the last Claude Code check
   (`{ at (ms), version, ok, failed: [items] }`, `null` when none has run), and `purposes` (`{ <paneId>: <one line> }`,
   never `null`: what each worker is for, as a headless orchestrator's `agent_start` or `agent_prompt` gave it; the
-  app shows it over the agent's name, and it goes once the agent is gone). Each agent's `completionSeq` is herdr's
+  app shows it over the agent's name, and it goes once the agent is gone), and `version`, this bridge's release (`dev` for
+  a source build; Settings → App version shows it). Each agent's `completionSeq` is herdr's
   `completion_seq` (which completion its idle/done status is; `null` until fetched), and its
   `stateChangeSeq` is herdr's `state_change_seq` (herdr's order of status changes, which the app
   lists by; `null` until fetched), and its `herdrName` herdr's name for it (`agent.start`'s, as
