@@ -60,7 +60,7 @@ async function home(s: AppState, actions?: { clear: () => void; stop: () => void
   location.hash = '#/home/pilot';
   store.view.activePaneId = 'hl:pilot';
   store.view.homeMode = true;
-  const t = homeTopbar('hl:pilot');
+  const t = homeTopbar('hl:pilot', 'pilot');
   ({ container, unmount } = await render(<><div id="tb">{t.title}{t.right}</div><Pane paneId="hl:pilot" home={true} actions={actions} name="pilot" /><Modals /></>));
   await act(() => new Promise<void>((r) => { setTimeout(r, 0); })); // happy-dom's hashchange, on a timer: it would close a popover opened before it
 }
@@ -132,7 +132,8 @@ describe("a headless orchestrator's Home", () => {
     assert.equal($('#chat-log').textContent, 'No messages yet.');
     assert.equal($('#btn-view-toggle').style.display, 'none');
     assert.equal($('#quickkey-row').style.display, 'none');
-    assert.equal($('#tb').textContent, 'Pilot· ready>_⚙'); // the toggle stays hidden
+    assert.equal($<HTMLElement>('#tb .home-switch-btn[aria-current="page"]').dataset.orch, 'pilot', 'the topbar: the switcher');
+    assert.ok(!$('#tb #btn-view-toggle') && $('#home-status #btn-view-toggle'), 'the toggle on its status bar, hidden');
   });
 
   it('sends the composer to /api/orchestrators/:name/send', async () => {

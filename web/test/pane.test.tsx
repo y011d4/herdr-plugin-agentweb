@@ -11,7 +11,7 @@ import { WIDE_QUERY } from '../src/theme.ts';
 import { AgentDrawer, type Sheet } from '../src/ui/AgentDrawer.tsx';
 import { homeTopbar, Pane, paneViewOnState } from '../src/ui/Pane.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
-import { fire, render } from './render.ts';
+import { fakeMedia, fire, render } from './render.ts';
 
 // The socket: pane-view.ts subscribes itself; the test delivers messages to whoever listens.
 const wsListeners = new Set<(msg: WsMessage) => void>();
@@ -44,7 +44,7 @@ async function show(paneId: string, home = false, back = '#/agents', name = home
   store.view.homeMode = home;
   store.view.paneBackRoute = back;
   store.view.paneOverBase = false;
-  const t = homeTopbar(paneId);
+  const t = homeTopbar(paneId, name ?? '');
   ({ container, unmount } = await render(home ? <><div id="tb">{t.title}{t.right}</div><Pane paneId={paneId} home name={name} /></>
     : <AgentDrawer sheet={{ paneId, key: 1, open: true, opener: null, openedPane: paneId }} actions={noActions} />));
 }
@@ -469,7 +469,8 @@ describe('Home', () => {
 
   it('shows the counts of its account and opens its agents from them, then its list', async () => {
     await home(fresh());
-    assert.equal($('#tb').textContent, 'Personal· ready>_⚙', "a Home's topbar: no Agents, ends with Settings, no ⋮");
+    assert.equal($('#tb').textContent, 'Personalwork1⚙', "a Home's topbar: the switcher (two Homes), then Settings; no toggle, no ⋮");
+    assert.ok($('#home-status .home-row #btn-view-toggle') && $('#home-status .home-row #btn-home-menu') === null, 'the toggle on its status bar (no actions: no ⋮)');
     assert.equal($('.home-counts').textContent, '1 working1 done0 idle▾');
     assert.equal($('.home-counts').getAttribute('aria-label'), 'Agents: 1 working, 1 done, 0 idle'); // p1, p3 (p4 is the orchestrator)
     // two configured, one running: the switcher lists both, the stopped one dimmed
@@ -598,16 +599,24 @@ describe('Home', () => {
     assert.equal(container.querySelectorAll('.qkey').length, 12);
   });
 
-  it('shows "doing now" only while the orchestrator works, and its state in the title', async () => {
+  it('shows "doing now" only while the orchestrator works, and its state in the title: under the switcher on a PC, in the topbar alone', async () => {
     const s = fresh();
     s.workspaces[0].tabs[0].panes[1].agent!.status = 'working';
+    const setWide = fakeMedia(WIDE_QUERY, true);
     await home(s);
     assert.equal($('#home-activity').style.display, '');
     assert.equal($('#home-activity').textContent, 'thinking…');
+    assert.ok($('#home-status .home-row .home-title .home-state') && !$('#tb .home-state'), 'a PC: on its status bar, the topbar its switcher');
     assert.match($('.home-state').style.color, /working/);
     assert.equal($('.home-state').textContent, '· working…');
     await fire(() => setAppState(fresh()));
     assert.equal($('#home-activity').style.display, 'none');
     assert.equal($('.home-state').textContent, '· ready');
+    await setWide(false);
+    assert.equal(container.querySelector('.home-state'), null, 'a phone: its switcher button names it, its dot the state');
+    const one = fresh();
+    one.orchestrators = [one.orchestrators[0]];
+    await fire(() => setAppState(one));
+    assert.equal($('#tb').textContent, 'Personal· ready⚙', 'one Home: no switcher, its title in the topbar');
   });
 });

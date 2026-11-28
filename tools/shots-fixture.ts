@@ -212,6 +212,7 @@ export const scenes: Scene[] = [
   ] },
   { name: 'home-stopped', hash: '#/home/side', ready: "!!document.querySelector('#screen-home-stopped')", screen: false, parts: [
     { name: 'home-status-stopped', el: q('#home-status') },
+    { name: 'topbar-home-stopped', el: q('#topbar'), sizes: ['phone'] }, // its switcher scrolled to it, the start faded
     { name: 'home-stopped-text', el: `${q('#btn-home-start')}?.previousElementSibling` },
     { name: 'home-start', el: q('#btn-home-start') },
   ] },
