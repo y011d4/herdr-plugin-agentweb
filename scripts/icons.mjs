@@ -3,8 +3,8 @@
 // icons/icon-512.png (the favicon's rounded tile), icons/maskable-512.png (full bleed, the mark inside
 // the 80% safe circle), icons/apple-touch-icon.png (180, full bleed: iOS rounds it) and
 // icons/lockup.svg (the mark and the "yoicks" wordmark, for the token screen, Settings and the README
-// on a dark theme); and docs/lockup-light.svg, the README's on a light theme (outside web/public, so
-// the SW doesn't precache it).
+// on a dark theme). And, outside web/public (so the SW doesn't precache them), the Pages site's copies in
+// site/docs/public: favicon.svg, lockup.svg and lockup-light.svg (the README's on a light theme too).
 // The outputs are committed; run it again after changing the mark.
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -39,7 +39,10 @@ const png = (source, width) => execFileSync('rsvg-convert', ['-w', String(width)
 const favicon = icon(0.8, 14);
 writeFileSync(OUT + 'favicon.svg', favicon);
 writeFileSync(OUT + 'icons/lockup.svg', lockup(TEXT));
-writeFileSync(fileURLToPath(new URL('../docs/lockup-light.svg', import.meta.url)), lockup(BG));
+const SITE = fileURLToPath(new URL('../site/docs/public/', import.meta.url));
+writeFileSync(SITE + 'favicon.svg', favicon);
+writeFileSync(SITE + 'lockup.svg', lockup(TEXT));
+writeFileSync(SITE + 'lockup-light.svg', lockup(BG));
 writeFileSync(OUT + 'icons/icon-192.png', png(favicon, 192));
 writeFileSync(OUT + 'icons/icon-512.png', png(favicon, 512));
 writeFileSync(OUT + 'icons/maskable-512.png', png(icon(0.55), 512));
