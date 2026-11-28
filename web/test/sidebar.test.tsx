@@ -109,14 +109,17 @@ describe('Sidebar', () => {
     assert.equal(c.querySelector('[data-sidebar-pane="p6"] .status-badge')!.textContent, 'blocked');
   });
 
-  it("links a Home's heading to its Home; marks the one on show", async () => {
+  it("links a Home's heading to its Home and, unfolded, Open the list to the list; marks the one on show", async () => {
     const c = await show('#/home/personal', fresh());
     assert.equal(c.querySelector('a[data-home="personal"]')!.getAttribute('href'), '#/home/personal');
     assert.equal(c.querySelector('a[data-home="work"]')!.getAttribute('href'), '#/home/work');
+    assert.ok(!c.querySelector('a.sidebar-list'), 'folded: no link to the list');
     assert.deepEqual(marked(c), ['personal']);
+    await unfold(c);
+    assert.equal(c.querySelector('a.sidebar-list')!.getAttribute('href'), '#/agents');
     location.hash = '#/agents';
     await settle();
-    assert.deepEqual(marked(c), []);
+    assert.deepEqual(marked(c), ['#/agents']);
   });
 
   it("opens a blocked agent's pane from its chip, and an agent's from its row, marked while it is shown", async () => {

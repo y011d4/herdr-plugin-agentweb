@@ -4,8 +4,8 @@
  * Home a heading (it opens the Home) over what waits there (Todos.tsx's NeedsList: its question, its
  * account's blocked agents, its to-do list), then Other, the blocked agents no Home's account lists.
  * Under them the agents, folded into one row (All agents, their count): a click unfolds them, grouped
- * by Home (homeGroups), each opening its pane the list's way (nav.ts's openAgent: its drawer), and
- * folds them again. Settings is the topbar's ⚙, at the screen's top right. The Home or the agent on
+ * by Home (homeGroups), each opening its pane the list's way (nav.ts's openAgent: its drawer), under
+ * Open the list (#/agents), and folds them again. Settings is the topbar's ⚙, at the screen's top right. The Home or the agent on
  * show, from the hash, is marked (aria-current).
  *
  * Like the agents list it gets every State push: it holds still while a finger is down
@@ -67,6 +67,8 @@ export function Sidebar() {
       <div className="mt-3.5" data-sidebar-agents="">
         <NavLink component="button" className="sidebar-all rounded-lg" label="All agents" aria-expanded={open}
           rightSection={`${cards.length} ${open ? '▾' : '›'}`} onClick={() => setOpen(!open)} />
+        {open && <NavLink href="#/agents" className="sidebar-list rounded-lg" label="Open the list" rightSection="›"
+          active={hash === '#/agents'} aria-current={current(hash === '#/agents')} />}
         {open && groups.map((g) => <Group key={g.home ? `home:${g.home.name}` : 'other'} group={g} hash={hash} />)}
       </div>
     </aside>
