@@ -13,7 +13,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 npx vite build > "$tmp/build.log" 2>&1 || { cat "$tmp/build.log"; exit 1; }
-node tools/e2e.ts shots --after web/dist --out "$tmp/shots" --only home,agents,home-needs > "$tmp/shots.log" 2>&1 ||
+node tools/e2e.ts shots --after web/dist --out "$tmp/shots" --only home,home-needs,home-agents > "$tmp/shots.log" 2>&1 ||
   { cat "$tmp/shots.log"; exit 1; }
 node -e 'const m = require(process.argv[1]); const bad = m.shots.filter((s) => s.notReady.length).map((s) => s.name);
   if (bad.length) { console.error(`not ready: ${bad.join(", ")}`); process.exit(1); }' "$tmp/shots/manifest.json"
@@ -28,5 +28,5 @@ done <<EOF
 home-pc 1280
 home-phone 540
 needs-popover-phone 540
-agents-phone 540
+agents-popover-phone 540
 EOF
