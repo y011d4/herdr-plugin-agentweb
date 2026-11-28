@@ -65,7 +65,7 @@ const toastTitles = (): string[] => getToasts().map((t) => t.title);
 
 // The page outside a browser: the visual viewport, a secure context with a service worker
 // (its messages, and the OS notifications it shows), the page's visibility.
-const vv = Object.assign(new EventTarget(), { height: 700 });
+const vv = Object.assign(new EventTarget(), { height: 700, scale: 1 });
 Object.defineProperty(window, 'visualViewport', { configurable: true, value: vv });
 Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
 const closed: string[] = [];
@@ -115,11 +115,17 @@ describe('App', () => {
     replace.mockRestore();
   });
 
-  it('keeps --app-height at the visual viewport height', async () => {
-    assert.equal(document.documentElement.style.getPropertyValue('--app-height'), '700px');
-    vv.height = 512;
+  it('keeps --app-height at the visual viewport height: the keyboard shrinks it, a pinch zoom does not', async () => {
+    const height = () => document.documentElement.style.getPropertyValue('--app-height');
+    assert.equal(height(), '700px');
+    vv.height = 512; // the keyboard
     vv.dispatchEvent(new Event('resize'));
-    assert.equal(document.documentElement.style.getPropertyValue('--app-height'), '512px');
+    assert.equal(height(), '512px');
+    Object.assign(vv, { height: 256, scale: 2 }); // zoomed in: the same screen shows half as many CSS px
+    vv.dispatchEvent(new Event('resize'));
+    assert.equal(height(), '512px');
+    Object.assign(vv, { height: 700, scale: 1 });
+    vv.dispatchEvent(new Event('resize'));
   });
 
   it("opens an orchestrator's pane as its Home, and a bare #/home as the Home used last", async () => {

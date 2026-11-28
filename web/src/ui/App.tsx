@@ -530,11 +530,13 @@ function showHome(name: string, paneId: string | null, hash: string): void {
 // overflows, so there's nothing for the browser to scroll. Android also gets
 // interactive-widget=resizes-content (index.html); this covers iOS, where that
 // hint is ignored, and is the fallback everywhere visualViewport exists.
+// A pinch zoom shrinks visualViewport.height too (the same screen shows fewer CSS px), but not
+// the screen above the keyboard: × scale undoes it, else zooming in left the space below #app empty.
 function bindViewportHeight(): void {
   const vv = window.visualViewport;
   if (!vv) return; // older browsers keep the height:100% fallback
   const apply = (): void => {
-    document.documentElement.style.setProperty('--app-height', `${vv.height}px`);
+    document.documentElement.style.setProperty('--app-height', `${vv.height * vv.scale}px`);
   };
   apply();
   vv.addEventListener('resize', apply);

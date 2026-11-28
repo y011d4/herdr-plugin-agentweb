@@ -1186,6 +1186,12 @@ async function p16(c: Ctx) {
 async function p17(c: Ctx) {
   const [h, vv] = await c.pg.ev(`[parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-height')), visualViewport.height]`);
   result(c, Math.abs(h - vv) <= 1, 'P17', `--app-height=${h},visualViewport=${vv}`, 'at 390x844 --app-height = visualViewport.height (+-1)');
+  // a pinch zoom shrinks visualViewport.height, not the screen: the shell keeps its height
+  await c.pg.S('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+  try {
+    const z = (await c.pg.until(`visualViewport.scale === 2 && [parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-height')), visualViewport.height]`, 2000)).v;
+    result(c, !!z && Math.abs(z[0] - h) <= 1, 'P17.zoom', `--app-height=${z?.[0]},visualViewport=${z?.[1]}`, 'zoomed x2, --app-height stays the unzoomed height (+-1)');
+  } finally { await c.pg.S('Emulation.setPageScaleFactor', { pageScaleFactor: 1 }); }
 }
 
 /** Reports wc-less's status and waits for /api/state to show it (the agent_status push goes out with it).
