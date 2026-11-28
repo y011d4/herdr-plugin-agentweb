@@ -283,9 +283,12 @@ function checkAccount(pane: string, name: string, account: string): void {
 /** The real claude on PATH, which the fake execs for wc-h2. */
 const realClaude = (): string => spawnSync('sh', ['-c', 'command -v claude'], { encoding: 'utf8' }).stdout.trim();
 
-// wc-h1 runs the fake claude, unverified version and all (H6); wc-h2 the real one, in the pinned account
-const orchConfig = (account: string | null, fake: string | null) => js({ orchestrators: [
-  ...['wc-o1', 'wc-o2'].map((name) => ({ name, label: name.toUpperCase(), ...(account ? { env: { CLAUDE_CONFIG_DIR: account } } : {}) })),
+// wc-h1 runs the fake claude, unverified version and all (H6); wc-h2 the real one, in the pinned account. On the private
+// herdr (`priv`) wc-o1 and wc-o2 get the account its panes run under (its HOME's: `herdr start` drops CLAUDE_CONFIG_DIR),
+// so their Homes list the run's agents as a Home lists its own; they never start there (Tier 2 runs on the desktop's herdr)
+const orchConfig = (account: string | null, fake: string | null, priv = false) => js({ orchestrators: [
+  ...['wc-o1', 'wc-o2'].map((name) => ({ name, label: name.toUpperCase(),
+    ...(priv ? { env: { CLAUDE_CONFIG_DIR: path.join(PRIV, '.claude') } } : account ? { env: { CLAUDE_CONFIG_DIR: account } } : {}) })),
   ...(fake ? [{ name: 'wc-h1', label: 'WC-H1', mode: 'headless', env: { CLAUDE_CONFIG_DIR: path.join(E2E_ROOT, 'fake-claude'), FAKECLAUDE_VERSION: '0.0.0-e2e' } }] : []),
   ...(fake && account !== null ? [{ name: 'wc-h2', label: 'WC-H2', mode: 'headless', env: { ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), FAKECLAUDE_REAL: realClaude() } }] : []),
 ] });
@@ -322,7 +325,7 @@ async function previewCmd(sub: string, o: Record<string, any>): Promise<number> 
     const account = fs.existsSync(path.join(E2E_ROOT, '.envrc')) ? pinnedAccount() : null;
     fs.rmSync(previewDir(port), { recursive: true, force: true });
     for (const d of ['state', 'config']) fs.mkdirSync(path.join(previewDir(port), d), { recursive: true });
-    fs.writeFileSync(path.join(previewDir(port), 'config', 'config.json'), orchConfig(account, p.fakeClaude ?? null));
+    fs.writeFileSync(path.join(previewDir(port), 'config', 'config.json'), orchConfig(account, p.fakeClaude ?? null, !!p.herdr));
     fs.writeFileSync(path.join(previewDir(port), 'preview.json'), js(p));
     await previewCtl(p, 'start');
     console.log(`preview ${port} up: http://127.0.0.1:${port} (token ${path.join(previewDir(port), 'state', 'token')}, account ${account === null ? 'none: Tier 1 only' : accountName(account)}, ` +
@@ -383,6 +386,7 @@ async function herdrCmd(sub: string): Promise<number> {
       XDG_DATA_HOME: path.join(PRIV, '.local/share'), XDG_CACHE_HOME: path.join(PRIV, '.cache'), SHELL: '/bin/sh' };
     delete e.HERDR_SOCKET_PATH; // the server's own place, under its HOME (= PRIV_SOCK)
     delete e.DBUS_SESSION_BUS_ADDRESS;
+    delete e.CLAUDE_CONFIG_DIR; // its panes on its HOME's account, whoever starts it (orchConfig's priv)
     const log = fs.openSync(path.join(PRIV, 'server.log'), 'a');
     spawn('herdr', ['server'], { env: e, detached: true, stdio: ['ignore', log, log] }).unref();
     fs.closeSync(log);
@@ -668,7 +672,7 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     // preview start gives the orchestrators that account as env; a preview from before the .envrc has none
     let cfg = '';
     try { cfg = fs.readFileSync(path.join(previewDir(c.port), 'config', 'config.json'), 'utf8'); } catch { /* not ours */ }
-    if (cfg !== orchConfig(account, fake)) throw env(`the preview's orchestrators are not pinned to ${accountName(account)} (restart it with preview start)`);
+    if (cfg !== orchConfig(account, fake, !!c.preview?.herdr)) throw env(`the preview's orchestrators are not pinned to ${accountName(account)} (restart it with preview start)`);
   }
   if (!needs.size) return;
   fs.mkdirSync(WORK, { recursive: true });
@@ -709,6 +713,12 @@ async function setup(c: Ctx, needs: Set<string>): Promise<void> {
     if (rd.timeout) throw env('no appScroll pane');
   }
   if (probe) {
+    // a process in its foreground first, as wc-less's less: an agent pane whose shell is in the foreground has no known
+    // account (the bridge's paneAccount), so no Home would list it
+    mutate(c.rec, probe, ['pane', 'run', probe, 'cat']);
+    const fg = await waitFn(() => { const pi = herdr(['pane', 'process-info', '--pane', probe]).process_info;
+      return !!pi?.foreground_process_group_id && pi.foreground_process_group_id !== pi.shell_pid; }, 10_000, 200);
+    if (fg.timeout) throw env('wc-probe: cat not in the foreground');
     c.rec.reported.push(probe);
     save(c.rec);
     mutate(c.rec, probe, ['pane', 'report-agent', '--source', 'e2e', '--agent', 'claude', '--state', 'idle', probe]);
@@ -763,9 +773,25 @@ const swState = (ms: number) => `Promise.race([navigator.serviceWorker.ready.the
 const cachesJs = `(async () => { const ks = await caches.keys(); const urls = ks.length ? (await (await caches.open(ks[0])).keys()).map((r) => r.url) : []; return { ks, urls }; })()`;
 const notifsJs = `navigator.serviceWorker.ready.then((r) => r.getNotifications()).then((ns) => ns.map((n) => n.tag))`;
 
-async function loadApp(c: Ctx, hash = '#/agents'): Promise<void> {
+/** The screen the checks start from and come back to: wc-o2's Home, stopped through Tier 1 (Tier 2's P8-T2 starts it,
+ *  next to last). Its status bar's agents popover lists its account's agents: the run's (one account, as theirs). */
+const BASE = '#/home/wc-o2';
+const AGENTS_BTN = `document.querySelector('#home-status [data-action="agents"]')`;
+const POPOVER = `document.querySelector('[data-agents-list]')`;
+/** An agent's row in BASE's agents popover (a phone's: a tap on it opens its drawer). */
+const popRow = (pane: string) => `document.querySelector('[data-agents-list] .agent-row[data-pane-id=${js(pane)}]')`;
+
+/** BASE on screen, its agents popover open with `pane`'s row in it. */
+async function agentsPopover(c: Ctx, pane: string): Promise<void> {
+  await c.pg.goto(BASE);
+  if ((await c.pg.until(`!!${AGENTS_BTN}`, 5000)).timeout) throw new Error(`no agents button on ${BASE}`);
+  if (!(await c.pg.ev(`!!${POPOVER}`))) await c.pg.tapEl(AGENTS_BTN);
+  if ((await c.pg.until(`!!${popRow(pane)}`, 5000)).timeout) throw new Error(`no row of ${pane} in ${BASE}'s agents popover`);
+}
+
+async function loadApp(c: Ctx, hash = BASE): Promise<void> {
   await c.pg.load(`${c.base}/?token=${enc(c.token)}${hash}`);
-  await c.pg.until(`!!document.querySelector('#screen-agents[data-ready], #screen-pane, #screen-settings')`, 8000);
+  await c.pg.until(`!!document.querySelector('#screen-home-stopped, #screen-pane, #screen-settings')`, 8000);
 }
 
 const expectedCards = (st: any, scopeName?: string): number => {
@@ -843,7 +869,7 @@ async function p2Round(c: Ctx, id: string) {
   }
   const re = c.build.vite ? /^herdr-yoicks-[0-9a-f]{8}$/ : /^herdr-yoicks-v\d+$/;
   const st = await c.pg.until(`${swState(1000)}.then((s) => s === 'activated' && s)`, 15_000, 200);
-  if (id !== 'P2.old') for (let i = 0; i < 2; i++) { await c.pg.load(`${c.base}/#/agents`); await sleep(1500); }
+  if (id !== 'P2.old') for (let i = 0; i < 2; i++) { await c.pg.load(`${c.base}/${BASE}`); await sleep(1500); }
   await sleep(1000);
   const { ks } = await c.pg.ev(cachesJs);
   const n404 = c.pg.resps.filter((r) => r.status === 404).map((r) => new URL(r.url).pathname); // the first load's too
@@ -871,7 +897,7 @@ async function p2Round(c: Ctx, id: string) {
 async function p3(c: Ctx) {
   const less = c.rec.names.less;
   const nav = async (url: string, want: string) => {
-    await c.pg.goto('#/agents');
+    await c.pg.goto(BASE);
     await c.pg.ev(`navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: ${js(url)} } })), 1`);
     return c.pg.until(`location.hash === ${js(want)}`, 2000);
   };
@@ -883,27 +909,19 @@ async function p3(c: Ctx) {
 }
 
 async function p7(c: Ctx) {
-  const counts: string[] = [];
-  let ok = true;
-  for (const route of ['#/agents', '#/agents/wc-o1']) {
-    await c.pg.goto(route);
-    let last = '';
-    const r = await waitFn(async () => {
-      const dom = await c.pg.ev(`document.querySelector('#screen-agents[data-ready]') ? document.querySelectorAll('.agent-card').length : -1`);
-      const want = expectedCards(await api(c, 'GET', '/api/state'), route.split('/')[2]);
-      last = `${dom}/${want}`;
-      return dom === want;
-    }, 5000, 300);
-    ok &&= !r.timeout;
-    counts.push(`${route}=${last}`);
-  }
-  await c.pg.goto('#/agents');
-  const btns = await c.pg.ev(`document.querySelectorAll('#topbar-right button').length`);
   const less = c.rec.names.less;
-  await c.pg.tapEl(`document.querySelector('.agent-card[data-pane-id=${js(less)}]')`);
+  await agentsPopover(c, less);
+  let last = '';
+  const r = await waitFn(async () => {
+    const dom = await c.pg.ev(`document.querySelectorAll('[data-agents-list] .agent-row').length`);
+    const want = expectedCards(await api(c, 'GET', '/api/state'), 'wc-o2');
+    last = `${dom}/${want}`;
+    return dom === want;
+  }, 5000, 300);
+  await c.pg.tapEl(popRow(less));
   const nav = await c.pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)}`, 2000);
-  result(c, ok && btns === 1 && !nav.timeout, 'P7', `cards(dom/state):${counts.join(',')},topbarButtons=${btns},tap=${nav.timeout ? 'timeout' : `${nav.ms}ms`}`,
-    '.agent-card count = /api/state (#/agents, #/agents/wc-o1); 1 topbar button (Settings); tapping wc-less opens #/pane/<it> within 2s');
+  result(c, !r.timeout && !nav.timeout, 'P7', `rows(dom/state)=${last},tap=${nav.timeout ? 'timeout' : `${nav.ms}ms`}`,
+    `${BASE}'s agents popover: one .agent-row per agent of its account in /api/state; tapping wc-less's opens #/pane/<it> within 2s`);
   // a Home's own list: its ← names that Home and opens its Home, on a phone (a tap) and a PC (a click, the sidebar beside it)
   const BACK = `document.querySelector('#topbar-left .topbar-back')`;
   const back = async (phone: boolean) => {
@@ -926,7 +944,6 @@ async function p7(c: Ctx) {
     "#/agents/wc-o1's topbar has '\u2190 <its Home>' (aria-label 'Back to <it>'), shown at 390px and at 1280px; it opens #/home/wc-o1 within 2s");
 }
 
-/** Without a running orchestrator, a fresh open (/) and #/home land on #/agents by location.replace. */
 /** A Home's status bar total: its counts (working, done, idle) plus its blocked agents (Needs you's data-blocked, none without it). */
 const HOME_TOTAL = `[...document.querySelectorAll('.home-counts [data-count]')].reduce((n, e) => n + parseInt(e.textContent), 0)
   + Number(document.querySelector('#home-status [data-action="needs"]')?.dataset.blocked ?? 0)`;
@@ -1088,7 +1105,7 @@ async function p14(c: Ctx) {
   const { pg } = c;
   const { shell, less } = c.rec.names;
   const read = `/api/panes/${enc(shell)}/read?`;
-  await pg.goto('#/agents');
+  await pg.goto(BASE);
   pg.hold = read;
   let held: any[] = [], tNav = 0, tRel = 0;
   try {
@@ -1164,11 +1181,11 @@ async function p13(c: Ctx) {
   const { pg } = c;
   await pg.ev(`localStorage.removeItem('herdr_token')`);
   const t = Date.now();
-  await pg.S('Page.navigate', { url: `${c.base}/?token=${enc(c.token)}#/agents` });
+  await pg.S('Page.navigate', { url: `${c.base}/?token=${enc(c.token)}${BASE}` });
   const s = await pg.until(`location.search === '' && localStorage.getItem('herdr_token') === ${js(c.token)}`, 1000 - (Date.now() - t), 20);
   result(c, !s.timeout, 'P13.strip', `in=${s.timeout ? 'timeout' : `${Date.now() - t}ms`}`, "within 1s ?token= is gone from the URL and stored in localStorage");
 
-  await pg.load(`${c.base}/?token=wc-invalid-token#/agents`);
+  await pg.load(`${c.base}/?token=wc-invalid-token${BASE}`);
   const bad = await pg.until(`(() => { const s = document.querySelector('#screen-login .login-subtitle')?.textContent ?? ''; return /invalid|expired|could not/i.test(s) && s; })()`, 5000);
   result(c, !bad.timeout, 'P13.bad-token', `message=${bad.v || 'none'}`, 'an invalid token shows the token screen with a message');
 
@@ -1186,7 +1203,7 @@ async function p16(c: Ctx) {
   const { pg } = c;
   const prev = await pg.ev(`localStorage.getItem('herdr_notifications')`);
   await pg.ev(`localStorage.setItem('herdr_notifications', 'false')`);
-  await pg.goto('#/agents');
+  await pg.goto(BASE);
   await pg.goto('#/settings');
   await pg.until(`!!document.getElementById('toggle-notif')`, 3000);
   await pg.tapEl(`document.querySelector('.toggle')`);
@@ -1247,7 +1264,7 @@ async function p4t1(c: Ctx) {
   let other: { targetId: string } | null = null;
   try {
     await pg.ev(`localStorage.setItem('herdr_notifications', 'true')`);
-    await pg.goto('#/agents');
+    await pg.goto(BASE);
     other = await pg.cdp.send('Target.createTarget', { url: 'about:blank' });
     await pg.cdp.send('Target.activateTarget', { targetId: other!.targetId });
     if ((await pg.until('document.hidden', 3000)).timeout) throw env('could not hide the page');
@@ -1275,15 +1292,15 @@ async function p4t1(c: Ctx) {
     if (other) await pg.cdp.send('Target.closeTarget', { targetId: other.targetId }).catch(() => {});
     await reportLess(c, 'idle');
     await sleep(500);
-    await pg.goto('#/agents');
+    await pg.goto(BASE);
   }
 }
 
-/** P15: wc-stop opened from #/agents/wc-o1 and stopped (⋮ → Stop agent… → Stop): back to that list, the pane gone. */
+/** P15: wc-stop opened from #/home/wc-o1 and stopped (⋮ → Stop agent… → Stop): back to that Home, the pane gone. */
 async function p15(c: Ctx) {
   const { pg } = c;
   const stop = c.rec.names.stop;
-  const list = '#/agents/wc-o1'; // not the default #/agents: the way back is remembered
+  const list = '#/home/wc-o1'; // not BASE, where the checks sit: the way back is the screen it was opened over
   await pg.goto(list);
   await pg.goto(`#/pane/${enc(stop)}`);
   const menu = `document.getElementById('btn-agent-menu')`;
@@ -1301,18 +1318,19 @@ async function p15(c: Ctx) {
   const gone = await waitFn(async () => !(await paneOf(c, stop)), 5000, 200);
   result(c, !back.timeout && !!del && !gone.timeout, 'P15', `back=${ms(back)}(${await pg.hash()}),delete=${!!del},paneGone=${ms(gone)}`,
     `stopping wc-stop returns to ${list} within 3s (DELETE /api/panes/<it>), and /api/state drops the pane within 5s`);
-  await pg.goto('#/agents');
+  await pg.goto(BASE);
 }
 
-/** P18: the list (390x400) under state pushes, each a rename of wc-less's tab (wc- kept), so its card changes:
- *  scrolled to 200px the scroller keeps its node and scrollTop, also when wc-probe's change reorders the cards; a finger down (moved 50px) holds every card until
- *  it lifts; a still tap on wc-less's card with a push arriving while the finger is down still opens it. */
+/** P18: BASE's agents popover (390x400), the phone's list of agents, under state pushes, each a rename of wc-less's tab
+ *  (wc- kept), so its row changes: scrolled to 200px the popover keeps its node and scrollTop, also when wc-probe's
+ *  change reorders the rows; a finger down (moved 50px) holds every row until it lifts; a still tap on wc-less's row with
+ *  a push arriving while the finger is down still opens it. */
 async function p18(c: Ctx) {
   const { pg, rec } = c;
   const less = rec.names.less;
   const tab = herdr(['pane', 'get', less]).pane.tab_id;
-  const SC = `document.getElementById('screen-agents')`;
-  const CARD = `document.querySelector('.agent-card[data-pane-id=${js(less)}]')`;
+  const SC = POPOVER;
+  const CARD = popRow(less);
   let n = 0;
   /** renames wc-less's tab; true once the page got the state frame carrying the new label */
   const push = async (): Promise<boolean> => {
@@ -1322,26 +1340,25 @@ async function p18(c: Ctx) {
     mutate(rec, tab, ['tab', 'rename', tab, label]);
     return !(await waitFn(() => pg.stateMarkT > 0, 5000, 5)).timeout;
   };
-  await pg.goto('#/agents');
   await pg.S('Emulation.setDeviceMetricsOverride', { width: 390, height: 400, deviceScaleFactor: 3, mobile: true });
   try {
-    await pg.until(`!!${SC}?.dataset.ready && !!${CARD}`, 5000);
-    // scrolled to 200px: the padding on the list makes room however many agents herdr has (on the scroller itself it
-    // would grow the scroller's own box, not its scroll range: a private herdr's 2 cards then scroll 182px at most)
-    await pg.ev(`(() => { const s = ${SC}; s.firstElementChild.style.paddingBottom = '1500px'; s.scrollTop = 200; window.__wcSc = s; })()`);
+    await agentsPopover(c, less);
+    // scrolled to 200px: the padding on its last child (Open the list) makes room however many agents herdr has (on the
+    // scroller itself it would grow the scroller's own box, not its scroll range)
+    await pg.ev(`(() => { const s = ${SC}; s.lastElementChild.style.paddingBottom = '1500px'; s.scrollTop = 200; window.__wcSc = s; })()`);
     await sleep(300);
     const top0 = await pg.ev(`${SC}.scrollTop`);
     const p1 = await push();
     await sleep(500);
     const [top1, same] = await pg.ev(`[${SC}.scrollTop, ${SC} === window.__wcSc]`);
     result(c, top0 === 200 && p1 && Math.abs(top1 - top0) <= 1 && same, 'P18.scroll', `push=${p1},scrollTop=${top0}->${top1},sameNode=${same}`,
-      'scrolled to 200px, a state push keeps #screen-agents (same node) and its scrollTop (+-1px)');
+      'scrolled to 200px, a state push keeps the agents popover (same node) and its scrollTop (+-1px)');
 
-    // a push that reorders the cards keeps it too: wc-less first and just above the top edge, wc-probe under it
-    // becomes the newest change and moves above it. Chrome's scroll anchoring (none in Safari) would scroll the list
-    // after the card it anchored on.
+    // a push that reorders the rows keeps it too: wc-less first (working, wc-probe idle) and just above the top edge,
+    // wc-probe under it becomes working, the newest change, and moves above it. Chrome's scroll anchoring (none in
+    // Safari) would scroll the popover after the row it anchored on.
     const probe = rec.names.probe;
-    const PROBE = `document.querySelector('.agent-card[data-pane-id=${js(probe)}]')`;
+    const PROBE = popRow(probe);
     const before = (a: string, b: string) => `!!${a} && !!${b} && !!(${a}.compareDocumentPosition(${b}) & Node.DOCUMENT_POSITION_FOLLOWING)`;
     await reportLess(c, 'working');
     const up = await pg.until(before(CARD, PROBE), 5000);
@@ -1354,9 +1371,9 @@ async function p18(c: Ctx) {
     const [top3, same3] = await pg.ev(`[${SC}.scrollTop, ${SC} === window.__wcSc]`);
     await reportLess(c, 'idle');
     result(c, !up.timeout && !moved.timeout && Math.abs(top3 - top2) <= 1 && same3, 'P18.reorder', `order=${!up.timeout && !moved.timeout},scrollTop=${top2}->${top3},sameNode=${same3}`,
-      "wc-less first, scrolled 44px into its card: wc-probe under it reported working moves above it within 5s, and #screen-agents keeps its node and scrollTop (+-1px)");
+      "wc-less first, scrolled 44px into its row: wc-probe under it reported working moves above it within 5s, and the popover keeps its node and scrollTop (+-1px)");
 
-    // a finger down and moved 50px: a push changes nothing in the list until it lifts, then what it carried (the new
+    // a finger down and moved 50px: a push changes nothing in the popover until it lifts, then what it carried (the new
     // tab label) shows within 100ms, RAIL's response budget, so it reads as part of the lift; a list still held would
     // wait for the next push, minutes away on a quiet system. The app's part is ~2ms (~5ms at 4x CPU throttling); the
     // rest is the renderer waiting for a CPU, up to 51ms on CI's runner, which the 50ms this had sat inside.
@@ -1380,9 +1397,9 @@ async function p18(c: Ctx) {
     await pg.ev('window.__wcMo.disconnect()');
     const d = lift.timeout ? null : lift.v.d;
     result(c, p2 && down === 0 && d !== null && d <= 100, 'P18.touch', `push=${p2},mutationsWhileDown=${down},shownAfterLift=${d === null ? 'none' : `${d}ms`}`,
-      "with a finger down (moved 50px) a push records 0 mutations in the list; its new label shows on wc-less's card within 100ms of touchend");
+      "with a finger down (moved 50px) a push records 0 mutations in the popover; its new label shows on wc-less's row within 100ms of touchend");
 
-    // a still tap on wc-less's card with a push arriving while the finger is down: what the push changed
+    // a still tap on wc-less's row with a push arriving while the finger is down: what the push changed
     // shows only after touchend, and that mustn't swallow the tap's click
     const q = await pg.at(CARD);
     await pg.uncovered(CARD, q);
@@ -1395,55 +1412,49 @@ async function p18(c: Ctx) {
     const nav = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)}`, 1000);
     const whileDown = p3 && pg.stateMarkT >= tDown && pg.stateMarkT < tUp;
     result(c, whileDown && !nav.timeout, 'P18.tap', `push=${p3},pushAt=${pg.stateMarkT - tDown}ms,liftAt=${tUp - tDown}ms,nav=${ms(nav)}`,
-      "a push arriving while a finger is down on wc-less's card: lifting it (a still tap) opens #/pane/<it> within 1s");
+      "a push arriving while a finger is down on wc-less's row: lifting it (a still tap) opens #/pane/<it> within 1s");
   } finally {
     pg.stateMark = '';
-    await pg.ev(`(() => { const l = ${SC}?.firstElementChild; if (l) l.style.paddingBottom = ''; })()`);
+    await pg.ev(`(() => { const l = ${SC}?.lastElementChild; if (l) l.style.paddingBottom = ''; })()`);
     await mobile(pg, true);
     mutate(rec, tab, ['tab', 'rename', tab, 'wc-less']);
-    await pg.goto('#/agents');
+    await pg.goto(BASE);
   }
 }
 
-/** M1: an agent's drawer over the list (390x844): a sheet from the bottom, the list's top showing above it, the list the
- *  same node at its scroll under it and back; ✕ closes it, and so does Back, without the history growing. */
+/** M1: an agent's drawer over BASE (390x844), opened from its agents popover: a sheet from the bottom, the Home's top
+ *  showing above it, the Home the same node under it and back; ✕ closes it, and so does Back, without the history growing. */
 async function m1(c: Ctx) {
   const { pg, rec } = c;
   const less = rec.names.less;
-  const SC = `document.getElementById('screen-agents')`;
-  const CARD = `document.querySelector('.agent-card[data-pane-id=${js(less)}]')`;
+  const SC = `document.getElementById('screen-home-stopped')`;
   const SHEET = `document.querySelector('.agent-drawer-content')`;
   const pane = js(`#/pane/${enc(less)}`);
-  await pg.goto('#/agents');
-  await pg.until(`!!${SC}?.dataset.ready && !!${CARD}`, 5000);
-  await pg.ev(`(() => { const s = ${SC}; s.firstElementChild.style.paddingBottom = '1500px'; window.__wcSc = s; })()`);
+  await pg.goto(BASE);
+  await pg.until(`!!${SC}`, 5000);
+  await pg.ev(`window.__wcSc = ${SC}, 1`);
   const cycle = async (close: () => Promise<unknown>) => {
-    // scrolled to 60px above the card (or 60px): tapped where it shows (at() would scroll it into view)
-    const p = await pg.ev(`(() => { const s = ${SC}, card = ${CARD};
-      s.scrollTop = Math.max(60, card.getBoundingClientRect().top - s.getBoundingClientRect().top + s.scrollTop - 60);
-      const r = card.getBoundingClientRect(), top = Math.max(r.top, s.getBoundingClientRect().top);
-      return { x: r.x + r.width / 2, y: (top + r.bottom) / 2 }; })()`);
-    await sleep(300);
-    await pg.tap(p.x, p.y);
+    await agentsPopover(c, less);
+    await pg.tapEl(popRow(less));
     const open = await pg.until(`location.hash === ${pane} && !!${SHEET}`, 3000);
     await sleep(400); // its slide-in
-    const [top0, sheetTop, sheetH] = await pg.ev(`(() => { const r = ${SHEET}.getBoundingClientRect(); return [${SC}.scrollTop, Math.round(r.top), Math.round(r.bottom)]; })()`);
+    const [sheetTop, sheetH] = await pg.ev(`(() => { const r = ${SHEET}.getBoundingClientRect(); return [Math.round(r.top), Math.round(r.bottom)]; })()`);
     await close();
-    const closed = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
-    const [top1, same, len] = await pg.ev(`[${SC}.scrollTop, ${SC} === window.__wcSc, history.length]`);
-    return { open, closed, top0, top1, same, len, sheetTop, sheetH };
+    const closed = await pg.until(`location.hash === ${js(BASE)} && !${SHEET}`, 3000);
+    const [same, len] = await pg.ev(`[${SC} === window.__wcSc, history.length]`);
+    return { open, closed, same, len, sheetTop, sheetH };
   };
   const a = await cycle(() => pg.tapEl(`document.getElementById('btn-drawer-close')`));
   const b = await cycle(() => pg.ev('history.back()')); // the phone's Back
-  result(c, !a.open.timeout && !a.closed.timeout && a.sheetTop >= 40 && a.sheetTop <= 60 && a.sheetH === 844 && a.same && Math.abs(a.top1 - a.top0) <= 1,
-    'M1.close', `open=${ms(a.open)},sheet=${a.sheetTop}..${a.sheetH},closed=${ms(a.closed)},sameNode=${a.same},scrollTop=${a.top0}->${a.top1}`,
-    "scrolled (>= 60px), a tap on wc-less's card opens #/pane/<it> in a sheet from 40-60px to the bottom; ✕ closes it within 3s back to the same #screen-agents at its scrollTop (+-1px)");
-  result(c, !b.open.timeout && !b.closed.timeout && b.same && Math.abs(b.top1 - b.top0) <= 1 && b.len === a.len,
-    'M1.back', `closed=${ms(b.closed)},sameNode=${b.same},scrollTop=${b.top0}->${b.top1},history=${a.len}->${b.len}`,
-    'Back closes it too (the same list, its scrollTop); opening and closing again leaves history.length as it was');
+  result(c, !a.open.timeout && !a.closed.timeout && a.sheetTop >= 40 && a.sheetTop <= 60 && a.sheetH === 844 && a.same,
+    'M1.close', `open=${ms(a.open)},sheet=${a.sheetTop}..${a.sheetH},closed=${ms(a.closed)},sameNode=${a.same}`,
+    `a tap on wc-less's row in ${BASE}'s agents popover opens #/pane/<it> in a sheet from 40-60px to the bottom; ✕ closes it within 3s back to the same #screen-home-stopped`);
+  result(c, !b.open.timeout && !b.closed.timeout && b.same && b.len === a.len,
+    'M1.back', `closed=${ms(b.closed)},sameNode=${b.same},history=${a.len}->${b.len}`,
+    'Back closes it too (the same Home); opening and closing again leaves history.length as it was');
 }
 
-/** M3: agents opened one after another (the user's path: a list card, then a notification's navigate, as a sidebar tap
+/** M3: agents opened one after another (the user's path: a row in a Home's agents popover, then a notification's navigate, as a sidebar tap
  *  or a [yoicks] notice switches it) keep one drawer: one header, the latest's, in one history entry; one Back closes it. */
 async function m3(c: Ctx) {
   const { pg, rec } = c;
@@ -1451,9 +1462,8 @@ async function m3(c: Ctx) {
   const SHEET = `document.querySelector('.agent-drawer-content')`;
   const HEADS = `document.querySelectorAll('.agent-drawer .agent-drawer-head')`;
   const to = (id: string) => `navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: ${js(`#/pane/${enc(id)}`)} } }))`;
-  await pg.goto('#/agents');
-  await pg.until(`!!document.querySelector('.agent-card[data-pane-id=${js(less)}]')`, 5000);
-  await pg.tapEl(`document.querySelector('.agent-card[data-pane-id=${js(less)}]')`);
+  await agentsPopover(c, less);
+  await pg.tapEl(popRow(less));
   const open = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)} && !!${SHEET}`, 3000);
   const len = await pg.ev('history.length');
   for (const id of [shell, less, shell, less]) {
@@ -1464,10 +1474,10 @@ async function m3(c: Ctx) {
   const [heads, title, sheets, len1] = await pg.ev(`[${HEADS}.length, ${HEADS}[0]?.querySelector('.topbar-title')?.textContent ?? '',
     document.querySelectorAll('.agent-drawer-content').length, history.length]`);
   await pg.ev('history.back()');
-  const closed = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
+  const closed = await pg.until(`location.hash === ${js(BASE)} && !${SHEET}`, 3000);
   result(c, !open.timeout && heads === 1 && sheets === 1 && len1 === len && !closed.timeout, 'M3.switch',
     `open=${ms(open)},heads=${heads},sheets=${sheets},title=${JSON.stringify(title)},history=${len}->${len1},closed=${ms(closed)}`,
-    "from wc-less's card, 4 switches (wc-shell, wc-less, …) by a notification's navigate leave one drawer with one header and history.length as it was; one Back closes it to #/agents");
+    `from wc-less's row in ${BASE}'s agents popover, 4 switches (wc-shell, wc-less, …) by a notification's navigate leave one drawer with one header and history.length as it was; one Back closes it to ${BASE}`);
 }
 
 /** M2: on a PC (1280x844) the drawer comes from the right, min(900px, 65% of the width right of the sidebar) wide, its
@@ -1488,7 +1498,7 @@ async function m2(c: Ctx) {
   };
   await mobile(pg, false);
   try {
-    await pg.goto('#/agents');
+    await pg.goto(BASE);
     await pg.goto(pane);
     const open = await pg.until(`!!${SHEET} && !!${MENU}`, 3000);
     await sleep(400);
@@ -1497,7 +1507,7 @@ async function m2(c: Ctx) {
         parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')) || 0]; })()`);
     const want = Math.min(900, (1280 - side) * 0.65);
     result(c, !open.timeout && right === 1280 && Math.abs(1280 - left - want) <= 1 && dim === side, 'M2.wide', `open=${ms(open)},x=${left}..${right},dimFrom=${dim},--sidebar-w=${side}`,
-      'from #/agents, #/pane/<wc-less> opens a drawer on the right edge, min(900, 65% of 1280 - --sidebar-w) wide, dimmed from --sidebar-w');
+      `from ${BASE}, #/pane/<wc-less> opens a drawer on the right edge, min(900, 65% of 1280 - --sidebar-w) wide, dimmed from --sidebar-w`);
     const m = await pg.at(MENU);
     await click(m.x, m.y);
     const menu = await pg.until(`!!document.querySelector('[data-menu-dropdown]')`, 2000);
@@ -1508,31 +1518,31 @@ async function m2(c: Ctx) {
     const gone = await pg.until(`!document.querySelector('[data-menu-dropdown]')`, 2000);
     const stayed = await pg.ev(`location.hash === ${js(pane)} && !!${SHEET}`);
     await esc();
-    const closed = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
+    const closed = await pg.until(`location.hash === ${js(BASE)} && !${SHEET}`, 3000);
     result(c, !menu.timeout && !gone.timeout && stayed && !closed.timeout, 'M2.escape', `menu=${ms(menu)},menuGone=${ms(gone)},drawerStayed=${stayed},closed=${ms(closed)}`,
-      "with ⋮'s menu open, Escape closes the menu only (its dropdown gone within 2s); Escape again closes the drawer back to #/agents within 3s");
+      `with ⋮'s menu open, Escape closes the menu only (its dropdown gone within 2s); Escape again closes the drawer back to ${BASE} within 3s`);
     await pg.goto(pane);
     await pg.until(`!!${SHEET}`, 3000);
     await sleep(400);
     await click(side + 100, 400);
-    const outside = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
-    result(c, !outside.timeout, 'M2.outside', `closed=${ms(outside)}`, 'a click on the dimmed screen left of it (right of the sidebar) closes it back to #/agents within 3s');
+    const outside = await pg.until(`location.hash === ${js(BASE)} && !${SHEET}`, 3000);
+    result(c, !outside.timeout, 'M2.outside', `closed=${ms(outside)}`, `a click on the dimmed screen left of it (right of the sidebar) closes it back to ${BASE} within 3s`);
   } finally {
     await mobile(pg, true);
   }
 }
 
 /** S1: Settings in front of the screen it came from, from ⚙: the topbar's at the screen's top right on a phone, the
- *  sidebar's at its top on a PC. Phone (390x844): on the list (scrolled) it opens over the whole screen; ✕ and Back close
- *  it back to the same list node at its scrollTop, the history as it was. PC (1280, the sidebar beside it): a centered
+ *  sidebar's at its top on a PC. Phone (390x844): on BASE it opens over the whole screen; ✕ and Back close it back to
+ *  the same Home node, the history as it was. PC (1280, the sidebar beside it): a centered
  *  760px dialog; Escape closes it, and so does a click outside it. */
 async function s1(c: Ctx) {
   const { pg } = c;
-  const SC = `document.getElementById('screen-agents')`;
+  const SC = `document.getElementById('screen-home-stopped')`;
   const SHEET = `document.querySelector('.settings-sheet')`;
-  await pg.goto('#/agents');
-  await pg.until(`!!${SC}?.dataset.ready`, 5000);
-  await pg.ev(`(() => { const s = ${SC}; s.firstElementChild.style.paddingBottom = '1500px'; s.scrollTop = 60; window.__wcSc = s; })()`);
+  await pg.goto(BASE);
+  await pg.until(`!!${SC}`, 5000);
+  await pg.ev(`window.__wcSc = ${SC}, 1`);
   const corner = (p: { x: number; y: number }, w: number) => p.x >= w - 60 && p.y <= 52; // its center: the topbar's last 44px button
   const gp = await pg.at(`document.getElementById('btn-settings')`);
   const cycle = async (close: () => Promise<unknown>) => {
@@ -1541,24 +1551,24 @@ async function s1(c: Ctx) {
     await sleep(400); // its slide-up
     const [top, bottom, width] = await pg.ev(`(() => { const r = ${SHEET}.getBoundingClientRect(); return [Math.round(r.top), Math.round(r.bottom), Math.round(r.width)]; })()`);
     await close();
-    const closed = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
-    const [st, same, len] = await pg.ev(`[${SC}.scrollTop, ${SC} === window.__wcSc, history.length]`);
-    return { open, closed, top, bottom, width, st, same, len };
+    const closed = await pg.until(`location.hash === ${js(BASE)} && !${SHEET}`, 3000);
+    const [same, len] = await pg.ev(`[${SC} === window.__wcSc, history.length]`);
+    return { open, closed, top, bottom, width, same, len };
   };
   const a = await cycle(() => pg.tapEl(`document.getElementById('btn-settings-close')`));
   const b = await cycle(() => pg.ev('history.back()'));
-  result(c, corner(gp, 390) && !a.open.timeout && a.top === 0 && a.bottom === 844 && a.width === 390 && !a.closed.timeout && a.same && Math.abs(a.st - 60) <= 1,
-    'S1.phone', `gear=${Math.round(gp.x)},${Math.round(gp.y)},open=${ms(a.open)},sheet=${a.top}..${a.bottom}x${a.width},closed=${ms(a.closed)},sameNode=${a.same},scrollTop=${a.st}`,
-    "the list scrolled 60px: its ⚙ (top right: x>=330, y<=52) opens #/settings over the whole screen (0..844, 390 wide); ✕ closes it within 3s back to the same #screen-agents at 60px");
-  result(c, !b.open.timeout && !b.closed.timeout && b.same && Math.abs(b.st - 60) <= 1 && b.len === a.len, 'S1.back', `closed=${ms(b.closed)},sameNode=${b.same},history=${a.len}->${b.len}`,
-    'Back closes it too, the list as it was; opening and closing again leaves history.length as it was');
+  result(c, corner(gp, 390) && !a.open.timeout && a.top === 0 && a.bottom === 844 && a.width === 390 && !a.closed.timeout && a.same,
+    'S1.phone', `gear=${Math.round(gp.x)},${Math.round(gp.y)},open=${ms(a.open)},sheet=${a.top}..${a.bottom}x${a.width},closed=${ms(a.closed)},sameNode=${a.same}`,
+    `${BASE}: its ⚙ (top right: x>=330, y<=52) opens #/settings over the whole screen (0..844, 390 wide); ✕ closes it within 3s back to the same #screen-home-stopped`);
+  result(c, !b.open.timeout && !b.closed.timeout && b.same && b.len === a.len, 'S1.back', `closed=${ms(b.closed)},sameNode=${b.same},history=${a.len}->${b.len}`,
+    'Back closes it too, the Home as it was; opening and closing again leaves history.length as it was');
   const click = async (x: number, y: number) => {
     for (const type of ['mousePressed', 'mouseReleased']) await pg.S('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
   };
   const esc = async () => { for (const type of ['keyDown', 'keyUp']) await pg.S('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); };
   await mobile(pg, false);
   try {
-    await pg.goto('#/agents');
+    await pg.goto(BASE);
     const gear = `document.querySelector('#sidebar #btn-settings')`;
     await pg.until(`!!${gear}`, 3000);
     const g = await pg.at(gear);
@@ -1567,12 +1577,12 @@ async function s1(c: Ctx) {
     await sleep(400);
     const [left, width] = await pg.ev(`(() => { const r = ${SHEET}.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.width)]; })()`);
     await esc();
-    const escaped = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
+    const escaped = await pg.until(`location.hash === ${js(BASE)} && !${SHEET}`, 3000);
     await click(g.x, g.y);
     await pg.until(`!!${SHEET}`, 3000);
     await sleep(400);
     await click(100, 800); // outside it (over the sidebar: a modal's backdrop covers it)
-    const outside = await pg.until(`location.hash === '#/agents' && !${SHEET}`, 3000);
+    const outside = await pg.until(`location.hash === ${js(BASE)} && !${SHEET}`, 3000);
     const side = await pg.ev(`Math.round(document.getElementById('sidebar').getBoundingClientRect().right)`);
     result(c, g.x < side && g.y <= 52 && !open.timeout && width === 760 && Math.abs(left - (1280 - 760) / 2) <= 1 && !escaped.timeout && !outside.timeout, 'S1.wide',
       `gear=${Math.round(g.x)},${Math.round(g.y)},open=${ms(open)},x=${left}+${width},escape=${ms(escaped)},outside=${ms(outside)}`,
@@ -1648,15 +1658,15 @@ async function p6(c: Ctx) {
     pg.stateMark = '';
     await mobile(pg, true);
     mutate(rec, tab, ['tab', 'rename', tab, 'wc-shell']);
-    await pg.goto('#/agents');
+    await pg.goto(BASE);
   }
 }
 
 /** W1: the PC's rail of Homes. On a PC (1280px): #sidebar left of the topbar and #screen, --sidebar-w its width (248px);
  *  All agents at its bottom, pinned there however long the rows above get; a row per orchestrator, in /api/state's order,
  *  its counts (working, done, idle) adding up to its account's agents less the blocked ones (those are in its needs
- *  count). A click on wc-less's card opens it in herdr (one POST …/focus, no drawer), as a Home panel's row does, and its
- *  ⋮'s Show here opens #/pane/<it>. W1.switch: a Home's topbar is its header, no switcher
+ *  count). A click on wc-less's row in BASE's Home panel opens it in herdr (one POST …/focus, no drawer), and its ⋮'s
+ *  Show here opens #/pane/<it>. W1.switch: a Home's topbar is its header, no switcher
  *  there (a phone's has one), and a click on another Home's row in the rail opens that Home. W1.home: that Home's Needs
  *  you and agent counts are on its status bar until its panel has them (1023px: no rail, the counts; 1024px: the rail and
  *  the counts, no panel; 1280px: the rail and the panel, neither), and come back with a phone's width. Down to a phone's
@@ -1670,7 +1680,7 @@ async function w1(c: Ctx) {
   };
   try {
     await mobile(pg, false);
-    await loadApp(c, '#/agents'); // a new document: a PC's pointer
+    await loadApp(c, BASE); // a new document: a PC's pointer
     // All agents' bottom edge on the rail's (pinned there), with the rail made too short for what it lists (150px: its
     // top and All agents leave 46px) and scrolled to its top
     const pin = await pg.until(`(() => { const s = document.getElementById('sidebar'), r = document.querySelector('#sidebar .sidebar-all')?.parentElement;
@@ -1694,16 +1704,16 @@ async function w1(c: Ctx) {
       return { w: Math.round(document.getElementById('sidebar').getBoundingClientRect().width), topbar: x('topbar'), screen: x('screen'),
         v: getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w').trim() }; })()`);
     const screen = await pg.ev(`window.__wcScreen = document.getElementById('screen'), 1`);
-    // a click on wc-less's card opens it in herdr, its ⋮'s Show here in the drawer (a Home panel's rows do the same)
-    const card = `document.querySelector('#screen .agent-card[data-pane-id=${js(less)}]')`;
+    // a click on wc-less's row in the Home panel opens it in herdr, its ⋮'s Show here in the drawer
+    const card = `document.querySelector('#home-panel .agent-row[data-pane-id=${js(less)}]')`;
     let herdr: Awaited<ReturnType<typeof waitFn>> | null = null;
     let show: Awaited<ReturnType<typeof waitFn>> | null = null;
     if (!(await pg.until(`!!${card}`, 5000)).timeout) {
       const t = Date.now();
       await click(card);
       herdr = await waitFn(async () => pg.posts(t, `/api/panes/${enc(less)}/focus`).length === 1
-        && await pg.ev(`location.hash === '#/agents' && !document.querySelector('.agent-drawer-content')`), 2000);
-      await click(`document.querySelector('#screen [data-agent-menu=${js(less)}]')`);
+        && await pg.ev(`location.hash === ${js(BASE)} && !document.querySelector('.agent-drawer-content')`), 2000);
+      await click(`document.querySelector('#home-panel [data-agent-menu=${js(less)}]')`);
       await pg.until(`!!document.querySelector('[data-agent-more=${js(less)}] [data-action=show]')`, 2000);
       await click(`document.querySelector('[data-agent-more=${js(less)}] [data-action=show]')`);
       show = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)} && !!document.querySelector('.agent-drawer-content')`, 2000);
@@ -1743,21 +1753,26 @@ async function w1(c: Ctx) {
       `pinned=${ms(pin)},rows=${rows}:${g.timeout ? 'mismatch' : 'ok'},width=${geo.w},topbarX=${geo.topbar},screenX=${geo.screen},--sidebar-w=${geo.v},` +
         `herdr=${herdr ? ms(herdr) : 'no card'},show=${show ? ms(show) : 'no card'},phone=${ms(gone)}`,
       "1280px: #sidebar 248px left of #topbar and #screen (--sidebar-w 248px); All agents at its bottom within 5s (the rail 150px tall, overflowing, scrolled to its top); a row per /api/state orchestrator, in order, " +
-        "its counts = its account's agents less the blocked; a click on wc-less's card POSTs …/focus once, no drawer, and its ⋮ Show here opens #/pane/<it>, within 2s each; at 390px no #sidebar and the same #screen within 2s");
+        "its counts = its account's agents less the blocked; a click on wc-less's row in its Home panel POSTs …/focus once, no drawer, and its ⋮ Show here opens #/pane/<it>, within 2s each; at 390px no #sidebar and the same #screen within 2s");
   } finally {
     await mobile(pg, true);
-    await loadApp(c, '#/agents'); // a phone's document again
+    await loadApp(c, BASE); // a phone's document again
   }
 }
 
-/** W2: on a PC (1280px) an agent's ⋮ (the card's, as a Home panel's row's: Dashboard.tsx's AgentMore) stops it: Stop agent…
- *  asks first (Cancel sends nothing), Stop sends one DELETE /api/panes/<it> and the pane goes, the list staying (no drawer).
- *  No Ask there: the list has no Home's composer. Its agent, wc-rowstop, is its own (a shell report-agent'ed as claude),
- *  opened here and gone by its end: a card more during the other items would move theirs. */
+/** W2: on a PC (1280px) an agent's ⋮ (its row's in BASE's Home panel: Dashboard.tsx's AgentMore) stops it: Stop agent…
+ *  asks first (Cancel sends nothing), Stop sends one DELETE /api/panes/<it> and the pane goes, the Home staying (no drawer).
+ *  No Ask there: BASE is stopped, no orchestrator to ask. Its agent, wc-rowstop, is its own (cat in a shell report-agent'ed
+ *  as claude: a process in its foreground, so its account is known and the Home lists it), opened here and gone by its
+ *  end: a row more during the other items would move theirs. */
 async function w2(c: Ctx) {
   const { pg } = c;
   const rowStop = await newTab(c, c.rec.workspaces[0], 'wc-rowstop');
   if ((await waitFn(() => screen(rowStop).trim(), 15_000, 300)).timeout) throw new Error(`no shell prompt in ${rowStop}`);
+  mutate(c.rec, rowStop, ['pane', 'run', rowStop, 'cat']);
+  const fg = await waitFn(() => { const pi = herdr(['pane', 'process-info', '--pane', rowStop]).process_info;
+    return !!pi?.foreground_process_group_id && pi.foreground_process_group_id !== pi.shell_pid; }, 10_000, 200);
+  if (fg.timeout) throw new Error('wc-rowstop: cat not in the foreground');
   c.rec.reported.push(rowStop);
   save(c.rec);
   mutate(c.rec, rowStop, ['pane', 'report-agent', '--source', 'e2e', '--agent', 'claude', '--state', 'idle', rowStop]);
@@ -1765,14 +1780,14 @@ async function w2(c: Ctx) {
     const p = await pg.at(sel);
     for (const type of ['mousePressed', 'mouseReleased']) await pg.S('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', clickCount: 1 });
   };
-  const MORE = `document.querySelector('#screen [data-agent-menu=${js(rowStop)}]')`;
+  const MORE = `document.querySelector('#home-panel [data-agent-menu=${js(rowStop)}]')`;
   const STOP = `document.querySelector('[data-agent-more=${js(rowStop)}] [data-action=stop]')`;
   const dels = (t: number) => pg.reqs.filter((q) => q.t >= t && q.method === 'DELETE' && q.url.endsWith(`/api/panes/${enc(rowStop)}`)).length;
   try {
     await mobile(pg, false);
-    await loadApp(c, '#/agents'); // a new document: a PC's pointer
-    const card = await pg.until(`!!${MORE}`, 5000);
-    if (card.timeout) throw new Error('no ⋮ on wc-rowstop\'s card');
+    await loadApp(c, BASE); // a new document: a PC's pointer
+    const row = await pg.until(`!!${MORE}`, 5000);
+    if (row.timeout) throw new Error(`no ⋮ on wc-rowstop's row in ${BASE}'s panel`);
     guard(c.rec, rowStop);
     const t0 = Date.now();
     await click(MORE);
@@ -1792,13 +1807,13 @@ async function w2(c: Ctx) {
     await click(`document.querySelector('#modal-root #cf-ok')`);
     const del = await waitFn(async () => dels(t1) === 1, 3000, 100);
     const gone = await waitFn(async () => !(await paneOf(c, rowStop)), 5000, 200);
-    const stayed = await pg.ev(`location.hash === '#/agents' && !document.querySelector('.agent-drawer-content')`);
+    const stayed = await pg.ev(`location.hash === ${js(BASE)} && !document.querySelector('.agent-drawer-content')`);
     result(c, !menu.timeout && !ask && !confirm.timeout && cancelled === 0 && !del.timeout && !gone.timeout && stayed, 'W2',
       `menu=${ms(menu)},ask=${ask},confirm=${ms(confirm)},cancelDeletes=${cancelled},delete=${ms(del)},paneGone=${ms(gone)},stayed=${stayed}`,
-      "1280px: wc-rowstop's card ⋮ has Stop agent… (no Ask on the list); it asks first: Cancel sends no DELETE, Stop sends one DELETE /api/panes/<it> within 3s, /api/state drops the pane within 5s, #/agents stays with no drawer");
+      `1280px: wc-rowstop's row ⋮ in ${BASE}'s panel has Stop agent… (no Ask: a stopped Home); it asks first: Cancel sends no DELETE, Stop sends one DELETE /api/panes/<it> within 3s, /api/state drops the pane within 5s, ${BASE} stays with no drawer`);
   } finally {
     await mobile(pg, true);
-    await loadApp(c, '#/agents'); // a phone's document again
+    await loadApp(c, BASE); // a phone's document again
   }
 }
 
@@ -1821,7 +1836,7 @@ async function p19(c: Ctx) {
     got.push(`${label}=${js(bodies)}`);
   }
   result(c, ok, 'P19', got.join(','), "on wc-shell: Esc -> exactly 1 POST /input {keys:['esc']}; 1 -> exactly 1 {text:'1'}");
-  await pg.goto('#/agents');
+  await pg.goto(BASE);
 }
 
 /** P20: a Home's switcher, its topbar with two or more Homes (no view toggle there: the status bar has it), on a narrow
@@ -1937,7 +1952,7 @@ async function h2(c: Ctx) {
   const n0 = await pg.ev(`document.querySelectorAll('#chat-log .chat-assistant').length`);
   await compose(c, 'slow 3');
   const working = await waitFn(async () => (await hlStatus(c, 'wc-h1')) === 'working', 3000, 100);
-  await pg.goto('#/agents'); // finishing while another screen is shown
+  await pg.goto(BASE); // finishing while another screen is shown
   const done = await waitFn(async () => (await hlStatus(c, 'wc-h1')) === 'done', 10_000, 200);
   await pg.goto('#/home/wc-h1');
   const reply = await pg.until(`document.querySelectorAll('#chat-log .chat-assistant').length > ${n0} && ${CHAT}.includes('echo: slow 3')`, 5000);
@@ -1946,7 +1961,7 @@ async function h2(c: Ctx) {
   const api0 = await hlStatus(c, 'wc-h1');
   result(c, !working.timeout && !done.timeout && !reply.timeout && !seen.timeout && api0 === 'done', 'H2',
     `working=${ms(working)},done=${ms(done)},reply=${ms(reply)},dot=${seen.v ? 'idle' : await pg.ev(dot)},api=${api0}`,
-    "Send 'slow 3' on wc-h1's Home: working within 3s, done within 10s (on #/agents); back on its Home the reply, and its switcher dot idle (seen) while /api/state still says done");
+    "Send 'slow 3' on wc-h1's Home: working within 3s, done within 10s (on #/home/wc-o2); back on its Home the reply, and its switcher dot idle (seen) while /api/state still says done");
 }
 
 /** H3: its question in the answer panel: a tap answers it (the fake's tool_result has the answer); the old id is 409. */
@@ -2170,7 +2185,7 @@ async function p4t2(c: Ctx) {
   const { pg } = c;
   const cl = c.rec.names.claude;
   await pg.ev(`localStorage.setItem('herdr_notifications', 'true')`);
-  await pg.goto('#/agents');
+  await pg.goto(BASE);
   const other = await pg.cdp.send('Target.createTarget', { url: 'about:blank' });
   await pg.cdp.send('Target.activateTarget', { targetId: other.targetId });
   try {
@@ -2199,7 +2214,7 @@ async function p17t2(c: Ctx) {
     await sendPrompt(c, cl, OK_PROMPT);
     if ((await statusFrame(c, cl, 'done', t0, 90_000)).timeout) throw new Error('wc-claude never done');
   }
-  await c.pg.goto('#/agents');
+  await c.pg.goto(BASE);
   await c.pg.goto(`#/pane/${enc(cl)}`);
   const seq = (await paneOf(c, cl))?.agent?.completionSeq;
   const r = await c.pg.until(`JSON.parse(localStorage.getItem('herdr_seen_done') || '{}')[${js(cl)}] === ${js(seq)}`, 3000);
@@ -2247,7 +2262,7 @@ async function p11(c: Ctx) {
   const { pg } = c;
   const cl = c.rec.names.claude;
   await ensureTranscript(c);
-  await pg.goto('#/agents');
+  await pg.goto(BASE);
   await pg.goto(`#/pane/${enc(cl)}`); // a Claude pane opens on its chat
   const shown = await pg.until(`(() => { const l = document.getElementById('chat-log'); return !!l && l.style.display !== 'none' && l.querySelectorAll('.chat-item').length; })()`, 5000);
   const users0 = await pg.ev(`window.__wcFirst = document.querySelector('#chat-log .chat-item'), document.querySelectorAll('#chat-log .chat-user').length`);
@@ -2278,7 +2293,7 @@ async function p10t2(c: Ctx) {
   const { pg, rec } = c;
   const { claude: cl, shell } = rec.names;
   await ensureTranscript(c);
-  await pg.goto('#/agents');
+  await pg.goto(BASE);
   await pg.goto(`#/pane/${enc(cl)}`);
   const chat = await pg.until(`(() => { const l = document.getElementById('chat-log'); return !!l && l.style.display !== 'none'; })()`, 5000);
   if (chat.timeout) throw new Error('wc-claude not shown in chat');
@@ -2293,7 +2308,7 @@ async function p10t2(c: Ctx) {
   const live = await pg.until(`document.getElementById('term-live').textContent.includes(${js(mark)})`, 3000);
   result(c, connected && !live.timeout, 'P10-T2', `connected=${connected},watchesSent=${watch.join('+') || 'none'},marker=${ms(live)}`,
     "from wc-claude's chat to #/pane/<wc-shell>: a line wc-shell prints shows in #term-live within 3s (the socket up, so no polling)");
-  await pg.goto('#/agents');
+  await pg.goto(BASE);
 }
 
 /** Clears an orchestrator from its Home. stayed: #/home/<name> held from the clear request through 8s and

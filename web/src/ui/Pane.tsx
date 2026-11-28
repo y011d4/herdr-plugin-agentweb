@@ -357,7 +357,8 @@ function HomeStatus({ name, state, actions, clear = actions?.clear, paneId }:
 // on it again and leaving the screen close it; the focus goes into it and back): its account's agents, blocked first, then
 // working, done and idle (byUrgency), each opening its drawer, then Open the list (#/agents/<name>); on a PC a row's ⋮ also
 // asks the orchestrator about it (on a running Home: the popover closes, the focus stays in the composer) or stops it. Like
-// the agents list it holds still while a finger is down (useHeldState).
+// the agents list it holds still while a finger is down (useHeldState), and keeps its scrollTop when a push reorders the
+// rows (no scroll anchoring: Chrome's would scroll it after the row it anchored on).
 function AgentsButton({ name, s }: { name: string; s: HomeSummary }) {
   const [opened, setOpened] = useState(false);
   const [asked, setAsked] = useState(false); // closed by an Ask: the focus stays in the composer
@@ -384,7 +385,7 @@ function AgentsButton({ name, s }: { name: string; s: HomeSummary }) {
           <span data-count=""><Dot status="idle" />{s.idle}<span className="max-sm:hidden"> idle</span></span>
         </Button>
       </Popover.Target>
-      <Popover.Dropdown className="overflow-y-auto overscroll-contain" p={6} data-agents-list="" {...hold}>
+      <Popover.Dropdown className="overflow-y-auto overscroll-contain [overflow-anchor:none]" p={6} data-agents-list="" {...hold}>
         {cards.length ? cards.map((c) => <AgentRow key={c.pane.paneId} card={c} ask={ask} askOff={!!o?.headless?.pending} />) : <Text c="dimmed" fz={13} px={12} py={8}>No active agents.</Text>}
         <div className="mt-1 border-t border-(--color-border) pt-1">
           <NavLink href={homeAgentsHash(homeHash(name))} className="agents-open-list rounded-lg" label="Open the list" rightSection="›" />
