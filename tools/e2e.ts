@@ -1954,12 +1954,16 @@ async function h8(c: Ctx) {
   const row = `document.querySelector('.home-warning[data-kind="stream_broken"]')`;
   const warn = await pg.until(`!!${row}?.querySelector('[data-action="tui"]')`, 5000);
   let steps = { v: false, timeout: true, ms: 0 };
+  let closed = { v: false, timeout: true, ms: 0 };
   if (!warn.timeout) {
     await pg.tapEl(`${row}.querySelector('[data-action="tui"]')`);
     steps = await pg.until(`(document.querySelector('#modal-root .tui-steps')?.textContent ?? '').includes('"wc-h1"')`, 2000);
+    // closed again, or its backdrop takes the next item's taps on this Home
+    if (!steps.timeout) await pg.tapEl(`document.getElementById('tui-close')`);
+    closed = await pg.until(`!document.querySelector('.tui-steps')`, 2000);
   }
-  result(c, !warn.timeout && !steps.timeout, 'H8', `warning=${ms(warn)},steps=${ms(steps)}`,
-    "'garbage 3': a stream_broken warning line within 5s; its 'Back to TUI' shows the steps naming wc-h1");
+  result(c, !warn.timeout && !steps.timeout && !closed.timeout, 'H8', `warning=${ms(warn)},steps=${ms(steps)},closed=${ms(closed)}`,
+    "'garbage 3': a stream_broken warning line within 5s; its 'Back to TUI' shows the steps naming wc-h1 in a dialog, which Close closes");
 }
 
 /** H7: the preview restarts: wc-h1 comes back on the same session, its chat still there. */
