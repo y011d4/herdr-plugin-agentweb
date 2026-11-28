@@ -2528,10 +2528,14 @@ async function shots(o: Record<string, any>): Promise<number> {
         // publishing checks it against the names denylist, as a PNG's text can't be read back
         // (.github/workflows/screenshots-publish.yml). ponytail: text drawn inside an image or a canvas isn't read
         // (no OCR); such an image is in the tree, which the check also reads, as are the names that would draw it.
-        const text = String(await ev(`[document.title, document.body.innerText,
+        const text = await ev(`[document.title, document.body.innerText,
           ...[...document.querySelectorAll('input, textarea')].flatMap((e) => [e.value, e.placeholder]),
           ...[...document.querySelectorAll('*')].flatMap((e) => ['::before', '::after'].map((p) => getComputedStyle(e, p).content))
-            .filter((c) => c && c !== 'none' && c !== 'normal')].join('\\n')`) ?? '');
+            .filter((c) => c && c !== 'none' && c !== 'normal')
+            // as written ('"a" "b"') and as shown ('ab': its strings run together)
+            .flatMap((c) => [c, (c.match(/"(?:[^"\\\\]|\\\\.)*"/g) ?? []).map((s) => s.slice(1, -1).replace(/\\\\(.)/g, '$1')).join('')])].join('\\n')`);
+        // no text (the expression threw) must not read as a page without names
+        if (typeof text !== 'string' || !text) throw new Error(`shots: ${scene.name}-${size.id}: could not read the page's text`);
         const shot: Array<{ name: string; kind: 'screen' | 'part'; png: Buffer; ready: boolean; text: string }> = [];
         if (scene.screen !== false) {
           const { data } = await S('Page.captureScreenshot', { format: 'png' });

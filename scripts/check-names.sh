@@ -99,7 +99,8 @@ install() {
   done
   # pre-push: our line first, in front of whatever is there (roborev's, say), which then reads the same ref
   # updates from stdin: they are kept in a file, and the rest of the hook reads that (an earlier line of ours goes)
-  line='i=$(mktemp) && cat > "$i" && { sh "$(dirname "$0")/check-names.sh" pre-push "$@" < "$i" || { rm -f "$i"; exit 1; }; } && exec < "$i" && rm -f "$i" # check-names'
+  # (no file, or no copy of the updates: the push stops; it never goes on to the rest unchecked)
+  line='{ i=$(mktemp) && cat > "$i"; } || { rm -f "${i:-}"; exit 1; }; sh "$(dirname "$0")/check-names.sh" pre-push "$@" < "$i" || { rm -f "$i"; exit 1; }; exec < "$i"; rm -f "$i" # check-names'
   if [ ! -e "$d/pre-push" ]; then printf '#!/bin/sh\n' > "$d/pre-push"; fi
   { head -n 1 "$d/pre-push"; echo "$line"; tail -n +2 "$d/pre-push" | grep -v '# check-names$' || true; } > "$tmp/pre-push"
   cat "$tmp/pre-push" > "$d/pre-push"
