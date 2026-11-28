@@ -22,12 +22,16 @@ import { todoQuote } from '../transcript.ts';
 import type { AppState, OrchestratorView, TodoItem } from '../types.ts';
 import { agentCards, cardTitle, orchestratorLabel } from './Dashboard.tsx';
 
-/** The time, again each minute: an item due later comes up when its time comes, with no State push. */
+/** The time, again at each minute's start: an item due later comes up when its time comes and a usage limit's
+ *  countdown ticks (both whole minutes), with no State push. Each wait is measured again, so a phone asleep
+ *  catches up as it wakes. */
 export function useMinute(): number {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(t);
+    let t: ReturnType<typeof setTimeout>;
+    const next = (): void => { t = setTimeout(() => { setNow(Date.now()); next(); }, 60_000 - (Date.now() % 60_000)); };
+    next();
+    return () => clearTimeout(t);
   }, []);
   return now;
 }
