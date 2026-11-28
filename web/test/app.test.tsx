@@ -55,6 +55,18 @@ const reads = (paneId: string): number => reqs.filter((q) => q.url.startsWith(`/
 const transcripts = (paneId: string): number => reqs.filter((q) => q.url === `/api/panes/${encodeURIComponent(paneId)}/transcript`).length;
 
 const go = async (hash: string): Promise<void> => { location.hash = hash; await settle(); };
+/** `hash` opened from no screen of the app (a link, a notification with the app closed): a hashchange from no hash.
+ *  happy-dom's replaceState fires hashchange, as no browser does: the empty hash's own route (a replace by the default
+ *  Home) is held back, and recorded by a spy on replace. */
+const openAfresh = async (hash: string): Promise<void> => {
+  vi.spyOn(location, 'replace').mockImplementationOnce(() => {});
+  history.replaceState(history.state, '', location.pathname);
+  await settle();
+  history.replaceState(history.state, '', hash);
+  await settle();
+};
+/** A Home on show (running or stopped). */
+const onHome = (): boolean => /^#\/home\/./.test(location.hash) && !!$('#screen #screen-pane.screen-home, #screen #screen-home-stopped');
 const click = async (el: Element | null): Promise<void> => {
   assert.ok(el, 'nothing to click');
   await act(async () => { (el as HTMLElement).click(); });
@@ -312,7 +324,7 @@ describe('App', () => {
     replace.mockRestore();
   });
 
-  it('pane to pane replaces the entry (Back still closes the drawer); a pane opened afresh closes to the list in its place', async () => {
+  it('pane to pane replaces the entry (Back still closes the drawer); a pane opened afresh closes to the default Home in its place', async () => {
     // happy-dom's replace() adds an entry, as assign() does: a browser's, in place
     const replace = vi.spyOn(location, 'replace').mockImplementation((url: string | URL) => {
       const oldURL = location.href;
@@ -339,14 +351,14 @@ describe('App', () => {
     assert.equal(location.hash, '#/agents');
     assert.ok(!$('.agent-drawer #screen-pane'));
 
-    await go('#/');
-    await go('#/pane/p2'); // not from a list or a Home: the list goes under it
-    assert.ok($('#screen #screen-agents') && $('.agent-drawer #screen-pane'));
+    await openAfresh('#/pane/p2'); // not from a list or a Home: an empty screen under it, no Home's view beside the drawer's
+    assert.ok($('.agent-drawer #screen-pane') && $('#screen')!.childElementCount === 0, 'nothing under it');
+    assert.equal($('#topbar-title')!.textContent, 'Yoicks');
     replace.mockClear();
     await click($('#btn-drawer-close'));
     await settle();
-    assert.deepEqual(replace.mock.calls.map((c) => c[0]), ['#/agents']);
-    assert.equal(location.hash, '#/agents');
+    assert.equal(replace.mock.calls[0]?.[0], '#/home', 'in its place: #/home, then the default Home');
+    assert.ok(onHome(), `the default Home, drawn: ${location.hash}`);
     assert.ok(!$('.agent-drawer #screen-pane'));
     replace.mockRestore();
   });
@@ -812,7 +824,7 @@ describe('App', () => {
     await settle();
   });
 
-  it('Escape closes Settings; opened afresh (no list or Home before it) it is in front of the list and closes in its place', async () => {
+  it('Escape closes Settings; opened afresh (no list or Home before it) it is in front of an empty screen and closes to the default Home', async () => {
     await go('#/agents');
     const list = $('#screen #screen-agents');
     await go('#/settings');
@@ -822,15 +834,15 @@ describe('App', () => {
     assert.equal(location.hash, '#/agents');
     assert.ok(!$('#screen-settings') && $('#screen #screen-agents') === list);
 
-    await go('#/');
     const replace = vi.spyOn(location, 'replace');
-    await go('#/settings');
-    assert.ok($('#screen #screen-agents') && $('#screen-settings'));
+    await openAfresh('#/settings');
+    assert.ok($('#screen-settings') && $('#screen')!.childElementCount === 0, 'nothing under it');
+    replace.mockClear();
     await click($('#btn-settings-close'));
-    assert.deepEqual(replace.mock.calls.map((c) => c[0]), ['#/agents']);
+    assert.equal(replace.mock.calls[0]?.[0], '#/home');
     replace.mockRestore();
     await settle();
-    assert.equal(location.hash, '#/agents');
+    assert.ok(onHome(), `the default Home, drawn: ${location.hash}`);
   });
 
   it("Settings taking the place of a drawer over a Home whose orchestrator's pane changed meanwhile draws the Home afresh", async () => {

@@ -366,13 +366,18 @@ function handleRoute(e?: Event): void {
 
 const showList = (hash: string): void => show('agents', <Dashboard hash={hash} />, dashboardTopbar(hash), hash);
 
+/** The screen under an overlay that has none on show (opened afresh: a notification, a reload): `base`'s list, else an
+ *  empty one with the bare topbar. A Home is drawn only as it is on show: under the drawer its view would run beside the
+ *  drawer's; closing the overlay goes to `base` (#/home: the default Home), drawn then. */
+const showBase = (base: string): void => (isAgentsRoute(base) ? showList(base) : show('loading', null, BARE, base));
+
 /** #/settings: Settings in front of the screen it was opened from, as it is (a Home's view running on),
- *  else in front of the list, drawn now. Opened from a pane's drawer, in the drawer's place (it replaced
+ *  else in front of showBase's. Opened from a pane's drawer, in the drawer's place (it replaced
  *  the drawer's entry: nav.ts's go), over the drawer's screen. */
 function openSettingsRoute(from: string | null): void {
   setSettingsOpen(true); // first: a Home drawn under it is out of sight (markActivePaneSeen)
   if (from === null && shown.hash === view.paneBackRoute) return; // drawn again with no hash change: as it is
-  let base = nextOverlayBase(from, view.paneBackRoute);
+  const base = nextOverlayBase(from, view.paneBackRoute);
   if (sheet?.open) { // one overlay at a time
     closePaneView(); // the drawer's
     view.activePaneId = null;
@@ -391,21 +396,17 @@ function openSettingsRoute(from: string | null): void {
     closePaneView();
     view.activePaneId = null;
     view.homeMode = false;
-    if (!isAgentsRoute(base)) base = '#/agents'; // a Home only as it is on show
-    showList(base);
+    showBase(base);
   }
   view.paneOverBase = nextOverlayOverBase(from, base, view.paneOverBase);
   view.paneBackRoute = base;
 }
 
 /** #/pane/<id>: the pane in the drawer, over the screen it was opened from (a Home or a list, left as it
- *  is: a Home's view stopped, its chat as it was), else over the list, drawn now. */
+ *  is: a Home's view stopped, its chat as it was), else over showBase's. */
 function openPaneRoute(paneId: string, from: string | null): void {
-  let base = nextOverlayBase(from, view.paneBackRoute);
-  if (shown.hash !== base) {
-    if (!isAgentsRoute(base)) base = '#/agents'; // a Home only as it is on show (one view at a time)
-    showList(base);
-  }
+  const base = nextOverlayBase(from, view.paneBackRoute);
+  if (shown.hash !== base) showBase(base);
   view.paneOverBase = nextOverlayOverBase(from, base, view.paneOverBase);
   view.paneBackRoute = base;
   view.activePaneId = paneId;

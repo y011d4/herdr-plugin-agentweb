@@ -4,7 +4,8 @@
  *   #/home/<name>    an orchestrator's Home, running or stopped (Start); #/home opens the default one
  *   #/pane/<id>      a pane, in a drawer over the screen it came from (an orchestrator's pane opens as its Home)
  *   #/settings       Settings, in front of the screen it came from
- * An empty hash (a fresh open) goes to the default Home once a State exists.
+ * An empty hash (a fresh open) goes to the default Home once a State exists, and so does a hash that names nothing
+ * (#/home: the default Home; an overlay opened with no screen under it closes to it).
  */
 import type { AppState, OrchestratorView } from './types.ts';
 
@@ -59,11 +60,11 @@ export function paneRoute(state: AppState | null, paneId: string): string {
 /** The routes shown in front of another screen: a pane's drawer, Settings. */
 export const isOverlay = (hash: string): boolean => hash.startsWith('#/pane/') || hash === '#/settings';
 
-/** The screen under an overlay after arriving from `fromHash`: a Home or an account's list it came from;
- *  from another overlay (which it replaced) the same; else (a fresh open, a reload) the list. */
+/** The screen under an overlay after arriving from `fromHash`: a Home or a list it came from; from another overlay
+ *  (which it replaced) the same; else (a fresh open, a reload) none: #/home, the default Home it closes to. */
 export function nextOverlayBase(fromHash: string | null, prev: string): string {
-  if (fromHash?.startsWith('#/home/') || fromHash?.startsWith('#/agents/')) return fromHash;
-  return fromHash && isOverlay(fromHash) ? prev : '#/agents';
+  if (fromHash?.startsWith('#/home/') || (fromHash && isAgentsRoute(fromHash))) return fromHash!;
+  return fromHash && isOverlay(fromHash) ? prev : '#/home';
 }
 
 /** Whether the overlay's history entry sits right on its screen's (`base`), so a close can go back to it:
@@ -75,34 +76,34 @@ export function nextOverlayOverBase(fromHash: string | null, base: string, prev:
 
 export function resolveRoute(hash: string, state: AppState | null, lastHome: string | null): Route {
   // Opening the app without a route (the PWA's start_url) lands on the default Home (a stopped
-  // one shows Start), replaced so the empty-hash entry stays out of history.
-  if (!hash && state) {
+  // one shows Start), replaced so the empty-hash entry stays out of history; before a State, the first one routes it.
+  if (!hash && !state) return { kind: 'loading' };
+  if (!hash) {
     const home = defaultHome(state, lastHome);
     return { kind: 'redirect', hash: home ? homeHash(home.name) : '#/agents', replace: true };
   }
-  const h = hash || '#/agents';
-  if (h === '#/home' && state) {
+  if (hash === '#/home' && state) {
     // no name (older links): the default Home
     const home = defaultHome(state, lastHome);
     return { kind: 'redirect', hash: home ? homeHash(home.name) : '#/agents', replace: true };
   }
-  if (h === '#/home' || h.startsWith('#/home/')) {
+  if (hash === '#/home' || hash.startsWith('#/home/')) {
     if (!state) return { kind: 'loading' };
-    const o = homeOf(h, state);
-    return o ? { kind: 'home', name: o.name, paneId: o.paneId } : { kind: 'redirect', hash: '#/agents', replace: false };
+    const o = homeOf(hash, state);
+    return o ? { kind: 'home', name: o.name, paneId: o.paneId } : { kind: 'redirect', hash: '#/home', replace: true }; // gone: the default one
   }
-  if (isAgentsRoute(h) || h === '#/') return { kind: 'agents' };
-  if (h.startsWith('#/pane/')) {
+  if (isAgentsRoute(hash)) return { kind: 'agents' };
+  if (hash.startsWith('#/pane/')) {
     let paneId: string;
     try {
-      paneId = decodeURIComponent(h.slice('#/pane/'.length));
+      paneId = decodeURIComponent(hash.slice('#/pane/'.length));
     } catch {
-      return { kind: 'redirect', hash: '#/agents', replace: false }; // malformed pane hash — don't break routing
+      return { kind: 'redirect', hash: '#/home', replace: true }; // malformed pane hash — don't break routing
     }
     // an orchestrator always opens as its Home (notification clicks, stale links, …)
     const o = orchestratorOfPane(state, paneId);
     return o ? { kind: 'redirect', hash: homeHash(o.name), replace: true } : { kind: 'pane', paneId };
   }
-  if (h === '#/settings') return { kind: 'settings' };
-  return { kind: 'redirect', hash: '#/agents', replace: false };
+  if (hash === '#/settings') return { kind: 'settings' };
+  return { kind: 'redirect', hash: '#/home', replace: true }; // #/ and anything else: the default Home
 }

@@ -6,21 +6,21 @@
  * the user there as a count (Todos.tsx's needsYou: its account's blocked agents, its question, its items due now), and
  * under them its account's other agents as counts (working, done, idle; each, a zero dimmed, so they line up). What waits there and the agents themselves
  * are the Home's: its panel at its right (ui/HomePanel.tsx), or below that width its status bar's popovers. Then Other,
- * the blocked agents no Home's account lists (a click opens one: nav.ts's openAgent, on a PC in herdr). At the bottom,
- * pinned, All agents (their count): the full list.
+ * the agents no Home's account lists, blocked first (byUrgency), as a Home panel's rows (Dashboard.tsx's AgentRow: a click
+ * opens one in herdr, its ⋮ also here): no Home has them. At the bottom, pinned, All agents (their count): the full list.
  *
  * Like the agents list it gets every State push: it holds still while a finger is down (useHeldState), and its rows are
  * keyed by orchestrator, so #sidebar, the scroll container, stays the same element.
  */
 import { NavLink, Text } from '@mantine/core';
 import { useSyncExternalStore, type ReactNode } from 'react';
-import { homeGroups, homeSummary, orchestratorStatus } from '../dashboard-group.ts';
+import { byUrgency, homeGroups, homeSummary, orchestratorStatus } from '../dashboard-group.ts';
 import { homeHash } from '../routes.ts';
 import { findPane, store } from '../store.ts';
 import type { AppState, OrchestratorView } from '../types.ts';
-import { SettingsButton, agentCards, orchestratorLabel, useHeldState } from './Dashboard.tsx';
+import { AgentRow, SettingsButton, agentCards, orchestratorLabel, useHeldState } from './Dashboard.tsx';
 import { StatusCounts, StatusDot } from './Status.tsx';
-import { Blocked, NeedsBadge, needsYou, useMinute } from './Todos.tsx';
+import { NeedsBadge, needsYou, useMinute } from './Todos.tsx';
 
 const subscribeHash = (fn: () => void): (() => void) => {
   addEventListener('hashchange', fn);
@@ -36,7 +36,7 @@ export function Sidebar({ dot }: { dot: ReactNode }) {
   const now = useMinute();
   const hash = useSyncExternalStore(subscribeHash, () => location.hash);
   const cards = agentCards(state);
-  const other = homeSummary(homeGroups(cards, state?.orchestrators ?? []).find((g) => !g.home)?.cards ?? [], store.seenDone).blocked;
+  const other = byUrgency(homeGroups(cards, state?.orchestrators ?? []).find((g) => !g.home)?.cards ?? [], store.seenDone);
   return (
     <aside id="sidebar" aria-label="Homes" {...hold}>
       {/* the topbar's height, kept in view over the list: the app's name, the connection (App.tsx's dot) and Settings */}
@@ -53,7 +53,7 @@ export function Sidebar({ dot }: { dot: ReactNode }) {
       {other.length > 0 && (
         <section className="sidebar-other" data-home="">
           {heading('Other')}
-          <div className="px-3 pt-1"><Blocked cards={other} /></div>
+          {other.map((c) => <AgentRow key={c.pane.paneId} card={c} />)}
         </section>
       )}
       {/* as tall as the topbar, at the bottom (#sidebar is a column): pinned there while the rows above run under it */}

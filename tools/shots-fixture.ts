@@ -44,6 +44,10 @@ export const state: AppState = {
     { workspaceId: 'w3', label: 'personal', cwd: `${orch}/personal`, worktree: null, tabs: [
       { tabId: 't5', label: 'personal', panes: [pane('p4', `${orch}/personal`, agent('claude', 'working', { stateChangeSeq: 15, sinceUnixMs: T0 - 20_000 }))] },
     ] },
+    // an agent no Home's account lists (a PC's rail: Other)
+    { workspaceId: 'w4', label: 'scratch', cwd: '/home/u/scratch', worktree: null, tabs: [
+      { tabId: 't6', label: 'notes', panes: [pane('p6', '/home/u/scratch', agent('codex', 'idle', { stateChangeSeq: 9, sinceUnixMs: T0 - 3 * 3_600_000 }))] },
+    ] },
   ],
   orchestrators: [
     { name: 'personal', label: 'personal', paneId: 'p4', agents: ['p1', 'p2', 'p3', 'p4', 'p5'], mode: 'tui', headless: null, todos: [
@@ -171,6 +175,7 @@ export const scenes: Scene[] = [
     { name: 'chat-notice', el: q('#chat-log .chat-notice') },
     { name: 'composer', el: q('.input-bar') },
     { name: 'home-panel', el: q('#home-panel'), sizes: ['pc'] }, // a PC's, beside it: what waits there, its agents
+    { name: 'sidebar-other', el: q('#sidebar .sidebar-other'), sizes: ['pc'] }, // the rail's agents no Home's account lists
   ] },
   // a PC's agent row menu (Open in herdr, Show here) in the Home's panel: the ready check clicks flaky-test's ⋮ (once: then it's
   // aria-expanded); a phone has none (a tap on a row opens its drawer)

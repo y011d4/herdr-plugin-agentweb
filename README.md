@@ -339,11 +339,12 @@ with defaults, is:
   **← Home** opens the Home used last. With two or more configured, a phone's top bar is a switcher between the
   Homes (`label`s, with their status and what waits on you there; it scrolls sideways when they don't fit), over the
   Home's status bar. On a PC a rail at the left lists the Homes instead, each with what waits on you there (a count)
-  and its agents' counts (working, done, idle, each shown, a zero dimmed); a click opens the Home, and **All agents** at its bottom the full
-  list. A Home's top bar is its own: its name and status, then what a phone has at its status bar's right (a headless
+  and its agents' counts (working, done, idle, each shown, a zero dimmed); a click opens the Home. Under them **Other** lists the agents no Home's
+  account has, blocked first (a click opens one in herdr), and **All agents** at its bottom opens the full list. A Home's top bar is its own: its name and status, then what a phone has at its status bar's right (a headless
   one's usage and model, `>_` and **⋮**). From 1280px wide a panel at the Home's right lists what needs you there (its
   question, its blocked agents, its to-do list) and its other agents, with **Open the list**; narrower, its status bar
   keeps Needs you and the counts. The app reopens the Home used last (`#/home/<name>`); with none, it opens on the list.
+  An agent opened from a notification while the app was closed closes to that Home.
 - `notify_url` — optional [ntfy](https://ntfy.sh) topic URL for background push
   notifications, e.g. `https://ntfy.example.internal/herdr` for a **self-hosted**
   ntfy instance. When unset (default) the bridge performs no outbound requests at

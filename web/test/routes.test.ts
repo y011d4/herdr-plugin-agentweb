@@ -9,7 +9,6 @@ const state = (...orchestrators: OrchestratorView[]): AppState => ({
   workspaces: [], orchestrators, orchestratorPaneId: null,
 });
 const replace = (hash: string) => ({ kind: 'redirect', hash, replace: true });
-const push = (hash: string) => ({ kind: 'redirect', hash, replace: false });
 
 describe('resolveRoute — the default Home (a fresh open, and #/home)', () => {
   const two = state(orch('a', 'p1'), orch('stopped', null), orch('b', 'p2'));
@@ -29,8 +28,8 @@ describe('resolveRoute — the default Home (a fresh open, and #/home)', () => {
     });
   }
 
-  it('waits for the first state: an empty hash shows the list, #/home a spinner', () => {
-    assert.deepEqual(resolveRoute('', null, 'a'), { kind: 'agents' });
+  it('waits for the first state: an empty hash and #/home show a spinner', () => {
+    assert.deepEqual(resolveRoute('', null, 'a'), { kind: 'loading' });
     assert.deepEqual(resolveRoute('#/home', null, 'a'), { kind: 'loading' });
   });
 });
@@ -47,8 +46,8 @@ describe('resolveRoute — #/home/<name>', () => {
     assert.deepEqual(resolveRoute('#/home/stopped', s, null), { kind: 'home', name: 'stopped', paneId: null });
   });
 
-  it('an unknown or broken name goes to the list (a new history entry)', () => {
-    for (const hash of ['#/home/nope', '#/home/%E0%A4%A']) assert.deepEqual(resolveRoute(hash, s, null), push('#/agents'), hash);
+  it('an unknown or broken name goes to the default Home, in its place (Back past it)', () => {
+    for (const hash of ['#/home/nope', '#/home/%E0%A4%A']) assert.deepEqual(resolveRoute(hash, s, null), replace('#/home'), hash);
   });
 
   it('waits for the first state', () => {
@@ -73,12 +72,12 @@ describe('resolveRoute — #/pane/<id>', () => {
 describe('resolveRoute — the rest', () => {
   const s = state(orch('a', 'p1'));
 
-  it('a broken or unknown hash goes to the list', () => {
-    for (const hash of ['#/pane/%E0%A4%A', '#/nope', '#/agentsx', '#settings']) assert.deepEqual(resolveRoute(hash, s, null), push('#/agents'), hash);
+  it('a broken or unknown hash goes to the default Home, in its place', () => {
+    for (const hash of ['#/pane/%E0%A4%A', '#/nope', '#/agentsx', '#settings', '#/']) assert.deepEqual(resolveRoute(hash, s, null), replace('#/home'), hash);
   });
 
   it('the lists and settings', () => {
-    for (const hash of ['#/agents', '#/agents/a', '#/agents/nope', '#/']) assert.deepEqual(resolveRoute(hash, s, null), { kind: 'agents' }, hash);
+    for (const hash of ['#/agents', '#/agents/a', '#/agents/nope']) assert.deepEqual(resolveRoute(hash, s, null), { kind: 'agents' }, hash);
     assert.deepEqual(resolveRoute('#/settings', s, null), { kind: 'settings' });
     assert.deepEqual(resolveRoute('#/settings', null, null), { kind: 'settings' });
   });
@@ -105,12 +104,13 @@ describe('route helpers', () => {
     for (const h of ['#/agents', '#/home/a', '#/settings/x', '']) assert.ok(!isOverlay(h), h);
   });
 
-  it("nextOverlayBase: a Home or an account's list it came from; from an overlay (it replaced) the same", () => {
+  it("nextOverlayBase: a Home or a list it came from; from an overlay (it replaced) the same; else #/home, the default Home", () => {
     assert.equal(nextOverlayBase('#/home/a', '#/agents'), '#/home/a');
-    assert.equal(nextOverlayBase('#/agents/a', '#/agents'), '#/agents/a');
+    assert.equal(nextOverlayBase('#/agents/a', '#/home'), '#/agents/a');
+    assert.equal(nextOverlayBase('#/agents', '#/home'), '#/agents');
     assert.equal(nextOverlayBase('#/pane/p9', '#/agents/a'), '#/agents/a');
     assert.equal(nextOverlayBase('#/settings', '#/home/a'), '#/home/a');
-    for (const from of ['#/agents', '#/', '', null]) assert.equal(nextOverlayBase(from, '#/home/a'), '#/agents', String(from));
+    for (const from of ['#/', '#/nope', '', null]) assert.equal(nextOverlayBase(from, '#/home/a'), '#/home', String(from));
   });
 
   it('nextOverlayOverBase: opened from the screen under it; from an overlay the same; a fresh open or another screen not', () => {
