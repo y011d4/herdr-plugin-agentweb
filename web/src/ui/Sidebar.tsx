@@ -7,7 +7,7 @@
  * under them its account's other agents as counts (working, done, idle; each, a zero dimmed, so they line up). What waits there and the agents themselves
  * are the Home's: its panel at its right (ui/HomePanel.tsx), or below that width its status bar's popovers. Then Other,
  * the agents no Home's account lists, blocked first (byUrgency), as a Home panel's rows (Dashboard.tsx's AgentRow: a click
- * opens one in herdr, its ⋮ also here): no Home has them.
+ * opens its menu, Open in herdr first): no Home has them.
  *
  * It gets every State push: it holds still while a finger is down (useHeldState), and its rows are
  * keyed by orchestrator, so #sidebar, the scroll container, stays the same element.

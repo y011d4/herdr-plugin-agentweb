@@ -1,6 +1,7 @@
 /**
  * nav.ts — the moves more than one screen makes: opening an overlay and closing it. An agent (#/pane/<id>)
- * opens in a drawer (ui/AgentDrawer.tsx; a click on one on a PC opens it in herdr instead: openAgent), Settings (#/settings) in a sheet (ui/SettingsSheet.tsx), in
+ * opens in a drawer (ui/AgentDrawer.tsx; a click on its name on a PC, a notice's or a chip's, opens it in herdr instead: openAgent;
+ * an agent row opens its menu, Dashboard.tsx's AgentRow), Settings (#/settings) in a sheet (ui/SettingsSheet.tsx), in
  * front of the screen they were opened from (store.view.paneBackRoute), one at a time. Going from one
  * overlay to another replaces the history entry, so the phone's Back still closes it; a close goes back
  * to the entry under it when the overlay was opened on top of it here, else replaces itself with that

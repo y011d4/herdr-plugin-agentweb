@@ -147,7 +147,7 @@ export function confirmModal(title: string, message: string, confirmLabel: strin
 
 // ── Rename (from a pane's ⋮, ui/Pane.tsx's AgentMenu) ────────────────────────
 
-/** Stop agent…, after a confirm: a pane's ⋮ (in its drawer, on a Home) and a PC's agent ⋮ (Dashboard.tsx's AgentMore). A
+/** Stop agent…, after a confirm: a pane's ⋮ (in its drawer, on a Home) and an agent row's menu (Dashboard.tsx's AgentRow). A
  *  pane is closed (herdr's pane.close: SIGHUP, then SIGTERM, then SIGKILL to what runs in it); a headless orchestrator
  *  (hl:<name>) is stopped by the bridge (Start resumes its session). */
 export async function stopAgentFlow(paneId: string): Promise<void> {

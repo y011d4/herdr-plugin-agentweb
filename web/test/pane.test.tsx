@@ -488,7 +488,7 @@ describe('Home', () => {
   const rows = (): string[] => [...container.querySelectorAll<HTMLElement>('[data-agents-list] .agent-row')]
     .map((r) => `${r.dataset.paneId}:${r.querySelector<HTMLElement>('.status-badge')!.dataset.status}`);
 
-  it('lists its agents most urgent first, opens one in its drawer and closes on Escape, a tap outside and a tap on it again', async () => {
+  it('lists its agents most urgent first, opens one in its drawer (its row\'s menu, Open) and closes on Escape, a tap outside and a tap on it again', async () => {
     const s = fresh();
     s.orchestrators[0].agents!.push('p6'); // blocked
     await home(s);
@@ -507,6 +507,8 @@ describe('Home', () => {
     assert.ok(!shown(), 'a tap outside');
     await fire(() => counts.click());
     await fire(() => $('[data-agents-list] .agent-row[data-pane-id="p1"]').click());
+    assert.equal(location.hash, '#/home/personal', 'a tap opens its menu');
+    await fire(() => $('[data-agent-more="p1"] [data-action="show"]').click());
     assert.equal(location.hash, '#/pane/p1');
     await hashSettled();
     assert.ok(!shown(), 'leaving the screen (its drawer) closes it');

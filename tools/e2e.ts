@@ -778,15 +778,25 @@ const notifsJs = `navigator.serviceWorker.ready.then((r) => r.getNotifications()
 const BASE = '#/home/wc-o2';
 const AGENTS_BTN = `document.querySelector('#home-status [data-action="agents"]')`;
 const POPOVER = `document.querySelector('[data-agents-list]')`;
-/** An agent's row in BASE's agents popover (a phone's: a tap on it opens its drawer). */
+/** An agent's row in BASE's agents popover (a tap on it opens its menu: on a phone Open, the drawer, then Stop). */
 const popRow = (pane: string) => `document.querySelector('[data-agents-list] .agent-row[data-pane-id=${js(pane)}]')`;
+/** An item of an agent row's open menu (`action`: herdr, show, ask, stop). */
+const rowItem = (pane: string, action: string) => `document.querySelector('[data-agent-more=${js(pane)}] [data-action=${action}]')`;
 
-/** BASE on screen, its agents popover open with `pane`'s row in it. */
+/** BASE on screen, its agents popover open afresh (no row's menu open) with `pane`'s row in it. */
 async function agentsPopover(c: Ctx, pane: string): Promise<void> {
   await c.pg.goto(BASE);
   if ((await c.pg.until(`!!${AGENTS_BTN}`, 5000)).timeout) throw new Error(`no agents button on ${BASE}`);
-  if (!(await c.pg.ev(`!!${POPOVER}`))) await c.pg.tapEl(AGENTS_BTN);
+  if (await c.pg.ev(`!!${POPOVER}`)) { await c.pg.tapEl(AGENTS_BTN); await c.pg.until(`!${POPOVER}`, 2000); }
+  await c.pg.tapEl(AGENTS_BTN);
   if ((await c.pg.until(`!!${popRow(pane)}`, 5000)).timeout) throw new Error(`no row of ${pane} in ${BASE}'s agents popover`);
+}
+
+/** Opens `pane` from its row in BASE's open agents popover, as a phone does: a tap on the row, then its menu's Open. */
+async function openFromRow(c: Ctx, pane: string): Promise<void> {
+  await c.pg.tapEl(popRow(pane));
+  if ((await c.pg.until(`!!${rowItem(pane, 'show')}`, 3000)).timeout) throw new Error(`no menu on ${pane}'s row`);
+  await c.pg.tapEl(rowItem(pane, 'show'));
 }
 
 async function loadApp(c: Ctx, hash = BASE): Promise<void> {
@@ -919,9 +929,13 @@ async function p7(c: Ctx) {
     return dom === want;
   }, 5000, 300);
   await c.pg.tapEl(popRow(less));
+  const menu = await c.pg.until(`!!${rowItem(less, 'show')}`, 2000);
+  const items: string[] = await c.pg.ev(`[...document.querySelectorAll('[data-agent-more=${js(less)}] [role=menuitem]')].map((e) => e.dataset.action)`);
+  if (!menu.timeout) await c.pg.tapEl(rowItem(less, 'show'));
   const nav = await c.pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)}`, 2000);
-  result(c, !r.timeout && !nav.timeout, 'P7', `rows(dom/state)=${last},tap=${nav.timeout ? 'timeout' : `${nav.ms}ms`}`,
-    `${BASE}'s agents popover: one .agent-row per agent of its account in /api/state; tapping wc-less's opens #/pane/<it> within 2s`);
+  result(c, !r.timeout && !menu.timeout && js(items) === js(['show', 'stop']) && !nav.timeout, 'P7',
+    `rows(dom/state)=${last},menu=${ms(menu)}:${items.join('+')},open=${ms(nav)}`,
+    `${BASE}'s agents popover: one .agent-row per agent of its account in /api/state; a tap on wc-less's opens its menu within 2s (a phone's on a stopped Home: Open, Stop), its Open #/pane/<it> within 2s`);
 }
 
 /** A Home's status bar total: its counts (working, done, idle) plus its blocked agents (Needs you's data-blocked, none without it). */
@@ -1391,10 +1405,10 @@ async function p18(c: Ctx) {
     await sleep(50); // the page handles the frame (CDP saw it arrive) before the touchend
     const tUp = Date.now();
     await pg.touch('touchEnd', []);
-    const nav = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)}`, 1000);
+    const menu = await pg.until(`!!${rowItem(less, 'show')}`, 1000);
     const whileDown = p3 && pg.stateMarkT >= tDown && pg.stateMarkT < tUp;
-    result(c, whileDown && !nav.timeout, 'P18.tap', `push=${p3},pushAt=${pg.stateMarkT - tDown}ms,liftAt=${tUp - tDown}ms,nav=${ms(nav)}`,
-      "a push arriving while a finger is down on wc-less's row: lifting it (a still tap) opens #/pane/<it> within 1s");
+    result(c, whileDown && !menu.timeout, 'P18.tap', `push=${p3},pushAt=${pg.stateMarkT - tDown}ms,liftAt=${tUp - tDown}ms,menu=${ms(menu)}`,
+      "a push arriving while a finger is down on wc-less's row: lifting it (a still tap) opens its menu within 1s");
   } finally {
     pg.stateMark = '';
     await pg.ev(`document.getElementById('wc-pad')?.remove(), 1`);
@@ -1417,7 +1431,7 @@ async function m1(c: Ctx) {
   await pg.ev(`window.__wcSc = ${SC}, 1`);
   const cycle = async (close: () => Promise<unknown>) => {
     await agentsPopover(c, less);
-    await pg.tapEl(popRow(less));
+    await openFromRow(c, less);
     const open = await pg.until(`location.hash === ${pane} && !!${SHEET}`, 3000);
     await sleep(400); // its slide-in
     const [sheetTop, sheetH] = await pg.ev(`(() => { const r = ${SHEET}.getBoundingClientRect(); return [Math.round(r.top), Math.round(r.bottom)]; })()`);
@@ -1445,7 +1459,7 @@ async function m3(c: Ctx) {
   const HEADS = `document.querySelectorAll('.agent-drawer .agent-drawer-head')`;
   const to = (id: string) => `navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'navigate', url: ${js(`#/pane/${enc(id)}`)} } }))`;
   await agentsPopover(c, less);
-  await pg.tapEl(popRow(less));
+  await openFromRow(c, less);
   const open = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)} && !!${SHEET}`, 3000);
   const len = await pg.ev('history.length');
   for (const id of [shell, less, shell, less]) {
@@ -1647,8 +1661,8 @@ async function p6(c: Ctx) {
 /** W1: the PC's rail of Homes. On a PC (1280px): #sidebar left of the topbar and #screen, --sidebar-w its width (248px);
  *  a row per orchestrator, in /api/state's order,
  *  its counts (working, done, idle) adding up to its account's agents less the blocked ones (those are in its needs
- *  count). A click on wc-less's row in BASE's Home panel opens it in herdr (one POST …/focus, no drawer), and its ⋮'s
- *  Show here opens #/pane/<it>. W1.switch: a Home's topbar is its header, no switcher
+ *  count). A click on wc-less's row in BASE's Home panel opens its menu: its first item, Open in herdr, opens it in herdr
+ *  (one POST …/focus, no drawer), and its Show here opens #/pane/<it>. W1.switch: a Home's topbar is its header, no switcher
  *  there (a phone's has one), and a click on another Home's row in the rail opens that Home. W1.home: that Home's Needs
  *  you and agent counts are on its status bar until its panel has them (1023px: no rail, the counts; 1024px: the rail and
  *  the counts, no panel; 1280px: the rail and the panel, neither), and come back with a phone's width. Down to a phone's
@@ -1679,18 +1693,20 @@ async function w1(c: Ctx) {
       return { w: Math.round(document.getElementById('sidebar').getBoundingClientRect().width), topbar: x('topbar'), screen: x('screen'),
         v: getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w').trim() }; })()`);
     const screen = await pg.ev(`window.__wcScreen = document.getElementById('screen'), 1`);
-    // a click on wc-less's row in the Home panel opens it in herdr, its ⋮'s Show here in the drawer
+    // a click on wc-less's row in the Home panel opens its menu: Open in herdr first, then Show here, the drawer
     const card = `document.querySelector('#home-panel .agent-row[data-pane-id=${js(less)}]')`;
     let herdr: Awaited<ReturnType<typeof waitFn>> | null = null;
     let show: Awaited<ReturnType<typeof waitFn>> | null = null;
     if (!(await pg.until(`!!${card}`, 5000)).timeout) {
-      const t = Date.now();
       await click(card);
+      const first = (await pg.until(`document.querySelector('[data-agent-more=${js(less)}] [role=menuitem]')?.dataset.action`, 2000)).v;
+      const t = Date.now();
+      if (first === 'herdr') await click(rowItem(less, 'herdr'));
       herdr = await waitFn(async () => pg.posts(t, `/api/panes/${enc(less)}/focus`).length === 1
         && await pg.ev(`location.hash === ${js(BASE)} && !document.querySelector('.agent-drawer-content')`), 2000);
-      await click(`document.querySelector('#home-panel [data-agent-menu=${js(less)}]')`);
-      await pg.until(`!!document.querySelector('[data-agent-more=${js(less)}] [data-action=show]')`, 2000);
-      await click(`document.querySelector('[data-agent-more=${js(less)}] [data-action=show]')`);
+      await click(card);
+      await pg.until(`!!${rowItem(less, 'show')}`, 2000);
+      await click(rowItem(less, 'show'));
       show = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)} && !!document.querySelector('.agent-drawer-content')`, 2000);
     }
     const orch: any[] = (await api(c, 'GET', '/api/state')).orchestrators;
@@ -1728,14 +1744,14 @@ async function w1(c: Ctx) {
       `rail=${ms(shown)},rows=${rows}:${g.timeout ? 'mismatch' : 'ok'},width=${geo.w},topbarX=${geo.topbar},screenX=${geo.screen},--sidebar-w=${geo.v},` +
         `herdr=${herdr ? ms(herdr) : 'no card'},show=${show ? ms(show) : 'no card'},phone=${ms(gone)}`,
       "1280px: #sidebar 248px left of #topbar and #screen (--sidebar-w 248px), no link to an agents list, within 5s; a row per /api/state orchestrator, in order, " +
-        "its counts = its account's agents less the blocked; a click on wc-less's row in its Home panel POSTs …/focus once, no drawer, and its ⋮ Show here opens #/pane/<it>, within 2s each; at 390px no #sidebar and the same #screen within 2s");
+        "its counts = its account's agents less the blocked; a click on wc-less's row in its Home panel opens its menu, whose first item, Open in herdr, POSTs …/focus once, no drawer, and whose Show here opens #/pane/<it>, within 2s each; at 390px no #sidebar and the same #screen within 2s");
   } finally {
     await mobile(pg, true);
     await loadApp(c, BASE); // a phone's document again
   }
 }
 
-/** W2: on a PC (1280px) an agent's ⋮ (its row's in BASE's Home panel: Dashboard.tsx's AgentMore) stops it: Stop agent…
+/** W2: on a PC (1280px) an agent row's menu (a click on its row in BASE's Home panel: Dashboard.tsx's AgentRow) stops it: Stop agent…
  *  asks first (Cancel sends nothing), Stop sends one DELETE /api/panes/<it> and the pane goes, the Home staying (no drawer).
  *  No Ask there: BASE is stopped, no orchestrator to ask. Its agent, wc-rowstop, is its own (cat in a shell report-agent'ed
  *  as claude: a process in its foreground, so its account is known and the Home lists it), opened here and gone by its
@@ -1785,7 +1801,7 @@ async function w2(c: Ctx) {
     const stayed = await pg.ev(`location.hash === ${js(BASE)} && !document.querySelector('.agent-drawer-content')`);
     result(c, !menu.timeout && !ask && !confirm.timeout && cancelled === 0 && !del.timeout && !gone.timeout && stayed, 'W2',
       `menu=${ms(menu)},ask=${ask},confirm=${ms(confirm)},cancelDeletes=${cancelled},delete=${ms(del)},paneGone=${ms(gone)},stayed=${stayed}`,
-      `1280px: wc-rowstop's row ⋮ in ${BASE}'s panel has Stop agent… (no Ask: a stopped Home); it asks first: Cancel sends no DELETE, Stop sends one DELETE /api/panes/<it> within 3s, /api/state drops the pane within 5s, ${BASE} stays with no drawer`);
+      `1280px: wc-rowstop's row in ${BASE}'s panel opens its menu, with Stop agent… (no Ask: a stopped Home); it asks first: Cancel sends no DELETE, Stop sends one DELETE /api/panes/<it> within 3s, /api/state drops the pane within 5s, ${BASE} stays with no drawer`);
   } finally {
     await mobile(pg, true);
     await loadApp(c, BASE); // a phone's document again

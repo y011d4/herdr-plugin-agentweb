@@ -47,9 +47,13 @@ afterEach(async () => {
 });
 
 describe('AgentRow', () => {
-  it("opens its agent on a click (a phone's: its drawer)", async () => {
+  it("opens its menu on a click; a phone's: Open (its drawer) and Stop, no Open in herdr", async () => {
     const c = await show(fresh());
     await fire(() => c.querySelector<HTMLElement>('.agent-row[data-pane-id="p7"]')!.click());
+    const menu = c.querySelector<HTMLElement>('[data-agent-more="p7"]')!;
+    assert.deepEqual([...menu.querySelectorAll('[role="menuitem"]')].map((e) => e.textContent), ['Open', 'Stop agent…']);
+    assert.equal(location.hash, '#/home/personal', 'nothing opened yet');
+    await fire(() => menu.querySelector<HTMLElement>('[data-action="show"]')!.click());
     assert.equal(location.hash, '#/pane/p7');
   });
 
