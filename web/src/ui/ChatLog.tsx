@@ -36,17 +36,24 @@ export function createChatLog(el: HTMLElement, { home = false, reply }: { home?:
   const root = createRoot(el);
   let items: TimelineItem[] = [];
   let drawn = 0; // each reset: a fresh tree
+  let midnight: ReturnType<typeof setTimeout> | undefined;
   // the app's provider already wrote Mantine's variables and global classes: this one only gives the theme
-  const draw = (): void => flushSync(() => root.render(
-    <MantineProvider theme={theme} forceColorScheme="dark" withCssVariables={false} withGlobalClasses={false}>
-      <ReplyTo value={reply ?? null}><Items key={drawn} items={items} home={home} /></ReplyTo>
-    </MantineProvider>,
-  ));
+  const draw = (): void => {
+    flushSync(() => root.render(
+      <MantineProvider theme={theme} forceColorScheme="dark" withCssVariables={false} withGlobalClasses={false}>
+        <ReplyTo value={reply ?? null}><Items key={drawn} items={items} home={home} /></ReplyTo>
+      </MantineProvider>,
+    ));
+    // a Home's times name the day once it isn't today: drawn again at midnight (a phone asleep then: as it wakes)
+    if (!home) return;
+    clearTimeout(midnight);
+    midnight = setTimeout(draw, new Date().setHours(24, 0, 0, 0) - Date.now());
+  };
   return {
     reset(next) { items = next; drawn++; draw(); },
     append(more) { items = [...items, ...more]; draw(); },
     // not during a React render (the pane's unmount calls this): after it
-    destroy() { queueMicrotask(() => root.unmount()); },
+    destroy() { clearTimeout(midnight); queueMicrotask(() => root.unmount()); },
   };
 }
 

@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
-import { describe, it } from 'vitest';
+import { describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { askAnswer, renderMarkdown, conversationItems, latestActivity, parseQuote, quoteLine, todoQuote, WORKER_NOTICE, type TimelineItem } from '../src/transcript.ts';
 import { createElement } from 'react';
-import { Notice } from '../src/ui/ChatLog.tsx';
+import { createChatLog, Notice } from '../src/ui/ChatLog.tsx';
 import { chatDom, drawn } from './render.ts';
 
 // what ui/ChatLog.tsx draws for an item, or a notice line
@@ -204,6 +204,24 @@ describe('the chat log (ui/ChatLog.tsx): assistant + user turns use the markdown
       ['chat-notice: 10:00', 'chat-user: 10:00', 'chat-user chat-images: 10:00', 'chat-user chat-images: 10:00']);
     // as CSS content: the message's text stays its words
     assert.equal(chatDom([user('look')], true, today).querySelector('.chat-user')!.textContent, 'look');
+  });
+
+  it("draws a Home's times again at midnight, so yesterday's say so", () => {
+    const at = (d: string): number => new Date(d).getTime();
+    vi.useFakeTimers({ now: at('2026-11-28T23:59:00'), toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const el = document.createElement('div');
+      const log = createChatLog(el, { home: true });
+      log.reset([{ kind: 'assistant', text: 'ok', sidechain: false, ts: at('2026-11-28T10:00:00') }]);
+      const time = (): string | undefined => el.querySelector<HTMLElement>('[data-time]')?.dataset.time;
+      assert.equal(time(), '10:00');
+      vi.advanceTimersByTime(60_000);
+      assert.equal(time(), 'yesterday 10:00');
+      log.destroy();
+      assert.equal(vi.getTimerCount(), 0, 'destroy: no timer left');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("splits the bridge's [yoicks] lines at either end of a user turn from the user's own words", () => {
