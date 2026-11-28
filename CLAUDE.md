@@ -214,6 +214,9 @@ All in `internal/bridge/` (one package):
   model: each child gets an `initialize` control request at its start, whose answer lists Claude Code's `/model`
   choices (state `headless.models`; the answer also has the account's email: only `models` is read); `POST …/model`
   switches a running child in place with `set_model` (refused mid-turn; Claude Code applies it from the next turn),
+  `POST …/compact {focus?}` writes `/compact` between turns (refused mid-turn or with a question open; the stream's
+  `status`/`compact_boundary` give state `headless.compact`, the context left comes from `get_context_usage`, as
+  `post_tokens` lacks the system prompt; a local command's result is no completion; the chat shows `[yoicks] compacted`),
   and each start passes the saved choice as `--model` (the list's `default` entry is left out: the Home offers the
   models themselves, the default's as its id when no other entry offers it). Without one, `--resume` keeps the model the session last ran on (2.1.322), not the settings' default, so the model in effect (`headless.activeModel`) comes from Claude Code: a
   `get_settings` request at each start (`applied.model`), `set_model`'s answer and each turn's init. `<state>/headless/<name>.mcp.json` (only the

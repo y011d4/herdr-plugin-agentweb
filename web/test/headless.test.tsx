@@ -12,7 +12,7 @@ import { orchestratorOfPane, resolveRoute } from '../src/routes.ts';
 import { findPane, markPaneSeen, setAppState, store } from '../src/store.ts';
 import type { AppState, OrchestratorView, WsMessage, WsStateMessage } from '../src/types.ts';
 import { Modals } from '../src/ui/Modals.tsx';
-import { homeTopbar, Pane, usageParts } from '../src/ui/Pane.tsx';
+import { compactLine, homeTopbar, Pane, usageParts } from '../src/ui/Pane.tsx';
 import { claudeCheckText } from '../src/ui/Settings.tsx';
 import { watchMessages } from '../src/watch.ts';
 import { messages, state as recorded, transcript } from './contract.gen.ts';
@@ -28,7 +28,7 @@ vi.mock('../src/image.ts', async (orig) => ({ ...(await orig<typeof import('../s
   toAttachment: async (f: File) => { await scaled; return { mediaType: 'image/jpeg', data: f.name }; } }));
 
 // The recorded headless orchestrator "pilot" (Pilot): blocked on "Which fruit?" (id 1a2b3c4d), completionSeq 3,
-// 5h 35% read long ago, ctx 12.5%, warnings silent (interrupt, clear) and unknown_event.
+// 5h 35% read long ago, ctx 12.5%, warnings silent (interrupt, clear) and unknown_event, a compaction done (64% → 12.5%).
 const pilot = (): OrchestratorView => structuredClone((messages.find((m) => m.type === 'state' &&
   m.state.orchestrators.some((o) => o.name === 'pilot')) as WsStateMessage).state.orchestrators.find((o) => o.name === 'pilot')!);
 function withPilot(edit: (p: OrchestratorView) => void = () => {}): AppState {
@@ -38,7 +38,7 @@ function withPilot(edit: (p: OrchestratorView) => void = () => {}): AppState {
   s.orchestrators.push(p);
   return s;
 }
-const idle = (p: OrchestratorView): void => { p.headless!.status = 'idle'; p.headless!.pending = null; p.headless!.warnings = []; };
+const idle = (p: OrchestratorView): void => { p.headless!.status = 'idle'; p.headless!.pending = null; p.headless!.warnings = []; p.headless!.compact = null; };
 
 interface Req { method: string; url: string; body: any; answered: boolean; answer: (status: number, body: unknown) => void }
 let reqs: Req[];
@@ -494,6 +494,58 @@ describe("a headless orchestrator's Home", () => {
     assert.deepEqual(posts('interrupt'), [{}]);
   });
 
+  it('compacts between turns, with a focus if given; a refusal stays in the dialog', async () => {
+    await home(withPilot(idle), { clear: () => {}, stop: () => {} });
+    const button = () => $<HTMLButtonElement>('#btn-home-compact');
+    assert.equal(button().disabled, false);
+    await fire(() => button().click());
+    const focus = document.querySelector<HTMLInputElement>('#cp-focus')!;
+    await fire(() => { focus.value = '  the open PRs  '; });
+    await fire(() => document.querySelector<HTMLElement>('#cp-ok')!.click());
+    assert.deepEqual(posts('compact'), [{ focus: 'the open PRs' }]);
+    await answer('POST /api/orchestrators/pilot/compact', { error: { code: 'busy', message: 'it is working: compact once its turn has ended' } }, 409);
+    assert.equal(document.querySelector('#cp-error')!.textContent, 'it is working: compact once its turn has ended');
+    await fire(() => document.querySelector<HTMLElement>('#cp-ok')!.click());
+    await answer('POST /api/orchestrators/pilot/compact', { ok: true });
+    assert.ok(document.querySelector('#cp-focus') === null, 'closed once sent');
+    await unmount();
+    for (const status of ['working', 'blocked'] as const) {
+      await home(withPilot((p) => { idle(p); p.headless!.status = status; }), { clear: () => {}, stop: () => {} });
+      assert.equal(button().disabled, true, status);
+      await unmount();
+    }
+    await home(withPilot(idle)); // no actions (a test's bare Home): no buttons
+    assert.ok(container.querySelector('#btn-home-compact') === null);
+  });
+
+  it('suggests a Compact once the context is 70% full, and never runs one', async () => {
+    await home(withPilot(idle), { clear: () => {}, stop: () => {} });
+    assert.equal($('#btn-home-compact').dataset.hint, undefined);
+    assert.equal($('#home-usage .high'), null);
+    await unmount();
+    await home(withPilot((p) => { idle(p); p.headless!.usage!.contextPct = 71.4; }), { clear: () => {}, stop: () => {} });
+    assert.equal($('#btn-home-compact').dataset.hint, '');
+    assert.equal($('#btn-home-compact').title, 'ctx 71%: compact it to free the context');
+    assert.equal($('#home-usage .high').textContent, ' · ctx 71%');
+    assert.deepEqual(posts('compact'), []);
+  });
+
+  it('says on its "doing now" line that it compacts, then how it went, until the next turn', async () => {
+    const line = () => $('#home-activity');
+    const compact = (c: Partial<NonNullable<OrchestratorView['headless']>['compact']>, status: 'idle' | 'working' = 'idle') =>
+      withPilot((p) => { idle(p); p.headless!.status = status; p.headless!.compact = { state: 'done', from: null, to: null, error: '', ...c }; });
+    await home(compact({ state: 'running', from: 64 }, 'working'));
+    assert.deepEqual([line().style.display, line().textContent], ['', 'compacting…■']);
+    await fire(() => setAppState(compact({ from: 64, to: 12.5 })));
+    assert.deepEqual([line().style.display, line().textContent], ['', 'compacted: ctx 64% → 13%']);
+    await fire(() => setAppState(compact({ state: 'failed', error: 'Not enough messages to compact.' })));
+    assert.equal(line().textContent, 'compact failed: Not enough messages to compact.');
+    await fire(() => setAppState(compact({ from: 64, to: 12.5 }, 'working'))); // the next turn: its own
+    assert.equal(line().textContent, 'thinking…■');
+    await fire(() => setAppState(withPilot(idle)));
+    assert.equal(line().style.display, 'none');
+  });
+
   it('shows its model and switches it, but not mid-turn; none without a list', async () => {
     await home(withPilot()); // blocked: its turn runs
     const select = () => $<HTMLSelectElement>('#home-model');
@@ -558,6 +610,13 @@ describe("a headless orchestrator's Home", () => {
 });
 
 describe('around a headless orchestrator', () => {
+  it('compactLine says what it knows', () => {
+    assert.equal(compactLine({ state: 'done', from: 64.2, to: 12.5, error: '' }), 'compacted: ctx 64% → 13%');
+    assert.equal(compactLine({ state: 'done', from: null, to: 3, error: '' }), 'compacted: ctx 3%');
+    assert.equal(compactLine({ state: 'done', from: 64, to: null, error: '' }), 'compacted');
+    assert.equal(compactLine({ state: 'failed', from: 64, to: null, error: 'API Error: Request was aborted.' }), 'compact failed: API Error: Request was aborted.');
+  });
+
   it('usageParts leaves out what is unknown', () => {
     const now = 1_000_000_000;
     assert.deepEqual(usageParts({ fiveHour: { utilization: 0.344, resetsAt: 0 }, sevenDay: { utilization: 0.69, resetsAt: 0 }, fable: null, contextPct: null, at: now - 1000 }, now),

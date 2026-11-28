@@ -2,7 +2,7 @@
  * ui/Pane.tsx — an opened pane (#/pane/<id>, in ui/AgentDrawer.tsx's drawer, with the header pieces
  * here: PaneTitle, ViewToggle, AgentMenu) or an orchestrator's Home (#/home/<name>): Home's topbar,
  * Home's status bar (the switcher between running orchestrators, then one row: "Needs you · n", the
- * counts, Clear and Stop) and "doing now" line, the composer and the quick keys, around the pane's body. The
+ * counts, a headless one's Compact, Clear and Stop) and "doing now" line, the composer and the quick keys, around the pane's body. The
  * body (terminal, chat) is pane-view.ts, imperative, in #pane-view: created on mount, destroyed on
  * unmount, one at a time. Below it, while the view reports a prompt, the answer panel (PromptPanel.tsx).
  * A pane's chat is read-only: its composer and keys show with its terminal,
@@ -26,12 +26,12 @@ import { showToast } from '../notify.ts';
 import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
 import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
 import { emit, findPane, store, subscribe } from '../store.ts';
-import type { AppState, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
+import type { AppState, HeadlessCompact, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
 import { TopbarIcon, agentCards, orchestratorLabel, relativeTime } from './Dashboard.tsx';
 import { StatusDot } from './Status.tsx';
 import { NeedsBadge, NeedsButton, needsYou, useMinute } from './Todos.tsx';
 import type { Topbar } from './App.tsx';
-import { previewImage } from './Modals.tsx';
+import { openCompact, previewImage } from './Modals.tsx';
 import { answersSoFar, HeadlessPrompt, PromptPanel } from './PromptPanel.tsx';
 import { TuiSteps } from './Settings.tsx';
 
@@ -167,7 +167,11 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
   // (hiding one grows the chat).
   const readOnly = !home && mode === 'chat';
   const hl = headlessName(paneId);
-  const pending = hl ? state?.orchestrators?.find((o) => o.name === hl)?.headless?.pending : null;
+  const headless = hl ? state?.orchestrators?.find((o) => o.name === hl)?.headless : null;
+  const pending = headless?.pending;
+  // a compaction: "compacting…" while it runs, then how it went, until the next turn begins
+  const compacting = headless?.compact?.state === 'running';
+  const compacted = headless?.compact && !compacting ? compactLine(headless.compact) : null;
   const [chatting, setChatting] = useState(''); // the question whose Chat about this was pressed: the composer writes about it
   const chatOn = !!pending && chatting === pending.id;
   return (
@@ -191,8 +195,8 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
       {hl && pending && <HeadlessPrompt key={pending.id} name={hl} pending={pending} chatting={chatOn} onChat={() => setChatting(pending.id)} />}
       {home && (
         <Group id="home-activity" gap={8} wrap="nowrap" py={6} className="shrink-0 px-4 border-t border-(--color-border) bg-(--color-bg) lg:px-(--wide-gutter)"
-          style={working ? undefined : { display: 'none' }}>
-          <Text flex={1} ff="monospace" fz={12} c="dimmed" truncate>{working ? (activity ? `▸ ${activity}` : 'thinking…') : null}</Text>
+          style={working || compacted ? undefined : { display: 'none' }}>
+          <Text flex={1} ff="monospace" fz={12} c="dimmed" truncate>{working ? (compacting ? 'compacting…' : activity ? `▸ ${activity}` : 'thinking…') : compacted}</Text>
           {hl && working && <Button id="btn-home-interrupt" {...SMALL} c="blocked" aria-label="Interrupt" onClick={() => { void interrupt(hl); }}>&#9632;</Button>}
         </Group>
       )}
@@ -222,7 +226,7 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
 // Home status bar: with two or more orchestrators configured a switcher between their Homes (a
 // stopped one dimmed: its Home has Start), then one row: "Needs you · n" (its account's blocked
 // agents, its own question, its to-do items: Todos.tsx's NeedsButton, a popover), the counts of its
-// agents (tap → its list), and at the right a headless one's usage and model and the orchestrator's
+// agents (tap → its list), and at the right a headless one's usage, model and Compact and the orchestrator's
 // Clear and Stop (the row wraps where it must: a phone, a narrow PC); under it a headless one's
 // warnings (`clear`: their Clear, on a stopped Home too).
 function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: string; state: AppState | null; actions?: HomeActions; clear?: () => void }) {
@@ -268,6 +272,7 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
           <Group gap={10} className="ml-auto">
             {usage}
             {self?.headless && <ModelPicker o={self} />}
+            {self?.headless && actions && <CompactButton name={name} o={self} />}
             {actions && <Button id="btn-home-clear" {...SMALL} onClick={actions.clear}>Clear</Button>}
             {actions && <Button id="btn-home-stop" {...SMALL} c="blocked" onClick={actions.stop}>Stop</Button>}
           </Group>
@@ -290,13 +295,13 @@ const pct = (n: number): string => `${Math.round(n)}%`;
 
 /** The usage parts a headless Home shows: 5h, 7d and fable (stale: read over 10 min ago) and the context,
  *  each only when known. */
-export function usageParts(u: HeadlessUsage, now: number): Array<{ text: string; stale: boolean }> {
+export function usageParts(u: HeadlessUsage, now: number): Array<{ text: string; stale: boolean; high?: boolean }> {
   const stale = !u.at || now - u.at > STALE_LIMITS_MS;
-  const parts: Array<{ text: string; stale: boolean }> = [];
+  const parts: Array<{ text: string; stale: boolean; high?: boolean }> = [];
   if (u.fiveHour) parts.push({ text: `5h ${pct(u.fiveHour.utilization * 100)}`, stale });
   if (u.sevenDay) parts.push({ text: `7d ${pct(u.sevenDay.utilization * 100)}`, stale });
   if (u.fable) parts.push({ text: `fable ${pct(u.fable.utilization * 100)}`, stale });
-  if (u.contextPct != null) parts.push({ text: `ctx ${pct(u.contextPct)}`, stale: false });
+  if (u.contextPct != null) parts.push({ text: `ctx ${pct(u.contextPct)}`, stale: false, ...(u.contextPct >= COMPACT_HINT_PCT && { high: true }) });
   return parts;
 }
 
@@ -305,8 +310,31 @@ function Usage({ usage }: { usage: HeadlessUsage }) {
   if (!parts.length) return null;
   return (
     <Text id="home-usage" fz={12} c="dimmed" className="tabular-nums">
-      {parts.map((p, i) => <span key={p.text} className={p.stale ? 'stale opacity-50' : undefined}>{i ? ` · ${p.text}` : p.text}</span>)}
+      {parts.map((p, i) => <span key={p.text} className={p.stale ? 'stale opacity-50' : p.high ? 'high text-(--color-blocked)' : undefined}>{i ? ` · ${p.text}` : p.text}</span>)}
     </Text>
+  );
+}
+
+/** From this much of its context in use, the Home suggests a Compact (the ctx and the button in orange); it never runs one. */
+export const COMPACT_HINT_PCT = 70;
+
+/** A compaction that has ended, as the "doing now" line says it. */
+export function compactLine(c: HeadlessCompact): string {
+  if (c.state === 'failed') return `compact failed: ${c.error}`;
+  if (c.to == null) return 'compacted';
+  return `compacted: ctx ${c.from == null ? '' : `${pct(c.from)} → `}${pct(c.to)}`;
+}
+
+// A headless Home's Compact (Modals.tsx's dialog: its focus, then /compact): between turns only, as the bridge allows;
+// orange, with why, once its context is COMPACT_HINT_PCT full.
+function CompactButton({ name, o }: { name: string; o: OrchestratorView }) {
+  const h = o.headless!;
+  const ctx = h.usage?.contextPct;
+  const hint = ctx != null && ctx >= COMPACT_HINT_PCT;
+  return (
+    <Button id="btn-home-compact" {...SMALL} c={hint ? 'blocked' : 'dimmed'} data-hint={hint ? '' : undefined}
+      disabled={h.status === 'working' || h.status === 'blocked'}
+      title={hint ? `ctx ${pct(ctx)}: compact it to free the context` : 'Compact the conversation'} onClick={() => openCompact(name)}>Compact</Button>
   );
 }
 

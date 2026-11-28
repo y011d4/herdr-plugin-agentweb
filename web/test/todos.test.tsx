@@ -126,7 +126,7 @@ describe('Todos', () => {
     const h = hl.orchestrators[0];
     h.paneId = 'hl:personal';
     h.mode = 'headless';
-    h.headless = { status: 'blocked', completionSeq: 0, pending: { id: 'q', questions: [] }, usage: null, warnings: [], model: '', activeModel: '', models: [] };
+    h.headless = { status: 'blocked', completionSeq: 0, pending: { id: 'q', questions: [] }, usage: null, warnings: [], model: '', activeModel: '', models: [], compact: null };
     setAppState(hl);
     assert.equal(needsYou(h, hl, NOW), 1);
   });

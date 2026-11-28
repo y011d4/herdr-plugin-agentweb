@@ -1,12 +1,12 @@
 /**
- * ui/Modals.tsx — the modal dialogs, one at a time, on Mantine's Modal in #modal-root: Confirm, Rename
- * and the image preview (full screen). A modal closes on a backdrop tap, Escape or its
+ * ui/Modals.tsx — the modal dialogs, one at a time, on Mantine's Modal in #modal-root: Confirm, Rename,
+ * a headless Home's Compact and the image preview (full screen). A modal closes on a backdrop tap, Escape or its
  * buttons; its close() is idempotent and fires the opener's onClose exactly once (so a
  * confirm resolves on dismiss). Opening one closes the one before.
  */
 import { Button, CloseButton, Group, Modal, Text, TextInput } from '@mantine/core';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { apiPost } from '../api.ts';
+import { apiPost, orchestratorPost } from '../api.ts';
 import { back } from '../nav.ts';
 import { showToast } from '../notify.ts';
 import type { RenameResponse } from '../types.ts';
@@ -176,6 +176,39 @@ function Rename({ paneId, current, close }: { paneId: string; current: string; c
       <TextInput label="Name" id="rn-name" ref={input} defaultValue={current} mb={14} {...textInput} />
       <ErrorLine id="rn-error">{error}</ErrorLine>
       <Actions ids={['rn-cancel', 'rn-save']} label="Save" busy={busy} close={close} onAction={() => { void save(); }} />
+    </>
+  );
+}
+
+// ── Compact (a headless Home's, ui/Pane.tsx's CompactButton) ──────────────────
+
+/** Compact…: the orchestrator's conversation summarized in place (its session kept), with what the summary
+ *  should keep, if anything; the Home's "doing now" line follows it. */
+export function openCompact(name: string): void {
+  showModal((close) => <Compact name={name} close={close} />);
+}
+
+function Compact({ name, close }: { name: string; close: () => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const run = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      await orchestratorPost(name, 'compact', { focus: input.current!.value.trim() });
+      close();
+    } catch (err) {
+      setBusy(false);
+      setError((err as Error).message);
+    }
+  };
+  return (
+    <>
+      <Title>Compact the conversation?</Title>
+      <Text fz={14} c="dimmed" mb={14}>Claude Code summarizes it to free the context, and the session goes on from the summary.</Text>
+      <TextInput label="Focus (optional)" id="cp-focus" ref={input} placeholder="What the summary should keep" mb={14} data-autofocus />
+      <ErrorLine id="cp-error">{error}</ErrorLine>
+      <Actions ids={['cp-cancel', 'cp-ok']} label="Compact" busy={busy} close={close} onAction={() => { void run(); }} />
     </>
   );
 }

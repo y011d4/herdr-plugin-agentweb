@@ -415,7 +415,11 @@ instead of an agent in a herdr pane (your Claude subscription only: the bridge r
 billing). Its Home is then the chat alone: messages go out also while it works, ■ on the
 "doing now" line interrupts it, its questions get an answer panel, and the status bar shows its
 usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable), the model it runs on (a pick from
-Claude Code's `/model` list switches it between turns, or for its next start) and what went wrong, each with what to do. It
+Claude Code's `/model` list switches it between turns, or for its next start) and what went wrong, each with what to do.
+**Compact** there (between turns; an optional focus says what the summary should keep) runs Claude Code's `/compact` in
+place: the session goes on from the summary, and the "doing now" line says `compacting…`, then `compacted: ctx 64% → 12%`.
+From 70% of the context in use, the ctx and Compact turn orange: a suggestion only (Claude Code compacts by itself near the
+limit). The chat marks where a compaction cut the conversation (`[yoicks] compacted`). It
 also keeps a to-do list for you (its `todo` tool), under "Needs you" on its Home: what only you can do, such
 as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; ✓ ticks one off and tells the Home, which takes up what follows
 (a stopped Home isn't told). Each Home's switcher button
@@ -501,8 +505,11 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   `"mode": "headless"`), whose `paneId` is `"hl:<name>"` while it runs and whose
   `headless` is `{ status: stopped|idle|working|blocked|done|error, completionSeq, pending: { id, questions } | null,
   usage: { fiveHour, sevenDay, fable: { utilization (0–1), resetsAt (ms) } | null, contextPct | null, at } | null,
-  warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }], model, activeModel, models: [{ value, displayName, description, resolvedModel }] }`,
-  `null` for a tui one; `models` is Claude Code's `/model` list without its `default` (whose model, if nothing else
+  warnings: [{ kind, message, since, actions: (interrupt|clear|tui)[] }], model, activeModel, models: [{ value, displayName, description, resolvedModel }],
+  compact: { state: running|done|failed, from, to, error } | null }`,
+  `null` for a tui one; `compact` is its last compaction (the Home's, a typed `/compact`, or Claude Code's own near the
+  limit) until the next turn ends: `from` and `to` the context before and after, percent of the window (`null` while
+  unknown), `error` why it failed (`""` when it didn't); `models` is Claude Code's `/model` list without its `default` (whose model, if nothing else
   offers it, stays as its id), `[]` until a child of this bridge has given it; `model` the one chosen here, `""` for none; `activeModel` the model in effect, Claude Code's id, `""`
   until known: with none chosen, a resumed session keeps the model it last ran on), `todos` the user's
   to-do list on its Home (`[{ id, text, agent, url, due, createdAt }]`, oldest first, never `null`: what its
@@ -556,6 +563,10 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   `headless.models` (400 for another): a running one switches in place (Claude Code's `set_model`, from its next
   turn), 409 while a turn runs, 504 when Claude Code hasn't answered within 10 s (kept once it does); a stopped one
   starts on it. Kept across restarts and Clear (`--model` at each start).
+- `POST /api/orchestrators/:name/compact` `{"focus"?: "<what the summary should keep>"}` — compact a headless
+  orchestrator's conversation in place (Claude Code's `/compact`, the focus on one line, at most 2000 bytes): the session goes
+  on from the summary; `headless.compact` follows it. Between turns only: 409 `busy` while a turn runs or a question waits,
+  409 `not_running` when stopped. It counts no completion.
 - `POST /api/orchestrators/:name/answer` `{"id": "…", "answers": {"<question>": "<label>"}}` or
   `{"id": "…", "deny": "<message>"}` or `{"id": "…", "chat": true, "answers"?: {…}}` — answer (or refuse) the
   headless orchestrator's pending question (`headless.pending`, its AskUserQuestion): a multiSelect's labels

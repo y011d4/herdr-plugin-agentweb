@@ -139,6 +139,19 @@ export interface HeadlessView {
   activeModel: string;
   /** the models Claude Code offers the account, as its /model lists them (but its 'default'); [] until a child of this bridge has said */
   models: HeadlessModel[];
+  /** its last compaction (/compact: the Home's Compact, POST /api/orchestrators/:name/compact, or Claude Code's own as
+   *  the context fills up), until the next turn ends; null: none */
+  compact: HeadlessCompact | null;
+}
+
+export interface HeadlessCompact {
+  state: 'running' | 'done' | 'failed';
+  /** the context before, percent of the window; null: unknown */
+  from: number | null;
+  /** and after; null until Claude Code has said */
+  to: number | null;
+  /** why it failed ('' = it didn't) */
+  error: string;
 }
 
 export interface HeadlessModel {

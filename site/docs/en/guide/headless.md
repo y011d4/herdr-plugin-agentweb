@@ -5,7 +5,11 @@ instead of an agent in a herdr pane (your Claude subscription only: the bridge r
 billing). Its Home is then the chat alone: messages go out also while it works, ■ on the
 "doing now" line interrupts it, its questions get an answer panel, and the status bar shows its
 usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable), the model it runs on (a pick from
-Claude Code's `/model` list switches it between turns, or for its next start) and what went wrong, each with what to do. It
+Claude Code's `/model` list switches it between turns, or for its next start) and what went wrong, each with what to do.
+**Compact** there (between turns; an optional focus says what the summary should keep) runs Claude Code's `/compact` in
+place: the session goes on from the summary, and the "doing now" line says `compacting…`, then `compacted: ctx 64% → 12%`.
+From 70% of the context in use, the ctx and Compact turn orange: a suggestion only (Claude Code compacts by itself near the
+limit). The chat marks where a compaction cut the conversation (`[yoicks] compacted`). It
 also keeps a to-do list for you (its `todo` tool), under "Needs you" on its Home: what only you can do, such
 as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; ✓ ticks one off. Each Home's switcher button
 (and its heading in the PC sidebar) counts what waits on you there. It has no herdr pane: on the PC,

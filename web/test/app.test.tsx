@@ -829,7 +829,7 @@ describe('App', () => {
     const pilot = (running: boolean): AppState => {
       const s = fresh();
       s.orchestrators.push({ name: 'pilot', label: 'Pilot', paneId: running ? 'hl:pilot' : null, agents: [], mode: 'headless',
-        headless: { status: running ? 'idle' : 'stopped', completionSeq: 0, pending: null, usage: null, warnings: [], model: '', activeModel: '', models: [] } });
+        headless: { status: running ? 'idle' : 'stopped', completionSeq: 0, pending: null, usage: null, warnings: [], model: '', activeModel: '', models: [], compact: null } });
       return s;
     };
     await act(async () => push!({ type: 'state', state: pilot(true) }));
