@@ -250,7 +250,7 @@ pane builds exactly this link) and use Chrome's "Add to Home screen".
 - On a Home, a long press on a message (on a PC a right click, or the ↩ in its top-right corner) offers **Reply**: the
   composer shows a line of that message (✕ cancels it), and what you send starts with it as a quote, so
   the orchestrator knows what you answer. A reply shows that line on top of its bubble; tapping it
-  scrolls to the message. The same menu has **Copy**.
+  scrolls to the message. The same menu has **Copy**, the only item on a dim `[yoicks]` line.
 - A Home's chat shows when each message was sent (your local time; the day too when it isn't today). The
   time is the one Claude Code recorded in its transcript, so a reload or a restart keeps it.
 

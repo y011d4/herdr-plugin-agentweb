@@ -710,6 +710,16 @@ describe('replying on a Home, and asking about a to-do item', () => {
     assert.ok(container.querySelector('#composer-quote') === null && getQuote(key) === '', 'dropped');
   });
 
+  it("a [yoicks] notice has no Reply: no ↩, its menu Copy only", async () => {
+    await home(withPilot(idle));
+    await chat([{ kind: 'user', text: '[yoicks] w-a: working → done', sidechain: false, ts: null }, said]);
+    const notice = $('#chat-log .chat-notice');
+    assert.ok(notice.querySelector('.chat-reply') === null, 'no ↩');
+    assert.ok(container.querySelector('#chat-log .chat-assistant .chat-reply') !== null, "the Home's own message keeps its ↩");
+    await menu(notice);
+    assert.deepEqual([...document.querySelectorAll<HTMLElement>('#modal-root [data-action]')].map((e) => e.dataset.action), ['copy']);
+  });
+
   it('drops a sent quote also where storage keeps nothing (full, or a private window)', async () => {
     await home(withPilot(idle));
     await chat([said]);
