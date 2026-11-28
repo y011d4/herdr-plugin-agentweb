@@ -758,7 +758,7 @@ const Subtitle = ({ className = '', c, children }: { className?: string; c?: str
 
 const settingsButton = <TopbarIcon id="btn-settings" label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</TopbarIcon>;
 
-export interface AgentActions { rename: () => void; clear: () => void; stop: () => void }
+export interface AgentActions { rename: () => void; clear: () => void; stop: () => void; openInHerdr: () => void }
 
 /** Whether ⋮'s menu is open: the drawer's Escape closes the drawer only while it isn't (ui/AgentDrawer.tsx). */
 export let agentMenuOpen = false;
@@ -766,8 +766,9 @@ export let agentMenuOpen = false;
 /** A pane's ⋮: Mantine's menu under it (closes on a pick, a tap outside or Escape). Each item
  *  44px tall, the app's touch target. Any Escape while it is open closes it: Mantine's own handler is the
  *  dropdown's, and its focus moves in only a moment after it opens (a timer), so an Escape from ⋮ before that
- *  closed nothing, the menu staying and, with a menu open, the drawer too. */
-export function AgentMenu({ actions }: { actions: AgentActions }) {
+ *  closed nothing, the menu staying and, with a menu open, the drawer too. `wide` (a PC) adds Open in herdr first:
+ *  from a phone it would switch the PC's screen out of sight. */
+export function AgentMenu({ actions, wide = false }: { actions: AgentActions; wide?: boolean }) {
   const [opened, setOpened] = useState(false);
   useLayoutEffect(() => { // as it commits: no Escape meanwhile finds the menu shown and the drawer not told
     agentMenuOpen = opened;
@@ -780,6 +781,7 @@ export function AgentMenu({ actions }: { actions: AgentActions }) {
     <Menu id="btn-agent-menu" position="bottom-end" width={220} radius="md" opened={opened} onChange={setOpened}>
       <Menu.Target><TopbarIcon label="Agent actions">&#8942;</TopbarIcon></Menu.Target>
       <Menu.Dropdown>
+        {wide && <Menu.Item id="am-herdr" className="min-h-11" fz="md" onClick={actions.openInHerdr}>Open in herdr</Menu.Item>}
         <Menu.Item id="am-rename" className="min-h-11" fz="md" onClick={actions.rename}>Rename…</Menu.Item>
         <Menu.Item id="am-clear" className="min-h-11" fz="md" onClick={actions.clear}>Clear (fresh session)…</Menu.Item>
         <Menu.Item id="am-stop" className="min-h-11" fz="md" color="var(--color-blocked)" onClick={actions.stop}>Stop agent…</Menu.Item>

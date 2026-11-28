@@ -115,7 +115,7 @@ describe('Confirm', () => {
   });
 
   it("from a ⋮ item (gone once picked): back to the ⋮", async () => {
-    const { unmount } = await render(<AgentMenu actions={{ rename: vi.fn(), clear: vi.fn(), stop: () => { void confirmModal('a', 'b', 'Stop', true); } }} />);
+    const { unmount } = await render(<AgentMenu actions={{ rename: vi.fn(), clear: vi.fn(), openInHerdr: vi.fn(), stop: () => { void confirmModal('a', 'b', 'Stop', true); } }} />);
     await fire(() => $('#btn-agent-menu').click());
     $('#am-stop').focus(); // a click focuses the button it lands on (Chrome)
     await fire(() => $('#am-stop').click());
@@ -128,7 +128,7 @@ describe('Confirm', () => {
 });
 
 describe('Agent actions (the ⋮) and Rename', () => {
-  const actions = () => ({ rename: vi.fn(), clear: vi.fn(), stop: vi.fn() });
+  const actions = () => ({ rename: vi.fn(), clear: vi.fn(), stop: vi.fn(), openInHerdr: vi.fn() });
   const menuOpen = (): boolean => !!document.querySelector('[data-menu-dropdown]');
   const calls = (cb: ReturnType<typeof actions>): number[] => [cb.rename, cb.clear, cb.stop].map((f) => f.mock.calls.length);
   // a pane's ⋮ (its drawer's header)

@@ -34,7 +34,8 @@
   — add `"clear": true` to wipe the pane's composer (repeated Ctrl+U) before the
   text lands, so a message composed here submits alone instead of being appended
   to a draft already typed straight into the pane
-- `POST /api/panes/:paneId/focus`
+- `POST /api/panes/:paneId/focus` — herdr's `pane.focus`: herdr on the PC switches to the pane's workspace, tab and
+  pane (the web's **Open in herdr**, in a pane's ⋮ on a PC's browser only)
 - `POST /api/panes/:paneId/scroll` `{"direction": "up", "steps": 3}` — SGR wheel events for full-screen apps
 - `POST /api/agents` `{"profile": "claude", "cwd": "/path", "name": "review", "task": "…", "workspace": "w7"}`
   — start a new agent from a named [launch profile](./config) (fixed argv allowlist; a caller

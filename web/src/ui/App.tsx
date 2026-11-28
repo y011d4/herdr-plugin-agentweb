@@ -443,7 +443,7 @@ function signIn(token: string): void {
 
 // ── Agent lifecycle UI (rename / clear / stop) ────────────────────────────────
 
-// A pane's ⋮ (ui/Pane.tsx's AgentMenu): Rename… (the header follows the store), Clear, Stop. A Home's
+// A pane's ⋮ (ui/Pane.tsx's AgentMenu): on a PC Open in herdr, then Rename… (the header follows the store), Clear, Stop. A Home's
 // ⋮ is on its status bar (ui/Pane.tsx's HomeMenu: a headless one's Compact, Clear, Stop), through the same
 // confirm flows. A headless orchestrator's (hl:<name>) go to /api/orchestrators/:name/*: it has no herdr pane.
 function agentActions(paneId: string): AgentActions {
@@ -451,6 +451,12 @@ function agentActions(paneId: string): AgentActions {
     rename: () => { const agent = findPane(paneId)?.pane.agent; openRename(paneId, agent?.displayName || agent?.name || ''); },
     clear: () => { void clearAgentFlow(paneId); },
     stop: () => { void stopAgentFlow(paneId); },
+    // herdr's pane.focus: the PC's herdr switches to its workspace, tab and pane
+    openInHerdr: () => {
+      apiPost(`/api/panes/${encodeURIComponent(paneId)}/focus`).then(
+        () => showToast('Opened in herdr', 'Its pane has the focus in herdr'),
+        (err: Error) => showToast('Could not open in herdr', err.message));
+    },
   };
 }
 

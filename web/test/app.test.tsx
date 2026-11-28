@@ -563,6 +563,29 @@ describe('App', () => {
     await go('#/agents');
   });
 
+  it("a pane's ⋮ has Open in herdr on a PC only: it focuses the pane in herdr and says so", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await go('#/agents');
+    await go('#/pane/p3');
+    await click($('#btn-agent-menu'));
+    assert.ok($('#am-rename') && !$('#am-herdr'), 'a phone: none (it would switch the PC out of sight)');
+    await click($('#btn-agent-menu'));
+    await setWide(true);
+    await click($('#btn-agent-menu'));
+    assert.ok($('[data-menu-item]')?.id === 'am-herdr', 'first');
+    await click($('#am-herdr'));
+    await answer('POST /api/panes/p3/focus', { ok: true });
+    assert.deepEqual(toastTitles(), ['Opened in herdr']);
+    assert.equal(location.hash, '#/pane/p3', 'the drawer stays');
+    clearToasts();
+    await click($('#btn-agent-menu'));
+    await click($('#am-herdr'));
+    await answer('POST /api/panes/p3/focus', { error: { code: 'not_found', message: 'pane not found' } }, 404);
+    assert.deepEqual(toastTitles(), ['Could not open in herdr']);
+    await setWide(false);
+    await go('#/agents');
+  });
+
   it("a Home's Stop (its ⋮) closes its orchestrator's pane after the confirm, and the Home stays, stopped", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/home/personal');
