@@ -186,6 +186,26 @@ describe('the chat log (ui/ChatLog.tsx): assistant + user turns use the markdown
     assert.ok(chatDom([a]).querySelector('.chat-assistant > .chat-md'), 'a pane: the prose alone');
   });
 
+  it("shows when each of a Home's messages was sent (its transcript line's time, local), another pane's not", () => {
+    const at = (d: string): number => new Date(d).getTime(); // local time, as the labels are
+    const today = at('2026-11-28T00:00:00');
+    const said = (ts: number | null): TimelineItem => ({ kind: 'assistant', text: 'ok', sidechain: false, ts });
+    const ask: TimelineItem = { kind: 'tool_use', id: 'q1', name: 'AskUserQuestion', summary: '', todos: null, sidechain: false, ts: at('2026-11-28T09:06:00'),
+      ask: [{ question: 'Which?', header: '', multiSelect: false, options: [{ label: 'a', description: '' }] }] };
+    // the element that has it, and its time
+    const times = (d: HTMLElement): string[] => [...d.querySelectorAll<HTMLElement>('[data-time]')]
+      .map((e) => `${[...e.closest('.chat-item')!.classList].filter((c) => /^chat-(?:assistant|notice|images|user|ask)$/.test(c)).join(' ')}: ${e.dataset.time}`);
+    assert.deepEqual(times(chatDom([said(at('2026-11-28T09:05:00')), ask, said(at('2026-11-27T23:50:00')), said(at('2026-11-20T08:00:00')), said(null)], true, today)),
+      ['chat-assistant: 09:05', 'chat-ask: 09:06', 'chat-assistant: yesterday 23:50', 'chat-assistant: 11/20 08:00']);
+    assert.deepEqual(times(chatDom([said(at('2026-11-28T09:05:00')), ask], false, today)), [], 'a pane: none');
+    // a user turn: each notice its own, the user's words theirs, or with images under the images
+    const user = (text: string, images?: string[]): TimelineItem => ({ kind: 'user', text, ...(images ? { images } : {}), sidechain: false, ts: at('2026-11-28T10:00:00') });
+    assert.deepEqual(times(chatDom([user('[yoicks] w-a: working → done\n\nlook'), user('see', ['data:image/png;base64,AA==']), user('', ['data:image/png;base64,AA=='])], true, today)),
+      ['chat-notice: 10:00', 'chat-user: 10:00', 'chat-user chat-images: 10:00', 'chat-user chat-images: 10:00']);
+    // as CSS content: the message's text stays its words
+    assert.equal(chatDom([user('look')], true, today).querySelector('.chat-user')!.textContent, 'look');
+  });
+
   it("splits the bridge's [yoicks] lines at either end of a user turn from the user's own words", () => {
     const user = (text: string): HTMLElement => item({ kind: 'user', text, sidechain: false, ts: null });
     const shown = (d: HTMLElement): string[] => [...d.querySelectorAll('.chat-notice, .chat-user')]

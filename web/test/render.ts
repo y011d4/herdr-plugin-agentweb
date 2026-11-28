@@ -65,6 +65,6 @@ export function drawn(node: ReactElement): HTMLElement {
   return el;
 }
 
-/** What a chat log (ui/ChatLog.tsx) draws for `items` (`home`: a Home's log). */
-export const chatDom = (items: TimelineItem[], home = false): HTMLElement =>
-  drawn(createElement(Fragment, null, ...items.map((item, i) => createElement(ChatItem, { key: i, item, home }))));
+/** What a chat log (ui/ChatLog.tsx) draws for `items` (`home`: a Home's log; `today`: the start of its day, its times'). */
+export const chatDom = (items: TimelineItem[], home = false, today = new Date().setHours(0, 0, 0, 0)): HTMLElement =>
+  drawn(createElement(Fragment, null, ...items.map((item, i) => createElement(ChatItem, { key: i, item, home, today }))));

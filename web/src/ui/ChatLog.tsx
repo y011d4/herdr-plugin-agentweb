@@ -8,7 +8,8 @@
  * renderMarkdown's HTML, escaped (transcript.ts), in Mantine's Typography; everything else is React's
  * text. The class names the tests and webcheck read (chat-item, chat-user, chat-assistant,
  * chat-result…) stay on their elements. On a Home (createChatLog's `reply`) a message can be replied to
- * (Repliable): its quote goes into the composer, and a reply shows what it quotes on top (QuoteRef).
+ * (Repliable): its quote goes into the composer, and a reply shows what it quotes on top (QuoteRef), and
+ * each message shows when it was sent (its transcript line's time: chatTime).
  */
 import { ActionIcon, Anchor, Box, Code, Group, Image, MantineProvider, Menu, Paper, Text, Typography, UnstyledButton } from '@mantine/core';
 import { createContext, memo, useContext, useState, type ReactNode, type Ref, type SyntheticEvent } from 'react';
@@ -17,6 +18,7 @@ import { createRoot } from 'react-dom/client';
 import { openAgentNamed } from '../nav.ts';
 import { showToast } from '../notify.ts';
 import { theme } from '../theme.ts';
+import { dueLabel } from '../todos.ts';
 import { inlineMarkdown, parseQuote, quoteLine, renderMarkdown, splitNotices, WORKER_NOTICE, type AskQuestion, type Quote, type QuoteOf, type TimelineItem, type TodoEntry } from '../transcript.ts';
 import { previewImage } from './Modals.tsx';
 
@@ -50,8 +52,17 @@ export function createChatLog(el: HTMLElement, { home = false, reply }: { home?:
 
 function Items({ items, home }: { items: TimelineItem[]; home: boolean }) {
   if (!items.length) return <Text className="chat-empty" m="auto" fz={13} c="dimmed">No messages yet.</Text>;
-  return <>{items.map((it, i) => <ChatItem key={i} item={it} home={home} />)}</>; // appended only: a position is an item
+  const today = new Date().setHours(0, 0, 0, 0); // a new day draws the times again (a memo'd item keeps its own)
+  return <>{items.map((it, i) => <ChatItem key={i} item={it} home={home} today={today} />)}</>; // appended only: a position is an item
 }
+
+/** When a message was sent, in local time (the day too when not `today`'s): "18:00", "yesterday 09:05", "11/30 09:00". */
+const chatTime = (ts: number, today: number): string => dueLabel(ts, today).text.replace(/^today /, '');
+
+// a Home message's time (its data-time): dim and small, as CSS content, so the message's text (a test's, Copy's, a
+// mouse selection's) stays its words alone. TIME_UNDER: on a line of its own under the bubble.
+const TIME = 'after:text-[10px] after:leading-none after:text-(--color-text-dim) after:content-[attr(data-time)]';
+const TIME_UNDER = `${TIME} after:mt-1 after:block`;
 
 // the prose: renderMarkdown's escaped HTML in Mantine's Typography (style.css's .chat-md tunes it for chat)
 const Markdown = ({ className = '', text }: { className?: string; text: string }) => (
@@ -70,14 +81,16 @@ const ToolName = ({ children }: { children: string }) => <Text span className="c
 
 /** One item: a user turn (its notices, its bubble, its images), the assistant's words (on a Home, a
  *  bubble too), a thinking block, a tool call (a question, a to-do list) or its result. */
-export const ChatItem = memo(function ChatItem({ item, home = false }: { item: TimelineItem; home?: boolean }) {
+export const ChatItem = memo(function ChatItem({ item, home = false, today }: { item: TimelineItem; home?: boolean; today: number }) {
   const sub = item.sidechain ? SIDECHAIN : ''; // after a space: Tailwind never finds a class written right before ${…}
   const tag = item.sidechain ? <SubTag /> : null;
+  const time = home && item.ts !== null ? chatTime(item.ts, today) : undefined;
   switch (item.kind) {
     case 'user': {
       // the images sent with it: under its words, or alone (the bridge sends only data: URLs)
       const images = item.images?.length ? (
-        <Group className={`chat-item chat-user chat-images max-w-[88%] self-end ${sub}`} gap={6} justify="flex-end">
+        <Group className={`chat-item chat-user chat-images max-w-[88%] self-end ${sub} ${time ? `${TIME} after:basis-full after:text-right` : ''}`}
+          gap={6} justify="flex-end" data-time={time}>
           {item.images.map((src, i) => (
             <UnstyledButton key={i} className="chat-image-open max-w-full" aria-label="View image" onClick={() => previewImage(src, 'image')}>
               <Image className="chat-image" src={src} alt="image" mah={160} maw="100%" w="auto" fit="contain" radius={10} />
@@ -87,11 +100,12 @@ export const ChatItem = memo(function ChatItem({ item, home = false }: { item: T
       ) : null;
       if (images && !item.text.trim()) return images;
       const { text } = item;
+      const own = images ? undefined : time; // the user's turn: its time under its images, else under its words
       const bubble = (t: string): ReactNode => {
         const q = parseQuote(t); // a reply: what it quotes on top, then its words
         const words = q ? q.body : t;
         return (
-          <Repliable className={`chat-item chat-user max-w-[88%] self-end ${sub}`} of="me" text={words} side="left">
+          <Repliable className={`chat-item chat-user max-w-[88%] self-end ${sub} ${own ? `${TIME_UNDER} after:text-right` : ''}`} of="me" text={words} side="left" time={own}>
             {tag}
             <Paper className="chat-bubble rounded-[14px_14px_4px_14px]" bg="accent" c="white" px={12} py={8}>
               {q && <QuoteRef q={q} />}
@@ -105,7 +119,8 @@ export const ChatItem = memo(function ChatItem({ item, home = false }: { item: T
       // the bridge's notices: dim lines, not the user's
       const notices = (ls: string[]): ReactNode => ls.map((l, i) => (
         <Repliable key={i} className={`chat-item chat-notice self-center ${sub}`} of="notice" text={l} side="right">
-          <Text component="div" className="whitespace-pre-wrap wrap-anywhere" fz={12} c="dimmed" ta="center"><Notice line={l} /></Text>
+          <Text component="div" className={`whitespace-pre-wrap wrap-anywhere ${time ? `${TIME} after:ml-1.5` : ''}`} fz={12} c="dimmed" ta="center"
+            data-time={time}><Notice line={l} /></Text>
         </Repliable>
       ));
       return <>{notices(before)}{body ? bubble(body) : null}{notices(after)}{images}</>;
@@ -113,7 +128,7 @@ export const ChatItem = memo(function ChatItem({ item, home = false }: { item: T
     case 'assistant':
       // a Home's replies are left bubbles, opposite the user's
       return home ? (
-        <Repliable className={`chat-item chat-assistant max-w-[92%] self-start ${sub}`} of="you" text={item.text} side="right">
+        <Repliable className={`chat-item chat-assistant max-w-[92%] self-start ${sub} ${time ? TIME_UNDER : ''}`} of="you" text={item.text} side="right" time={time}>
           {tag}
           <Paper className="rounded-[14px_14px_14px_4px]" withBorder bg="dark.7" px={12} py={8}><Markdown text={item.text} /></Paper>
         </Repliable>
@@ -132,7 +147,7 @@ export const ChatItem = memo(function ChatItem({ item, home = false }: { item: T
       if (item.name === 'AskUserQuestion' && item.ask?.length) {
         return (
           <Card className={`chat-tool chat-ask ${sub}`} edge="border-l-(--color-blocked)">
-            <Group gap={8} align="baseline"><ToolName>Question</ToolName></Group>
+            <Group className={time ? `${TIME} after:ml-auto` : undefined} gap={8} align="baseline" data-time={time}><ToolName>Question</ToolName></Group>
             <AskQuestions ask={item.ask} />
           </Card>
         );
@@ -175,10 +190,10 @@ const REPLY_ICON = (
  *  it is there for a screen reader only). On a link or a button, or with its text selected, the browser's
  *  own menu instead. A mouse still selects its text; a long press selects none (Copy is for that). Its
  *  data-quote is that quote line: a reply's QuoteRef finds it by it. */
-function Repliable({ className, of, text, side, children }: { className: string; of: Exclude<QuoteOf, 'todo'>; text: string; side: 'left' | 'right'; children: ReactNode }) {
+function Repliable({ className, of, text, side, time, children }: { className: string; of: Exclude<QuoteOf, 'todo'>; text: string; side: 'left' | 'right'; time?: string; children: ReactNode }) {
   const reply = useContext(ReplyTo);
   const [native, setNative] = useState(false);
-  if (!reply || !text.trim()) return <div className={className}>{children}</div>;
+  if (!reply || !text.trim()) return <div className={className} data-time={time}>{children}</div>;
   const quote = quoteLine(of, text);
   // before the menu's own handlers see the press
   const press = (e: SyntheticEvent<HTMLDivElement>): void => {
@@ -193,7 +208,7 @@ function Repliable({ className, of, text, side, children }: { className: string;
     <Menu position="bottom-start" returnFocus={false}>
       <Menu.ContextMenu disabled={native}>
         <div className={`group/msg relative rounded-[14px] pointer-fine:select-text! data-flash:outline-2 data-flash:outline-offset-2 data-flash:outline-(--color-accent) ${className}`}
-          data-quote={quote} onTouchStart={press} onMouseDown={press}>
+          data-quote={quote} data-time={time} onTouchStart={press} onMouseDown={press}>
           {children}
           <ActionIcon className={`chat-reply absolute top-1 ${side === 'left' ? '-left-9' : '-right-9'} opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 pointer-coarse:sr-only`}
             variant="subtle" color="gray" size={28} aria-label="Reply" onClick={() => reply(quote)}>{REPLY_ICON}</ActionIcon>
