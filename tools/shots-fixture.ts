@@ -187,6 +187,12 @@ export const scenes: Scene[] = [
       document.querySelector('.home-todo[aria-expanded=false]')?.click()))`, parts: [
     { name: 'todo-menu', el: q('[data-todo-menu]') },
   ] },
+  // the same item's Snooze… panel, under it: the ready check opens the menu as above, then taps Snooze…
+  { name: 'home-todo-snooze', hash: '#/home/personal', ready: `${items('')} && (!!document.querySelector('[data-snooze]')
+    || void (innerWidth < 1024 && document.querySelector('[data-action=needs][aria-expanded=false]')?.click(),
+      ((s) => s ? s.click() : document.querySelector('.home-todo[aria-expanded=false]')?.click())(document.querySelector('[data-todo-menu] [data-action=todo-snooze]'))))`, parts: [
+    { name: 'todo-snooze', el: q('[data-snooze]') },
+  ] },
   // its agents' popover, from its counts: the ready check taps them (once: then they're aria-expanded) until the rows show;
   // a phone's only, as Needs you
   { name: 'home-agents', hash: '#/home/personal', ready: `innerWidth >= 1024 || ${items('')} && (!!document.querySelector('[data-agents-list] .agent-row')

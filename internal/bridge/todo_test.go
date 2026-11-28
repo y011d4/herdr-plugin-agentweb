@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -354,5 +355,54 @@ func TestHeadlessTodoTickWake(t *testing.T) {
 	b.clock.Advance(wakeCoalesce + time.Second)
 	if got := tickMessages(); len(got) != 2 {
 		t.Errorf("%q", got)
+	}
+}
+
+// The user snoozing an item: its due moves there (the web shows it under Later until then), it is
+// reminded once again then, and its Home isn't woken. A due that isn't a whole ms ahead and within
+// a year is a 400 that changes nothing; an item that isn't there, a 404.
+func TestHeadlessTodoSnooze(t *testing.T) {
+	b := startHeadless(t, t.TempDir(), nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	now := nowMs()
+	// come due already: reminded (or told in the chat that added it)
+	items, _, err := b.srv.todos.Apply(b.name, []todoAdd{{Text: "rotate the key", Due: time.UnixMilli(now - 60_000).Format(time.RFC3339)}}, nil, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/orchestrators/" + b.name + "/todos/" + items[0].ID
+	patch := func(p, body string) int {
+		t.Helper()
+		status, _, _ := b.do(t, "PATCH", p, b.token, []byte(body))
+		return status
+	}
+	for _, body := range []string{`{}`, `{"due":"tomorrow"}`, `{"due":null}`, `{"due":` + strconv.FormatInt(now-1000, 10) + `}`,
+		`{"due":` + strconv.FormatInt(now+3_600_000, 10) + `.5}`, `{"due":` + strconv.FormatInt(now+400*86_400_000, 10) + `}`, `{"due":1e300}`} {
+		if status := patch(path, body); status != 400 {
+			t.Errorf("%s: %d", body, status)
+		}
+	}
+	due := now + 3_600_000
+	if status := patch("/api/orchestrators/"+b.name+"/todos/ffffff", `{"due":`+strconv.FormatInt(due, 10)+`}`); status != 404 {
+		t.Errorf("unknown: %d", status)
+	}
+	if status := patch(path, `{"due":`+strconv.FormatInt(due, 10)+`}`); status != 200 {
+		t.Fatalf("%d", status)
+	}
+	b.waitFor(t, "the new due", func(v OrchestratorView) bool {
+		return len(v.Todos) == 1 && v.Todos[0].Due != nil && *v.Todos[0].Due == due
+	})
+	for _, c := range []struct {
+		at   int64
+		want int
+	}{{due - 1, 0}, {due, 1}, {due + 60_000, 0}} {
+		if got := b.srv.todos.TakeDue(c.at)[b.name]; len(got) != c.want {
+			t.Errorf("at due%+d ms: %v", c.at-due, got)
+		}
+	}
+	b.clock.Advance(wakeCoalesce + time.Second)
+	if _, stdin := b.runs(t); slices.ContainsFunc(stdin, func(l string) bool { return strings.Contains(l, "rotate the key") }) {
+		t.Errorf("woken: %q", stdin)
 	}
 }

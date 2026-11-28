@@ -86,6 +86,9 @@
   list undone: the line is `[yoicks] to-do dismissed by the user: <text> (<agent>, <url>)`, from which
   the orchestrator takes no next step (any other `dismiss` is a 400). 404 when there is no such item
   (already ticked off or dismissed, or done by its orchestrator).
+- `PATCH /api/orchestrators/:name/todos/:id` `{"due": 1795910400000}` — snooze an item: its `due` becomes that time
+  (ms, ahead, at most a year away; else a 400), so it waits under Later, out of the needs-you count, and is reminded
+  once again then. Its orchestrator isn't told (the list it reads shows the due). 404 when there is no such item.
 - `DELETE /api/panes/:paneId` — stop an agent by closing its pane
 - `POST /api/panes/:paneId/rename` `{"name": "worker-2"}` — rename the agent running in the pane
 - `POST /api/agents/:target/clear` — start a fresh replacement agent (same profile + cwd) and close

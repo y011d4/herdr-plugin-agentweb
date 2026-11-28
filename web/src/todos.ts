@@ -33,3 +33,25 @@ export function dueLabel(due: number, now: number): { text: string; past: boolea
   const named: Record<number, string> = { [-1]: 'yesterday', 0: 'today', 1: 'tomorrow' };
   return { text: `${named[days] ?? `${d.getMonth() + 1}/${d.getDate()}`} ${hm}`, past: due <= now };
 }
+
+const HOUR = 3_600_000;
+
+/** Snooze's presets at `now`, each to the whole minute (the bridge reminds at the minute's tick): in 1 and 3 hours, this
+ *  evening (18:00, while that is an hour or more ahead) and tomorrow morning (09:00, as a due given as a date). */
+export function snoozeChoices(now: number): { label: string; at: number }[] {
+  const d = new Date(now);
+  const day = (days: number, h: number): number => new Date(d.getFullYear(), d.getMonth(), d.getDate() + days, h).getTime();
+  const inH = (h: number): number => Math.ceil((now + h * HOUR) / 60_000) * 60_000;
+  return [
+    { label: 'In 1 hour', at: inH(1) },
+    { label: 'In 3 hours', at: inH(3) },
+    ...(day(0, 18) - now >= HOUR ? [{ label: 'This evening', at: day(0, 18) }] : []),
+    { label: 'Tomorrow morning', at: day(1, 9) },
+  ];
+}
+
+/** `t` as an <input type="datetime-local"> takes it: local time, to the minute. */
+export function localInput(t: number): string {
+  const d = new Date(t);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}

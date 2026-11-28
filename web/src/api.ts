@@ -97,6 +97,12 @@ export const headlessName = (paneId: string): string | null => (paneId.startsWit
 export const orchestratorPost = <T = unknown>(name: string, action: 'start' | 'send' | 'answer' | 'interrupt' | 'clear' | 'stop' | 'model' | 'compact', body: Record<string, unknown> = {}): Promise<T> =>
   apiPost<T>(`/api/orchestrators/${encodeURIComponent(name)}/${action}`, body);
 
+export async function apiPatch(path: string, body: Record<string, unknown>): Promise<unknown> {
+  const resp = await apiFetch(path, { method: 'PATCH', body: JSON.stringify(body) });
+  if (!resp.ok) throw apiError(await resp.json().catch(() => ({})) as ErrorBody, resp.status);
+  return resp.json();
+}
+
 export async function apiDelete(path: string): Promise<unknown> {
   const resp = await apiFetch(path, { method: 'DELETE' });
   if (!resp.ok) throw apiError(await resp.json().catch(() => ({})) as ErrorBody, resp.status);
