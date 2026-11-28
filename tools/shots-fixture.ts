@@ -181,6 +181,13 @@ export const scenes: Scene[] = [
     || void document.querySelector('[data-action=needs][aria-expanded=false]')?.click())`, screen: false, parts: [
     { name: 'needs-popover', el: q('[data-needs-list]'), sizes: ['phone'] },
   ] },
+  // a to-do item's menu, open: on a phone in Needs you (the ready check taps it, then the item: once each, then they're
+  // aria-expanded), on a PC in the sidebar (its first item is the sidebar's)
+  { name: 'home-todo-menu', hash: '#/home/personal', ready: `${items('')} && (!!document.querySelector('[data-todo-menu]')
+    || void (innerWidth < 1024 && document.querySelector('[data-action=needs][aria-expanded=false]')?.click(),
+      document.querySelector('.home-todo[aria-expanded=false]')?.click()))`, parts: [
+    { name: 'todo-menu', el: q('[data-todo-menu]') },
+  ] },
   // its agents' popover, from its counts: the ready check taps them (once: then they're aria-expanded) until the rows show;
   // a phone's only, as Needs you
   { name: 'home-agents', hash: '#/home/personal', ready: `innerWidth >= 1024 || ${items('')} && (!!document.querySelector('[data-agents-list] .agent-row')

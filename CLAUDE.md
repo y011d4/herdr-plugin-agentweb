@@ -189,7 +189,7 @@ All in `internal/bridge/` (one package):
   has both (under All agents a Home's heading opens `#/agents/<name>`); the Home's name and status take their place
   under the switcher (a phone has them on its button there). Needs you opens a Mantine Popover (Escape, a tap outside
   and leaving the screen close it; as wide as a phone allows, no taller than the room below it): the blocked agents' chips, its
-  question's line, and its to-do list (`ui/Todos.tsx` over the pure `todos.ts`: ✓ = `DELETE …/todos/:id`, an item due ahead under
+  question's line, and its to-do list (`ui/Todos.tsx` over the pure `todos.ts`: a tap on an item opens its menu, Mark done = `DELETE …/todos/:id`, an item due ahead under
   Later until its time, a link shown by its host, a worker's name opening its drawer; a stopped Home has them too), dialogue-only chat
   (`conversationItems` hides tools/injected turns, but for questions and worker starts), a "doing now" line (`latestActivity`) and a
   composer (the terminal + quick keys stay one `>_` tap away — the only way to send Esc/Ctrl+C, and

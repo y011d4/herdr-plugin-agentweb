@@ -162,8 +162,14 @@ describe('Sidebar', () => {
   it("Ask quotes an item in its running Home's composer and opens that Home; a stopped Home's items have none", async () => {
     const s = withTodos();
     const c = await show('#/agents', s);
-    assert.ok(!c.querySelector('section.sidebar-home[data-home="work"] [data-action="todo-ask"]'), 'work is stopped');
-    await fire(() => c.querySelector<HTMLElement>('section.sidebar-home[data-home="personal"] [data-action="todo-ask"]')!.click());
+    const menu = async (home: string): Promise<HTMLElement> => {
+      await fire(() => c.querySelector<HTMLElement>(`section.sidebar-home[data-home="${home}"] .home-todo`)!.click());
+      return c.querySelector<HTMLElement>(`section.sidebar-home[data-home="${home}"] [role="menu"]`)!;
+    };
+    const work = await menu('work');
+    assert.ok(work.querySelector('[data-action="todo-done"]') && !work.querySelector('[data-action="todo-ask"]'), 'work is stopped');
+    const personal = await menu('personal');
+    await fire(() => personal.querySelector<HTMLElement>('[data-action="todo-ask"]')!.click());
     await settle();
     assert.equal(getQuote(draftKey('', 'personal')), todoQuote(s.orchestrators[0].todos![0]));
     assert.equal(location.hash, '#/home/personal');

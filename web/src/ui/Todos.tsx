@@ -5,13 +5,13 @@
  * account's blocked agents (a tap: the drawer), its orchestrator's own question (answered below the
  * chat) and the to-do list, what its orchestrator wrote down (todos.ts); on a PC the sidebar shows the same
  * (NeedsList) under the Home's heading, its blocked agents outside any Home under Other (Blocked). An item due later waits
- * under Later until its time; ✓ ticks one off (DELETE …/todos/:id, the State push then drops it). A
- * link shows its host; an agent's name opens its drawer. On a running Home, Ask puts an item's quote into the
- * composer (transcript.ts's todoQuote: its text, id, worker and link), to ask its orchestrator about it. The sidebar's
- * are `dense`: smaller, each item's text two lines at most (all of it on hover), its Ask on the line of its worker and link.
+ * under Later until its time. A tap on an item opens its menu: Mark done ticks it off (DELETE …/todos/:id, the State
+ * push then drops it), and on a running Home Ask the orchestrator puts its quote into the composer (transcript.ts's
+ * todoQuote: its text, id, worker and link), to ask its orchestrator about it. A link shows its host; an agent's name
+ * opens its drawer. The sidebar's are `dense`: smaller, each item's text two lines at most (all of it on hover).
  */
-import { ActionIcon, Anchor, Badge, Button, Group, Popover, Stack, Text, UnstyledButton } from '@mantine/core';
-import { useEffect, useState, type ReactNode } from 'react';
+import { Anchor, Badge, Button, Group, Loader, Menu, Popover, Stack, Text, UnstyledButton } from '@mantine/core';
+import { useEffect, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { apiDelete } from '../api.ts';
 import { draftKey, setQuote } from '../drafts.ts';
 import { homeSummary, orchestratorStatus, type DashboardCard, type HomeSummary } from '../dashboard-group.ts';
@@ -81,7 +81,7 @@ export function NeedsButton({ o, s, n, now }: { o: OrchestratorView; s: HomeSumm
   }
   return (
     <Popover opened={opened} onChange={setOpened} position="bottom-start" width="min(400px, calc(100vw - 24px))" radius="md" shadow="md"
-      trapFocus returnFocus={!asked} middlewares={{ shift: { padding: 12 }, size: { padding: 12 } }}>
+      trapFocus returnFocus={!asked} middlewares={{ shift: { padding: 12 }, size: { padding: 12 } }} closeOnEscape={false}>
       <Popover.Target>
         <Button className="shrink-0" data-action="needs" size="compact-sm" radius="xl" fz={13} fw={700} variant={n ? 'filled' : 'default'}
           color="blocked" c={n ? 'white' : 'dimmed'} data-blocked={s.blocked.length} rightSection={<span className="text-[10px]">&#9662;</span>}
@@ -89,7 +89,9 @@ export function NeedsButton({ o, s, n, now }: { o: OrchestratorView; s: HomeSumm
           {n ? `Needs you · ${n}` : `To-do · ${todos}`}
         </Button>
       </Popover.Target>
-      <Popover.Dropdown className="overflow-y-auto overscroll-contain" data-needs-list="">
+      {/* Mantine's own Escape (closeOnEscape) would take one meant for an item's menu inside it too */}
+      <Popover.Dropdown className="overflow-y-auto overscroll-contain" data-needs-list=""
+        onKeyDownCapture={(e) => { if (e.key === 'Escape' && !(e.target as Element).closest('[role="menu"]')) setOpened(false); }}>
         <NeedsList o={o} s={s} now={now} ask={ask} />
       </Popover.Dropdown>
     </Popover>
@@ -129,7 +131,7 @@ export function Blocked({ cards }: { cards: DashboardCard[] }) {
 }
 
 /** Home `o`'s items: the ones to do now, then Later (n), closed until tapped. Nothing without items. `ask`:
- *  each has Ask, off while its orchestrator's question is open (the composer is the question's then). */
+ *  each menu has Ask the orchestrator, off while its question is open (the composer is the question's then). */
 export function Todos({ o, now, ask, dense }: { o: OrchestratorView; now: number; ask?: (it: TodoItem) => void; dense?: boolean }) {
   const off = !!o.headless?.pending;
   const [open, setOpen] = useState(false);
@@ -149,10 +151,23 @@ export function Todos({ o, now, ask, dense }: { o: OrchestratorView; now: number
   );
 }
 
-// `dense` (the sidebar's): smaller, ✓ centered on the row as the popover's, the text two lines at most (all of it on hover), and Ask at the
-// right end of the line under it with the worker, the link and the due time (`inline`), so the text has the row's width
+// the menu's Ask: a speech bubble, drawn as ChatLog.tsx's REPLY_ICON
+const ASK_ICON = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+  </svg>
+);
+
+// An item is one target: a tap or a click on it (not on its worker or its link, which are theirs), or Enter/Space on it, opens
+// its menu under it: Mark done, and on a running Home Ask the orchestrator (off while its question is open); the arrow keys
+// move in it, Escape closes it (just it: NeedsButton leaves an Escape from inside a menu to the menu). The menu stays in the
+// item's DOM (not a portal; fixed, so no scroll box clips it), so the Needs you popover doesn't take a tap in it for one outside
+// and stays open over a Mark done. ⋮ at its right says it has one. Ask's quote focuses the composer: the menu then doesn't
+// put the focus back on the item (`back`).
+// `dense` (the sidebar's): smaller, the text two lines at most (all of it on hover)
 function Todo({ home, item, now, ask, off, dense }: { home: string; item: TodoItem; now: number; ask?: () => void; off: boolean; dense?: boolean }) {
   const [busy, setBusy] = useState(false);
+  const [back, setBack] = useState(true);
   const host = item.url ? linkHost(item.url) : null;
   const due = item.due != null ? dueLabel(item.due, now) : null;
   const done = async (): Promise<void> => {
@@ -165,30 +180,41 @@ function Todo({ home, item, now, ask, off, dense }: { home: string; item: TodoIt
       showToast('Could not tick it off', (err as Error).message);
     }
   };
-  const meta = !!(item.agent || host || due);
-  const inline = dense && meta;
-  const askButton = ask && (
-    <Button className={`shrink-0 ${inline ? 'ml-auto' : ''}`} variant="subtle" size={dense ? 'compact-xs' : 'compact-sm'} fz={dense ? 12 : 13} data-action="todo-ask"
-      aria-label={`Ask about: ${item.text}`} disabled={off} title={off ? 'Answer the question first' : undefined} onClick={ask}>Ask</Button>
-  );
+  const own = (e: SyntheticEvent): void => e.stopPropagation(); // a link's tap is the link's, not the menu's
   return (
-    // a line under each but the list's last, so items of two or three lines don't run together
-    <Group className={`home-todo border-b border-(--color-border) last:border-b-0 ${dense ? 'py-1' : 'py-1.5'}`} data-todo={item.id} gap={dense ? 8 : 10}
-      wrap="nowrap">
-      <ActionIcon variant="default" radius="xl" size={dense ? 'sm' : undefined} className="shrink-0" aria-label={`Done: ${item.text}`} data-action="todo-done"
-        loading={busy} onClick={() => { void done(); }}>&#10003;</ActionIcon>
-      <div className="min-w-0 flex-1">
-        <Text fz={dense ? 13 : 14} lh={dense ? 1.45 : undefined} className="break-words" lineClamp={dense ? 2 : undefined} title={dense ? item.text : undefined}>{item.text}</Text>
-        {meta && (
-          <Group gap={10} className="text-[12px]">
-            {item.agent && <Anchor component="button" fz={12} data-agent={item.agent} onClick={() => openAgentNamed(item.agent!)}>{item.agent}</Anchor>}
-            {host && <Anchor href={item.url!} target="_blank" rel="noopener noreferrer" fz={12} data-host={host}>{`${host} ↗`}</Anchor>}
-            {due && <Text span fz={12} fw={due.past ? 600 : undefined} c={due.past ? 'blocked' : 'dimmed'} data-due={due.past ? 'past' : 'later'}>{due.past ? `due ${due.text}` : due.text}</Text>}
-            {inline && askButton}
-          </Group>
+    <Menu position="bottom-end" withinPortal={false} floatingStrategy="fixed" disabled={busy} returnFocus={back} onOpen={() => setBack(true)}>
+      <Menu.Target>
+        {/* a line under each but the list's last, so items of two or three lines don't run together */}
+        <div role="button" tabIndex={0} data-todo={item.id} aria-busy={busy || undefined}
+          className={`home-todo -mx-2 flex cursor-pointer items-center gap-2 border-b border-(--color-border) px-2 last:border-b-0
+            hover:bg-(--color-border) active:bg-(--color-border) data-expanded:bg-(--color-border) focus-visible:outline-2
+            focus-visible:-outline-offset-2 focus-visible:outline-(--color-accent) aria-busy:opacity-50 ${dense ? 'py-1' : 'min-h-11 py-1.5'}`}
+          onKeyDown={(e) => {
+            if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.currentTarget.click(); }
+          }}>
+          <div className="min-w-0 flex-1">
+            <Text fz={dense ? 13 : 14} lh={dense ? 1.45 : undefined} className="break-words" lineClamp={dense ? 2 : undefined} title={dense ? item.text : undefined}>{item.text}</Text>
+            {(item.agent || host || due) && (
+              <Group gap={10} className="text-[12px]">
+                {item.agent && <Anchor component="button" fz={12} data-agent={item.agent} onClick={(e) => { own(e); openAgentNamed(item.agent!); }}>{item.agent}</Anchor>}
+                {host && <Anchor href={item.url!} target="_blank" rel="noopener noreferrer" fz={12} data-host={host} onClick={own}>{`${host} ↗`}</Anchor>}
+                {due && <Text span fz={12} fw={due.past ? 600 : undefined} c={due.past ? 'blocked' : 'dimmed'} data-due={due.past ? 'past' : 'later'}>{due.past ? `due ${due.text}` : due.text}</Text>}
+              </Group>
+            )}
+          </div>
+          {busy ? <Loader size={14} /> : <span className="shrink-0 text-(--color-text-dim)" aria-hidden="true">&#8942;</span>}
+        </div>
+      </Menu.Target>
+      <Menu.Dropdown data-todo-menu={item.id}>
+        <Menu.Item className="min-h-11" fz="md" leftSection={<span className="w-4 text-center" aria-hidden="true">&#10003;</span>} data-action="todo-done"
+          onClick={() => { void done(); }}>Mark done</Menu.Item>
+        {ask && (
+          <Menu.Item className="min-h-11" fz="md" leftSection={ASK_ICON} data-action="todo-ask" disabled={off} onClick={() => { setBack(false); ask(); }}>
+            Ask the orchestrator
+            {off && <Text fz={12} c="dimmed">Answer its question first</Text>}
+          </Menu.Item>
         )}
-      </div>
-      {!inline && askButton}
-    </Group>
+      </Menu.Dropdown>
+    </Menu>
   );
 }
