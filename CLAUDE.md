@@ -240,7 +240,7 @@ All in `internal/bridge/` (one package):
   or closed PR's item and wakes its Home with `[yoicks] PR merged: <url> (<worker>); its to-do item is removed`, an unreadable
   PR's once a run, a gh failure alerted once per error, kind `github`, to each Home with a PR); `approve` is the child's
   `--permission-prompt-tool`: AskUserQuestion becomes state `headless.pending` (answered by
-  `POST …/answer`: the panel's "Type something." is a question's own answer, its "Chat about this" (`{chat}`) refuses it with Claude Code's words; a `/send` meanwhile is written, then refuses it the same way), held open with progress, anything
+  `POST …/answer`: the panel's "Type something." is a question's own answer, its "Chat about this" (`{chat}`) refuses it with Claude Code's words; a `/send` naming it (`question`: the composer's, for a message begun with the panel on screen, 1 s at least) is written, then refuses it the same way; any other waits in Claude Code's queue, a toast says so), held open with progress, anything
   else is denied unasked. `agent_prompt` watches the worker (one goroutine, herdr's waits on a
   closable no-deadline connection, `HerdrClient.Wait`) and wakes the orchestrator with `[yoicks]
   <worker>: <from> → <to>` (names and status only, 3 s coalesced); a watch outlives the worker's

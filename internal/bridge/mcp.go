@@ -364,7 +364,7 @@ func (r *headlessRunner) approve(ctx context.Context, req *mcp.CallToolRequest, 
 	if p == nil {
 		return textResult(`{"behavior":"deny","message":"this orchestrator's session has ended"}`, false), nil, nil
 	}
-	r.asked(in.ToolUseID, p)
+	r.asked(in.ToolUseID)
 	defer r.dropQuestion(p)
 	for n := 1.0; ; n++ {
 		select {
@@ -483,17 +483,11 @@ func clarify(questions []AskQuestion, answers map[string]any) string {
 	return b.String()
 }
 
-// asked notes that question p reached the permission route (see watchAsk). One a message was
-// written behind while it was on its way (Send) is refused at once, as Chat about this.
-func (r *headlessRunner) asked(toolUseID string, p *hlPending) {
+// asked notes that a question reached the permission route (see watchAsk).
+func (r *headlessRunner) asked(toolUseID string) {
 	r.mu.Lock()
 	r.asks[toolUseID] = true
-	answers, chat := r.chatNext[toolUseID]
-	delete(r.chatNext, toolUseID)
 	r.mu.Unlock()
-	if chat {
-		r.Chat(p.id, answers)
-	}
 }
 
 // watchAsk: an AskUserQuestion in the stream must reach approve within askReachWait, else
@@ -512,7 +506,6 @@ func (r *headlessRunner) watchAsk(toolUseID string) {
 			alert = r.warn("question_route", "a question (AskUserQuestion) never reached the Home: interrupt and ask again")
 		}
 		delete(r.asks, toolUseID)
-		delete(r.chatNext, toolUseID)
 		r.mu.Unlock()
 		alert()
 		r.onChange()

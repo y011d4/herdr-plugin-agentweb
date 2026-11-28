@@ -120,8 +120,11 @@ export function PromptPanel({ paneId, prompt, view }: { paneId: string; prompt: 
 }
 
 /** The answers a headless orchestrator's open question has so far in its panel, by orchestrator:
- *  a composer message sent meanwhile carries them (ui/Pane.tsx), as Chat about this does. */
+ *  a composer message about it carries them (ui/Pane.tsx), as Chat about this does. */
 export const answersSoFar = new Map<string, Record<string, string>>();
+/** The question each headless orchestrator's panel shows, and since when (Date.now()), by
+ *  orchestrator: a composer message is about it only when begun after that (ui/Pane.tsx). */
+export const questionShown = new Map<string, { id: string; at: number }>();
 
 /**
  * A headless orchestrator's question (the State's headless.pending: its AskUserQuestion, which the
@@ -132,8 +135,10 @@ export const answersSoFar = new Map<string, Record<string, string>>();
  * Under each question's options, as in Claude Code's TUI: "Type something." opens a field whose text
  * is that question's answer (a multiSelect's: with the checked ones), and "Chat about this" answers
  * none (POST …/answer {chat}: the bridge refuses the question with Claude Code's words for it, the
- * answers so far in them), so the orchestrator asks what to clarify. A message sent from the
- * composer meanwhile does the same, with the message (the bridge's /send, given answersSoFar).
+ * answers so far in them), so the orchestrator asks what to clarify. A message from the composer
+ * does the same, with the message, when it was begun with this panel already on screen
+ * (questionShown; the bridge's /send, given its id and answersSoFar); one begun before waits,
+ * in Claude Code's queue, until the question is answered. The panel flashes as it comes (style.css).
  */
 export function HeadlessPrompt({ name, pending }: { name: string; pending: { id: string; questions: AskQuestion[] } }) {
   const [step, setStep] = useState(0);
@@ -153,6 +158,11 @@ export function HeadlessPrompt({ name, pending }: { name: string; pending: { id:
     if (Object.keys(soFar).length) answersSoFar.set(name, soFar);
     return () => { answersSoFar.delete(name); };
   }, [name, soFar]);
+  useLayoutEffect(() => { // as it is drawn, before any tap or key
+    const shown = { id: pending.id, at: Date.now() };
+    questionShown.set(name, shown);
+    return () => { if (questionShown.get(name) === shown) questionShown.delete(name); };
+  }, [name, pending.id]);
   if (!q) return null;
   const last = step + 1 === pending.questions.length;
   const n = q.options.length;
@@ -222,7 +232,7 @@ export function HeadlessPrompt({ name, pending }: { name: string; pending: { id:
         <Option id="headless-prompt-chat" extra num={String(n + 2)} label="Chat about this" description="Ask the orchestrator about it instead of answering"
           marked={false} disabled={sending} onClick={chat} />
       </div>
-      <Text className="chat-prompt-hint" fz={12} c="dimmed" mt={8}>A message sent below is about these questions, not an answer: like Chat about this.</Text>
+      <Text className="chat-prompt-hint" fz={12} c="dimmed" mt={8}>A message you write below now is about these questions, not an answer: like Chat about this. One begun before they came waits until they are answered.</Text>
     </div>
   );
 }

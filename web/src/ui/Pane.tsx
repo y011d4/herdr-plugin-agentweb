@@ -31,7 +31,7 @@ import { StatusDot } from './Status.tsx';
 import { NeedsBadge, NeedsButton, needsYou, useMinute } from './Todos.tsx';
 import type { Topbar } from './App.tsx';
 import { previewImage } from './Modals.tsx';
-import { answersSoFar, HeadlessPrompt, PromptPanel } from './PromptPanel.tsx';
+import { answersSoFar, HeadlessPrompt, PromptPanel, questionShown } from './PromptPanel.tsx';
 import { TuiSteps } from './Settings.tsx';
 
 type Mode = 'terminal' | 'chat';
@@ -359,7 +359,11 @@ const autoGrow = (t: HTMLTextAreaElement): void => {
 // inserts a newline and only the Send button sends, so the phone keyboard can't fire off half-typed
 // commands; on a PC Enter sends and Shift+Enter inserts a newline (composer-keys.ts). What is typed is
 // kept as the Home's (`name`) or the pane's draft (drafts.ts) until it is sent. A headless
-// orchestrator's also takes images (+, or pasted), shown above it until sent (not kept as a draft).
+// orchestrator's also takes images (+, or pasted), shown above it until sent (not kept as a draft),
+// and its message is about the question open (Chat about this) only when that question was on
+// screen before the message was begun, and for SEEN_MS at least, Enter or Send alike: one that came
+// as it was typed or sent wasn't read, and the message then waits until it is answered.
+const SEEN_MS = 1000;
 function Composer({ paneId, home, name }: { paneId: string; home: boolean; name: string }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const resetPicker = useRef<() => void>(null);
@@ -370,6 +374,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
   const shown = useRef(images);
   shown.current = images;
   const sendingImages = useRef(false);
+  const begun = useRef<number | null>(null); // when what it holds was begun (Date.now(); 0: before this screen, a kept draft); null: empty
   const [preparing, setPreparing] = useState(0); // images being scaled: no send until they are there
   const attach = async (files: File[]): Promise<void> => {
     const picked = files.filter((f) => f.type.startsWith('image/'));
@@ -384,6 +389,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
     } finally {
       setPreparing((n) => n - 1);
     }
+    begun.current ??= Date.now();
     const next = fitImages(shown.current, added);
     if (next.length < shown.current.length + added.length) showToast('Not every image was added', `At most ${MAX_IMAGES}, 1 MB in all, per message`);
     setImages(next);
@@ -394,6 +400,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
     shownKey = key;
     const stored = getDraft(key);
     const draft = sendingDrafts.get(key) === stored ? '' : stored;
+    begun.current = draft ? 0 : null;
     if (draft) {
       t.value = draft;
       autoGrow(t);
@@ -408,6 +415,8 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
     if ((!text && !sent.length) || sendingImages.current || preparing) return;
     sendingImages.current = sent.length > 0; // an upload takes a while: a second tap mustn't send them twice
     if (text) sendingDrafts.set(key, text);
+    const open = hl ? questionShown.get(hl) : undefined;
+    const about = open && open.at < (begun.current ?? 0) && Date.now() - open.at >= SEEN_MS ? open.id : '';
     try {
       // clear:true wipes the pane's composer first so this message submits on its own — never
       // merged with a half-typed draft the user left in the pane that yoicks can't see. Scope it
@@ -415,10 +424,17 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
       // raw control byte a full-screen / non-readline TUI could act on. Other panes just get
       // text+enter. enter:true then submits in the same request.
       const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
-      await (hl ? orchestratorPost(hl, 'send', { text, ...(sent.length ? { images: sent } : {}), ...(answersSoFar.has(hl) ? { answers: answersSoFar.get(hl) } : {}) }) : apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) }));
+      const aboutIt = hl && about ? { question: about, ...(answersSoFar.has(hl) ? { answers: answersSoFar.get(hl) } : {}) } : {};
+      await (hl ? orchestratorPost(hl, 'send', { text, ...(sent.length ? { images: sent } : {}), ...aboutIt }) : apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) }));
       if (t.value === text) { // clear on success, but keep text typed mid-send
         t.value = '';
         autoGrow(t);
+        begun.current = null;
+      }
+      // not about the question open (it came as this was written): it holds this, which the chat won't show yet. ponytail: one
+      // that comes after the response isn't told of; the bridge's answer would need to say whether one holds it
+      if (hl && !about && store.appState?.orchestrators?.find((o) => o.name === hl)?.headless?.pending) {
+        showToast('Your message waits', `${orchestratorLabel(orchestratorOfPane(store.appState, paneId))} reads it once the question is answered. To make it about the question, tap Chat about this.`);
       }
       if (text && getDraft(key) === text) setDraft(key, '');
       if (sent.length) setImages((cur) => cur.filter((i) => !sent.includes(i))); // and images added mid-send
@@ -486,7 +502,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
         {/* Mantine's look, the composer's own text: 14px (iOS zooms in on focus, as before), at most 120px tall (autoGrow) */}
         <Textarea id="pane-input" ref={input} rows={1} placeholder={placeholder} autoCorrect="off" autoCapitalize="off" spellCheck={false}
           className="flex-1" styles={{ input: { fontSize: 14, lineHeight: 1.4, maxHeight: 120, background: 'var(--color-bg)', paddingTop: 10, paddingBottom: 10 } }}
-          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); setDraft(key, e.currentTarget.value); }} />
+          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); setDraft(key, e.currentTarget.value); begun.current = e.currentTarget.value ? begun.current ?? Date.now() : null; }} />
         <Button id="btn-send-enter" miw={64} px={12} fz={13} disabled={preparing > 0} onClick={() => { void send(); }}>Send</Button>
       </Group>
     </>

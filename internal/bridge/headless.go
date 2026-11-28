@@ -310,7 +310,6 @@ type headlessRunner struct {
 	lastEvent    time.Time
 	pending      *hlPending                // the question waiting for the user
 	asks         map[string]bool           // AskUserQuestion tool_use ids: did each reach approve?
-	chatNext     map[string]map[string]any // of those not there yet, the ones a message was written behind (Send): their answers so far
 	served       map[string]bool           // the tool_use ids of the tool calls that reached the bridge, until their result
 	watches      map[string]*hlWatch       // by pane
 	saved        []hlWatch                 // the watches saved by an earlier bridge, re-armed at the first start
@@ -357,7 +356,7 @@ func newHeadlessRunner(def OrchestratorDef, stateDir, rules string) *headlessRun
 		clock:         realClock{},
 		restartDelays: []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second},
 		crashWindow:   10 * time.Minute, interruptWait: 2 * time.Second, silence: 3 * time.Minute,
-		alerted: map[string]bool{}, acks: map[string]chan string{}, switches: map[string]string{}, asks: map[string]bool{}, chatNext: map[string]map[string]any{}, served: map[string]bool{},
+		alerted: map[string]bool{}, acks: map[string]chan string{}, switches: map[string]string{}, asks: map[string]bool{}, served: map[string]bool{},
 		watches: map[string]*hlWatch{}}
 	r.model.Status = "stopped"
 	var saved headlessState
@@ -971,7 +970,7 @@ func (r *headlessRunner) canUse(c *hlChild, cu *hlCanUse, epoch int) {
 		reply(map[string]any{"behavior": "deny", "message": "this orchestrator's session has ended"})
 		return
 	}
-	r.asked(cu.ToolUseID, p)
+	r.asked(cu.ToolUseID)
 	go func() { reply(<-p.reply) }() // every pending question gets its reply (answer, deny, the child's end)
 }
 
@@ -1108,14 +1107,15 @@ func (r *headlessRunner) running() (*hlChild, error) {
 }
 
 // Send is the user's message, written also mid-turn (Claude Code takes it in at the next tool
-// boundary). Images (imageBlocks') go first, then the text, if any. With a question pending once
-// it is written, it is about the question, not an answer (a question's own answer is the panel's
-// "Type something."): the question is refused as Claude Code's "Chat about this" refuses it, with
-// the answers the panel had so far, so the model reads the two together at the boundary the
-// refusal makes. Looked for after the write, and one already in the stream but not at the
-// permission route yet is refused as it gets there (asked): else it would hold the message in
-// Claude Code's queue until it is answered.
-func (r *headlessRunner) Send(text string, images []any, answers map[string]any) error {
+// boundary). Images (imageBlocks') go first, then the text, if any. With question (the id of the
+// one the user saw open as they wrote it: the web's composer says which), it is about that
+// question, not an answer (a question's own answer is the panel's "Type something."): once it is
+// written, the question is refused as Claude Code's "Chat about this" refuses it, with the answers
+// the panel had so far, so the model reads the two together at the boundary the refusal makes.
+// Without one, or once that question is gone, a question pending stays: Claude Code holds the
+// message until it is answered. Never a question the user didn't see: one that came as the
+// message was sent isn't about it.
+func (r *headlessRunner) Send(text string, images []any, answers map[string]any, question string) error {
 	var err error
 	if len(images) == 0 {
 		err = r.write(text)
@@ -1125,24 +1125,10 @@ func (r *headlessRunner) Send(text string, images []any, answers map[string]any)
 		}
 		err = r.write(images)
 	}
-	if err != nil {
-		return err
+	if err == nil && question != "" {
+		r.Chat(question, answers) // answered or replaced meanwhile (a 409): the message stands on its own
 	}
-	// ponytail: stdin and stdout share no order, so a question still unread on stdout (ms) is missed,
-	// and one asked in answer to this message would be taken for an earlier one (it takes an API call:
-	// never this soon). Telling them apart needs a mark from Claude Code it doesn't give.
-	r.mu.Lock()
-	p := r.pending
-	for id, reached := range r.asks {
-		if p == nil && !reached {
-			r.chatNext[id] = answers
-		}
-	}
-	r.mu.Unlock()
-	if p != nil {
-		r.Chat(p.id, answers) // answered meanwhile (a 409): the message stands on its own
-	}
-	return nil
+	return err
 }
 
 // The images a message may carry: JPEG, PNG or GIF that decode whole (a broken one in the

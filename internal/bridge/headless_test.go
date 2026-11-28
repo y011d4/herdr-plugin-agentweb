@@ -121,26 +121,20 @@ type hlBridge struct {
 	name string // its orchestrator
 	// the runner's timers and its herdr's waits: time moves only when the test moves it
 	clock *fakeherdr.FakeClock
-	gate  *sendGate // its runner's lineHook and approveHook (startHeadless's)
+	gate  *interruptGate // its runner's approveHook (startHeadless's)
 }
 
-// sendGate gives a send a real model's pace. A question in answer to a message takes the model
-// an API call, so it reaches the bridge (its tool_use on stdout, its approve call) only after
-// Send has looked for one the message was written behind; fakeclaude asks at once, and Send
-// would take its question for such a one and refuse it as Chat about this. So while a send is
-// in flight (hlBridge.send) the reader waits at a question's tool_use, and an approve call at
-// its start and at its answer. A tweak's own lineHook replaces the reader's half.
-//
-// An interrupt with a question pending goes through it too (during): Interrupt refuses the
-// question before it writes the interrupt, and fakeclaude, answered, would end its turn done
-// before reading the interrupt, where Claude Code would be in its next API call when the
-// interrupt lands. Held until the interrupt is answered, the refusal comes after it.
-type sendGate struct {
+// interruptGate gives an interrupt with a question pending a real model's pace (during):
+// Interrupt refuses the question before it writes the interrupt, and fakeclaude, answered, would
+// end its turn done before reading the interrupt, where Claude Code would be in its next API call
+// when the interrupt lands. While one is in flight, an approve call waits at its start and at its
+// answer: held until the interrupt is answered, the refusal comes after it.
+type interruptGate struct {
 	mu   sync.Mutex
-	open chan struct{} // closed once the send in flight has returned; nil: none in flight
+	open chan struct{} // closed once the interrupt in flight has returned; nil: none in flight
 }
 
-func (g *sendGate) wait() {
+func (g *interruptGate) wait() {
 	g.mu.Lock()
 	ch := g.open
 	g.mu.Unlock()
@@ -149,13 +143,7 @@ func (g *sendGate) wait() {
 	}
 }
 
-func (g *sendGate) line(line []byte) {
-	if bytes.Contains(line, []byte(`"name":"AskUserQuestion"`)) {
-		g.wait()
-	}
-}
-
-func (g *sendGate) during(f func()) {
+func (g *interruptGate) during(f func()) {
 	ch := make(chan struct{})
 	g.mu.Lock()
 	g.open = ch
@@ -226,12 +214,12 @@ func startHeadless(t *testing.T, stateDir string, env map[string]string, tweak f
 	}
 	name := firstNonEmpty(os.Getenv("HLNAME"), "h1")
 	def := OrchestratorDef{Name: name, Label: "H1", Dir: filepath.Join(home, "orchestrators", name), Env: env, Mode: "headless"}
-	clock, gate := fakeherdr.NewFakeClock(), &sendGate{}
+	clock, gate := fakeherdr.NewFakeClock(), &interruptGate{}
 	b := startBridge(t, Config{StateDir: stateDir, Orchestrators: []OrchestratorDef{def}}, nil, func(s *server) {
 		h := s.headless[name]
 		h.clock = clock
 		h.restartDelays = []time.Duration{50 * time.Millisecond, 50 * time.Millisecond, 50 * time.Millisecond}
-		h.lineHook, h.approveHook = gate.line, gate.wait
+		h.approveHook = gate.wait
 		if tweak != nil {
 			tweak(h)
 		}
@@ -306,10 +294,7 @@ func (b *hlBridge) start(t *testing.T) {
 func (b *hlBridge) send(t *testing.T, text string) {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"text": text})
-	var status int
-	var out string
-	b.gate.during(func() { status, out = b.post(t, "send", string(body)) })
-	if status != 200 {
+	if status, out := b.post(t, "send", string(body)); status != 200 {
 		t.Fatalf("send %q: %d %s", text, status, out)
 	}
 }
@@ -1291,7 +1276,7 @@ func TestHeadlessClaudeCheck(t *testing.T) {
 		return fakeherdr.Reply{}, false
 	}, func(s *server) { s.headless["h1"].clock = clock })
 	t.Cleanup(tb.srv.shutdownHeadless)
-	b := &hlBridge{tb, log, home, "h1", clock, &sendGate{}}
+	b := &hlBridge{tb, log, home, "h1", clock, &interruptGate{}}
 	nAlerts := func() int { shown.Lock(); defer shown.Unlock(); return len(alerts) }
 	warning := func(v OrchestratorView, kind string) string {
 		for _, w := range v.Headless.Warnings {
@@ -1442,14 +1427,15 @@ func TestHeadlessImageBlocks(t *testing.T) {
 }
 
 // A message with images: the images then the text on its stdin, its user turn in the chat with
-// them; images alone are a message, also about a question that waits (Chat about this).
+// them; images alone are a message, also about a question the user saw (Chat about this).
 func TestHeadlessSendsImages(t *testing.T) {
 	b := startHeadless(t, t.TempDir(), nil, nil)
 	b.start(t)
 	b.waitStatus(t, "idle")
 	small := b64Image(t, png.Encode, 8, 8)
+	question := ""
 	send := func(text string) (int, string) {
-		body, _ := json.Marshal(map[string]any{"text": text, "images": []any{map[string]any{"mediaType": "image/png", "data": small}}})
+		body, _ := json.Marshal(map[string]any{"text": text, "question": question, "images": []any{map[string]any{"mediaType": "image/png", "data": small}}})
 		return b.post(t, "send", string(body))
 	}
 	if status, out := send("what is it?"); status != 200 {
@@ -1475,7 +1461,7 @@ func TestHeadlessSendsImages(t *testing.T) {
 		t.Errorf("long text: %d %s", status, out)
 	}
 	b.send(t, "ask")
-	b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
+	question = b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil }).Headless.Pending.ID
 	if status, out := send("this one?"); status != 200 {
 		t.Errorf("with a question: %d %s", status, out)
 	}

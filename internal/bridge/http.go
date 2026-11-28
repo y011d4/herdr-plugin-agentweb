@@ -614,12 +614,14 @@ func (s *server) headlessRoute(w http.ResponseWriter, r *http.Request, h *headle
 			sendError(w, ierr)
 			return
 		}
-		answers, ok := stringMap(body["answers"]) // with a question open: its panel's so far (Chat about this)
-		if jsTrim(text) == "" && len(images) == 0 || !ok {
-			jsonError(w, http.StatusBadRequest, "invalid_params", "text must be a non-empty string, or images given; answers, if any, question → label")
+		// with question (the one open as the user wrote it): about it, Chat about this with answers (its panel's so far)
+		question, isText := body["question"].(string)
+		answers, ok := stringMap(body["answers"])
+		if jsTrim(text) == "" && len(images) == 0 || !ok || body["question"] != nil && !isText {
+			jsonError(w, http.StatusBadRequest, "invalid_params", "text must be a non-empty string, or images given; question, if any, an id; answers, if any, question → label")
 			return
 		}
-		err = h.Send(text, images, answers)
+		err = h.Send(text, images, answers, question)
 	case "answer":
 		// {id, answers: {question: label(s)}} answers the pending question; {id, deny: message} refuses
 		// it; {id, chat: true, answers?: those given so far} is Claude Code's "Chat about this"

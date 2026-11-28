@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { act } from 'react';
 import { shownStatus } from '../src/dashboard-group.ts';
+import { draftKey, setDraft } from '../src/drafts.ts';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { orchestratorOfPane, resolveRoute } from '../src/routes.ts';
 import { findPane, markPaneSeen, setAppState, store } from '../src/store.ts';
@@ -308,25 +309,78 @@ describe("a headless orchestrator's Home", () => {
     assert.match($('#headless-prompt .chat-prompt-hint').textContent!, /not an answer/);
   });
 
-  it("sends a composer message with the panel's answers so far (the bridge's Chat about this), and none once it's gone", async () => {
-    await home(withPilot((p) => {
+  describe('a composer message, with a question open', () => {
+    beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(1_000_000); });
+    afterEach(() => { vi.useRealTimers(); });
+    const later = (ms: number): void => { vi.setSystemTime(Date.now() + ms); };
+    const input = () => $<HTMLTextAreaElement>('#pane-input');
+    const twoQuestions = (p: OrchestratorView): void => {
       const q = p.headless!.pending!.questions[0];
       p.headless!.pending!.questions = [q, { question: 'Size?', header: 'Size', multiSelect: false, options: [{ label: 'S', description: '' }] }];
-    }));
-    await fire(() => opts()[1].click());
-    await fire(() => { $<HTMLTextAreaElement>('#pane-input').value = 'why S?'; });
-    await fire(() => $('#btn-send-enter').click());
-    assert.deepEqual(posts('send'), [{ text: 'why S?', answers: { 'Which fruit?': 'cherry' } }]);
-    // a multiSelect's checks count as they stand (the TUI records them at each check)
-    await fire(() => setAppState(withPilot((p) => { p.headless!.pending!.id = 'm1'; p.headless!.pending!.questions[0].multiSelect = true; })));
-    await fire(() => opts()[0].click());
-    await fire(() => $('#headless-prompt-chat').click());
-    assert.deepEqual(posts('answer'), [{ id: 'm1', chat: true, answers: { 'Which fruit?': 'apple' } }]);
-    await answer('POST /api/orchestrators/pilot/send', { ok: true });
-    await fire(() => setAppState(withPilot(idle)));
-    await fire(() => { $<HTMLTextAreaElement>('#pane-input').value = 'thanks'; });
-    await fire(() => $('#btn-send-enter').click());
-    assert.deepEqual(posts('send')[1], { text: 'thanks' });
+    };
+
+    it("is about it when begun with it on screen, a second on: its id and the panel's answers so far (the bridge's Chat about this)", async () => {
+      await home(withPilot(twoQuestions));
+      await fire(() => opts()[1].click());
+      later(1500);
+      await type(input(), 'why S?');
+      await fire(() => $('#btn-send-enter').click());
+      assert.deepEqual(posts('send'), [{ text: 'why S?', question: '1a2b3c4d', answers: { 'Which fruit?': 'cherry' } }]);
+      // a multiSelect's checks count as they stand (the TUI records them at each check)
+      await fire(() => setAppState(withPilot((p) => { p.headless!.pending!.id = 'm1'; p.headless!.pending!.questions[0].multiSelect = true; })));
+      await fire(() => opts()[0].click());
+      await fire(() => $('#headless-prompt-chat').click());
+      assert.deepEqual(posts('answer'), [{ id: 'm1', chat: true, answers: { 'Which fruit?': 'apple' } }]);
+      await answer('POST /api/orchestrators/pilot/send', { ok: true });
+      assert.deepEqual(getToasts(), [], 'about it: nothing waits');
+      await fire(() => setAppState(withPilot(idle)));
+      await type(input(), 'thanks');
+      await fire(() => $('#btn-send-enter').click());
+      assert.deepEqual(posts('send')[1], { text: 'thanks' });
+    });
+
+    it('the race: Enter on a PC as a question comes sends a message that waits behind it, the question open, and says so', async () => {
+      await home(withPilot(idle));
+      await type(input(), 'and run the tests');
+      later(4000);
+      await fire(() => setAppState(withPilot())); // the question comes…
+      later(300);
+      vi.stubGlobal('matchMedia', () => ({ matches: true }));
+      await fire(() => input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))); // …as Enter is pressed
+      assert.deepEqual(posts('send'), [{ text: 'and run the tests' }], 'not about the question');
+      await answer('POST /api/orchestrators/pilot/send', { ok: true });
+      assert.ok(container.querySelector('#headless-prompt'), 'the question stays open');
+      assert.deepEqual(getToasts().map((t) => [t.title, t.body]), [['Your message waits', 'Pilot reads it once the question is answered. To make it about the question, tap Chat about this.']]);
+      assert.equal(input().value, '', 'sent');
+    });
+
+    it("isn't about it when Send is tapped within a second of it, begun before it came, or a draft kept from before", async () => {
+      await home(withPilot());
+      later(500);
+      await type(input(), 'ok'); // begun after it came, but sent before it could be read
+      await fire(() => $('#btn-send-enter').click());
+      await answer('POST /api/orchestrators/pilot/send', { ok: true });
+      await unmount();
+      await home(withPilot(idle));
+      await type(input(), 'look at'); // the question comes mid-typing
+      later(200);
+      await fire(() => setAppState(withPilot()));
+      later(5000);
+      await type(input(), 'look at the logs');
+      await fire(() => $('#btn-send-enter').click());
+      await answer('POST /api/orchestrators/pilot/send', { ok: true });
+      await unmount();
+      setDraft(draftKey('hl:pilot', 'pilot'), 'kept from before');
+      await home(withPilot());
+      later(5000);
+      await fire(() => $('#btn-send-enter').click());
+      assert.deepEqual(posts('send'), [{ text: 'ok' }, { text: 'look at the logs' }, { text: 'kept from before' }]);
+      // cleared and begun again with it on screen, it is
+      await answer('POST /api/orchestrators/pilot/send', { ok: true });
+      await type(input(), 'what are the options?');
+      await fire(() => $('#btn-send-enter').click());
+      assert.deepEqual(posts('send')[3], { text: 'what are the options?', question: '1a2b3c4d' });
+    });
   });
 
   it('has ■ on its "doing now" line while it works', async () => {
