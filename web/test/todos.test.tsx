@@ -108,6 +108,25 @@ describe('Todos', () => {
     assert.equal(container.querySelector('[data-todo="d4e5f6"] [data-action="todo-done"]')!.hasAttribute('data-loading'), false, 'tappable again');
   });
 
+  it("dense (the sidebar's): two lines of text at most, all of it on hover; Ask on the line of its worker, link and due, else beside the text", async () => {
+    const long = 'merge PR #119 once CI is green at /home/u/src/repo-wt-a-very-long-branch-name-that-wraps';
+    const o = home([item('a1b2c3', long, { agent: 'w-todo' }), item('d4e5f6', 'log in')]);
+    ({ container, unmount } = await render(<Todos o={o} now={NOW} ask={() => {}} dense />));
+    const text = container.querySelector<HTMLElement>('[data-todo="a1b2c3"] .mantine-Text-root')!;
+    assert.equal(text.dataset.lineClamp, 'true');
+    assert.match(text.getAttribute('style')!, /--text-line-clamp: ?2/);
+    assert.equal(text.title, long);
+    const ask = (id: string): HTMLElement => container.querySelector<HTMLElement>(`[data-todo="${id}"] [data-action="todo-ask"]`)!;
+    assert.ok(ask('a1b2c3').parentElement === container.querySelector('[data-todo="a1b2c3"] [data-agent="w-todo"]')!.parentElement, 'on its worker\'s line');
+    assert.ok(ask('d4e5f6').parentElement === container.querySelector('[data-todo="d4e5f6"]'), 'no such line: beside the text');
+    await unmount();
+    // the popover's: all of the text, Ask at the row's end
+    ({ container, unmount } = await render(<Todos o={o} now={NOW} ask={() => {}} />));
+    const full = container.querySelector<HTMLElement>('[data-todo="a1b2c3"] .mantine-Text-root')!;
+    assert.ok(!full.hasAttribute('data-line-clamp') && !full.title);
+    assert.ok(ask('a1b2c3').parentElement === container.querySelector('[data-todo="a1b2c3"]'));
+  });
+
   it('counts what waits at a Home: its blocked agents, its orchestrator waiting itself, its items due now', () => {
     const s: AppState = structuredClone(recorded);
     s.orchestrators[0].agents!.push('p6'); // blocked
