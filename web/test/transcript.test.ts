@@ -348,8 +348,10 @@ describe('quotes (a Reply on a message, Ask on a to-do item)', () => {
     assert.equal(long, `> Replying to my message: ${'あ'.repeat(100)}…`);
     assert.deepEqual(parseQuote(`${long}\n\nそれで?\n\nもう一行`), { of: 'me', line: long, excerpt: `${'あ'.repeat(100)}…`, body: 'それで?\n\nもう一行' });
     assert.equal(quoteLine('you', '# Plan\n> note\n- **one** `a.ts`\n2. [the docs](https://example.com/d) ~~old~~\n\nsnake_case *em*'),
-      '> Replying to your message: Plan note one a.ts the docs old snake_case *em*', 'Markdown marks dropped, as it reads');
-    assert.equal(quoteLine('me', 'is x ** 2 > 3?\n```ts\nconst y = 1;\n```'), '> Replying to my message: is x ** 2 > 3? const y = 1;', 'a lone mark, and code, stay');
+      '> Replying to your message: Plan note one a.ts the docs old snake_case em', 'Markdown marks dropped, as it reads');
+    assert.equal(quoteLine('me', 'is x ** 2 > 3 & <b>?\n```ts\nconst y = 1;\n```'), '> Replying to my message: is x ** 2 > 3 & <b>? const y = 1;', 'a lone mark, and code, stay');
+    assert.equal(quoteLine('you', 'try `run(**x**)` or ```hello``` now'), '> Replying to your message: try run(**x**) or hello now', "code's own marks stay");
+    assert.equal(quoteLine('you', '```\n```'), '> Replying to your message: ``` ```', 'nothing shown: its text');
     assert.deepEqual(parseQuote(quoteLine('notice', '[yoicks] w-a: working → done')),
       { of: 'notice', line: '> Replying to this notice: [yoicks] w-a: working → done', excerpt: '[yoicks] w-a: working → done', body: '' });
   });
