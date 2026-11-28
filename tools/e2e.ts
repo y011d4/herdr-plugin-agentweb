@@ -1985,14 +1985,18 @@ async function h9(c: Ctx) {
     const mark = await hlMark(c, 'wc-h1');
     const needs = `document.querySelector('#home-status [data-action="needs"]')`;
     const listed = await pg.until(`${needs}?.textContent.startsWith('Needs you · 2') && document.getElementById('conn-dot').classList.contains('connected')`, 20_000, 300);
+    // a tap where it lands on `el`: a menu just closed fades out over what is under it for a moment
+    const tapClear = async (el: string): Promise<number> => {
+      if ((await pg.until(`!!${el}`, 3000)).timeout) throw env(`not there: ${el}`);
+      const p = await pg.at(el);
+      if ((await pg.uncovered(el, p)).timeout) throw env(`covered: ${el}`);
+      await pg.tap(p.x, p.y);
+      return Date.now();
+    };
     const pick = async (id: string, action: string): Promise<number> => {
       if (!(await pg.ev(`!!document.querySelector('[data-needs-list]')`))) await pg.tapEl(needs);
-      const row = `document.querySelector('[data-needs-list] [data-todo="${id}"]')`;
-      if ((await pg.until(`!!${row}`, 3000)).timeout) throw env(`no to-do ${id} in the Needs you popover`);
-      await pg.tapEl(row);
-      const opt = `document.querySelector('[data-todo-menu="${id}"] [data-action="${action}"]')`;
-      if ((await pg.until(`!!${opt}`, 2000)).timeout) throw env(`no ${action} in ${id}'s menu`);
-      return pg.tapEl(opt);
+      await tapClear(`document.querySelector('[data-needs-list] [data-todo="${id}"]')`);
+      return tapClear(`document.querySelector('[data-todo-menu="${id}"] [data-action="${action}"]')`);
     };
     const t0 = await pick(ids[0], 'todo-dismiss');
     const del = (id: string) => pg.reqs.filter((q) => q.t >= t0 - 1000 && q.method === 'DELETE' && new URL(q.url).pathname.endsWith(`/todos/${id}`)).map((q) => new URL(q.url).search);
