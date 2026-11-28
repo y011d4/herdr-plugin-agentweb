@@ -41,6 +41,8 @@ describe('vrt viewer', () => {
     assert.equal(pressed(w), 'slider');
     assert.deepEqual(srcs(w), ['home-pc.before.png', 'home-pc.after.png']);
     assert.ok(w.document.getElementById('range'));
+    // each image only on its side of the bar, so a smaller after never shows the before's pixels around it
+    assert.deepEqual([...w.document.querySelectorAll('#view img')].map((i) => (i as unknown as HTMLElement).style.clipPath !== ''), [true, true]);
     const pr = w.document.getElementById('pr');
     assert.ok(!pr?.hidden && pr?.getAttribute('href') === 'https://github.com/y011d4/herdr-yoicks/pull/170' && pr.textContent === '#170');
   });
@@ -80,6 +82,8 @@ describe('vrt viewer', () => {
     w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: '2', bubbles: true }));
     assert.equal(pressed(w), 'blink');
     assert.equal(w.document.querySelector('#view .tag')?.textContent, 'after');
+    // one at a time: the after shown, the before hidden
+    assert.deepEqual([...w.document.querySelectorAll('#view img')].map((i) => (i as unknown as HTMLElement).style.visibility), ['hidden', '']);
     assert.equal(w.localStorage.getItem('yoicks-vrt-mode'), 'blink');
   });
 });

@@ -83,21 +83,33 @@
   if (/^[0-9]{1,6}$/.test(pr)) { var a = $('pr'); a.hidden = false; a.href = 'https://github.com/' + REPO + '/pull/' + pr; a.textContent = '#' + pr }
   var url = function (n, side) { return 'https://raw.githubusercontent.com/' + REPO + '/' + sha + '/' + n + '.' + side + '.png' }
   names.forEach(function (n) { var o = el('option', '', n); o.value = n; $('pick').append(o) })
-  var mode = 'slider', at = 0.5, timer = 0, placeBar = null
+  var mode = 'slider', at = 0.5, timer = 0, refit = null
   try { mode = localStorage.getItem('yoicks-vrt-mode') || mode } catch (e) {}
 
-  // an image at its CSS size: a phone's shots are taken at 2x
   function img(n, side) {
     var i = el('img'); i.alt = n + ' ' + side; i.draggable = false
-    i.onload = function () { i.style.width = (i.naturalWidth / (/-phone$/.test(n) ? 2 : 1)) + 'px' }
     i.onerror = function () { msg('Could not load ' + n + '.' + side + '.png: a newer run of the PR may have replaced these shots; open the link in its comment again.') }
     i.src = url(n, side)
     return i
   }
 
+  // the shots at their CSS size (a phone's are taken at 2x), all scaled by one factor, so that their pixels stay
+  // aligned, to fit `box`; once every one has loaded, and again on a resize; then `done`
+  function fit(imgs, box, n, done) {
+    var dpr = /-phone$/.test(n) ? 2 : 1
+    refit = function () {
+      if (!imgs.every(function (i) { return i.complete && i.naturalWidth })) return
+      var s = Math.min(1, box.clientWidth / Math.max.apply(null, imgs.map(function (i) { return i.naturalWidth / dpr })))
+      imgs.forEach(function (i) { i.style.width = (i.naturalWidth / dpr) * s + 'px' })
+      if (done) done()
+    }
+    imgs.forEach(function (i) { i.addEventListener('load', refit) })
+    refit()
+  }
+
   function render() {
     clearInterval(timer)
-    placeBar = null
+    refit = null
     msg('')
     var n = names.indexOf(location.hash.slice(1)) >= 0 ? location.hash.slice(1) : names[0]
     var k = names.indexOf(n)
@@ -110,21 +122,25 @@
     var view = $('view')
     view.replaceChildren()
     if (mode === 'side') {
-      var s = el('div', 'side')
-      ;['before', 'after'].forEach(function (side) { var f = el('figure'); f.append(el('figcaption', '', side), img(n, side)); s.append(f) })
+      var s = el('div', 'side'), pair = [img(n, 'before'), img(n, 'after')]
+      pair.forEach(function (i, k) { var f = el('figure'); f.append(el('figcaption', '', k ? 'after' : 'before'), i); s.append(f) })
       view.append(s)
+      fit(pair, s.firstChild, n)
       return
     }
     if (mode === 'diff') {
-      var f = el('figure'); f.append(el('figcaption', '', 'where they differ: the after dimmed, the changed pixels magenta'), img(n, 'diff')); view.append(f)
+      var f = el('figure'), d = img(n, 'diff'); f.append(el('figcaption', '', 'where they differ: the after dimmed, the changed pixels magenta'), d); view.append(f)
+      fit([d], view, n)
       return
     }
     var frame = el('div', 'frame'), before = img(n, 'before'), after = img(n, 'after')
     frame.append(before, after)
     view.append(frame)
-    if (mode === 'blink') { // the after and the before in turn; a tap pauses or resumes
+    if (mode === 'blink') { // the after and the before in turn, one at a time (a smaller one shows the frame around it)
+      fit([before, after], view, n)
       var tag = el('span', 'tag', 'after'); tag.style.left = '6px'; frame.append(tag)
-      var show = true, flip = function () { show = !show; after.style.visibility = show ? '' : 'hidden'; tag.textContent = show ? 'after' : 'before' }
+      var show = false, flip = function () { show = !show; after.style.visibility = show ? '' : 'hidden'; before.style.visibility = show ? 'hidden' : ''; tag.textContent = show ? 'after' : 'before' }
+      flip()
       timer = setInterval(flip, 800)
       frame.onclick = function () { if (timer) { clearInterval(timer); timer = 0 } else timer = setInterval(flip, 800) }
       view.append(el('p', 'note', 'Tap the image to pause or resume.'))
@@ -138,14 +154,18 @@
     var range = el('input'); range.type = 'range'; range.id = 'range'; range.min = 0; range.max = 1000; range.value = Math.round(at * 1000)
     range.setAttribute('aria-label', 'Divider between before and after')
     view.append(range)
-    function place() { var x = Math.round(at * frame.clientWidth); after.style.clipPath = 'inset(0 0 0 ' + x + 'px)'; bar.style.left = x + 'px' }
+    // each only on its side of the bar: where one is smaller, the frame shows, never the other's pixels
+    function place() {
+      var x = Math.round(at * frame.clientWidth)
+      before.style.clipPath = 'inset(0 ' + Math.max(0, before.clientWidth - x) + 'px 0 0)'
+      after.style.clipPath = 'inset(0 0 0 ' + x + 'px)'
+      bar.style.left = x + 'px'
+    }
     function to(clientX) { var b = frame.getBoundingClientRect(); at = Math.min(1, Math.max(0, (clientX - b.left) / b.width)); range.value = Math.round(at * 1000); place() }
     range.oninput = function () { at = range.value / 1000; place() }
     frame.onpointerdown = function (e) { try { frame.setPointerCapture(e.pointerId) } catch (err) {} to(e.clientX) }
     frame.onpointermove = function (e) { if (frame.hasPointerCapture(e.pointerId)) to(e.clientX) }
-    before.addEventListener('load', place)
-    after.addEventListener('load', place)
-    placeBar = place
+    fit([before, after], view, n, place)
     place()
   }
 
@@ -164,7 +184,7 @@
     else if (/^[1-4]$/.test(e.key)) document.querySelectorAll('#modes button')[e.key - 1].click()
   })
   addEventListener('hashchange', render)
-  addEventListener('resize', function () { if (placeBar) placeBar() })
+  addEventListener('resize', function () { if (refit) refit() })
   render()
 })()
 </script>
