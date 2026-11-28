@@ -72,17 +72,19 @@ const tool = (id: string, name: string, summary: string, rest: { todos?: Extract
   ({ kind: 'tool_use', id, name, summary, todos: rest.todos ?? null, ask: rest.ask ?? null, sidechain: false, ts: T0 });
 const result = (forId: string, text: string, isError = false, truncated = false): Item =>
   ({ kind: 'tool_result', forId, text, truncated, isError, sidechain: false, ts: T0 });
+/** `it`, sent `min` minutes before T0 (a Home shows its time) */
+const ago = (min: number, it: Item): Item => ({ ...it, ts: T0 - min * 60_000 });
 
 const PRS_OPEN = 'Started **flaky-test**. Two PRs are open:\n- #108 the token screen\n- #109 the toasts\n\nBoth have green CI.';
 /** By pane id; a pane without one has no transcript (its terminal shows). */
 export const transcripts: Record<string, Item[]> = {
   p4: [
-    user('Review the open PRs, and start a worker on the flaky test in herdr-yoicks.'),
-    said("I'll look at the open PRs first, then start **flaky-test** in `herdr-yoicks`."),
-    user('[yoicks] started flaky-test (pane p2): the first task was sent'),
-    said(PRS_OPEN),
-    user(`${quoteLine('you', PRS_OPEN)}\n\nMerge #109 first.`),
-    user('[yoicks] review: working → blocked'),
+    ago(1500, user('Review the open PRs, and start a worker on the flaky test in herdr-yoicks.')),
+    ago(1499, said("I'll look at the open PRs first, then start **flaky-test** in `herdr-yoicks`.")),
+    ago(1498, user('[yoicks] started flaky-test (pane p2): the first task was sent')),
+    ago(12, said(PRS_OPEN)),
+    ago(5, user(`${quoteLine('you', PRS_OPEN)}\n\nMerge #109 first.`)),
+    ago(2, user('[yoicks] review: working → blocked')),
     user('This is the screenshot.', ['/icons/icon-512.png']),
   ],
   p1: [
@@ -112,12 +114,12 @@ export const transcripts: Record<string, Item[]> = {
     said('Waiting for your answer.'),
   ],
   'hl:work': [
-    user('Start a worker on the flaky ws test in herdr-yoicks.'),
+    ago(1440, user('Start a worker on the flaky ws test in herdr-yoicks.')),
     tool('a1', 'mcp__yoicks__agent_start', 'flaky-test'),
-    result('a1', 'started flaky-test (pane w8H:p1) in /home/u/src/herdr-yoicks; delivered to flaky-test: you are woken when it finishes or stops for an answer'),
-    said('Started **flaky-test** on it.'),
-    user('[yoicks] flaky-test: working → done'),
-    said('It found the race. I asked it to add a regression test too.'),
+    ago(1439, result('a1', 'started flaky-test (pane w8H:p1) in /home/u/src/herdr-yoicks; delivered to flaky-test: you are woken when it finishes or stops for an answer')),
+    ago(1439, said('Started **flaky-test** on it.')),
+    ago(25, user('[yoicks] flaky-test: working → done')),
+    ago(24, said('It found the race. I asked it to add a regression test too.')),
     tool('a2', 'mcp__yoicks__agent_prompt', 'flaky-test: Also add a regression test for the reconnect race in ws.test.ts, then open a PR'),
     result('a2', 'delivered to flaky-test: you are woken when it finishes or stops for an answer'),
     tool('a3', 'mcp__yoicks__agent_prompt', 'review: look at the PR again'),
