@@ -123,6 +123,8 @@ export function PromptPanel({ paneId, prompt, view }: { paneId: string; prompt: 
 /** The answers a headless orchestrator's open question has so far in its panel, by orchestrator:
  *  its Chat about this, sent from the composer (ui/Pane.tsx), carries them. */
 export const answersSoFar = new Map<string, Record<string, string>>();
+/** The question minimized, by orchestrator (its id): kept while it is open, a new one comes in full. */
+const minimized = new Map<string, string>();
 
 /**
  * A headless orchestrator's question (the State's headless.pending: its AskUserQuestion, which the
@@ -138,6 +140,8 @@ export const answersSoFar = new Map<string, Record<string, string>>();
  * whose message then goes with the question's id and answersSoFar (the bridge's /send), and the
  * bridge refuses the question with Claude Code's words for it, the answers so far in them, so the
  * orchestrator reads the message with them. The panel flashes as it comes (style.css).
+ * Minimize shrinks it to one line above the composer, so the chat shows (several questions, a phone);
+ * a tap on that line brings it back as it was, the answers so far in it.
  */
 export function HeadlessPrompt({ name, pending, chatting, onChat }:
   { name: string; pending: { id: string; questions: AskQuestion[] }; chatting: boolean; onChat: () => void }) {
@@ -148,6 +152,13 @@ export function HeadlessPrompt({ name, pending, chatting, onChat }:
   const [own, setOwn] = useState(''); // and what is typed in it: this question's alone
   const [sending, setSending] = useState(false);
   const busy = useRef(false); // set at once, so a second tap before the re-render sends nothing
+  const [small, setSmall] = useState(() => minimized.get(name) === pending.id);
+  useEffect(() => { if (minimized.get(name) !== pending.id) minimized.delete(name); }, [name, pending.id]); // an earlier question's
+  const minimize = (on: boolean): void => {
+    if (on) minimized.set(name, pending.id);
+    else minimized.delete(name);
+    setSmall(on);
+  };
   const q = pending.questions[step];
   // the checked ones in their order, then the typed answer (as the TUI joins them)
   const chosen = (): string[] => (q ? [...q.options.filter((o) => q.multiSelect && picked.includes(o.label)).map((o) => o.label),
@@ -193,9 +204,23 @@ export function HeadlessPrompt({ name, pending, chatting, onChat }:
 
   const next = (): void => { if (chosen().length && !sending) answer(chosen().join(', ')); }; // Next, or Send on the last
   const toggle = (label: string): void => setPicked((p) => (p.includes(label) ? p.filter((l) => l !== label) : [...p, label]));
+  const count = pending.questions.length;
+  // the same element either way: expanding doesn't flash it again
+  if (small) return (
+    <div className={`${PANEL} py-0`} id="headless-prompt" data-minimized="">
+      <UnstyledButton id="headless-prompt-expand" className="flex min-h-11 w-full items-center gap-2 text-left" onClick={() => minimize(false)}>
+        <Text span fz={13} fw={650} c="blocked" className="min-w-0 flex-1 truncate">&#9203; {count > 1 ? `Questions (${count})` : 'Question'} — tap to answer</Text>
+        <Text span fz={12} c="dimmed" aria-hidden>&#9650;</Text>
+      </UnstyledButton>
+    </div>
+  );
   return (
     <div className={PANEL} id="headless-prompt">
-      <Head>&#9203; {q.header || 'Question'}{pending.questions.length > 1 ? ` (${step + 1}/${pending.questions.length})` : ''}</Head>
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1"><Head>&#9203; {q.header || 'Question'}{count > 1 ? ` (${step + 1}/${count})` : ''}</Head></div>
+        <Button id="headless-prompt-minimize" variant="default" size="compact-xs" radius="xl" fz={12} fw={600} c="dimmed"
+          className="bg-transparent hover:bg-(--color-surface-2)" onClick={() => minimize(true)}>Minimize &#9660;</Button>
+      </div>
       <Question>{q.question}</Question>
       <Options>
         {q.options.map((o, i) => {
@@ -235,8 +260,9 @@ export function HeadlessPrompt({ name, pending, chatting, onChat }:
 
 // ── The panels' parts ─────────────────────────────────────────────────────────
 
-// below the chat, an orange rule on top; past 45% of the screen it scrolls on its own
-const PANEL = 'chat-prompt shrink-0 max-h-[45vh] overflow-y-auto border-t-2 border-(--color-blocked) bg-(--color-surface) px-3 py-2.5 lg:px-(--wide-gutter)';
+// below the chat, an orange rule on top; past 40% of what the screen shows (the keyboard's room left out:
+// --app-height) it scrolls on its own, so some of the chat stays in view
+const PANEL = 'chat-prompt shrink-0 max-h-[calc(var(--app-height,100dvh)*0.4)] overflow-y-auto border-t-2 border-(--color-blocked) bg-(--color-surface) px-3 py-2.5 lg:px-(--wide-gutter)';
 
 const Head = ({ children }: { children: ReactNode }) => <Text className="chat-prompt-head" fz={12} fw={650} c="blocked" mb={8}>{children}</Text>;
 // the question (none: no line)
