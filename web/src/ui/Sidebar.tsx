@@ -4,7 +4,7 @@
  * dot and ⚙ (Settings): the topbar beside it is the screen's own (a Home's header). Then each orchestrator's Home, a row
  * in config order that opens it (the Home on show marked): its dot (its orchestrator's state), its name, what waits on
  * the user there as a count (Todos.tsx's needsYou: its account's blocked agents, its question, its items due now), and
- * under them its account's other agents as counts (working, done, idle). What waits there and the agents themselves
+ * under them its account's other agents as counts (working, done, idle; each, a zero dimmed, so they line up). What waits there and the agents themselves
  * are the Home's: its panel at its right (ui/HomePanel.tsx), or below that width its status bar's popovers. Then Other,
  * the blocked agents no Home's account lists (a click opens one: nav.ts's openAgent, on a PC in herdr). At the bottom,
  * pinned, All agents (their count): the full list.
@@ -65,14 +65,14 @@ export function Sidebar({ dot }: { dot: ReactNode }) {
   );
 }
 
-// A Home's row: its dot, its name and what waits there (a count), under them its agents' counts (none: no second line)
+// A Home's row: its dot, its name and what waits there (a count), under them its agents' counts (without agents: 0 0 0)
 function Home({ o, state, now, on }: { o: OrchestratorView; state: AppState; now: number; on: boolean }) {
   const s = homeSummary(agentCards(state, o), store.seenDone);
   const st = orchestratorStatus(o, o.paneId ? findPane(o.paneId)?.pane : undefined, store.seenDone);
   return (
     <NavLink href={homeHash(o.name)} className="sidebar-home rounded-lg" data-home={o.name} fw={600} c={o.paneId ? undefined : 'dimmed'}
       label={orchestratorLabel(o)} leftSection={<StatusDot status={st} />} rightSection={<NeedsBadge n={needsYou(o, state, now)} />}
-      description={s.working + s.done + s.idle > 0 ? <span className="mt-1 block"><StatusCounts n={s} /></span> : undefined}
+      description={<span className="mt-1 block"><StatusCounts n={s} /></span>}
       active={on} aria-current={current(on)} />
   );
 }

@@ -27,10 +27,11 @@ async function show(hash: string, state: AppState | null): Promise<HTMLElement> 
   unmount = r.unmount;
   return r.container;
 }
-/** each Home's row: its name, its dot's status, its count, its agents' counts (working, done, idle; '' for none) */
+/** each Home's row: its name, its dot's status, its count, its agents' counts (working, done, idle; a zero dimmed: 0-) */
 const rows = (c: HTMLElement): Array<[string, string, string, string]> => [...c.querySelectorAll<HTMLAnchorElement>('a.sidebar-home')]
   .map((a) => [a.dataset.home!, a.querySelector<HTMLElement>('.status-dot')!.dataset.status!, a.querySelector('.home-needs')?.textContent ?? '',
-    [...a.querySelectorAll<HTMLElement>('.status-counts [data-count]')].map((e) => (e.classList.contains('invisible') ? '-' : e.textContent!.trim().split(' ')[0])).join(' ')]);
+    [...a.querySelectorAll<HTMLElement>('.status-counts [data-count]')]
+      .map((e) => e.textContent!.trim().split(' ')[0] + (e.classList.contains('opacity-40') ? '-' : '')).join(' ')]);
 const marked = (c: HTMLElement): string[] => [...c.querySelectorAll<HTMLElement>('[aria-current="page"]')]
   .map((e) => e.dataset.home ?? e.getAttribute('href')!);
 
@@ -60,7 +61,7 @@ describe('Sidebar', () => {
     s.orchestrators[0].todos = [item('t1', 'Merge the PR')];
     const c = await show('#/agents', s);
     // personal: p1 working, p3 done, t1 due; work's account is unknown: every agent, p6 blocked (its count), p7 unknown (idle)
-    assert.deepEqual(rows(c), [['personal', 'idle', '1', '1 1 -'], ['work', 'stopped', '1', '1 1 1']]);
+    assert.deepEqual(rows(c), [['personal', 'idle', '1', '1 1 0-'], ['work', 'stopped', '1', '1 1 1']]);
     const personal = c.querySelector<HTMLAnchorElement>('a[data-home="personal"]')!;
     assert.equal(personal.getAttribute('href'), '#/home/personal');
     assert.equal(personal.querySelector('.mantine-NavLink-label')!.textContent, 'Personal');
@@ -70,12 +71,11 @@ describe('Sidebar', () => {
     assert.ok(!c.querySelector('.home-todo, .agent-row'), 'neither what waits there nor the agents: those are its Home\'s');
   });
 
-  it('has no counts under a Home without agents, and no count on it while nothing waits there', async () => {
+  it('has zeros under a Home without agents, as tall as the others, and no count on it while nothing waits there', async () => {
     const s = fresh();
     s.orchestrators[1].agents = []; // work: none
     const c = await show('#/agents', s);
-    assert.deepEqual(rows(c), [['personal', 'idle', '', '1 1 -'], ['work', 'stopped', '', '']]);
-    assert.equal(c.querySelector('a[data-home="work"] .mantine-NavLink-description')!.childElementCount, 0, 'one line');
+    assert.deepEqual(rows(c), [['personal', 'idle', '', '1 1 0-'], ['work', 'stopped', '', '0- 0- 0-']]);
   });
 
   it('marks the Home on show; All agents, at the bottom, links the list and is marked on it', async () => {

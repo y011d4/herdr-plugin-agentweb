@@ -21,14 +21,13 @@ export function StatusBadge({ status, small = false }: { status: string; small?:
 
 const COUNTED = ['working', 'done', 'idle'] as const;
 
-/** A Home's agents as counts, each after its status's dot (the rail's rows, the panel's heading): working, done, idle. A
- *  zero keeps its place unseen, so the rows' counts line up; nothing without any. */
+/** A Home's agents as counts, each after its status's dot (the rail's rows, the panel's heading): working, done, idle.
+ *  Every one, a zero dimmed, so the rows' counts line up and a Home without agents reads 0 0 0. */
 export function StatusCounts({ n }: { n: Record<(typeof COUNTED)[number], number> }) {
-  if (!n.working && !n.done && !n.idle) return null;
   return (
     <span className="status-counts flex items-center gap-2.5 text-[12px] tabular-nums text-(--color-text-dim)">
       {COUNTED.map((k) => (
-        <span key={k} data-count={k} className={`flex items-center gap-1 ${n[k] ? '' : 'invisible'}`}>
+        <span key={k} data-count={k} className={`flex items-center gap-1 ${n[k] ? '' : 'opacity-40'}`}>
           <StatusDot status={k} />{n[k]}<span className="sr-only">{` ${k}`}</span>
         </span>
       ))}
