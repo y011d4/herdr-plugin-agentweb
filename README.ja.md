@@ -14,8 +14,8 @@
 たくさんのコーディングエージェントを、そのうちの 1 つを通して同時に動かすための [herdr](https://herdr.dev) プラグインです。
 仕事は **orchestrator** に渡します。**Home** で話しかける Claude Code のエージェントです。orchestrator はタスクごとにワーカーを
 起動し (同じリポジトリを並行して変更するものは、それぞれ専用の git worktree で)、進み具合を追い、終わったときやあなたが要る
-ときだけ戻ってきます。ヘッドレスの orchestrator は、あなたにしかできないことをやることリストに残し、PR がマージされると
-その先へ進みます。小さなローカルのブリッジが、そのすべてをスマホや PC のブラウザに届けます。アカウントもクラウドも要りません。
+ときだけ戻ってきます。ヘッドレスの orchestrator は、あなたにしかできないことをやることリストに残し、`pr_watch` を有効にすれば
+PR がマージされたあとも先へ進みます。小さなローカルのブリッジが、そのすべてをスマホや PC のブラウザに届けます。アカウントもクラウドも要りません。
 
 **ドキュメント: https://yoicks.y011d4.com/docs/ja/** (English: https://yoicks.y011d4.com/docs/en/)
 
@@ -32,8 +32,16 @@ Linux (amd64 か arm64。macOS は試験的な対応) の [herdr](https://herdr.
 
 ```bash
 herdr plugin install y011d4/herdr-yoicks --ref v0.1.0
+```
+
+次に、スマホからの経路を用意し、スマホが使うアドレスをプラグインの `config.json` の `public_url` に書きます
+(そのディレクトリは `herdr plugin config-dir y011d4.yoicks` で表示されます。[スマホへの公開](https://yoicks.y011d4.com/docs/ja/guide/phone) を参照)。
+これが無いと、接続用の QR は見つけた Tailscale のアドレスを使い、それも無ければスマホでは開けない
+`http://127.0.0.1:<port>` になります。そのあとブリッジを起動し、QR を読み取ります:
+
+```bash
 herdr plugin action invoke y011d4.yoicks.start                      # ブリッジをデーモンとして起動
-herdr plugin pane open --plugin y011d4.yoicks --entrypoint connect  # スマホで開く QR コード
+herdr plugin pane open --plugin y011d4.yoicks --entrypoint connect  # スマホで読み取る QR コード
 ```
 
 ## ドキュメント

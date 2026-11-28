@@ -14,8 +14,8 @@
 A [herdr](https://herdr.dev) plugin for running many coding agents at once through one of them. You hand the work
 to an **orchestrator**, a Claude Code agent you talk to on its **Home**. It starts a worker for each task (in a git
 worktree of its own when several change one repository), follows them, and comes back to you only when one is done
-or needs you. A headless orchestrator also keeps a to-do list of what only you can do, and goes on after a PR is
-merged. A small local bridge serves all of it to your phone or a PC's browser: no account, no cloud.
+or needs you. A headless orchestrator also keeps a to-do list of what only you can do and, with `pr_watch` on,
+goes on after a PR is merged. A small local bridge serves all of it to your phone or a PC's browser: no account, no cloud.
 
 **Documentation: https://yoicks.y011d4.com/docs/en/** (日本語: https://yoicks.y011d4.com/docs/ja/)
 
@@ -32,8 +32,17 @@ against the checksums committed with its release.
 
 ```bash
 herdr plugin install y011d4/herdr-yoicks --ref v0.1.0
+```
+
+Then give your phone a way in, and write the address it will use as `public_url` in the plugin's `config.json`
+(`herdr plugin config-dir y011d4.yoicks` prints its dir; see
+[Exposing the bridge to your phone](https://yoicks.y011d4.com/docs/en/guide/phone)). Without it, the connect QR
+uses a Tailscale address it finds, else `http://127.0.0.1:<port>`, which a phone can't open. Then start the bridge
+and scan the QR:
+
+```bash
 herdr plugin action invoke y011d4.yoicks.start                      # the bridge, as a daemon
-herdr plugin pane open --plugin y011d4.yoicks --entrypoint connect  # the QR code to open on your phone
+herdr plugin pane open --plugin y011d4.yoicks --entrypoint connect  # the QR code to scan with your phone
 ```
 
 ## Documentation
