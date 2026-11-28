@@ -687,7 +687,9 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   decodes and compares the PNGs), in one comment it updates (images in `refs/screenshots/pr-<n>`, outside the branches).
   No herdr, no bridge: a stand-in serves `tools/shots-fixture.ts` (made-up data, typed as the web's
   `State`, so `npm run check:contract` fails when it goes stale; the shots are public, so never real
-  data in it). A new screen is a line in its `scenes`. The same build shoots the same bytes: a browser
+  data in it). One full screen per kind of screen, plus the components cut out of them (a scene's `parts`: an
+  element's box from the same page, so a diff names the component that changed; the comment lists them first).
+  A new screen is a line in its `scenes`, a new component a part. The same build shoots the same bytes: a browser
   context per shot, a frozen clock, UTC, no animations (CSS transitions off; not reduced motion, which made a
   popover's raster flip between runs), images decoded, one origin (a fixed port, 8397) for both builds and every run, the entry script
   under a fixed name (the app shows its hash). Its `screens` job is a **gate** (a required check): it fails while
