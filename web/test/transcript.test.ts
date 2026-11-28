@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
-import { askAnswer, renderMarkdown, conversationItems, latestActivity, parseQuote, quoteLine, todoQuote, WORKER_NOTICE, type TimelineItem } from '../src/transcript.ts';
+import { askAnswer, renderMarkdown, conversationItems, latestActivity, parseQuote, quoteLine, todoQuote, agentQuote, WORKER_NOTICE, type TimelineItem } from '../src/transcript.ts';
 import { createElement } from 'react';
 import { createChatLog, Notice } from '../src/ui/ChatLog.tsx';
 import { chatDom, drawn } from './render.ts';
@@ -400,6 +400,13 @@ describe('quotes (a Reply on a message, Ask on a to-do item)', () => {
     assert.equal(line, '> To-do: merge PR (#7) (id t1, worker w-a, https://github.com/o/r/pull/7)');
     assert.equal(todoQuote({ id: 't2', text: 'log in', agent: null, url: null }), '> To-do: log in (id t2)');
     assert.deepEqual(parseQuote(`${line}\n\nis CI green?`), { of: 'todo', line, excerpt: 'merge PR (#7)', body: 'is CI green?' });
+  });
+
+  it("quotes an agent with its name, purpose, pane id and status; shows its name and purpose", () => {
+    const line = agentQuote({ name: 'w-a', purpose: 'fix the\nreview (#7)', paneId: 'p3', status: 'done' });
+    assert.equal(line, '> Agent: w-a — fix the review (#7) (pane p3, done)');
+    assert.equal(agentQuote({ name: 't1', purpose: null, paneId: 'p1', status: 'idle' }), '> Agent: t1 (pane p1, idle)');
+    assert.deepEqual(parseQuote(`${line}\n\nstill needed?`), { of: 'agent', line, excerpt: 'w-a — fix the review (#7)', body: 'still needed?' });
   });
 
   it('reads no quote from anything else: a plain quote, one not on its own line, one not at the start', () => {

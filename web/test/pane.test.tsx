@@ -515,6 +515,20 @@ describe('Home', () => {
     assert.ok(!shown(), 'leaving the screen (its drawer) closes it');
   });
 
+  it("on a PC a row's ⋮ asks the orchestrator about its agent: the quote in the composer (✕ drops it), the popover closed", async () => {
+    fakeMedia(WIDE_QUERY, true);
+    await home(fresh());
+    await fire(() => $('.home-counts').click());
+    await fire(() => $('[data-agents-list] [data-agent-menu="p3"]').click());
+    await fire(() => $('[data-agent-more="p3"] [data-action="ask"]').click());
+    assert.equal(container.querySelector('[data-agents-list]'), null, 'closed');
+    assert.equal($('#composer-quote').dataset.quoteOf, 'agent');
+    assert.equal($('#composer-quote').textContent, 'Asking about an agentw-review — レビューの指摘を直す');
+    assert.ok(document.activeElement === ta(), 'the focus in the composer, to type the question');
+    await fire(() => $('#composer-quote [aria-label="Cancel the question about the agent"]').click());
+    assert.equal(container.querySelector('#composer-quote'), null);
+  });
+
   it('counts the agents waiting on the user on Needs you and lists them in its popover; a switcher once two orchestrators run', async () => {
     const s = fresh();
     s.orchestrators[0].agents!.push('p6'); // blocked

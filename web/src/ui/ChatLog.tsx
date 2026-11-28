@@ -200,7 +200,7 @@ const REPLY_ICON = (
  *  selected, the browser's own menu instead. A phone's long press is the OS's: it selects words, with the OS's
  *  handles and Copy (Menu.ContextMenu would take it: no selection, no callout); a mouse selects as anywhere.
  *  Its data-quote is that quote line: a reply's QuoteRef finds it by it. */
-function Repliable({ className, of, text, time, children }: { className: string; of: Exclude<QuoteOf, 'todo'>; text: string; time?: string; children: ReactNode }) {
+function Repliable({ className, of, text, time, children }: { className: string; of: Exclude<QuoteOf, 'todo' | 'agent'>; text: string; time?: string; children: ReactNode }) {
   const reply = useContext(ReplyTo);
   const [native, setNative] = useState(false);
   if (!reply || !text.trim()) return <div className={className} data-time={time}>{children}</div>;
@@ -263,8 +263,8 @@ function MenuOnTap({ children }: { children: ReactElement<HTMLAttributes<HTMLDiv
 
 const selected = (): boolean => { const s = getSelection(); return !!s && !s.isCollapsed; };
 
-// whose message a quote is (a to-do item's: none, it isn't in the chat)
-const QUOTE_LABEL: Record<QuoteOf, string> = { you: 'Orchestrator', me: 'You', notice: 'yoicks', todo: 'To-do' };
+// whose message a quote is (a to-do item's or an agent's: none, it isn't in the chat)
+const QUOTE_LABEL: Record<QuoteOf, string> = { you: 'Orchestrator', me: 'You', notice: 'yoicks', todo: 'To-do', agent: 'Agent' };
 
 /** What a quote shows of what it quotes: `head` (whose, by default), then its excerpt (two lines at most). */
 export const QuoteText = ({ q, head = QUOTE_LABEL[q.of] }: { q: Quote; head?: string }) => (
@@ -275,10 +275,10 @@ export const QuoteText = ({ q, head = QUOTE_LABEL[q.of] }: { q: Quote; head?: st
 );
 
 /** On top of a reply's bubble: what it quotes. A tap scrolls the chat to that message (the nearest before it
- *  with that quote line) and marks it a moment; a to-do item's isn't in the chat, so it is no button. */
+ *  with that quote line) and marks it a moment; a to-do item's or an agent's isn't in the chat, so it is no button. */
 function QuoteRef({ q }: { q: Quote }) {
   const cls = 'chat-quote-ref mb-1.5 block w-full rounded-md border-l-3 border-white/60 bg-black/20 px-2 py-1 text-left';
-  if (q.of === 'todo') return <div className={cls} data-quote-of="todo"><QuoteText q={q} /></div>;
+  if (q.of === 'todo' || q.of === 'agent') return <div className={cls} data-quote-of={q.of}><QuoteText q={q} /></div>;
   return (
     <UnstyledButton className={cls} data-quote-of={q.of} aria-label={`Show the message replied to (${QUOTE_LABEL[q.of]}): ${q.excerpt}`}
       onClick={(e) => showOriginal(e.currentTarget, q.line)}><QuoteText q={q} /></UnstyledButton>

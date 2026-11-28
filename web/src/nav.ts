@@ -60,6 +60,10 @@ addEventListener('popstate', moved); // first: before a close waiting on the sam
 /** Whether a close of the overlay on show is under way (its Back not landed yet). */
 export const closingDrawer = (): boolean => closing === location.href;
 
+/** Whether `paneId` is the drawer's pane now, not closing. The hash, not view.activePaneId: it changes at
+ *  once; a close going Back changes it only once that lands (closingDrawer). */
+export const drawerShows = (paneId: string): boolean => location.hash === `#/pane/${encodeURIComponent(paneId)}` && !closingDrawer();
+
 /** The app's every history.back(): one close waits for it to land. */
 export function back(): void {
   traversing = true;

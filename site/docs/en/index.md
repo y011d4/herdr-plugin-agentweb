@@ -35,7 +35,9 @@ phone or a PC's browser:
   (fresh session), or stops it (an orchestrator's Home has **Clear** and **Stop**, and a headless
   one's **Compact**, in the **⋮** on its status bar, on a PC in its top bar). On a PC's browser a click on an agent opens it
   in herdr: herdr on the PC switches to that agent's workspace, tab and pane (its **⋮** there has **Show here**, to open it in
-  the browser instead, and an open pane's **⋮** has **Open in herdr**). Agents are started by the orchestrators, not by hand.
+  the browser instead, and **Stop agent…**; beside a running Home, **Ask the orchestrator** quotes the agent (its name,
+  purpose, pane and status) in the Home's composer, to ask about it, "is it still needed?" say; an open pane's **⋮** has
+  **Open in herdr**). Stopping an agent closes its pane, which ends what runs in it. Agents are started by the orchestrators, not by hand.
   **⚙** at the top right (on a PC at the top of the left rail) opens the settings
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
   scrollback by swiping down, multiline input, and quick keys

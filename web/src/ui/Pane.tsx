@@ -22,7 +22,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, typ
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
 import { draftKey, getDraft, getQuote, onQuote, pruneDrafts, setDraft, setQuote } from '../drafts.ts';
-import { byUrgency, homeSummary, orchestratorStatus, type HomeSummary } from '../dashboard-group.ts';
+import { byUrgency, homeSummary, orchestratorStatus, type DashboardCard, type HomeSummary } from '../dashboard-group.ts';
 import { fitImages, MAX_IMAGES, toAttachment, type ImageAttachment } from '../image.ts';
 import { showToast } from '../notify.ts';
 import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
@@ -33,7 +33,7 @@ import { usePanel, useWide } from '../theme.ts';
 import { dueLabel } from '../todos.ts';
 import type { AppState, HeadlessCompact, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
 import { QuoteText } from './ChatLog.tsx';
-import { AgentRow, SettingsButton, TopbarIcon, agentCards, orchestratorLabel, relativeTime, useHeldState } from './Dashboard.tsx';
+import { AgentRow, SettingsButton, TopbarIcon, agentCards, askAbout, orchestratorLabel, relativeTime, useHeldState } from './Dashboard.tsx';
 import { StatusDot } from './Status.tsx';
 import { NeedsBadge, NeedsButton, needsYou, useMinute } from './Todos.tsx';
 import type { Topbar } from './App.tsx';
@@ -355,10 +355,12 @@ function HomeStatus({ name, state, actions, clear = actions?.clear, paneId }:
 // buttons (below sm only the numbers: the words come back with the room). A tap opens the popover under it, as Needs you's
 // does (Todos.tsx's NeedsButton: as wide as a phone allows, no taller than the room below it; Escape, a tap outside, a tap
 // on it again and leaving the screen close it; the focus goes into it and back): its account's agents, blocked first, then
-// working, done and idle (byUrgency), each opening its drawer, then Open the list (#/agents/<name>). Like the agents list it
-// holds still while a finger is down (useHeldState).
+// working, done and idle (byUrgency), each opening its drawer, then Open the list (#/agents/<name>); on a PC a row's ⋮ also
+// asks the orchestrator about it (on a running Home: the popover closes, the focus stays in the composer) or stops it. Like
+// the agents list it holds still while a finger is down (useHeldState).
 function AgentsButton({ name, s }: { name: string; s: HomeSummary }) {
   const [opened, setOpened] = useState(false);
+  const [asked, setAsked] = useState(false); // closed by an Ask: the focus stays in the composer
   const [held, hold] = useHeldState();
   useEffect(() => {
     if (!opened) return;
@@ -366,21 +368,23 @@ function AgentsButton({ name, s }: { name: string; s: HomeSummary }) {
     addEventListener('hashchange', close);
     return () => removeEventListener('hashchange', close);
   }, [opened]);
-  const cards = byUrgency(agentCards(held, held?.orchestrators.find((o) => o.name === name)), store.seenDone);
+  const o = held?.orchestrators.find((x) => x.name === name);
+  const cards = byUrgency(agentCards(held, o), store.seenDone);
+  const ask = o?.paneId ? (c: DashboardCard): void => { askAbout(name, c); setAsked(true); setOpened(false); } : undefined;
   return (
     <Popover opened={opened} onChange={setOpened} position="bottom-start" width="min(400px, calc(100vw - 24px))" radius="md" shadow="md"
-      trapFocus returnFocus middlewares={{ shift: { padding: 12 }, size: { padding: 12 } }}>
+      trapFocus returnFocus={!asked} middlewares={{ shift: { padding: 12 }, size: { padding: 12 } }}>
       <Popover.Target>
         <Button {...SMALL} className="home-counts shrink-0 bg-transparent hover:bg-(--color-surface-2)" classNames={{ label: 'gap-x-3' }} size="compact-sm" fz={13} fw={400}
           data-action="agents" title="Agents" aria-label={`Agents: ${s.working} working, ${s.done} done, ${s.idle} idle`}
-          rightSection={<span className="text-[10px]" aria-hidden="true">&#9662;</span>} onClick={() => setOpened(!opened)}>
+          rightSection={<span className="text-[10px]" aria-hidden="true">&#9662;</span>} onClick={() => { setAsked(false); setOpened(!opened); }}>
           <span data-count=""><Dot status="working" />{s.working}<span className="max-sm:hidden"> working</span></span>
           <span data-count=""><Dot status="done" />{s.done}<span className="max-sm:hidden"> done</span></span>
           <span data-count=""><Dot status="idle" />{s.idle}<span className="max-sm:hidden"> idle</span></span>
         </Button>
       </Popover.Target>
       <Popover.Dropdown className="overflow-y-auto overscroll-contain" p={6} data-agents-list="" {...hold}>
-        {cards.length ? cards.map((c) => <AgentRow key={c.pane.paneId} card={c} />) : <Text c="dimmed" fz={13} px={12} py={8}>No active agents.</Text>}
+        {cards.length ? cards.map((c) => <AgentRow key={c.pane.paneId} card={c} ask={ask} askOff={!!o?.headless?.pending} />) : <Text c="dimmed" fz={13} px={12} py={8}>No active agents.</Text>}
         <div className="mt-1 border-t border-(--color-border) pt-1">
           <NavLink href={homeAgentsHash(homeHash(name))} className="agents-open-list rounded-lg" label="Open the list" rightSection="›" />
         </div>
@@ -570,6 +574,7 @@ const QKEY = 'qkey shrink-0 text-(--color-text-dim) active:border-(--color-accen
 // what the composer says it sends a quote of
 const QUOTING: Record<QuoteOf, string> = {
   you: 'Replying to the orchestrator', me: 'Replying to your message', notice: 'Replying to a yoicks notice', todo: 'Asking about a to-do',
+  agent: 'Asking about an agent',
 };
 
 const autoGrow = (t: HTMLTextAreaElement): void => {
@@ -772,7 +777,7 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
       {q && (
         <Group id="composer-quote" data-quote-of={q.of} gap={8} wrap="nowrap" pt={8} className="px-3 lg:px-(--wide-gutter)">
           <div className="min-w-0 flex-1 border-l-3 border-(--color-accent) pl-2 text-(--color-text-dim)"><QuoteText q={q} head={QUOTING[q.of]} /></div>
-          <CloseButton size={28} aria-label={q.of === 'todo' ? 'Cancel the question about the to-do' : 'Cancel the reply'} onClick={() => setQuote(key, '')} />
+          <CloseButton size={28} aria-label={q.of === 'todo' ? 'Cancel the question about the to-do' : q.of === 'agent' ? 'Cancel the question about the agent' : 'Cancel the reply'} onClick={() => setQuote(key, '')} />
         </Group>
       )}
       {locked && (

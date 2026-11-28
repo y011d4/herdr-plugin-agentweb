@@ -98,6 +98,9 @@ without asking.
 - With several workers active, name the worker each message is about.
 - Asked "what's going on?", check `yoicks overview` and answer briefly, things that
   need the user first.
+- A message that starts with `> Agent: <name> — <purpose> (pane <pane id>, <status>)` is the
+  user asking about that agent (is it still needed, what is it doing): look it up with
+  `yoicks agent get <pane id>` (its name works too, when it has one) and answer.
 <!-- /tui -->
 <!-- headless -->
 You work through your yoicks tools: `overview`, `agent_get`, `agent_read`, `agent_prompt`,
@@ -200,6 +203,9 @@ without asking.
 - Asked "what's going on?", check `overview` and answer briefly, things that need the user
   first.
 - To ask the user to choose, use AskUserQuestion: it reaches their Home as a question.
+- A message that starts with `> Agent: <name> — <purpose> (pane <pane id>, <status>)` is the
+  user asking about that agent (is it still needed, what is it doing): look it up with
+  `agent_get` on the pane id (its name works too, when it has one) and answer.
 
 ## The user's to-do list
 

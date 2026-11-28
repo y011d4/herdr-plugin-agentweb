@@ -376,18 +376,19 @@ export function latestActivity(items: TimelineItem[], prev: string | null): stri
   return cur;
 }
 
-// A reply (a Home's Reply on a message, or Ask on a to-do item): the message sent starts with one quote line,
+// A reply (a Home's Reply on a message, or Ask on a to-do item or an agent): the message sent starts with one quote line,
 // a Markdown blockquote the orchestrator reads as it is, then a blank line and the user's words. The line
 // names what it quotes (`of`), and the chat finds a message's original by it (ui/ChatLog.tsx's data-quote).
-export type QuoteOf = 'you' | 'me' | 'notice' | 'todo';
+export type QuoteOf = 'you' | 'me' | 'notice' | 'todo' | 'agent';
 const QUOTE_HEAD: Record<QuoteOf, string> = {
   you: 'Replying to your message', // the orchestrator's
   me: 'Replying to my message', // the user's
   notice: 'Replying to this notice', // the bridge's [yoicks] line
   todo: 'To-do',
+  agent: 'Agent',
 };
 const QUOTE_OF = new Map(Object.entries(QUOTE_HEAD).map(([of, head]) => [head, of as QuoteOf]));
-const QUOTE_RE = /^> (Replying to your message|Replying to my message|Replying to this notice|To-do): (.+)(?:\n\n|\n?$)/;
+const QUOTE_RE = /^> (Replying to your message|Replying to my message|Replying to this notice|To-do|Agent): (.+)(?:\n\n|\n?$)/;
 const EXCERPT = 100; // characters of the quoted message, on one line
 const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim();
 
@@ -399,7 +400,7 @@ const plain = (s: string): string => renderMarkdown(s)
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
 
 /** The quote line of a message: its text on one line, as it reads (a notice's: as it is, the chat shows it so), cut short. */
-export function quoteLine(of: Exclude<QuoteOf, 'todo'>, text: string): string {
+export function quoteLine(of: Exclude<QuoteOf, 'todo' | 'agent'>, text: string): string {
   const cs = [...((of === 'notice' ? '' : oneLine(plain(text))) || oneLine(text))]; // nothing shown (an empty code block): its text
   return `> ${QUOTE_HEAD[of]}: ${cs.length > EXCERPT ? `${cs.slice(0, EXCERPT).join('').trimEnd()}…` : cs.join('')}`;
 }
@@ -410,11 +411,17 @@ export function todoQuote(item: { id: string; text: string; agent: string | null
   return `> ${QUOTE_HEAD.todo}: ${oneLine(item.text)} (${more.join(', ')})`;
 }
 
+/** The quote line of an agent: its name and purpose, then its pane id (the orchestrator's agent_get finds it by it, as by
+ *  its herdr name) and status. */
+export function agentQuote(a: { name: string; purpose: string | null; paneId: string; status: string }): string {
+  return `> ${QUOTE_HEAD.agent}: ${oneLine(a.name)}${a.purpose ? ` — ${oneLine(a.purpose)}` : ''} (pane ${a.paneId}, ${a.status})`;
+}
+
 export interface Quote {
   of: QuoteOf;
   /** the line as sent (an original's data-quote is the same line) */
   line: string;
-  /** what it shows of the original: its excerpt (a to-do item's text, without its id) */
+  /** what it shows of the original: its excerpt (a to-do item's text, without its id; an agent's name and purpose) */
   excerpt: string;
   /** the user's words after it */
   body: string;
@@ -425,6 +432,6 @@ export function parseQuote(text: string): Quote | null {
   const m = QUOTE_RE.exec(text);
   if (!m) return null;
   const of = QUOTE_OF.get(m[1])!;
-  const excerpt = of === 'todo' ? m[2].replace(/ \(id [^)]*\)$/, '') : m[2];
+  const excerpt = of === 'todo' ? m[2].replace(/ \(id [^)]*\)$/, '') : of === 'agent' ? m[2].replace(/ \(pane [^)]*\)$/, '') : m[2];
   return { of, line: `> ${m[1]}: ${m[2]}`, excerpt, body: text.slice(m[0].length) };
 }

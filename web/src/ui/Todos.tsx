@@ -101,22 +101,23 @@ export function NeedsButton({ o, s, n, now }: { o: OrchestratorView; s: HomeSumm
 const head = (text: string): ReactNode => <Text fz={11} fw={700} c="dimmed" tt="uppercase" lts="0.06em">{text}</Text>;
 
 /** What waits on the user at Home `o` (`s`: its agents' summary): its orchestrator's question, its blocked agents
- *  and its to-do list. The popover's, and a PC's Home panel's (ui/HomePanel.tsx: its blocked agents as `rows`). */
-export function NeedsList({ o, s, now, ask, rows }: { o: OrchestratorView; s: HomeSummary; now: number; ask?: (it: TodoItem) => void; rows?: boolean }) {
+ *  and its to-do list. The popover's, and a PC's Home panel's (ui/HomePanel.tsx: its blocked agents as `rows`, whose ⋮
+ *  asks about one with `askAgent`). */
+export function NeedsList({ o, s, now, ask, askAgent, rows }: { o: OrchestratorView; s: HomeSummary; now: number; ask?: (it: TodoItem) => void; askAgent?: (c: DashboardCard) => void; rows?: boolean }) {
   return (
     <Stack gap={12}>
       {asksUser(o) && <Text data-asks="" fz={13} c="blocked" fw={600}>{`${orchestratorLabel(o)} is waiting for your answer, below the chat.`}</Text>}
-      <Blocked cards={s.blocked} rows={rows} />
+      <Blocked cards={s.blocked} rows={rows} ask={askAgent} askOff={!!o.headless?.pending} />
       {(o.todos?.length ?? 0) > 0 && <Stack gap={4}>{head('To-do')}<Todos o={o} now={now} ask={ask} /></Stack>}
     </Stack>
   );
 }
 
 /** Agents waiting on the user, under "Waiting on you", as chips (a tap opens it: nav.ts's openAgent), or as the agents
- *  popover's rows (`rows`: AgentRow, with a PC's ⋮). Nothing without any. */
-export function Blocked({ cards, rows }: { cards: DashboardCard[]; rows?: boolean }) {
+ *  popover's rows (`rows`: AgentRow, with a PC's ⋮ and its Ask, `ask`/`askOff`). Nothing without any. */
+export function Blocked({ cards, rows, ask, askOff }: { cards: DashboardCard[]; rows?: boolean; ask?: (c: DashboardCard) => void; askOff?: boolean }) {
   if (!cards.length) return null;
-  if (rows) return <Stack gap={0} className="-mx-3"><div className="px-3 pb-1">{head('Waiting on you')}</div>{cards.map((c) => <AgentRow key={c.pane.paneId} card={c} />)}</Stack>;
+  if (rows) return <Stack gap={0} className="-mx-3"><div className="px-3 pb-1">{head('Waiting on you')}</div>{cards.map((c) => <AgentRow key={c.pane.paneId} card={c} ask={ask} askOff={askOff} />)}</Stack>;
   return (
     <Stack gap={6}>
       {head('Waiting on you')}
