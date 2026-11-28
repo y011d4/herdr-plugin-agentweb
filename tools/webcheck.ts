@@ -21,8 +21,9 @@
  * en-US, no animations (CSS transitions off: Mantine's JS-timed ones then show their end state two frames in), its
  * images decoded, and Chrome's software raster drawing every frame whole (no GPU, no partial raster: on CI's
  * emulated GPU the anti-aliased rim of an overlay, the chat's ↓ over a card, once came out a step off in 18 pixels,
- * main's side only, which failed an approval), so the same build shoots the same bytes. CI (.github/workflows/screenshots.yml) posts the
- * changed ones on the PR and fails its `screens` check until the user approves them with the ui-change label.
+ * main's side only, which failed an approval), so the same build shoots the same bytes. CI
+ * (.github/workflows/screenshots.yml, then screenshots-publish.yml) posts the changed ones on the PR and keeps its
+ * `screenshots` status pending until the user approves them with the box in its comment.
  *
  * A preview is a throwaway bridge (state/config under $WC_ROOT/preview-<port>, `env -u HERDR_BIN_PATH`)
  * over the REAL herdr, which production also shows, unless the root has a private herdr: `herdr start` runs a
