@@ -1,0 +1,175 @@
+<!doctype html>
+<!-- The landing at https://yoicks.y011d4.com/: one page in both languages. Each text is there twice
+     (lang="en", lang="ja"); the script below shows one: ?lang=en|ja (and remembers it), else the one picked
+     last, else the browser's. Without JS both show. The docs it links to are VitePress's (site/docs). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>yoicks</title>
+<meta name="description" content="Monitor and control every coding agent running in herdr from your phone. herdr で動くすべてのコーディングエージェントを、スマホから見て操作できます。">
+<link rel="canonical" href="https://yoicks.y011d4.com/">
+<link rel="icon" type="image/svg+xml" href="docs/favicon.svg">
+<script>
+  (function () {
+    var langs = ['en', 'ja'], l = new URLSearchParams(location.search).get('lang')
+    if (langs.indexOf(l) >= 0) { try { localStorage.setItem('yoicks-lang', l) } catch (e) {} }
+    else { try { l = localStorage.getItem('yoicks-lang') } catch (e) {} }
+    if (langs.indexOf(l) < 0) {
+      l = 'en'
+      var ls = navigator.languages || [navigator.language]
+      for (var i = 0; i < ls.length; i++) {
+        var p = String(ls[i]).slice(0, 2).toLowerCase()
+        if (langs.indexOf(p) >= 0) { l = p; break }
+      }
+    }
+    document.documentElement.lang = document.documentElement.dataset.lang = l
+  })()
+</script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff; --fg: #1b1d23; --dim: #555a66; --card: #f4f5f8; --line: #e1e3e9;
+    --accent: #2f6fd6; --on-accent: #ffffff; --fox: #c9560f;
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111318; --fg: #e2e4ea; --dim: #9aa0b2; --card: #1c1f26; --line: #2e3140;
+      --accent: #4f8ef7; --on-accent: #0b0d12; --fox: #f47c2a; }
+  }
+  /* one language at a time once the script has picked it (the switch keeps both); both without JS */
+  html[data-lang="en"] [lang="ja"]:not(.switch a), html[data-lang="ja"] [lang="en"]:not(html, .switch a) { display: none !important; }
+  html:not([data-lang]) .switch { display: none; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); }
+  a { color: var(--accent); }
+  .wrap { max-width: 68rem; margin: 0 auto; padding-inline: 1.25rem; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 1rem; }
+  header img { display: block; }
+  header nav { display: flex; align-items: center; gap: .75rem; font-size: .9375rem; white-space: nowrap; }
+  header nav a { color: var(--fg); text-decoration: none; }
+  @media (max-width: 30rem) { header nav .wide { display: none; } }
+  .switch { display: flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .switch a { padding: .25rem .75rem; }
+  html[data-lang="en"] .switch a[hreflang="en"], html[data-lang="ja"] .switch a[hreflang="ja"] {
+    background: var(--fg); color: var(--bg); }
+  .hero { text-align: center; padding-block: 3.5rem 3rem; }
+  .hero picture img { width: min(18rem, 70vw); height: auto; }
+  h1 { font-size: clamp(1.75rem, 5vw, 2.75rem); line-height: 1.25; margin: 1.5rem 0 .75rem; }
+  h1 span, .lead span { display: block; }
+  .lead { color: var(--dim); font-size: 1.125rem; max-width: 40rem; margin: 0 auto; }
+  .cta { display: flex; flex-wrap: wrap; justify-content: center; gap: .75rem; margin-top: 2rem; }
+  .button { display: inline-block; padding: .75rem 1.5rem; border-radius: .5rem; font-weight: 600; text-decoration: none;
+    border: 1px solid var(--line); color: var(--fg); min-height: 2.75rem; }
+  .button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  h2 { font-size: 1.5rem; text-align: center; margin: 0 0 1.5rem; }
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1rem; padding-block: 1rem 3rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: .75rem; padding: 1.25rem; }
+  .card h3 { margin: 0 0 .5rem; font-size: 1.0625rem; }
+  .card h3::before { content: ""; display: inline-block; width: .5rem; height: .5rem; border-radius: 50%;
+    background: var(--fox); margin-right: .5rem; vertical-align: middle; }
+  .card p { margin: 0; color: var(--dim); }
+  .card a { display: inline-block; margin-top: .75rem; }
+  footer { border-top: 1px solid var(--line); padding-block: 1.5rem 2.5rem; color: var(--dim); font-size: .875rem; }
+  footer p { margin: 0; }
+</style>
+</head>
+<body>
+<header class="wrap">
+  <img src="docs/favicon.svg" width="32" height="32" alt="yoicks">
+  <nav>
+    <a lang="en" href="docs/en/">Docs</a>
+    <a lang="ja" href="docs/ja/">ドキュメント</a>
+    <a class="wide" href="https://github.com/y011d4/herdr-yoicks">GitHub</a>
+    <span class="switch" aria-label="Language">
+      <a href="?lang=en" hreflang="en" lang="en">English</a>
+      <a href="?lang=ja" hreflang="ja" lang="ja">日本語</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <section class="hero wrap">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/lockup.svg">
+      <img src="docs/lockup-light.svg" alt="yoicks" width="214" height="64">
+    </picture>
+    <h1>
+      <span lang="en">Every herdr agent, on your phone</span>
+      <span lang="ja">herdr のエージェントを、スマホから</span>
+    </h1>
+    <p class="lead">
+      <span lang="en">Monitor and control the coding agents running in herdr from your phone, or from a PC's browser.
+        A small local bridge and a PWA; nothing leaves your machine.</span>
+      <span lang="ja">herdr で動くコーディングエージェントを、スマホや PC のブラウザから見て操作できます。小さなローカルのブリッジと PWA で動き、データはマシンの外に出ません。</span>
+    </p>
+    <div class="cta">
+      <a class="button primary" lang="en" href="docs/en/">Get started</a>
+      <a class="button primary" lang="ja" href="docs/ja/">はじめる</a>
+      <a class="button" href="https://github.com/y011d4/herdr-yoicks">GitHub</a>
+    </div>
+  </section>
+
+  <section class="wrap" aria-labelledby="features">
+    <h2 id="features"><span lang="en">What it does</span><span lang="ja">できること</span></h2>
+    <div class="features">
+      <div class="card">
+        <h3 lang="en">Every agent on one screen</h3>
+        <h3 lang="ja">全エージェントを 1 画面で</h3>
+        <p lang="en">Live status (idle, working, blocked, done) across all workspaces, blocked agents first, with each one's git branch and worktree.</p>
+        <p lang="ja">すべてのワークスペースのエージェントの状態 (idle、working、blocked、done) をライブで表示します。blocked のものが先頭に並び、git のブランチと worktree も出ます。</p>
+        <a lang="en" href="docs/en/">What is yoicks</a>
+        <a lang="ja" href="docs/ja/">yoicks とは</a>
+      </div>
+      <div class="card">
+        <h3 lang="en">A pane in your hand</h3>
+        <h3 lang="ja">ペインを手元に</h3>
+        <p lang="en">The terminal fitted to the phone's width, pinch zoom, scrollback by swiping, quick keys; a Claude Code pane also reads as a chat.</p>
+        <p lang="ja">端末をスマホの幅に合わせて表示し、ピンチでズーム、スワイプで履歴をさかのぼり、クイックキーで入力できます。Claude Code のペインはチャットとしても読めます。</p>
+        <a lang="en" href="docs/en/guide/app">Using the app</a>
+        <a lang="ja" href="docs/ja/guide/app">アプリの使い方</a>
+      </div>
+      <div class="card">
+        <h3 lang="en">Orchestrators</h3>
+        <h3 lang="ja">orchestrator</h3>
+        <p lang="en">Talk to one Claude Code agent on its Home. It starts the workers, follows them and reports back, inside its own Claude account.</p>
+        <p lang="ja">Home で 1 つの Claude Code エージェントと話します。それがワーカーを起動し、進み具合を追い、結果を伝えます。触れるのは自分の Claude アカウントの中だけです。</p>
+        <a lang="en" href="docs/en/guide/orchestrators">Orchestrators</a>
+        <a lang="ja" href="docs/ja/guide/orchestrators">orchestrator</a>
+      </div>
+      <div class="card">
+        <h3 lang="en">Headless mode</h3>
+        <h3 lang="ja">ヘッドレス</h3>
+        <p lang="en">An orchestrator can run as the bridge's own <code>claude -p</code>, with no pane, and keep a to-do list of what only you can do.</p>
+        <p lang="ja">orchestrator を、ペインを持たないブリッジ自身の <code>claude -p</code> として動かせます。あなたにしかできないことは、やることリストに残ります。</p>
+        <a lang="en" href="docs/en/guide/headless">Headless orchestrators</a>
+        <a lang="ja" href="docs/ja/guide/headless">ヘッドレスの orchestrator</a>
+      </div>
+      <div class="card">
+        <h3 lang="en">Notifications</h3>
+        <h3 lang="ja">通知</h3>
+        <p lang="en">OS notifications when an agent is blocked or done, and optional ntfy pushes while the app is closed.</p>
+        <p lang="ja">エージェントが blocked か done になると OS の通知を出します。ntfy を設定すれば、アプリを閉じている間もプッシュが届きます。</p>
+        <a lang="en" href="docs/en/reference/config">Configuration</a>
+        <a lang="ja" href="docs/ja/reference/config">設定 (config)</a>
+      </div>
+      <div class="card">
+        <h3 lang="en">Local only</h3>
+        <h3 lang="ja">ローカルだけで動く</h3>
+        <p lang="en">No account, no cloud. The bridge listens on loopback; you pick the way in: a reverse proxy, a tunnel or a VPN.</p>
+        <p lang="ja">アカウントもクラウドも要りません。ブリッジはループバックで待ち受け、スマホからの経路 (リバースプロキシ、トンネル、VPN) は自分で選びます。</p>
+        <a lang="en" href="docs/en/guide/phone">Exposing the bridge to your phone</a>
+        <a lang="ja" href="docs/ja/guide/phone">スマホへの公開</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <p lang="en">yoicks is a <a href="https://herdr.dev">herdr</a> plugin, released under the
+    <a href="https://github.com/y011d4/herdr-yoicks/blob/main/LICENSE">MIT License</a>.</p>
+  <p lang="ja">yoicks は <a href="https://herdr.dev">herdr</a> のプラグインです。
+    <a href="https://github.com/y011d4/herdr-yoicks/blob/main/LICENSE">MIT ライセンス</a>で公開しています。</p>
+</footer>
+</body>
+</html>
