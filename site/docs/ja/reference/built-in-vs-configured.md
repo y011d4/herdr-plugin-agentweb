@@ -6,7 +6,7 @@ yoicks のふるまいは、それぞれ [5 つの出どころ](#sources)のど�
 ## ファイルの場所 {#files}
 
 yoicks が読み書きするファイルとディレクトリを、場所ごとに並べます。
-各項目の下に、誰が書くかと、それが何かを書いています。
+各行には、誰が書くかと、それが何かを書いています。
 書くのは **yoicks** (ブリッジか `yoicks` のコマンド)、**あなた**、**Claude Code**、またはほかの道具です。
 *書き直し* とあるものは、ブリッジの起動時と、その orchestrator を起動するたびに yoicks が書き直すので、編集しても消えます。
 
@@ -19,15 +19,12 @@ herdr のプラグインのコマンドの中では、状態のディレクト�
 
 ```text
 ~/.config/herdr/
-├── herdr.sock
-│     herdr: API のソケット
-├── plugins/config/y011d4.yoicks/
-│   └── config.json
-│         あなた: プラグインの設定
-└── plugins/github-installations/
-    └── y011d4.yoicks-…/bin/yoicks
-          herdr: インストールと更新
-          のときに置くバイナリ
+├── herdr.sock           herdr: ソケット。ブリッジはここから入る
+└── plugins/
+    ├── config/y011d4.yoicks/
+    │   └── config.json  あなた: プラグインの設定
+    └── github-installations/y011d4.yoicks-…/
+        └── bin/yoicks   herdr (インストールと更新で): バイナリ
 ```
 
 設定のディレクトリは `herdr plugin config-dir y011d4.yoicks` で表示できます。
@@ -37,26 +34,18 @@ herdr のプラグインのコマンドの中では、状態のディレクト�
 ### orchestrator のディレクトリ {#orchestrator-dirs}
 
 ```text
-~/.local/share/herdr-yoicks/
-└── orchestrators/<name>/
-    │ Home ごとに 1 つ (設定が
-    │ 無ければ default が 1 つ)
-    ├── CLAUDE.md
-    │     yoicks、書き直し: rules.md
-    │     と local.md を読む
-    ├── rules.md
-    │     yoicks、書き直し: その
-    │     mode 向けの同梱の規則
-    ├── local.md
-    │     あなた: この Home の規則
+~/.local/share/herdr-yoicks/orchestrators/
+└── <name>/                      Home ごとに 1 つ (無ければ default)
+    ├── CLAUDE.md                yoicks、書き直し: 入口のファイル
+    ├── rules.md                 yoicks、書き直し: 同梱の規則
+    ├── local.md                 あなた: この Home のためのあなたの規則
     └── .claude/
-        ├── settings.json
-        │     yoicks、書き直し: TUI
-        │     で実行できるもの
-        └── settings.local.json
-              あなた: それに足すもの
+        ├── settings.json        yoicks、書き直し: 権限
+        └── settings.local.json  あなた: それに足すもの
 ```
 
+`CLAUDE.md` は `rules.md` (同梱の規則のうち、その mode の部分) を、続けて `local.md` を読み込みます。
+`.claude/settings.json` は、TUI の orchestrator が実行できるものです。
 `local.md` は yoicks が一度だけ (コメントだけを書いて) 作り、そのあとは書きません。
 それぞれの orchestrator はこのディレクトリで動きます。
 TUI の orchestrator は、これでほかのエージェントと見分けます。
@@ -64,29 +53,16 @@ TUI の orchestrator は、これでほかのエージェントと見分けま�
 ### プラグインの状態 {#state-dir}
 
 ```text
-~/.local/state/herdr/plugins/
-└── y011d4.yoicks/
-    ├── token
-    │     yoicks: アクセストークン
-    ├── bridge.log
-    │     yoicks: ブリッジのログ
-    ├── bridge.pid, bridge-run.pid
-    │     yoicks: ブリッジの pid
-    ├── pane-profiles.json
-    │     yoicks: 起動プロファイル
-    ├── agent-purposes.json
-    │     yoicks: ワーカーの目的
-    ├── todos/<name>.json
-    │     yoicks: ヘッドレスの Home
-    │     のやることリスト
-    ├── headless/<name>.json
-    │     yoicks: ヘッドレスの Home
-    │     のセッション、モデル、使用量
-    ├── headless/<name>.mcp.json
-    │     yoicks: その MCP の設定
-    └── canary.json
-          claude-canary.sh: 最後の
-          Claude Code の確認
+~/.local/state/herdr/plugins/y011d4.yoicks/
+├── token                       yoicks: アクセストークン
+├── bridge.log                  yoicks: ブリッジのログ
+├── bridge.pid, bridge-run.pid  yoicks: ブリッジのプロセス ID
+├── pane-profiles.json          yoicks: エージェントの起動プロファイル
+├── agent-purposes.json         yoicks: ワーカーの目的の行
+├── todos/<name>.json           yoicks: ヘッドレスのやることリスト
+├── headless/<name>.json        yoicks: セッション、モデル、使用量
+├── headless/<name>.mcp.json    yoicks: その MCP の設定
+└── canary.json                 claude-canary.sh: 最後の確認
 ```
 
 どれも編集するものではありません。
@@ -95,21 +71,14 @@ TUI の orchestrator は、これでほかのエージェントと見分けま�
 ### Claude Code のアカウント {#claude-accounts}
 
 ```text
-~/.claude/
-│ 既定のアカウント
-│ (CLAUDE_CONFIG_DIR 未設定)
-├── settings.json
-│     あなた: アカウントの設定
-└── projects/…/<session>.jsonl
-      Claude Code: チャットが
-      読むトランスクリプト
-~/.claude.json
-  Claude Code: 既定のアカウント
-  のログイン
-~/.config/claude/work/
-  別のアカウント (その
-  CLAUDE_CONFIG_DIR)。中身は同じ
-  で、.claude.json もこの中
+~/.claude/                      既定 (CLAUDE_CONFIG_DIR 未設定)
+├── settings.json               あなた: アカウントの設定
+└── projects/…/<session>.jsonl  Claude Code: トランスクリプト
+~/.claude.json                  Claude Code: 既定のログイン
+~/.config/claude/work/          別のアカウント: CLAUDE_CONFIG_DIR
+├── settings.json               あなた
+├── projects/…                  Claude Code
+└── .claude.json                Claude Code
 ```
 
 `work` は例です。
@@ -120,26 +89,17 @@ yoicks はここのファイルを何も書きません。
 ### あなたのリポジトリ {#repositories}
 
 ```text
-~/src/work/
-│ リポジトリを置く場所 (例)
-├── .envrc
-│     あなた (direnv): この下
-│     すべてのアカウント
-├── <repo>/
-│   │ ワーカーが動くリポジトリ
-│   ├── .claude/settings.json
-│   │     あなた: ワーカーの権限
-│   ├── .claude/settings.local.json
-│   │     あなた: 同じもの (手元だけ)
-│   └── .git/hooks/
-│         あなた: git のフック
-│         (yoicks は入れない)
-└── <repo>-wt-<branch>/
-      yoicks (herdr 経由): 新しい
-      worktree
+~/src/work/                          リポジトリを置くディレクトリ (例)
+├── .envrc                           あなた (direnv): アカウント
+├── <repo>/                          ワーカーが動くリポジトリ
+│   ├── .claude/settings.json        あなた: ワーカーの権限
+│   ├── .claude/settings.local.json  あなた: 同じもので手元だけ
+│   └── .git/hooks/                  あなた (yoicks は入れない)
+└── <repo>-wt-<branch>/              yoicks (herdr 経由): worktree
 ```
 
-`.envrc` はたとえば `export CLAUDE_CONFIG_DIR=$HOME/.config/claude/work` です。
+`.envrc` は、この下すべてのアカウントを決めます。
+たとえば `export CLAUDE_CONFIG_DIR=$HOME/.config/claude/work` です。
 herdr は worktree に環境変数を渡せないので、新しい worktree のアカウントはこれで決まります。
 `<branch>` の、英数字と `.`、`_`、`-` 以外の文字は `-` になります。
 
@@ -147,13 +107,11 @@ herdr は worktree に環境変数を渡せないので、新しい worktree の
 
 ```text
 ~/.config/systemd/user/
-├── yoicks-claude-canary.service
-│     claude-canary.sh install:
-│     確認を実行する
-└── yoicks-claude-canary.timer
-      同じ: 1 時間ごと (あなたが
-      有効にしたら)
+├── yoicks-claude-canary.service   確認を実行する
+└── yoicks-claude-canary.timer     1 時間ごと (あなたが有効にしたら)
 ```
+
+どちらも `sh scripts/claude-canary.sh install` が書きます。タイマーを有効にするまでは何も動きません。
 
 ### yoicks のチェックアウト {#checkout}
 
@@ -161,20 +119,11 @@ herdr は worktree に環境変数を渡せないので、新しい worktree の
 
 ```text
 herdr-yoicks/
-├── bin/yoicks
-│     plugin-build.sh: ソースから
-│     ビルドしたバイナリ
-├── orchestrator/rules.md
-│     yoicks: 同梱の規則 (バイナリ
-│     に入る)
-├── scripts/claude-canary.sh
-│     yoicks: Claude Code の確認
-├── .claude/settings.json
-│     yoicks: 次を許可する
-│     sh scripts/redeploy.sh main
-└── .git/hooks/
-      あなた: git のフック
-      (リポジトリには含まれない)
+├── bin/yoicks                plugin-build.sh: ソースからビルド
+├── orchestrator/rules.md     yoicks: 同梱の規則
+├── scripts/claude-canary.sh  yoicks: Claude Code の確認
+├── .claude/settings.json     yoicks: redeploy.sh main を許可
+└── .git/hooks/               あなた (リポジトリには含まれない)
 ```
 
 ## 5 つの出どころ {#sources}
