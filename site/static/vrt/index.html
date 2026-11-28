@@ -1,0 +1,192 @@
+<!doctype html>
+<!-- The VRT viewer, https://yoicks.y011d4.com/vrt/: a PR's changed screenshots, before and after, by slider, blink,
+     diff or side by side. The screenshots workflow's comment links here. Everything comes from the URL:
+     ?sha=<the refs/screenshots/pr-<n> commit>&s=<the changed shots, comma-separated>[&pr=<n>]#<a shot>, and the
+     PNGs from that commit on raw.githubusercontent.com (by commit: they never change). No dependency; it stores
+     nothing but the mode picked last. The URL's values are checked and only ever set as text or an image's src. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https://raw.githubusercontent.com; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>yoicks VRT</title>
+<style>
+  :root { color-scheme: dark; --bg: #111318; --fg: #e2e4ea; --dim: #9aa0b2; --card: #1c1f26; --line: #2e3140; --accent: #4f8ef7; --mark: #ff3bff;
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); }
+  a { color: var(--accent); }
+  header { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+    padding: 8px 16px; background: var(--card); border-bottom: 1px solid var(--line); }
+  header .title { font-weight: 650; white-space: nowrap; }
+  button, select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    min-height: 40px; padding: 4px 12px; cursor: pointer; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .group { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  #pick { min-width: 0; max-width: min(60vw, 28rem); text-overflow: ellipsis; }
+  #modes button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #0b0d12; }
+  main { padding: 16px; }
+  #msg { color: var(--dim); margin: 0 0 12px; }
+  #msg:empty { display: none; }
+  .note { color: var(--dim); font-size: 13px; margin: 8px 0 0; }
+  /* both images in one cell: the frame is as big as the bigger one; a checkerboard shows where one is smaller */
+  .frame { position: relative; display: inline-grid; max-width: 100%; touch-action: pan-y; user-select: none; -webkit-user-select: none;
+    background: repeating-conic-gradient(#1a1c22 0 25%, #23262e 0 50%) 0 0 / 16px 16px; }
+  .frame > img { grid-area: 1 / 1; display: block; max-width: 100%; height: auto; -webkit-user-drag: none; }
+  .frame.slider { cursor: ew-resize; }
+  .bar { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--mark); pointer-events: none; }
+  .tag { position: absolute; top: 6px; padding: 0 6px; border-radius: 4px; font-size: 12px; background: rgb(0 0 0 / .65); pointer-events: none; }
+  #range { display: block; width: 100%; max-width: 40rem; margin-top: 10px; accent-color: var(--accent); }
+  /* two equal columns at any width: the images scale down into them rather than wrap one under the other */
+  .side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+  figure { margin: 0; max-width: 100%; }
+  figcaption { color: var(--dim); font-size: 13px; margin-bottom: 4px; }
+  figure img { display: block; max-width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<header>
+  <span class="title"><a href="/">yoicks</a> VRT</span>
+  <a id="pr" hidden></a>
+  <span class="group" id="nav">
+    <button id="prev" aria-label="Previous shot">‹</button>
+    <select id="pick" aria-label="Shot"></select>
+    <button id="next" aria-label="Next shot">›</button>
+    <span id="count" class="note" style="margin:0"></span>
+  </span>
+  <span class="group" id="modes" role="group" aria-label="Compare by">
+    <button data-mode="slider">Slider</button>
+    <button data-mode="blink">Blink</button>
+    <button data-mode="diff">Diff</button>
+    <button data-mode="side">Side by side</button>
+  </span>
+</header>
+<main>
+  <p id="msg"></p>
+  <div id="view"></div>
+</main>
+<script>
+(function () {
+  var REPO = 'y011d4/herdr-yoicks'
+  var q = new URLSearchParams(location.search)
+  var sha = q.get('sha') || '', pr = q.get('pr') || ''
+  var names = (q.get('s') || '').split(',').filter(Boolean)
+  var $ = function (id) { return document.getElementById(id) }
+  var el = function (tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e }
+  var msg = function (t) { $('msg').textContent = t }
+  if (!/^[0-9a-f]{40}$/.test(sha) || !names.length || names.length > 200 || !names.every(function (n) { return /^[a-z0-9-]{1,64}$/.test(n) })) {
+    msg('This page compares the screenshots a pull request changed: open it from the screenshots comment on the PR.')
+    $('nav').hidden = $('modes').hidden = true
+    return
+  }
+  if (/^[0-9]{1,6}$/.test(pr)) { var a = $('pr'); a.hidden = false; a.href = 'https://github.com/' + REPO + '/pull/' + pr; a.textContent = '#' + pr }
+  var url = function (n, side) { return 'https://raw.githubusercontent.com/' + REPO + '/' + sha + '/' + n + '.' + side + '.png' }
+  names.forEach(function (n) { var o = el('option', '', n); o.value = n; $('pick').append(o) })
+  var mode = 'slider', at = 0.5, timer = 0, refit = null
+  try { mode = localStorage.getItem('yoicks-vrt-mode') || mode } catch (e) {}
+
+  function img(n, side) {
+    var i = el('img'); i.alt = n + ' ' + side; i.draggable = false
+    i.onerror = function () { msg('Could not load ' + n + '.' + side + '.png: a newer run of the PR may have replaced these shots; open the link in its comment again.') }
+    i.src = url(n, side)
+    return i
+  }
+
+  // the shots at their CSS size (a phone's are taken at 2x), all scaled by one factor, so that their pixels stay
+  // aligned, to fit `box`; once every one has loaded, and again on a resize; then `done`
+  function fit(imgs, box, n, done) {
+    var dpr = /-phone$/.test(n) ? 2 : 1
+    refit = function () {
+      if (!imgs.every(function (i) { return i.complete && i.naturalWidth })) return
+      var s = Math.min(1, box.clientWidth / Math.max.apply(null, imgs.map(function (i) { return i.naturalWidth / dpr })))
+      imgs.forEach(function (i) { i.style.width = (i.naturalWidth / dpr) * s + 'px' })
+      if (done) done()
+    }
+    imgs.forEach(function (i) { i.addEventListener('load', refit) })
+    refit()
+  }
+
+  function render() {
+    clearInterval(timer)
+    refit = null
+    msg('')
+    var n = names.indexOf(location.hash.slice(1)) >= 0 ? location.hash.slice(1) : names[0]
+    var k = names.indexOf(n)
+    $('pick').value = n
+    $('count').textContent = (k + 1) + ' / ' + names.length
+    $('prev').disabled = k === 0
+    $('next').disabled = k === names.length - 1
+    if (['slider', 'blink', 'diff', 'side'].indexOf(mode) < 0) mode = 'slider'
+    document.querySelectorAll('#modes button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.mode === mode)) })
+    var view = $('view')
+    view.replaceChildren()
+    if (mode === 'side') {
+      var s = el('div', 'side'), pair = [img(n, 'before'), img(n, 'after')]
+      pair.forEach(function (i, k) { var f = el('figure'); f.append(el('figcaption', '', k ? 'after' : 'before'), i); s.append(f) })
+      view.append(s)
+      fit(pair, s.firstChild, n)
+      return
+    }
+    if (mode === 'diff') {
+      var f = el('figure'), d = img(n, 'diff'); f.append(el('figcaption', '', 'where they differ: the after dimmed, the changed pixels magenta'), d); view.append(f)
+      fit([d], view, n)
+      return
+    }
+    var frame = el('div', 'frame'), before = img(n, 'before'), after = img(n, 'after')
+    frame.append(before, after)
+    view.append(frame)
+    if (mode === 'blink') { // the after and the before in turn, one at a time (a smaller one shows the frame around it)
+      fit([before, after], view, n)
+      var tag = el('span', 'tag', 'after'); tag.style.left = '6px'; frame.append(tag)
+      var show = false, flip = function () { show = !show; after.style.visibility = show ? '' : 'hidden'; before.style.visibility = show ? 'hidden' : ''; tag.textContent = show ? 'after' : 'before' }
+      flip()
+      timer = setInterval(flip, 800)
+      frame.onclick = function () { if (timer) { clearInterval(timer); timer = 0 } else timer = setInterval(flip, 800) }
+      view.append(el('p', 'note', 'Tap the image to pause or resume.'))
+      return
+    }
+    // slider: the before at the left of the bar, the after at its right; drag on the image, or use the range under it
+    frame.classList.add('slider')
+    var bar = el('span', 'bar'), l = el('span', 'tag', 'before'), r = el('span', 'tag', 'after')
+    l.style.left = '6px'; r.style.right = '6px'
+    frame.append(bar, l, r)
+    var range = el('input'); range.type = 'range'; range.id = 'range'; range.min = 0; range.max = 1000; range.value = Math.round(at * 1000)
+    range.setAttribute('aria-label', 'Divider between before and after')
+    view.append(range)
+    // each only on its side of the bar: where one is smaller, the frame shows, never the other's pixels
+    function place() {
+      var x = Math.round(at * frame.clientWidth)
+      before.style.clipPath = 'inset(0 ' + Math.max(0, before.clientWidth - x) + 'px 0 0)'
+      after.style.clipPath = 'inset(0 0 0 ' + x + 'px)'
+      bar.style.left = x + 'px'
+    }
+    function to(clientX) { var b = frame.getBoundingClientRect(); at = Math.min(1, Math.max(0, (clientX - b.left) / b.width)); range.value = Math.round(at * 1000); place() }
+    range.oninput = function () { at = range.value / 1000; place() }
+    frame.onpointerdown = function (e) { try { frame.setPointerCapture(e.pointerId) } catch (err) {} to(e.clientX) }
+    frame.onpointermove = function (e) { if (frame.hasPointerCapture(e.pointerId)) to(e.clientX) }
+    fit([before, after], view, n, place)
+    place()
+  }
+
+  function go(d) { var k = names.indexOf($('pick').value) + d; if (k >= 0 && k < names.length) location.hash = names[k] }
+  $('prev').onclick = function () { go(-1) }
+  $('next').onclick = function () { go(1) }
+  $('pick').onchange = function () { location.hash = $('pick').value }
+  document.querySelectorAll('#modes button').forEach(function (b) {
+    b.onclick = function () { mode = b.dataset.mode; try { localStorage.setItem('yoicks-vrt-mode', mode) } catch (e) {} render() }
+  })
+  // ← → step through the shots (but not while the range has the keys), 1-4 pick the mode
+  document.addEventListener('keydown', function (e) {
+    if (e.target.id === 'range' || e.target.id === 'pick' || e.altKey || e.ctrlKey || e.metaKey) return
+    if (e.key === 'ArrowLeft') go(-1)
+    else if (e.key === 'ArrowRight') go(1)
+    else if (/^[1-4]$/.test(e.key)) document.querySelectorAll('#modes button')[e.key - 1].click()
+  })
+  addEventListener('hashchange', render)
+  addEventListener('resize', function () { if (refit) refit() })
+  render()
+})()
+</script>
+</body>
+</html>
