@@ -310,8 +310,8 @@ func TestHerdrClientIgnoresAnAgentListFromBeforeADrop(t *testing.T) {
 		}
 		return *s.Pane("p1").Agent.CompletionSeq
 	}
-	// each connect's two snapshots (before the subscription, after its ack) arm the debounce in
-	// turn: moving the clock past the first one's leaves the second's waiting, or a request behind
+	// a connect's agent.list comes after the snapshot that follows the ack (connectedSnapshot):
+	// moving the clock past its debounce sends it
 	connectedSnapshot(t, c)
 	pass(t, clock, "agent.list's debounce", completionSeqDebounce)
 	env := &fakeherdr.Env{Srv: srv, World: world, Errorf: t.Errorf}
