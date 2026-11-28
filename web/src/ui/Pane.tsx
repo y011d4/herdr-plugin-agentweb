@@ -385,6 +385,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
     try {
       added = await Promise.all(picked.map(toAttachment));
     } catch {
+      if (!input.current?.value && !shown.current.length) begun.current = null; // nothing else begun
       showToast('Image not added', 'This browser could not read it');
       return;
     } finally {
@@ -503,7 +504,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
         {/* Mantine's look, the composer's own text: 14px (iOS zooms in on focus, as before), at most 120px tall (autoGrow) */}
         <Textarea id="pane-input" ref={input} rows={1} placeholder={placeholder} autoCorrect="off" autoCapitalize="off" spellCheck={false}
           className="flex-1" styles={{ input: { fontSize: 14, lineHeight: 1.4, maxHeight: 120, background: 'var(--color-bg)', paddingTop: 10, paddingBottom: 10 } }}
-          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); setDraft(key, e.currentTarget.value); begun.current = e.currentTarget.value || shown.current.length ? begun.current ?? Date.now() : null; }} />
+          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); setDraft(key, e.currentTarget.value); begun.current = e.currentTarget.value || shown.current.length || preparing ? begun.current ?? Date.now() : null; }} />
         <Button id="btn-send-enter" miw={64} px={12} fz={13} disabled={preparing > 0} onClick={() => { void send(); }}>Send</Button>
       </Group>
     </>

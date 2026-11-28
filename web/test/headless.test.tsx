@@ -391,14 +391,33 @@ describe("a headless orchestrator's Home", () => {
       await fire(() => picker.dispatchEvent(new Event('change', { bubbles: true }))); // picked…
       later(200);
       await fire(() => setAppState(withPilot())); // …the question comes while it is scaled
+      later(1500);
+      await type(input(), 'x');
+      await type(input(), ''); // text cleared, the image still being scaled
       await act(async () => { release(); await flush(); });
       scaled = Promise.resolve();
-      later(2000);
       await type(input(), 'x');
-      await type(input(), ''); // text cleared, the image still there
+      await type(input(), ''); // and once it is attached
       await type(input(), 'this one');
       await fire(() => $('#btn-send-enter').click());
       assert.deepEqual(posts('send'), [{ text: 'this one', images: [{ mediaType: 'image/jpeg', data: 'a.png' }] }]);
+    });
+
+    it("forgets an image that couldn't be read: a message begun after it with the question on screen is about it", async () => {
+      await home(withPilot(idle));
+      scaled = Promise.reject(new Error('unreadable'));
+      scaled.catch(() => {});
+      const picker = $<HTMLInputElement>('#input-image-picker');
+      Object.defineProperty(picker, 'files', { configurable: true, value: [new File(['x'], 'a.png', { type: 'image/png' })] });
+      await fire(() => picker.dispatchEvent(new Event('change', { bubbles: true })));
+      scaled = Promise.resolve();
+      assert.deepEqual(getToasts().map((t) => t.title), ['Image not added']);
+      later(200);
+      await fire(() => setAppState(withPilot()));
+      later(1500);
+      await type(input(), 'which one?');
+      await fire(() => $('#btn-send-enter').click());
+      assert.deepEqual(posts('send'), [{ text: 'which one?', question: '1a2b3c4d' }]);
     });
   });
 

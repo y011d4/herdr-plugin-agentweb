@@ -1131,6 +1131,9 @@ func (r *headlessRunner) Send(text string, images []any, answers map[string]any,
 	if question != "" {
 		r.Chat(question, answers) // answered or replaced meanwhile (a 409): the message stands on its own
 	}
+	// ponytail: only a question already read off stdout counts; one the model asks after the write
+	// (its API call still running) holds the message too, untold: the chat shows it once answered.
+	// Telling needs a mark from Claude Code it doesn't give.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	held = r.pending != nil
