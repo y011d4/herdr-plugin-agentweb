@@ -349,6 +349,7 @@ describe('quotes (a Reply on a message, Ask on a to-do item)', () => {
     assert.deepEqual(parseQuote(`${long}\n\nそれで?\n\nもう一行`), { of: 'me', line: long, excerpt: `${'あ'.repeat(100)}…`, body: 'それで?\n\nもう一行' });
     assert.equal(quoteLine('you', '# Plan\n> note\n- **one** `a.ts`\n2. [the docs](https://example.com/d) ~~old~~\n\nsnake_case *em*'),
       '> Replying to your message: Plan note one a.ts the docs old snake_case *em*', 'Markdown marks dropped, as it reads');
+    assert.equal(quoteLine('me', 'is x ** 2 > 3?\n```ts\nconst y = 1;\n```'), '> Replying to my message: is x ** 2 > 3? const y = 1;', 'a lone mark, and code, stay');
     assert.deepEqual(parseQuote(quoteLine('notice', '[yoicks] w-a: working → done')),
       { of: 'notice', line: '> Replying to this notice: [yoicks] w-a: working → done', excerpt: '[yoicks] w-a: working → done', body: '' });
   });

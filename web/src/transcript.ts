@@ -391,12 +391,14 @@ const QUOTE_RE = /^> (Replying to your message|Replying to my message|Replying t
 const EXCERPT = 100; // characters of the quoted message, on one line
 const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim();
 
-// a message's text as it reads: no Markdown marks at a line's start (a heading's, a quote's, a list item's),
-// a link as its text, no bold, strike-through or code marks
+// a message's text as it reads: no Markdown marks at a line's start (a code fence's, a heading's, a quote's, a
+// list item's), a link as its text, and bold, strike-through and code without their marks, paired on a line as
+// renderMarkdown pairs them (a lone `**`, as in `x ** 2`, is text there, and stays)
 const plain = (s: string): string => s
-  .replace(/^[ \t]{0,3}(?:#{1,6}[ \t]+|>[ \t]?|[-*+][ \t]+|\d+[.)][ \t]+)/gm, '')
+  .replace(/^[ \t]{0,3}(?:```.*|#{1,6}[ \t]+|>[ \t]?|[-*+][ \t]+|\d+[.)][ \t]+)/gm, '')
   .replace(/\[([^\]\n]+)\]\([^)\s]+\)/g, '$1')
-  .replace(/\*\*|__|~~|`/g, '');
+  .replace(/(\*\*|__|~~)([^\n]+?)\1/g, '$2')
+  .replace(/`([^`\n]+)`/g, '$1');
 
 /** The quote line of a message: its text on one line, as it reads, cut short. */
 export function quoteLine(of: Exclude<QuoteOf, 'todo'>, text: string): string {
