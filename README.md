@@ -430,7 +430,7 @@ also keeps a to-do list for you (its `todo` tool), under "Needs you" on its Home
 as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; ✓ ticks one off and tells the Home, which takes up what follows
 (a stopped Home isn't told), and **Ask** quotes one (with its id) in the composer, to ask the orchestrator about it. Each Home's switcher button
 (and its heading in the PC sidebar) counts what waits on you there. On a PC the sidebar lists it under that heading
-(its blocked agents, its question, its to-do list); the agents themselves are folded into one row, **All agents**, which a click unfolds. It has no herdr pane: on the PC,
+(its blocked agents, its question, its to-do list: each item two lines at most, all of it on hover); the agents themselves are folded into one row, **All agents**, kept at the bottom of the sidebar, which a click unfolds. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
 fresh session); the Home's warnings and Settings show the same steps.

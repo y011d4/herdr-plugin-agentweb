@@ -7,7 +7,8 @@
  * (NeedsList) under the Home's heading, its blocked agents outside any Home under Other (Blocked). An item due later waits
  * under Later until its time; ✓ ticks one off (DELETE …/todos/:id, the State push then drops it). A
  * link shows its host; an agent's name opens its drawer. On a running Home, Ask puts an item's quote into the
- * composer (transcript.ts's todoQuote: its text, id, worker and link), to ask its orchestrator about it.
+ * composer (transcript.ts's todoQuote: its text, id, worker and link), to ask its orchestrator about it. The sidebar's
+ * are `dense`: smaller, each item's text two lines at most (all of it on hover), its Ask on the line of its worker and link.
  */
 import { ActionIcon, Anchor, Badge, Button, Group, Popover, Stack, Text, UnstyledButton } from '@mantine/core';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -98,13 +99,13 @@ export function NeedsButton({ o, s, n, now }: { o: OrchestratorView; s: HomeSumm
 const head = (text: string): ReactNode => <Text fz={11} fw={700} c="dimmed" tt="uppercase" lts="0.06em">{text}</Text>;
 
 /** What waits on the user at Home `o` (`s`: its agents' summary): its orchestrator's question, its blocked agents
- *  and its to-do list. The popover's, and on a PC the sidebar's, under the Home's heading. */
-export function NeedsList({ o, s, now, ask }: { o: OrchestratorView; s: HomeSummary; now: number; ask?: (it: TodoItem) => void }) {
+ *  and its to-do list. The popover's, and on a PC the sidebar's (`dense`), under the Home's heading. */
+export function NeedsList({ o, s, now, ask, dense }: { o: OrchestratorView; s: HomeSummary; now: number; ask?: (it: TodoItem) => void; dense?: boolean }) {
   return (
-    <Stack gap={12}>
+    <Stack gap={dense ? 8 : 12}>
       {asksUser(o) && <Text data-asks="" fz={13} c="blocked" fw={600}>{`${orchestratorLabel(o)} is waiting for your answer, below the chat.`}</Text>}
       <Blocked cards={s.blocked} />
-      {(o.todos?.length ?? 0) > 0 && <Stack gap={4}>{head('To-do')}<Todos o={o} now={now} ask={ask} /></Stack>}
+      {(o.todos?.length ?? 0) > 0 && <Stack gap={4}>{head('To-do')}<Todos o={o} now={now} ask={ask} dense={dense} /></Stack>}
     </Stack>
   );
 }
@@ -129,26 +130,28 @@ export function Blocked({ cards }: { cards: DashboardCard[] }) {
 
 /** Home `o`'s items: the ones to do now, then Later (n), closed until tapped. Nothing without items. `ask`:
  *  each has Ask, off while its orchestrator's question is open (the composer is the question's then). */
-export function Todos({ o, now, ask }: { o: OrchestratorView; now: number; ask?: (it: TodoItem) => void }) {
+export function Todos({ o, now, ask, dense }: { o: OrchestratorView; now: number; ask?: (it: TodoItem) => void; dense?: boolean }) {
   const off = !!o.headless?.pending;
   const [open, setOpen] = useState(false);
   const { now: due, later } = splitTodos(o.todos ?? [], now);
   if (!due.length && !later.length) return null;
   return (
     <Stack className="home-todos" gap={0}>
-      {due.map((it) => <Todo key={it.id} home={o.name} item={it} now={now} ask={ask && (() => ask(it))} off={off} />)}
+      {due.map((it) => <Todo key={it.id} home={o.name} item={it} now={now} ask={ask && (() => ask(it))} off={off} dense={dense} />)}
       {later.length > 0 && (
         <UnstyledButton className="self-start py-1 text-[12px] font-semibold text-(--color-text-dim) hover:text-(--color-text)" data-action="todo-later"
           aria-expanded={open} onClick={() => setOpen(!open)}>
           {`Later (${later.length}) ${open ? '▾' : '›'}`}
         </UnstyledButton>
       )}
-      {open && later.map((it) => <Todo key={it.id} home={o.name} item={it} now={now} ask={ask && (() => ask(it))} off={off} />)}
+      {open && later.map((it) => <Todo key={it.id} home={o.name} item={it} now={now} ask={ask && (() => ask(it))} off={off} dense={dense} />)}
     </Stack>
   );
 }
 
-function Todo({ home, item, now, ask, off }: { home: string; item: TodoItem; now: number; ask?: () => void; off: boolean }) {
+// `dense` (the sidebar's): smaller, ✓ at the first line, the text two lines at most (all of it on hover), and Ask at the
+// right end of the line under it with the worker, the link and the due time (`inline`), so the text has the row's width
+function Todo({ home, item, now, ask, off, dense }: { home: string; item: TodoItem; now: number; ask?: () => void; off: boolean; dense?: boolean }) {
   const [busy, setBusy] = useState(false);
   const host = item.url ? linkHost(item.url) : null;
   const due = item.due != null ? dueLabel(item.due, now) : null;
@@ -162,25 +165,30 @@ function Todo({ home, item, now, ask, off }: { home: string; item: TodoItem; now
       showToast('Could not tick it off', (err as Error).message);
     }
   };
+  const meta = !!(item.agent || host || due);
+  const inline = dense && meta;
+  const askButton = ask && (
+    <Button className={`shrink-0 ${inline ? 'ml-auto' : ''}`} variant="subtle" size={dense ? 'compact-xs' : 'compact-sm'} fz={dense ? 12 : 13} data-action="todo-ask"
+      aria-label={`Ask about: ${item.text}`} disabled={off} title={off ? 'Answer the question first' : undefined} onClick={ask}>Ask</Button>
+  );
   return (
     // a line under each but the list's last, so items of two or three lines don't run together
-    <Group className="home-todo border-b border-(--color-border) py-1.5 last:border-b-0" data-todo={item.id} gap={10} wrap="nowrap">
-      <ActionIcon variant="default" radius="xl" className="shrink-0" aria-label={`Done: ${item.text}`} data-action="todo-done"
+    <Group className={`home-todo border-b border-(--color-border) last:border-b-0 ${dense ? 'py-1' : 'py-1.5'}`} data-todo={item.id} gap={dense ? 8 : 10}
+      wrap="nowrap" align={dense ? 'flex-start' : 'center'}>
+      <ActionIcon variant="default" radius="xl" size={dense ? 'sm' : undefined} className="shrink-0" aria-label={`Done: ${item.text}`} data-action="todo-done"
         loading={busy} onClick={() => { void done(); }}>&#10003;</ActionIcon>
       <div className="min-w-0 flex-1">
-        <Text fz={14} className="break-words">{item.text}</Text>
-        {(item.agent || host || due) && (
+        <Text fz={dense ? 13 : 14} lh={dense ? 1.45 : undefined} className="break-words" lineClamp={dense ? 2 : undefined} title={dense ? item.text : undefined}>{item.text}</Text>
+        {meta && (
           <Group gap={10} className="text-[12px]">
             {item.agent && <Anchor component="button" fz={12} data-agent={item.agent} onClick={() => openAgentNamed(item.agent!)}>{item.agent}</Anchor>}
             {host && <Anchor href={item.url!} target="_blank" rel="noopener noreferrer" fz={12} data-host={host}>{`${host} ↗`}</Anchor>}
             {due && <Text span fz={12} fw={due.past ? 600 : undefined} c={due.past ? 'blocked' : 'dimmed'} data-due={due.past ? 'past' : 'later'}>{due.past ? `due ${due.text}` : due.text}</Text>}
+            {inline && askButton}
           </Group>
         )}
       </div>
-      {ask && (
-        <Button className="shrink-0" variant="subtle" size="compact-sm" fz={13} data-action="todo-ask" aria-label={`Ask about: ${item.text}`}
-          disabled={off} title={off ? 'Answer the question first' : undefined} onClick={ask}>Ask</Button>
-      )}
+      {!inline && askButton}
     </Group>
   );
 }

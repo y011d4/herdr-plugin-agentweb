@@ -92,6 +92,24 @@ describe('Sidebar', () => {
     assert.ok(!c.querySelector('section.sidebar-group'), 'folded again');
   });
 
+  it('pins All agents after what waits at the Homes, unfolds the agents below it and scrolls them into view; its to-do items are dense', async () => {
+    const scrolled: Array<[Element, unknown]> = [];
+    vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element, arg) { scrolled.push([this, arg]); });
+    const c = await show('#/agents', withTodos());
+    const kids = [...c.querySelector('#sidebar')!.children];
+    const row = c.querySelector('.sidebar-all')!.parentElement!;
+    assert.equal(kids.at(-1), row, 'its own row, last while folded');
+    assert.ok(kids.at(-2)!.matches('section.sidebar-home'));
+    assert.ok(c.querySelector('[data-todo="t1"] [data-line-clamp]'), 'dense');
+    await unfold(c);
+    const list = c.querySelector('[data-sidebar-agents]')!;
+    assert.ok(row.nextElementSibling === list && list.querySelector('a.sidebar-list') && list.querySelector('section.sidebar-group'));
+    assert.deepEqual(scrolled, [[list, { block: 'nearest' }]]);
+    await unfold(c);
+    assert.equal(scrolled.length, 1, 'not as it folds');
+    vi.restoreAllMocks();
+  });
+
   it('shows an agent as its card does: the name and its status (a seen done as idle), its purpose, the location and branch', async () => {
     store.seenDone = { p3: 4 };
     const c = await show('#/agents', fresh());

@@ -3,17 +3,18 @@
  * (WIDE_QUERY: ui/App.tsx draws it only then). On top, what waits on the user: each orchestrator's
  * Home a heading (it opens the Home) over what waits there (Todos.tsx's NeedsList: its question, its
  * account's blocked agents, its to-do list), then Other, the blocked agents no Home's account lists.
- * Under them the agents, folded into one row (All agents, their count): a click unfolds them, grouped
- * by Home (homeGroups), each opening its pane the list's way (nav.ts's openAgent: its drawer), under
- * Open the list (#/agents), and folds them again. Settings is the topbar's ⚙, at the screen's top right. The Home or the agent on
- * show, from the hash, is marked (aria-current).
+ * The to-do items there are the dense ones (two lines at most, all of it on hover). Under them the agents, folded
+ * into one row (All agents, their count), pinned at the sidebar's bottom (in reach however long the lists above get):
+ * a click unfolds them below it, grouped by Home (homeGroups), each opening its pane the list's way (nav.ts's
+ * openAgent: its drawer), under Open the list (#/agents), scrolled into view, and folds them again. Settings is the
+ * topbar's ⚙, at the screen's top right. The Home or the agent on show, from the hash, is marked (aria-current).
  *
  * Like the agents list it gets every State push: it holds still while a finger is down
  * (useHeldState), and its rows are keyed by orchestrator and pane, so #sidebar, the scroll container,
  * stays the same element.
  */
 import { NavLink, Text } from '@mantine/core';
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { homeGroups, homeSummary, orchestratorStatus, shownStatus, type DashboardCard, type HomeGroup } from '../dashboard-group.ts';
 import { draftKey, setQuote } from '../drafts.ts';
 import { openAgent } from '../nav.ts';
@@ -48,13 +49,15 @@ export function Sidebar() {
   const now = useMinute();
   const hash = useSyncExternalStore(subscribeHash, () => location.hash);
   const [open, setOpen] = useState(false); // the agents, unfolded
+  const list = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (open) list.current?.scrollIntoView({ block: 'nearest' }); }, [open]);
   const cards = agentCards(state);
   const groups = homeGroups(cards, state?.orchestrators ?? []);
   const other = homeSummary(groups.find((g) => !g.home)?.cards ?? [], store.seenDone).blocked;
   return (
     <aside id="sidebar" aria-label="Homes and agents" {...hold}>
       {/* the topbar's height, kept in view over the list */}
-      <div className="sticky top-0 z-1 -mx-2 mb-2 flex h-[52px] items-center border-b border-(--color-border) bg-(--color-surface) px-4">
+      <div className="sticky top-0 z-1 -mx-2 flex h-[52px] shrink-0 items-center border-b border-(--color-border) bg-(--color-surface) px-4">
         <Text fw={700} fz={16}>Yoicks</Text>
       </div>
       {state?.orchestrators.map((o) => <Home key={o.name} o={o} state={state} now={now} on={hash === homeHash(o.name)} />)}
@@ -64,13 +67,19 @@ export function Sidebar() {
           <div className="px-3 pt-1"><Blocked cards={other} /></div>
         </section>
       )}
-      <div className="mt-3.5" data-sidebar-agents="">
+      {/* as tall as the topbar, at the bottom (#sidebar is a column): pinned there while the lists above run under it */}
+      <div className="sticky bottom-0 z-1 -mx-2 mt-auto flex h-[52px] shrink-0 items-center border-t border-(--color-border) bg-(--color-surface) px-2">
         <NavLink component="button" className="sidebar-all rounded-lg" label="All agents" aria-expanded={open}
           rightSection={`${cards.length} ${open ? '▾' : '›'}`} onClick={() => setOpen(!open)} />
-        {open && <NavLink href="#/agents" className="sidebar-list rounded-lg" label="Open the list" rightSection="›"
-          active={hash === '#/agents'} aria-current={current(hash === '#/agents')} />}
-        {open && groups.map((g) => <Group key={g.home ? `home:${g.home.name}` : 'other'} group={g} hash={hash} />)}
       </div>
+      {/* unfolded, below it; scrolled into view, its top below the topbar's height and the row's */}
+      {open && (
+        <div ref={list} className="scroll-mt-[104px] pb-4" data-sidebar-agents="">
+          <NavLink href="#/agents" className="sidebar-list rounded-lg" label="Open the list" rightSection="›"
+            active={hash === '#/agents'} aria-current={current(hash === '#/agents')} />
+          {groups.map((g) => <Group key={g.home ? `home:${g.home.name}` : 'other'} group={g} hash={hash} />)}
+        </div>
+      )}
     </aside>
   );
 }
@@ -89,7 +98,7 @@ function Home({ o, state, now, on }: { o: OrchestratorView; state: AppState; now
       <NavLink href={homeHash(o.name)} className="rounded-lg" data-home={o.name} fw={700} c={o.paneId ? undefined : 'dimmed'}
         label={orchestratorLabel(o)} leftSection={<StatusDot status={st} />} rightSection={<NeedsBadge n={n} />} active={on} aria-current={current(on)} />
       {(n > 0 || (o.todos?.length ?? 0) > 0) && (
-        <div className="px-3 pt-1"><NeedsList o={o} s={homeSummary(agentCards(state, o), store.seenDone)} now={now} ask={ask} /></div>
+        <div className="px-3 pt-1"><NeedsList o={o} s={homeSummary(agentCards(state, o), store.seenDone)} now={now} ask={ask} dense /></div>
       )}
     </section>
   );
