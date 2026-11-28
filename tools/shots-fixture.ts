@@ -1,10 +1,11 @@
 /**
  * tools/shots-fixture.ts: the made-up data `node tools/webcheck.ts shots` serves in place of a bridge, and the
- * screens it shoots. Nothing here is real: the screenshots it makes go into public PR comments. The types are
- * the web's own, so `npm run check:contract` (tsconfig.contract.json) fails when the State changes under it.
+ * screens and components it shoots. Nothing here is real: the screenshots it makes go into public PR comments. The
+ * types are the web's own, so `npm run check:contract` (tsconfig.contract.json) fails when the State changes under it.
  *
  * A new screen: one line in `scenes` (and the data it needs here). `ready` is a JS expression, true once the
- * screen has drawn what it shows; shots waits for it, then for the fonts and two frames.
+ * screen has drawn what it shows; shots waits for it, then for the fonts, the images and two frames. A new component:
+ * a part of the scene that shows it (`el`: the element, by the hooks the tests use; a new hook is a data-* attribute).
  */
 import type { AppState } from '../web/src/types.ts';
 import type { TimelineItem } from '../web/src/transcript.ts';
@@ -135,21 +136,71 @@ export const screen = (paneId: string): string => ({
     '  3. Type something.', '', 'Enter to select · ↑/↓ to navigate · Esc to cancel'].join('\n'),
 } as Record<string, string>)[paneId] ?? SHELL;
 
-export interface Scene { name: string; hash: string; ready: string; token?: false }
+/** A component cut out of its scene's screen: `el` is a JS expression, the element (null: not ready). */
+export interface Part { name: string; el: string; sizes?: Array<'phone' | 'pc'> }
+/** `screen: false` shoots only its parts (one full screen per kind of screen is enough). */
+export interface Scene { name: string; hash: string; ready: string; token?: false; screen?: false; parts?: Part[] }
 const items = (scope: string) => `document.querySelectorAll(${JSON.stringify(`${scope} #chat-log .chat-item`)}).length > 0`;
-/** Each one is shot on a phone and on a PC. */
+const q = (sel: string) => `document.querySelector(${JSON.stringify(sel)})`;
+/** the chat item (in the drawer) holding the first `sel` */
+const item = (sel: string) => `${q(`.agent-drawer ${sel}`)}?.closest('.chat-item')`;
+/** a Settings section by its title */
+const section = (title: string) => `[...document.querySelectorAll('.settings-section')].find((e) => e.firstElementChild?.textContent === ${JSON.stringify(title)})`;
+/** Each one is shot on a phone and on a PC: its screen (unless `screen: false`), then each part, so a diff names the
+ *  component that changed, and the screen shows how they sit together. */
 export const scenes: Scene[] = [
-  { name: 'agents', hash: '#/agents', ready: "!!document.querySelector('#screen-agents[data-ready]')" },
-  { name: 'agents-home', hash: '#/agents/personal', ready: "!!document.querySelector('#screen-agents[data-ready]')" },
-  { name: 'home', hash: '#/home/personal', ready: items('') },
+  { name: 'agents', hash: '#/agents', ready: "!!document.querySelector('#screen-agents[data-ready]')", parts: [
+    { name: 'agent-card-blocked', el: q('.agent-card[data-pane-id="p1"]') },
+    { name: 'agent-card-working', el: q('.agent-card[data-pane-id="p2"]') },
+    { name: 'agent-card-done', el: q('.agent-card[data-pane-id="p3"]') },
+    { name: 'agent-card-idle', el: q('.agent-card[data-pane-id="p5"]') },
+    { name: 'sidebar-home', el: q('.sidebar-group[data-home="personal"]'), sizes: ['pc'] },
+  ] },
+  { name: 'agents-home', hash: '#/agents/personal', ready: "!!document.querySelector('#screen-agents[data-ready]')", screen: false, parts: [
+    { name: 'topbar-agents-home', el: q('#topbar') },
+  ] },
+  { name: 'home', hash: '#/home/personal', ready: items(''), parts: [
+    { name: 'topbar-home', el: q('#topbar') },
+    { name: 'home-status', el: q('#home-status') },
+    { name: 'chat-notice', el: q('#chat-log .chat-notice') },
+    { name: 'composer', el: q('.input-bar') },
+  ] },
   // its Needs you popover: the ready check taps the button (once: then it's aria-expanded) until the list shows
   { name: 'home-needs', hash: '#/home/personal', ready: `${items('')} && (!!document.querySelector('[data-needs-list] .home-todo')
-    || void document.querySelector('[data-action=needs][aria-expanded=false]')?.click())` },
-  { name: 'home-headless', hash: '#/home/work', ready: `${items('')} && !!document.querySelector('.ask-opt')` },
-  { name: 'home-stopped', hash: '#/home/side', ready: "!!document.querySelector('#screen-home-stopped')" },
-  { name: 'pane-chat', hash: '#/pane/p5', ready: items('.agent-drawer') },
-  { name: 'pane-question', hash: '#/pane/p1', ready: `${items('.agent-drawer')} && !!document.querySelector('.agent-drawer .ask-opt')` },
-  { name: 'pane-terminal', hash: '#/pane/p3', ready: "!!document.querySelector('.agent-drawer #term-live')?.textContent?.trim()" },
-  { name: 'settings', hash: '#/settings', ready: "!!document.querySelector('#screen-settings')" },
-  { name: 'token', hash: '', ready: "!!document.querySelector('#token-input')", token: false },
+    || void document.querySelector('[data-action=needs][aria-expanded=false]')?.click())`, screen: false, parts: [
+    { name: 'needs-popover', el: q('[data-needs-list]') },
+  ] },
+  { name: 'home-headless', hash: '#/home/work', ready: `${items('')} && !!document.querySelector('.ask-opt')`, screen: false, parts: [
+    { name: 'home-status-headless', el: q('#home-status') },
+    { name: 'headless-prompt', el: q('#headless-prompt') },
+  ] },
+  { name: 'home-stopped', hash: '#/home/side', ready: "!!document.querySelector('#screen-home-stopped')", screen: false, parts: [
+    { name: 'home-status-stopped', el: q('#home-status') },
+    { name: 'home-start', el: q('#btn-home-start') },
+  ] },
+  { name: 'pane-chat', hash: '#/pane/p5', ready: items('.agent-drawer'), parts: [
+    { name: 'drawer-head', el: q('.agent-drawer .agent-drawer-head') },
+    { name: 'chat-user', el: item('.chat-user') },
+    { name: 'chat-thinking', el: item('.chat-thinking') },
+    { name: 'chat-markdown', el: item('.chat-assistant .chat-md') },
+    { name: 'chat-tool', el: item('.chat-tool') },
+    { name: 'chat-result-error', el: item('.chat-result-error') },
+    { name: 'chat-todos', el: item('.chat-todos') },
+    { name: 'chat-ask', el: item('.chat-ask') },
+  ] },
+  { name: 'pane-question', hash: '#/pane/p1', ready: `${items('.agent-drawer')} && !!document.querySelector('.agent-drawer .ask-opt')`, screen: false, parts: [
+    { name: 'chat-prompt', el: q('.agent-drawer #chat-prompt') },
+  ] },
+  { name: 'pane-terminal', hash: '#/pane/p3', ready: "!!document.querySelector('.agent-drawer #term-live')?.textContent?.trim()", screen: false, parts: [
+    { name: 'terminal', el: q('.agent-drawer #term-live') },
+  ] },
+  { name: 'settings', hash: '#/settings', ready: "!!document.querySelector('#screen-settings')", parts: [
+    { name: 'settings-notifications', el: section('Notifications') },
+    { name: 'settings-connection', el: section('Connection') },
+    { name: 'settings-headless', el: section('Headless orchestrators') },
+    { name: 'settings-account', el: section('Account') },
+  ] },
+  { name: 'token', hash: '', ready: "!!document.querySelector('#token-input')", token: false, parts: [
+    { name: 'token-form', el: q('#token-form') },
+  ] },
 ];

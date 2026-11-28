@@ -13,9 +13,10 @@
  *   node tools/webcheck.ts shots --after DIR [--before DIR] --out DIR [--only home,agents]   # the PR screenshots
  *
  * shots needs no herdr and no bridge: it serves tools/shots-fixture.ts's made-up data and a web build (DIR = a
- * web/dist), shoots each scene on a phone and a PC, before and after, and writes <scene>-<phone|pc>.<side>.png,
- * for each changed one <name>.diff.png (where its pixels differ), and manifest.json (which changed: the PNGs' bytes
- * differ; how many pixels) into --out. Each shot gets a browser context of its own
+ * web/dist), shoots each scene on a phone and a PC, before and after: its screen (<scene>-<phone|pc>.<side>.png,
+ * unless `screen: false`) and each of its parts, cut out of the same page (<part>-<phone|pc>.<side>.png), and writes
+ * for each changed one <name>.diff.png (where its pixels differ), and manifest.json (screen or part; which changed:
+ * the PNGs' bytes differ; how many pixels) into --out. Each shot gets a browser context of its own
  * (the app keeps seen-done, the last Home, drafts in localStorage), a frozen clock (the fixture's T0 + 30s), UTC,
  * en-US, no animations (CSS transitions off: Mantine's JS-timed ones then show their end state two frames in), and
  * its images decoded, so the same build shoots the same bytes. CI (.github/workflows/screenshots.yml) posts the
@@ -2476,6 +2477,10 @@ async function shots(o: Record<string, any>): Promise<number> {
   const { T0, scenes } = await import('./shots-fixture.ts');
   const only = o.only ? new Set(String(o.only).split(',')) : null;
   const picked = scenes.filter((s) => !only || only.has(s.name));
+  const partsOf = (scene: typeof scenes[number], size: typeof SIZES[number]) => (scene.parts ?? []).filter((p) => !p.sizes || p.sizes.includes(size.id as 'phone' | 'pc'));
+  const names = picked.flatMap((s) => SIZES.flatMap((z) => [...(s.screen === false ? [] : [s.name]), ...partsOf(s, z).map((p) => p.name)].map((n) => `${n}-${z.id}`)));
+  const bad = names.find((n, i) => !/^[a-z0-9-]{1,64}$/.test(n) || names.indexOf(n) !== i);
+  if (bad) throw new Error(`shots: ${bad} is twice or not [a-z0-9-] (tools/shots-fixture.ts)`);
   // a frozen clock that still moves with the page's own time (timers run), and nothing animated
   const init = `(() => { const T = ${T0 + 30_000}, p0 = performance.now(), R = Date;
     class D extends R { constructor(...a) { super(...(a.length ? a : [T + performance.now() - p0])); } static now() { return T + performance.now() - p0; } }
@@ -2518,8 +2523,24 @@ async function shots(o: Record<string, any>): Promise<number> {
         await ev(`document.fonts.ready.then(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))))
           .then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))`);
         await sleep(300);
-        const { data } = await S('Page.captureScreenshot', { format: 'png' });
-        return { png: Buffer.from(data, 'base64'), ready };
+        const shot: Array<{ name: string; kind: 'screen' | 'part'; png: Buffer; ready: boolean }> = [];
+        if (scene.screen !== false) {
+          const { data } = await S('Page.captureScreenshot', { format: 'png' });
+          shot.push({ name: `${scene.name}-${size.id}`, kind: 'screen', png: Buffer.from(data, 'base64'), ready });
+        }
+        // each part after the screen: its own box (whole pixels, within the viewport), scrolled into its container's
+        // view first; one not found is a 1x1 shot, not ready
+        for (const part of partsOf(scene, size)) {
+          const box = ready ? await ev(`(async () => { const e = ${part.el}; if (!e) return null;
+            e.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+            const b = e.getBoundingClientRect(), x = Math.max(0, Math.floor(b.left)), y = Math.max(0, Math.floor(b.top));
+            const w = Math.min(innerWidth, Math.ceil(b.right)) - x, h = Math.min(innerHeight, Math.ceil(b.bottom)) - y;
+            return w > 0 && h > 0 ? { x: x + scrollX, y: y + scrollY, width: w, height: h, scale: 1 } : null; })()`) : null;
+          const { data } = await S('Page.captureScreenshot', { format: 'png', clip: box ?? { x: 0, y: 0, width: 1, height: 1, scale: 1 } });
+          shot.push({ name: `${part.name}-${size.id}`, kind: 'part', png: Buffer.from(data, 'base64'), ready: !!box });
+        }
+        return shot;
       } finally {
         await c.send('Target.disposeBrowserContext', { browserContextId }).catch(() => {});
       }
@@ -2552,27 +2573,31 @@ async function shots(o: Record<string, any>): Promise<number> {
       return { pixels: r.pixels, near: at(3, 3), far: at(4, 4) };
     })()`);
     if (probe.pixels !== 1 || probe.near !== '255,0,255' || probe.far === '255,0,255') throw new Error(`the diff is broken: ${js(probe)}`);
-    const manifest: Array<{ name: string; changed: boolean | null; notReady: string[]; pixels: number | null }> = [];
+    const manifest: Array<{ name: string; kind: 'screen' | 'part'; changed: boolean | null; notReady: string[]; pixels: number | null }> = [];
     for (const scene of picked) for (const size of SIZES) {
-      const name = `${scene.name}-${size.id}`;
-      const got: Record<string, Buffer> = {};
-      const notReady: string[] = [];
+      // one page load per side gives the scene's screen and its parts; both sides shoot the same names (one fixture)
+      const shots = new Map<string, { kind: 'screen' | 'part'; got: Record<string, Buffer>; notReady: string[] }>();
       for (const [side, d] of sides) {
         server.use(d);
-        const r = await shoot(scene, size);
-        fs.writeFileSync(path.join(out, `${name}.${side}.png`), r.png);
-        got[side] = r.png;
-        if (!r.ready) notReady.push(side);
+        for (const r of await shoot(scene, size)) {
+          const s = shots.get(r.name) ?? { kind: r.kind, got: {}, notReady: [] };
+          shots.set(r.name, s);
+          fs.writeFileSync(path.join(out, `${r.name}.${side}.png`), r.png);
+          s.got[side] = r.png;
+          if (!r.ready) s.notReady.push(side);
+        }
       }
-      const changed = got.before ? !got.before.equals(got.after) : null;
-      let pixels: number | null = null;
-      if (changed) {
-        const d = await diff(got.before, got.after);
-        fs.writeFileSync(path.join(out, `${name}.diff.png`), d.png);
-        pixels = d.pixels;
+      for (const [name, { kind, got, notReady }] of shots) {
+        const changed = got.before ? !got.before.equals(got.after) : null;
+        let pixels: number | null = null;
+        if (changed) {
+          const d = await diff(got.before, got.after);
+          fs.writeFileSync(path.join(out, `${name}.diff.png`), d.png);
+          pixels = d.pixels;
+        }
+        manifest.push({ name, kind, changed, notReady, pixels });
+        console.log(`${changed === null ? 'shot   ' : changed ? 'CHANGED' : 'same   '} ${name}${changed ? ` (${pixels} px)` : ''}${notReady.length ? ` (not ready: ${notReady.join(', ')})` : ''}`);
       }
-      manifest.push({ name, changed, notReady, pixels });
-      console.log(`${changed === null ? 'shot   ' : changed ? 'CHANGED' : 'same   '} ${name}${changed ? ` (${pixels} px)` : ''}${notReady.length ? ` (not ready: ${notReady.join(', ')})` : ''}`);
     }
     fs.writeFileSync(path.join(out, 'manifest.json'), js({ shots: manifest }, null, 1));
     console.log(`${manifest.filter((s) => s.changed).length} of ${manifest.length} changed; ${out}`);
