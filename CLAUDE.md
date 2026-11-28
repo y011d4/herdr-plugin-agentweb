@@ -261,9 +261,17 @@ All in `internal/bridge/` (one package):
   linked checkout, `plugin-build.sh` builds that checkout from source (so the linked main is
   always main's latest, whatever release exists). `scripts/release.sh <version>` builds the 4 release binaries
   (linux/darwin × amd64/arm64, pinned toolchain, stripped, `-X …/internal/bridge.Version`) and writes the
-  checksums + manifest version; README "Releasing" has the rest
+  checksums + manifest version; the docs' Development page (`site/docs/en/development.md`, Releasing) has the rest
+- `site/` — the public site, https://yoicks.y011d4.com/, which `.github/workflows/pages.yml` deploys from main
+  (PRs only build it, in ci.yml's `docs` job). `npm run build` there makes all of it in `site/dist`: the landing at
+  `/` (`static/index.html`, hand-written, both languages in one page: `?lang=en|ja`, else the last choice, else the
+  browser's), the docs (`docs/`, VitePress, base `/docs/`: `en/` and `ja/` with the same pages, which the config
+  checks; the language menu, hreflang and `sitemap.xml` pair them), `static/` copied as is (later `/vrt/`,
+  `/demo/`), then `check-links.mjs` (every link and anchor inside the site). Its own npm project
+  (`site/package.json`, VitePress 2 alpha pinned exactly): the app's dependencies, its build and the binary never
+  see it (`go:embed` takes `web/dist*` only)
 
-The REST/WS/State JSON contract is documented in README "API surface". The Go bridge
+The REST/WS/State JSON contract is documented in the docs' API page (`site/docs/en/reference/api.md`, and `ja/`). The Go bridge
 and the TypeScript web share only this contract — change both sides together
 (`internal/bridge/contract_test.go` writes `testdata/contract/` and
 `web/test/contract.gen.ts`; `npm run check:contract` type-checks it against the web's types).
@@ -276,6 +284,7 @@ npm test                      # web tests (Vitest; Node per package.json engines
 go test ./...                 # bridge + CLI (CI: go test -race ./...); no web build needed
 go build -o bin/yoicks ./cmd/yoicks   # after build:web: without it, the bridge refuses to start
 HERDR_PLUGIN_STATE_DIR=$(mktemp -d) HERDR_YOICKS_PORT=8392 ./bin/yoicks run   # dev run
+(cd site && npm ci && npm run build)   # the Pages site → site/dist (links checked); npm run dev: the docs, hot reload
 ```
 
 The web UI from source (Vite on :5174, hot reload, no service worker: it registers only in a
@@ -700,6 +709,9 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   user's GitHub account, so GitHub can't tell them apart, and this rule is the only thing keeping the approval
   the user's. A failing `screens` check over intended changes is reported to the user, not worked around (no edit
   to the fixture, a scene or the workflow to make it pass).
+- Docs: the user-facing docs are `site/docs/en/` and `site/docs/ja/`, the same pages in both languages (a page in
+  one only fails the build); a behavior change updates the page in both, in the same PR. The READMEs still carry the
+  same text until they are cut down to a pointer to the site: change them too until then.
 - TS sources use explicit `.ts` relative-import extensions (`node` runs `tools/vectors/*.ts`
   on them directly; Vite bundles them). No raw control bytes in
   source — write ESC as the literal six characters `\u001b` in string escapes.
