@@ -11,10 +11,11 @@
  * (Repliable): its quote goes into the composer, and a reply shows what it quotes on top (QuoteRef), and
  * each message shows when it was sent (its transcript line's time: chatTime).
  */
-import { ActionIcon, Anchor, Box, Code, Group, Image, MantineProvider, Menu, Paper, Text, Typography, UnstyledButton } from '@mantine/core';
-import { createContext, memo, useContext, useState, type ReactNode, type Ref, type SyntheticEvent } from 'react';
+import { ActionIcon, Anchor, Box, Code, Group, Image, MantineProvider, Menu, Paper, Text, Typography, UnstyledButton, useMenuContext, usePopoverContext } from '@mantine/core';
+import { cloneElement, createContext, memo, useContext, useRef, useState, type HTMLAttributes, type ReactElement, type ReactNode, type Ref, type SyntheticEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
+import { DESKTOP_QUERY } from '../composer-keys.ts';
 import { openAgentNamed } from '../nav.ts';
 import { showToast } from '../notify.ts';
 import { theme } from '../theme.ts';
@@ -192,18 +193,20 @@ const REPLY_ICON = (
 );
 
 /** A message a Home can reply to (`of`: whose, `text`: its words): Reply puts its quote line into the
- *  composer, Copy copies its words (a [yoicks] notice has Copy only). Both from a long press on a phone or
+ *  composer, Copy copies its words (a [yoicks] notice has Copy only). Both from a tap on a phone (MenuOnTap) or
  *  a right click on a PC (Mantine's Menu.ContextMenu), Reply also from the ↩ over its top-right corner, shown on a PC's hover or keyboard
  *  focus (inside the message, so the mouse reaches it without leaving it; on its own background, over the
  *  text while shown), on a phone there for a screen reader only. On a link or a button, or with its text
- *  selected, the browser's own menu instead. A mouse still selects its text; a long press selects none (Copy
- *  is for that). Its data-quote is that quote line: a reply's QuoteRef finds it by it. */
+ *  selected, the browser's own menu instead. A phone's long press is the OS's: it selects words, with the OS's
+ *  handles and Copy (Menu.ContextMenu would take it: no selection, no callout); a mouse selects as anywhere.
+ *  Its data-quote is that quote line: a reply's QuoteRef finds it by it. */
 function Repliable({ className, of, text, time, children }: { className: string; of: Exclude<QuoteOf, 'todo'>; text: string; time?: string; children: ReactNode }) {
   const reply = useContext(ReplyTo);
   const [native, setNative] = useState(false);
   if (!reply || !text.trim()) return <div className={className} data-time={time}>{children}</div>;
   const quote = quoteLine(of, text); // a notice's too: an earlier reply to one still finds it
   const canReply = of !== 'notice'; // the bridge's line: Copy only
+  const touch = !matchMedia(DESKTOP_QUERY).matches; // a phone or a tablet (composer-keys.ts): its long press stays the OS's
   // before the menu's own handlers see the press
   const press = (e: SyntheticEvent<HTMLDivElement>): void => {
     const sel = getSelection();
@@ -213,16 +216,17 @@ function Repliable({ className, of, text, time, children }: { className: string;
     (navigator.clipboard?.writeText(text) ?? Promise.reject(new Error())).then(
       () => showToast('Copied', ''), () => showToast('Not copied', 'This browser did not allow it.'));
   };
+  const msg = (
+    <div className={`group/msg relative rounded-[14px] pointer-fine:select-text! data-flash:outline-2 data-flash:outline-offset-2 data-flash:outline-(--color-accent) ${className}`}
+      data-quote={quote} data-time={time} onTouchStart={press} onMouseDown={press}>
+      {children}
+      {canReply && <ActionIcon className="chat-reply absolute top-1 right-1 opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 focus-visible:outline-current pointer-coarse:sr-only"
+        variant="default" size={28} aria-label="Reply" onClick={() => reply(quote)}>{REPLY_ICON}</ActionIcon>}
+    </div>
+  );
   return (
     <Menu position="bottom-start" returnFocus={false}>
-      <Menu.ContextMenu disabled={native}>
-        <div className={`group/msg relative rounded-[14px] pointer-fine:select-text! data-flash:outline-2 data-flash:outline-offset-2 data-flash:outline-(--color-accent) ${className}`}
-          data-quote={quote} data-time={time} onTouchStart={press} onMouseDown={press}>
-          {children}
-          {canReply && <ActionIcon className="chat-reply absolute top-1 right-1 opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 focus-visible:outline-current pointer-coarse:sr-only"
-            variant="default" size={28} aria-label="Reply" onClick={() => reply(quote)}>{REPLY_ICON}</ActionIcon>}
-        </div>
-      </Menu.ContextMenu>
+      {touch ? <MenuOnTap>{msg}</MenuOnTap> : <Menu.ContextMenu disabled={native}>{msg}</Menu.ContextMenu>}
       <Menu.Dropdown>
         {canReply && <Menu.Item className="min-h-11" fz="md" data-action="reply" onClick={() => reply(quote)}>Reply</Menu.Item>}
         <Menu.Item className="min-h-11" fz="md" data-action="copy" onClick={copy}>Copy</Menu.Item>
@@ -230,6 +234,34 @@ function Repliable({ className, of, text, time, children }: { className: string;
     </Menu>
   );
 }
+
+/** A phone's way to a message's menu: a tap opens it where it landed (as Menu.ContextMenu does for a right click),
+ *  and the long press is left to the OS. Not a press held past a tap's 500 ms (should a click follow it), nor a tap
+ *  that ends a text selection or closes a menu (read at its touchstart: by its click the browser may have dropped
+ *  the selection, and the menu's click-outside, on the document, has closed it), nor one on a link or a button. */
+function MenuOnTap({ children }: { children: ReactElement<HTMLAttributes<HTMLDivElement>> }) {
+  const menu = useMenuContext();
+  // typed for an element, but Floating UI's: a virtual one too, the point Menu.ContextMenu gives it the same way
+  const reference = usePopoverContext().reference as (at: object) => void;
+  const start = useRef<{ at: number; ending: boolean } | null>(null);
+  return cloneElement(children, {
+    onTouchStart: (e) => {
+      children.props.onTouchStart?.(e);
+      // ponytail: a menu in the DOM, its 150 ms closing transition included, so a tap that soon after one closed is
+      // dropped too (one more tap); its open state, kept across the chat's menus, would leak one unmounted open
+      start.current = { at: e.timeStamp, ending: selected() || !!document.querySelector('[role="menu"]') };
+    },
+    onClick: (e) => {
+      const s = start.current;
+      start.current = null;
+      if (s?.ending || (s && e.timeStamp - s.at > 500) || selected() || (e.target as Element).closest('a, button')) return;
+      reference({ getBoundingClientRect: () => DOMRect.fromRect({ x: e.clientX, y: e.clientY }), contextElement: e.currentTarget });
+      menu.openDropdown();
+    },
+  });
+}
+
+const selected = (): boolean => { const s = getSelection(); return !!s && !s.isCollapsed; };
 
 // whose message a quote is (a to-do item's: none, it isn't in the chat)
 const QUOTE_LABEL: Record<QuoteOf, string> = { you: 'Orchestrator', me: 'You', notice: 'yoicks', todo: 'To-do' };
