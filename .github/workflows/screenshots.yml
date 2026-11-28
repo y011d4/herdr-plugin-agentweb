@@ -5,7 +5,9 @@ name: Screenshots
 # bridge), on a phone and a PC: a full screen per kind of screen and the components cut out of them (agent card,
 # Home status bar, chat items, answer panel, settings sections…: tools/shots-fixture.ts's `parts`), so a diff names
 # the component that changed. The shots whose pixels changed go into one comment, components first, before | after and
-# where they differ (tools/webcheck.ts's diff: the after dimmed, the changed pixels magenta), updated on each push. The fixture is all the shots ever see: they are public.
+# where they differ (tools/webcheck.ts's diff: the after dimmed, the changed pixels magenta), with links to the
+# viewer on the Pages site (https://yoicks.y011d4.com/vrt/: slider, blink, diff, side by side), updated on each
+# push. The fixture is all the shots ever see: they are public.
 #
 # The `screens` job is a gate (a required check): it fails while a screen differs from main's and the user hasn't
 # approved exactly those pixels. The user approves by adding the `ui-change` label after looking at the comment
@@ -289,6 +291,11 @@ jobs:
             echo
             if (( ${#changed[@]} )); then
               echo "**UI screenshots**: ${#changed[@]} of $total shots changed: ${#parts[@]} components, ${#screens[@]} screens (${HEAD_SHA:0:7}). Made-up data: \`tools/shots-fixture.ts\`."
+              # the viewer (site/static/vrt/index.html, on the Pages site): this commit's changed shots, in this order, by
+              # slider, blink, diff or side by side; the PNGs it shows are the ones linked here
+              vrt="https://yoicks.y011d4.com/vrt/?sha=$sha&pr=$PR&s=$(IFS=,; echo "${changed[*]}")"
+              echo
+              echo "[Compare them: slider, blink, diff]($vrt)"
               # a PNG's width (its IHDR), in CSS px: the phone's are shot at 2x
               pngw() { echo $(( 16#$(od -An -tx1 -j16 -N4 "$1" | tr -d ' \n') )); }
               show() { # $1 the shot, $2 open or not
@@ -302,8 +309,8 @@ jobs:
                 fi
                 cell() { if [[ -f $pub/$n.$1.png ]]; then echo "<img src=\"https://raw.githubusercontent.com/$REPO/$sha/$n.$1.png\" width=\"$w\">"; else echo "(none)"; fi; }
                 # the diff under the pair, not beside it: three PC shots don't fit the comment's width
-                printf '\n<details%s><summary><code>%s</code>: %s px differ</summary>\n\n| before | after |\n| --- | --- |\n| %s | %s |\n\nWhere they differ (magenta):<br>%s\n\n</details>\n' \
-                  "$2" "$n" "${px[$n]}" "$(cell before)" "$(cell after)" "$(cell diff)"
+                printf '\n<details%s><summary><code>%s</code>: %s px differ</summary>\n\n[Open the comparison](%s)\n\n| before | after |\n| --- | --- |\n| %s | %s |\n\nWhere they differ (magenta):<br>%s\n\n</details>\n' \
+                  "$2" "$n" "${px[$n]}" "$vrt#$n" "$(cell before)" "$(cell after)" "$(cell diff)"
               }
               if (( ${#parts[@]} )); then
                 printf '\n#### Components\n'

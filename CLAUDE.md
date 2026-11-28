@@ -266,8 +266,8 @@ All in `internal/bridge/` (one package):
   (PRs only build it, in ci.yml's `docs` job). `npm run build` there makes all of it in `site/dist`: the landing at
   `/` (`static/index.html`, hand-written, both languages in one page: `?lang=en|ja`, else the last choice, else the
   browser's), the docs (`docs/`, VitePress, base `/docs/`: `en/` and `ja/` with the same pages, which the config
-  checks; the language menu, hreflang and `sitemap.xml` pair them), `static/` copied as is (later `/vrt/`,
-  `/demo/`), then `check-links.mjs` (every link and anchor inside the site). Its own npm project
+  checks; the language menu, hreflang and `sitemap.xml` pair them), `static/` copied as is (`/vrt/`: the PR
+  screenshots' viewer, below; later `/demo/`), then `check-links.mjs` (every link and anchor inside the site). Its own npm project
   (`site/package.json`, VitePress 2 alpha pinned exactly): the app's dependencies, its build and the binary never
   see it (`go:embed` takes `web/dist*` only)
 
@@ -684,7 +684,10 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
 - **PR screenshots** (`.github/workflows/screenshots.yml`): on a PR touching the web UI, CI shoots main's
   web build and the PR's (`node tools/webcheck.ts shots`) and posts the screens whose pixels changed,
   before | after and where they differ (the after dimmed, the changed pixels magenta, with their count; Chrome
-  decodes and compares the PNGs), in one comment it updates (images in `refs/screenshots/pr-<n>`, outside the branches).
+  decodes and compares the PNGs), in one comment it updates (images in `refs/screenshots/pr-<n>`, outside the branches),
+  with links to the viewer, https://yoicks.y011d4.com/vrt/ (`site/static/vrt/index.html`, one static page: slider, blink,
+  diff, side by side; everything from its URL, `?sha=<that ref's commit>&s=<the changed shots>&pr=<n>#<a shot>`, the
+  PNGs from raw.githubusercontent.com by commit, a CSP that allows nothing else).
   No herdr, no bridge: a stand-in serves `tools/shots-fixture.ts` (made-up data, typed as the web's
   `State`, so `npm run check:contract` fails when it goes stale; the shots are public, so never real
   data in it). One full screen per kind of screen, plus the components cut out of them (a scene's `parts`: an
