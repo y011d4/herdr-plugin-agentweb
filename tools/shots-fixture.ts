@@ -1,5 +1,5 @@
 /**
- * tools/shots-fixture.ts: the made-up data `node tools/webcheck.ts shots` serves in place of a bridge, and the
+ * tools/shots-fixture.ts: the made-up data `node tools/e2e.ts shots` serves in place of a bridge, and the
  * screens and components it shoots. Nothing here is real: the screenshots it makes go into public PR comments. The
  * types are the web's own, so `npm run check:contract` (tsconfig.contract.json) fails when the State changes under it.
  *

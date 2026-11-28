@@ -32,7 +32,7 @@ All in `internal/bridge/` (one package):
   agents launch only from a
   fixed `launch_profiles` allowlist (never a caller-supplied command). http.go wires the routes
   (`POST /api/agents`, `DELETE /api/panes/:id`, `POST /api/panes/:id/rename`, `POST /api/agents/:target/clear`).
-  The web UI starts no agents (orchestrators do); `POST /api/agents` stays for scripts and webcheck's
+  The web UI starts no agents (orchestrators do); `POST /api/agents` stays for scripts and e2e's
   Tier 2 setup. Every new worktree (API, `yoicks agent start --worktree`) goes
   next to its repo as `<repo>-wt-<branch>` (`placeWorktreeNextToRepo` in worktree_resolve.go), so a
   parent-dir `.envrc` (e.g. the Claude account per org dir) covers it; herdr's own default dir wouldn't.
@@ -150,7 +150,7 @@ All in `internal/bridge/` (one package):
   the theme's `cursorType`, a `summary` or `[role=button]` by reset.css, a disabled one `not-allowed` (style.css). Mantine's style props (`px`, `c`, `bg`…) are inline
   styles, so they beat any class, a Tailwind `lg:` one too: a value that changes with the width goes in
   classes only. A class (Tailwind's layer, or `app`) beats Mantine's own CSS. Ids stay; the class names the
-  tests and webcheck select on stay on their elements as hooks without CSS (`agent-card`, `home-chip`,
+  tests and e2e select on stay on their elements as hooks without CSS (`agent-card`, `home-chip`,
   `qkey`, `toast`, `ask-opt`…); a new hook is a `data-*` attribute. Mantine's focus trap focuses in a
   `setTimeout`: `autoFocus` where the focus must be there as it mounts. Tailwind never finds a class written
   right before `${…}` in a template string (`self-end${x}`): leave a space. With no preflight, `border-dashed`
@@ -308,8 +308,8 @@ To check the built app, SW included, without rebuilding the binary: `npx vite bu
 and run the bridge with `YOICKS_WEB_DIR=web/dist`.
 
 Deploying to the running bridge (the binary of the checkout herdr links, normally main's), in
-that checkout, with the PC at hand. The gate is CI, not a local webcheck: each push to main runs
-all of ci.yml, webcheck's Tier 1 included, so the run of main's head checks the merged PRs together,
+that checkout, with the PC at hand. The gate is CI, not a local e2e run: each push to main runs
+all of ci.yml, e2e's Tier 1 included, so the run of main's head checks the merged PRs together,
 and `redeploy.sh main` deploys only a commit whose run passed:
 
 ```bash
@@ -533,7 +533,7 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   (Shift+Enter: a newline), never the Enter that confirms an IME conversion (`isComposing`, or
   keyCode 229), and once per held key (`composer-keys.ts`); on a touch device only Send sends.
 - **`ui/App.tsx`: `#topbar`, `#reconnect-banner` and `#screen` stay the same elements** for the
-  app's life (webcheck observes `#screen`); a route render swaps what is inside them only.
+  app's life (e2e observes `#screen`); a route render swaps what is inside them only.
 - `terminal.ts`: double-tap detection requires two *stationary* taps (movement > 10px within
   a touch disqualifies it) — fast swipe flicks must not trigger it.
 - WS pushes are deduped server-side against the last serialized state;
@@ -644,22 +644,22 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   (`Input.dispatchTouchEvent`, mobile metrics, fresh profile). "The screen
   changed" is not proof by itself on a busy pane — assert on content moving
   to *older* lines and on the composer staying clean.
-- **webcheck** (`tools/webcheck.ts`: headless Chrome over CDP, no dependencies): CI's `webcheck` job
+- **e2e** (`tools/e2e.ts`: the web UI's end-to-end checks, headless Chrome over CDP, no dependencies): CI's `e2e` job
   runs Tier 1 on every PR and every push to main, over a private herdr (the release binary of
   `HERDR_VERSION`, pinned by SHA-256 in ci.yml), and main's run is the gate before a deploy (above).
   By hand it is optional, for debugging a UI flow or writing a check: the same, in a root of your own
   (its own lock: no other worker's run to wait for) and nowhere production shows:
   ```bash
-  export WEBCHECK_ROOT=$(mktemp -d /tmp/wc-XXXX)  # short: the private herdr's socket lives under it
+  export E2E_ROOT=$(mktemp -d /tmp/e2e-XXXX)  # short: the private herdr's socket lives under it
   go build -o "$FC/claude" ./tools/fakeclaude   # FC: any dir; the H items' wc-h1 runs it
-  node tools/webcheck.ts herdr start            # a private headless herdr for this root
-  node tools/webcheck.ts preview start --bin bin/yoicks --port 8396 --fake-claude "$FC/claude"  # a port of your own
-  node tools/webcheck.ts check --base http://127.0.0.1:8396 --tier 1  # lock, setup, checks, teardown
-  node tools/webcheck.ts preview stop --port 8396 && node tools/webcheck.ts herdr stop
+  node tools/e2e.ts herdr start            # a private headless herdr for this root
+  node tools/e2e.ts preview start --bin bin/yoicks --port 8396 --fake-claude "$FC/claude"  # a port of your own
+  node tools/e2e.ts check --base http://127.0.0.1:8396 --tier 1  # lock, setup, checks, teardown
+  node tools/e2e.ts preview stop --port 8396 && node tools/e2e.ts herdr stop
   ```
-  The private herdr (`herdr server` under `$WC_ROOT/herdr` as its HOME and XDG dirs: none of the
+  The private herdr (`herdr server` under `$E2E_ROOT/herdr` as its HOME and XDG dirs: none of the
   desktop herdr's config, so not its plugins, which would start a second yoicks) takes every herdr call
-  of that root and its previews while `$WC_ROOT/herdr` exists; stopped, they fail rather than reach the
+  of that root and its previews while `$E2E_ROOT/herdr` exists; stopped, they fail rather than reach the
   desktop's. A preview and a run stay on the herdr they began on: `herdr start|stop` refuse while the root
   has a preview or an unfinished run, a run refuses a preview of the other herdr, and the default root
   (every worker's) gets none. Without `herdr start` (Tier 2, which needs the desktop's HOME and direnv),
@@ -671,7 +671,7 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   - Tier 1 is deterministic, shell panes only: `wc-shell` (`seq`) and `wc-less` (`less --mouse`,
     `report-agent`ed as claude, so it takes the app-scroll path). Tier 2 (`--tier 2`) drives a
     real Claude (`wc-claude`, orchestrators `wc-o1`/`wc-o2`) and refuses to run until
-    `$WC_ROOT/.envrc` sets the account's `CLAUDE_CONFIG_DIR` (`direnv allow`ed). `preview start`
+    `$E2E_ROOT/.envrc` sets the account's `CLAUDE_CONFIG_DIR` (`direnv allow`ed). `preview start`
     then gives the orchestrators that account as `env` (start the preview after the `.envrc`), and
     a Claude it starts in another account stops the run (`ENV: … account mismatch`). The default
     account is `unset CLAUDE_CONFIG_DIR`, not `~/.claude`: set, Claude Code reads a stale
@@ -684,13 +684,13 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
     phone, notifications included) sees the scratch agents: say so before such a run. It mutates only what the run created
     and recorded whose live tab or workspace label starts with `wc-` (one guard, which the page's
     own API requests pass too), and refuses port 8390. Runs and `preview start`/`stop` take turns
-    on `$WC_ROOT/lock`, held by a separate `flock` process the bridge and Chrome never inherit.
+    on `$E2E_ROOT/lock`, held by a separate `flock` process the bridge and Chrome never inherit.
     Teardown also runs on Ctrl+C; what it can't close stays recorded, and the next run retries it.
-    `WC_ROOT` = `$WEBCHECK_ROOT` or `~/.local/state/herdr-yoicks-webcheck`.
+    `E2E_ROOT` defaults to `~/.local/state/herdr-yoicks-e2e`.
   - A new check first passes on the current UI (the main before a screen's port), so it isn't
     written to fit the new code.
 - **PR screenshots** (`.github/workflows/screenshots.yml`): on a PR touching the web UI, CI shoots main's
-  web build and the PR's (`node tools/webcheck.ts shots`) and pushes the changed shots' before, after and where they
+  web build and the PR's (`node tools/e2e.ts shots`) and pushes the changed shots' before, after and where they
   differ (the after dimmed, the changed pixels magenta; Chrome decodes and compares the PNGs) to `refs/screenshots/pr-<n>`,
   outside the branches. One comment it updates says how many shots changed and how many didn't and names the changed
   ones (with their pixel count), each linked to the viewer, plus one link stepping through them all; it embeds no image.
@@ -723,7 +723,7 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   quick look before pushing:
   ```bash
   git worktree add "$T/before" main && (cd "$T/before" && npm ci --ignore-scripts && npx vite build)
-  npx vite build && node tools/webcheck.ts shots --before "$T/before/web/dist" --after web/dist --out "$T/shots"
+  npx vite build && node tools/e2e.ts shots --before "$T/before/web/dist" --after web/dist --out "$T/shots"
   ```
 
 ## Conventions

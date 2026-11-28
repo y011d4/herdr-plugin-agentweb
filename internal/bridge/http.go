@@ -765,7 +765,7 @@ func (s *server) headlessStatus(def OrchestratorDef, from, to string) {
 	s.showOnPC(def, label+" → "+to, "headless orchestrator", sound)
 }
 
-// showOnPC is herdr's notification.show, never for webcheck's wc- orchestrators.
+// showOnPC is herdr's notification.show, never for e2e's wc- orchestrators.
 func (s *server) showOnPC(def OrchestratorDef, title, body, sound string) {
 	if strings.HasPrefix(def.Name, "wc-") {
 		return

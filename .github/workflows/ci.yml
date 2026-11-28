@@ -154,13 +154,13 @@ jobs:
         working-directory: site
         run: npm ci --ignore-scripts && npm run build
 
-  # webcheck's Tier 1 (tools/webcheck.ts): the web UI in headless Chrome through a preview bridge, over a private
-  # headless herdr (`webcheck herdr start`) and the fake claude: no desktop herdr, no real Claude (Tier 2 stays a
+  # e2e's Tier 1 (tools/e2e.ts): the web UI in headless Chrome through a preview bridge, over a private
+  # headless herdr (`e2e.ts herdr start`) and the fake claude: no desktop herdr, no real Claude (Tier 2 stays a
   # step by hand). herdr is the release binary of the version production runs (CLAUDE.md's herdr 0.9.5), checked
   # against the SHA-256 below (herdr publishes none): a release replaced under the same tag fails here, not runs.
   # Raising the version is a PR that changes both lines, and so runs this against the new herdr first.
   # It runs on pushes to main too, with no `if:`: main's run is the deploy gate (CLAUDE.md's deploy steps).
-  webcheck:
+  e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -210,20 +210,20 @@ jobs:
 
       - name: Tier 1
         env:
-          WEBCHECK_ROOT: ${{ runner.temp }}/wc
+          E2E_ROOT: ${{ runner.temp }}/e2e
         run: |
-          node tools/webcheck.ts herdr start
-          node tools/webcheck.ts preview start --bin bin/yoicks --fake-claude "$RUNNER_TEMP/fake/claude"
-          node tools/webcheck.ts check --base http://127.0.0.1:8395 --tier 1
+          node tools/e2e.ts herdr start
+          node tools/e2e.ts preview start --bin bin/yoicks --fake-claude "$RUNNER_TEMP/fake/claude"
+          node tools/e2e.ts check --base http://127.0.0.1:8395 --tier 1
 
       - name: Upload the logs
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: webcheck-logs
+          name: e2e-logs
           path: |
-            ${{ runner.temp }}/wc/preview-*/state/bridge.log
-            ${{ runner.temp }}/wc/herdr/server.log
-            ${{ runner.temp }}/wc/herdr/.config/herdr/herdr-server.log
+            ${{ runner.temp }}/e2e/preview-*/state/bridge.log
+            ${{ runner.temp }}/e2e/herdr/server.log
+            ${{ runner.temp }}/e2e/herdr/.config/herdr/herdr-server.log
           retention-days: 7
           if-no-files-found: ignore
