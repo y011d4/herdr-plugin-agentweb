@@ -38,7 +38,8 @@
   .bar { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--mark); pointer-events: none; }
   .tag { position: absolute; top: 6px; padding: 0 6px; border-radius: 4px; font-size: 12px; background: rgb(0 0 0 / .65); pointer-events: none; }
   #range { display: block; width: 100%; max-width: 40rem; margin-top: 10px; accent-color: var(--accent); }
-  .side { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+  /* two equal columns at any width: the images scale down into them rather than wrap one under the other */
+  .side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
   figure { margin: 0; max-width: 100%; }
   figcaption { color: var(--dim); font-size: 13px; margin-bottom: 4px; }
   figure img { display: block; max-width: 100%; height: auto; }
