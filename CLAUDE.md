@@ -191,7 +191,9 @@ All in `internal/bridge/` (one package):
   composer (the terminal + quick keys stay one `>_` tap away — the only way to send Esc/Ctrl+C, and
   the fallback when there's no transcript). Orchestrators get no card in any agents list (`agentCards`
   in `ui/Dashboard.tsx` feeds both the list and `homeSummary`); the full list's ← Home opens `defaultHome()`.
-  Home's counts (its status bar's: an outlined pill with a ›) open `#/agents/<name>`: only the panes in its state `agents` (its Claude
+  Home's counts (its status bar's: an outlined pill with a ▾, `Pane.tsx`'s `AgentsButton`) open a popover as Needs you's: those
+  agents, blocked first, then working, done, idle (`byUrgency`), as the sidebar's rows (`AgentRow`, with the time; a tap: its
+  drawer), and at its bottom Open the list, `#/agents/<name>`: only the panes in its state `agents` (its Claude
   account's, via `paneAccount`, cached per agent pane and re-checked every 60s by `paneAccountCache`;
   `null` = unknown → every agent),
   with `← <its Home>` (`Back to …`; at every width) to that Home; a pane opened from there opens over that list. Any route to

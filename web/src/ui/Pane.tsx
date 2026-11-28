@@ -16,12 +16,12 @@
  * State pushes re-render it constantly. The composer's textarea is uncontrolled (React never sets its
  * value), so a push never resets what is being typed, an IME composition included.
  */
-import { ActionIcon, Button, CloseButton, FileButton, Group, Image, Indicator, Menu, NativeSelect, Popover, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Button, CloseButton, FileButton, Group, Image, Indicator, Menu, NativeSelect, NavLink, Popover, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
 import { draftKey, getDraft, getQuote, onQuote, pruneDrafts, setDraft, setQuote } from '../drafts.ts';
-import { homeSummary, orchestratorStatus } from '../dashboard-group.ts';
+import { byUrgency, homeSummary, orchestratorStatus, type HomeSummary } from '../dashboard-group.ts';
 import { fitImages, MAX_IMAGES, toAttachment, type ImageAttachment } from '../image.ts';
 import { showToast } from '../notify.ts';
 import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
@@ -31,7 +31,7 @@ import { emit, findPane, store, subscribe } from '../store.ts';
 import { dueLabel } from '../todos.ts';
 import type { AppState, HeadlessCompact, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
 import { QuoteText } from './ChatLog.tsx';
-import { TopbarIcon, agentCards, orchestratorLabel, relativeTime } from './Dashboard.tsx';
+import { AgentRow, TopbarIcon, agentCards, orchestratorLabel, relativeTime, useHeldState } from './Dashboard.tsx';
 import { StatusDot } from './Status.tsx';
 import { NeedsBadge, NeedsButton, needsYou, useMinute } from './Todos.tsx';
 import type { Topbar } from './App.tsx';
@@ -239,7 +239,7 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
 // Home status bar: with two or more orchestrators configured a switcher between their Homes (a
 // stopped one dimmed: its Home has Start), then one row: "Needs you · n" (its account's blocked
 // agents, its own question, its to-do items: Todos.tsx's NeedsButton, a popover), the counts of its
-// agents (tap → its list), and at the right a headless one's usage and model and the orchestrator's ⋮ (HomeMenu:
+// agents (AgentsButton, a popover of them), and at the right a headless one's usage and model and the orchestrator's ⋮ (HomeMenu:
 // Compact, Clear, Stop; the row wraps where it must: a phone, a narrow PC); under it a headless one's
 // warnings (`clear`: their Clear, on a stopped Home too).
 function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: string; state: AppState | null; actions?: HomeActions; clear?: () => void }) {
@@ -271,16 +271,7 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
       )}
       <Group className="home-row" gap="6px 14px">
         {self && <NeedsButton o={self} s={s} n={needsYou(self, state, now)} now={now} />}
-        {/* the counts are the way to its agents: an outlined pill and a dim ›, as its other buttons;
-            below sm only the numbers: the words come back with the room */}
-        <Button {...SMALL} className="home-counts shrink-0 bg-transparent hover:bg-(--color-surface-2)" classNames={{ label: 'gap-x-3' }} size="compact-sm" fz={13} fw={400}
-          data-go="agents" title="Agents" aria-label={`Agents: ${s.working} working, ${s.done} done, ${s.idle} idle`}
-          rightSection={<span aria-hidden="true">&#8250;</span>}
-          onClick={() => { location.hash = homeAgentsHash(location.hash); }}>
-          <span data-count=""><Dot status="working" />{s.working}<span className="max-sm:hidden"> working</span></span>
-          <span data-count=""><Dot status="done" />{s.done}<span className="max-sm:hidden"> done</span></span>
-          <span data-count=""><Dot status="idle" />{s.idle}<span className="max-sm:hidden"> idle</span></span>
-        </Button>
+        <AgentsButton name={name} s={s} />
         {(usage || self?.headless || actions) && (
           <Group gap={10} className="ml-auto">
             {usage}
@@ -291,6 +282,44 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
       </Group>
       {self?.headless && <HeadlessWarnings o={self} clear={clear} />}
     </Stack>
+  );
+}
+
+// A Home's counts of its agents (`s`; the blocked ones are on Needs you), the way to them: an outlined pill, as its other
+// buttons (below sm only the numbers: the words come back with the room). A tap opens the popover under it, as Needs you's
+// does (Todos.tsx's NeedsButton: as wide as a phone allows, no taller than the room below it; Escape, a tap outside, a tap
+// on it again and leaving the screen close it; the focus goes into it and back): its account's agents, blocked first, then
+// working, done and idle (byUrgency), each opening its drawer, then Open the list (#/agents/<name>). Like the agents list it
+// holds still while a finger is down (useHeldState).
+function AgentsButton({ name, s }: { name: string; s: HomeSummary }) {
+  const [opened, setOpened] = useState(false);
+  const [held, hold] = useHeldState();
+  useEffect(() => {
+    if (!opened) return;
+    const close = (): void => setOpened(false);
+    addEventListener('hashchange', close);
+    return () => removeEventListener('hashchange', close);
+  }, [opened]);
+  const cards = byUrgency(agentCards(held, held?.orchestrators.find((o) => o.name === name)), store.seenDone);
+  return (
+    <Popover opened={opened} onChange={setOpened} position="bottom-start" width="min(400px, calc(100vw - 24px))" radius="md" shadow="md"
+      trapFocus returnFocus middlewares={{ shift: { padding: 12 }, size: { padding: 12 } }}>
+      <Popover.Target>
+        <Button {...SMALL} className="home-counts shrink-0 bg-transparent hover:bg-(--color-surface-2)" classNames={{ label: 'gap-x-3' }} size="compact-sm" fz={13} fw={400}
+          data-action="agents" title="Agents" aria-label={`Agents: ${s.working} working, ${s.done} done, ${s.idle} idle`}
+          rightSection={<span className="text-[10px]" aria-hidden="true">&#9662;</span>} onClick={() => setOpened(!opened)}>
+          <span data-count=""><Dot status="working" />{s.working}<span className="max-sm:hidden"> working</span></span>
+          <span data-count=""><Dot status="done" />{s.done}<span className="max-sm:hidden"> done</span></span>
+          <span data-count=""><Dot status="idle" />{s.idle}<span className="max-sm:hidden"> idle</span></span>
+        </Button>
+      </Popover.Target>
+      <Popover.Dropdown className="overflow-y-auto overscroll-contain" p={6} data-agents-list="" {...hold}>
+        {cards.length ? cards.map((c) => <AgentRow key={c.pane.paneId} card={c} />) : <Text c="dimmed" fz={13} px={12} py={8}>No active agents.</Text>}
+        <div className="mt-1 border-t border-(--color-border) pt-1">
+          <NavLink href={homeAgentsHash(homeHash(name))} className="agents-open-list rounded-lg" label="Open the list" rightSection="›" />
+        </div>
+      </Popover.Dropdown>
+    </Popover>
   );
 }
 

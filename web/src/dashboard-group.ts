@@ -74,6 +74,15 @@ export function homeSummary(cards: DashboardCard[], seen: SeenDone = {}): HomeSu
   return s;
 }
 
+const URGENCY: Partial<Record<AgentStatus, number>> = { blocked: 0, working: 1, done: 2 };
+
+/** A Home's agents popover order (ui/Pane.tsx's AgentsButton): blocked, working, done, then idle and unknown, each
+ *  status in `cards`' own order (most recent status change first). */
+export function byUrgency(cards: DashboardCard[], seen: SeenDone = {}): DashboardCard[] {
+  const rank = (c: DashboardCard): number => URGENCY[shownStatus(c.pane, seen)] ?? 3;
+  return [...cards].sort((a, b) => rank(a) - rank(b));
+}
+
 /**
  * Done panes this phone has already looked at: paneId -> herdr's completion_seq of
  * the done it saw. herdr's server-side "seen" flag (what turns done into idle) can

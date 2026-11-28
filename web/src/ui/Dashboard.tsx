@@ -8,7 +8,7 @@
  * what changed: scrollTop and iOS momentum hold. While a finger is down the list doesn't change at all
  * (a rewrite mid-drag can cancel the scroll); the latest State shows once it lifts.
  */
-import { ActionIcon, Badge, Button, Card, Center, Group, Loader, Text } from '@mantine/core';
+import { ActionIcon, Badge, Button, Card, Center, Group, Loader, NavLink, Text } from '@mantine/core';
 import { useEffect, useRef, useState, useSyncExternalStore, type ComponentPropsWithRef, type HTMLAttributes, type TouchEvent } from 'react';
 import { dashboardCards, shownStatus, type DashboardCard } from '../dashboard-group.ts';
 import { openAgent } from '../nav.ts';
@@ -146,6 +146,23 @@ function AgentCard({ card }: { card: DashboardCard }) {
         {relTime ? <span className="shrink-0 whitespace-nowrap">{relTime}</span> : null}
       </Group>
     </Card>
+  );
+}
+
+/** An agent in a Home's agents popover (ui/Pane.tsx's AgentsButton), as the PC sidebar's rows have it: the name, then
+ *  at the line's right end how long ago its status changed and the status; under it its purpose (two lines at most,
+ *  all of it on hover) and the location and branch. A click opens its drawer. */
+export function AgentRow({ card }: { card: DashboardCard }) {
+  const { pane, purpose } = card;
+  const rel = relativeTime(pane.agent!.sinceUnixMs);
+  return (
+    <NavLink component="button" className="agent-row rounded-lg" data-pane-id={pane.paneId} noWrap
+      label={<span className="flex items-center gap-2"><span className="min-w-0 truncate">{cardTitle(card)}</span><span className="ml-auto" />
+        {rel ? <span className="shrink-0 text-[12px] text-(--color-text-dim)">{rel}</span> : null}<StatusBadge status={shownStatus(pane, store.seenDone) || 'unknown'} small /></span>}
+      // spans (a button holds no <p>), each a line of its own; the purpose wraps, under the row's noWrap
+      description={<>{purpose ? <Text span className="card-purpose my-0.5 whitespace-normal text-(--color-text)" fz={13} lh={1.3} lineClamp={2} title={purpose}>{purpose}</Text> : null}
+        <CardWhere card={card} /></>}
+      onClick={() => openAgent(pane.paneId)} />
   );
 }
 
