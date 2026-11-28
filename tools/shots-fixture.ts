@@ -138,7 +138,8 @@ export const screen = (paneId: string): string => ({
 
 /** A component cut out of its scene's screen: `el` is a JS expression, the element (null: not ready). */
 export interface Part { name: string; el: string; sizes?: Array<'phone' | 'pc'> }
-/** `screen: false` shoots only its parts (one full screen per kind of screen is enough). */
+/** `screen: false` shoots only its parts (one full screen per kind of screen is enough): give such a scene a part for
+ *  whatever it shows that no other shot has. */
 export interface Scene { name: string; hash: string; ready: string; token?: false; screen?: false; parts?: Part[] }
 const items = (scope: string) => `document.querySelectorAll(${JSON.stringify(`${scope} #chat-log .chat-item`)}).length > 0`;
 const q = (sel: string) => `document.querySelector(${JSON.stringify(sel)})`;
@@ -176,6 +177,7 @@ export const scenes: Scene[] = [
   ] },
   { name: 'home-stopped', hash: '#/home/kenri', ready: "!!document.querySelector('#screen-home-stopped')", screen: false, parts: [
     { name: 'home-status-stopped', el: q('#home-status') },
+    { name: 'home-stopped-text', el: `${q('#btn-home-start')}?.previousElementSibling` },
     { name: 'home-start', el: q('#btn-home-start') },
   ] },
   { name: 'pane-chat', hash: '#/pane/p5', ready: items('.agent-drawer'), parts: [
@@ -193,6 +195,7 @@ export const scenes: Scene[] = [
   ] },
   { name: 'pane-terminal', hash: '#/pane/p3', ready: "!!document.querySelector('.agent-drawer #term-live')?.textContent?.trim()", screen: false, parts: [
     { name: 'terminal', el: q('.agent-drawer #term-live') },
+    { name: 'quick-keys', el: q('.agent-drawer #quickkey-row') },
   ] },
   { name: 'settings', hash: '#/settings', ready: "!!document.querySelector('#screen-settings')", parts: [
     { name: 'settings-notifications', el: section('Notifications') },
