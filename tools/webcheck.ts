@@ -515,24 +515,45 @@ class Page {
   }
 }
 
+// A runner's first Chrome start reads much of its ~450 MB install from a disk that is still cold: 0.6–17 s over 16
+// fresh GitHub runners, against 0.1 s for each one's second start (so CI starts one early, in a step of its own). The
+// timeout only bounds a Chrome that hangs: one that exits fails at once, with its stderr.
+const CHROME_START_MS = 60_000;
+
+/** Headless Chrome on `dir` as its user-data-dir; `url` resolves to the browser's CDP WebSocket once it listens. */
+function startChrome(dir: string, args: string[]): { proc: ReturnType<typeof spawn>; url: Promise<string> } {
+  fs.rmSync(path.join(dir, 'DevToolsActivePort'), { force: true });
+  const t0 = Date.now();
+  const proc = spawn('google-chrome-stable', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${dir}`,
+    ...args, '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let tail = '';
+  proc.stderr!.on('data', (b) => { tail = (tail + b).slice(-2000); });
+  // a spawn failure or an early exit rejects into the caller's teardown instead of waiting out the timeout
+  const gone = new Promise<never>((_, rej) => {
+    proc.on('error', (e) => rej(env(`chrome: ${e.message}`)));
+    proc.on('exit', (code, sig) => rej(env(`chrome exited (${sig ?? code}) before it listened:\n${tail}`)));
+  });
+  gone.catch(() => {});
+  const url = (async () => {
+    const port = await Promise.race([waitFn(() => fs.readFileSync(path.join(dir, 'DevToolsActivePort'), 'utf8').split('\n')[0], CHROME_START_MS), gone]);
+    if (port.timeout) throw env(`chrome did not start in ${CHROME_START_MS / 1000} s:\n${tail}`);
+    console.log(`chrome started in ${Date.now() - t0} ms`);
+    return (await (await fetch(`http://127.0.0.1:${port.v}/json/version`)).json()).webSocketDebuggerUrl as string;
+  })();
+  return { proc, url };
+}
+
 async function openPage(c: Ctx, profile?: string): Promise<Page> {
   const pg = new Page(c);
   const dir = profile ? path.resolve(profile) : path.join(c.rec.dir, 'chrome');
   fs.mkdirSync(dir, { recursive: true });
-  fs.rmSync(path.join(dir, 'DevToolsActivePort'), { force: true });
   // headless Linux swallows touchmoves within ~30px of the touchstart; 3 makes it ~8px, a phone's 8dp. Without touch
   // emulation headless has no pointer: the blink settings make it a PC's mouse (hover, fine), from the next document on
-  pg.proc = spawn('google-chrome-stable', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${dir}`,
-    '--touch-slop-distance=3', '--blink-settings=primaryPointerType=4,primaryHoverType=2,availablePointerTypes=4,availableHoverTypes=2',
-    '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' });
-  // a spawn failure ('error') rejects into the run's normal teardown instead of crashing past it
-  const failed = new Promise<never>((_, rej) => pg.proc.on('error', (e) => rej(env(`chrome: ${e.message}`))));
-  failed.catch(() => {});
+  const chrome = startChrome(dir, ['--touch-slop-distance=3',
+    '--blink-settings=primaryPointerType=4,primaryHoverType=2,availablePointerTypes=4,availableHoverTypes=2']);
+  pg.proc = chrome.proc;
   if (pg.proc.pid) { c.rec.chrome = { pid: pg.proc.pid, dir }; save(c.rec); }
-  const port = await Promise.race([waitFn(() => fs.readFileSync(path.join(dir, 'DevToolsActivePort'), 'utf8').split('\n')[0], 15_000), failed]);
-  if (port.timeout) throw env('chrome did not start');
-  const ver = await (await fetch(`http://127.0.0.1:${port.v}/json/version`)).json();
-  pg.cdp = await connectCdp(ver.webSocketDebuggerUrl);
+  pg.cdp = await connectCdp(await chrome.url);
   ({ targetId: pg.targetId } = await pg.cdp.send('Target.createTarget', { url: 'about:blank' }));
   ({ sessionId: pg.sid } = await pg.cdp.send('Target.attachToTarget', { targetId: pg.targetId, flatten: true }));
   pg.cdp.on((m) => {
@@ -2494,16 +2515,12 @@ async function shots(o: Record<string, any>): Promise<number> {
   for (const [, d] of sides) if (!fs.existsSync(path.join(d, 'index.html'))) throw env(`no index.html in ${d} (npx vite build)`);
   const server = await fixtureServer();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yoicks-shots-'));
-  const proc = spawn('google-chrome-stable', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${dir}`, '--hide-scrollbars',
-    '--blink-settings=primaryPointerType=4,primaryHoverType=2,availablePointerTypes=4,availableHoverTypes=2',
-    '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' });
-  const failed = new Promise<never>((_, rej) => proc.on('error', (e) => rej(env(`chrome: ${e.message}`))));
-  failed.catch(() => {});
+  const chrome = startChrome(dir, ['--hide-scrollbars',
+    '--blink-settings=primaryPointerType=4,primaryHoverType=2,availablePointerTypes=4,availableHoverTypes=2']);
+  const proc = chrome.proc;
   let cdp: Cdp | null = null;
   try {
-    const port = await Promise.race([waitFn(() => fs.readFileSync(path.join(dir, 'DevToolsActivePort'), 'utf8').split('\n')[0], 15_000), failed]);
-    if (port.timeout) throw env('chrome did not start');
-    cdp = await connectCdp((await (await fetch(`http://127.0.0.1:${port.v}/json/version`)).json()).webSocketDebuggerUrl);
+    cdp = await connectCdp(await chrome.url);
     const c = cdp;
     const shoot = async (scene: typeof scenes[number], size: typeof SIZES[number]) => {
       const { browserContextId } = await c.send('Target.createBrowserContext');
