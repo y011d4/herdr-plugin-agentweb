@@ -64,8 +64,9 @@ describe('HomePanel', () => {
     assert.deepEqual(ids('[data-panel="needs"] .home-todo'), ['t1'], 'the one due later under Later');
     assert.ok(c.querySelector('[data-panel="needs"] [data-action="todo-later"]'));
     assert.deepEqual(ids('[data-panel="agents"] .agent-row'), ['p3'], 'the rest: p1 is above, p4 is the orchestrator');
-    assert.deepEqual([...c.querySelectorAll<HTMLElement>('[data-panel="agents"] > :first-child .status-counts [data-count]:not(.invisible)')]
-      .map((e) => e.textContent), ['1 done'], 'its counts after the heading (a zero keeps its place, unseen)');
+    assert.deepEqual([...c.querySelectorAll<HTMLElement>('[data-panel="agents"] > :first-child .status-counts [data-count]')]
+      .map((e) => `${e.textContent}${e.classList.contains('opacity-40') ? ' (dimmed)' : ''}`),
+    ['0 working (dimmed)', '1 done', '0 idle (dimmed)'], 'its counts after the heading, each, a zero dimmed');
     assert.equal(c.querySelector('a.home-panel-list')!.getAttribute('href'), '#/agents/personal');
   });
 
@@ -75,7 +76,7 @@ describe('HomePanel', () => {
     await show('personal', s);
     assert.equal(head('needs'), 'Needs you');
     assert.equal(c.querySelector('[data-panel="needs"]')!.textContent, 'Needs youNothing waits on you.');
-    assert.match(c.querySelector('[data-panel="agents"]')!.textContent!, /^AgentsNo agents\.Open the list/);
+    assert.match(c.querySelector('[data-panel="agents"]')!.textContent!, /^Agents0 working0 done0 idleNo agents\.Open the list/);
   });
 
   it("lists a stopped Home's: its account unknown, every agent; its items without Ask", async () => {
