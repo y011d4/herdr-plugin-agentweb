@@ -23,7 +23,7 @@
  * emulated GPU the anti-aliased rim of an overlay, the chat's ↓ over a card, once came out a step off in 18 pixels,
  * main's side only, which failed an approval), so the same build shoots the same bytes. CI
  * (.github/workflows/screenshots.yml, then screenshots-publish.yml) posts the changed ones on the PR and keeps its
- * `screenshots` status pending until the user approves them with the ui-change label.
+ * `screenshots` status pending until the user approves them with the box in its comment.
  *
  * A preview is a throwaway bridge (state/config under $WC_ROOT/preview-<port>, `env -u HERDR_BIN_PATH`)
  * over the REAL herdr, which production also shows, unless the root has a private herdr: `herdr start` runs a

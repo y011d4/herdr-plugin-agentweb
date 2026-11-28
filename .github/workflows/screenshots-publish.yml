@@ -1,26 +1,26 @@
 name: Screenshots publish
 
-# The trusted half of the PR screenshots (screenshots.yml is the other): after each Screenshots run of a PR, this
-# takes its shots (the artifact), decides, publishes and sets the PR head's `screenshots` commit status, the gate
-# (a required check on main). `workflow_run` runs this file as it is on main, never a PR's copy, with main's token:
-# a PR changes what it does only once merged. It checks out nothing and runs none of the PR's code; the artifact
-# (made by the PR's code) is data: each manifest entry must match a strict pattern, each file must be a PNG of
-# bounded size, the PNGs are compared here (not the manifest's word for it), and the comment and the status are
-# built from those checked names only.
+# The trusted half of the PR screenshots (screenshots.yml is the other). After each Screenshots run of a PR, and
+# when the approval box in the bot's comment is ticked or unticked, this takes the head's shots (the artifact of its
+# latest Screenshots run), decides, publishes and sets the PR head's `screenshots` commit status, the gate (a
+# required check on main). `workflow_run` and `issue_comment` run this file as it is on main, never a PR's copy,
+# with main's token: a PR changes what it does only once merged. It checks out nothing and runs none of the PR's
+# code; the artifact (made by the PR's code) is data: each manifest entry must match a strict pattern, each file
+# must be a PNG of bounded size, the PNGs are compared here (not the manifest's word for it), and the comment and the
+# status are built from those checked names only.
 #
-# The status: `pending` while a Screenshots run shoots, and while shots changed and the user hasn't approved exactly
-# those pixels, `success` when none
+# The status: `pending` while shots changed and the user hasn't approved exactly those pixels, `success` when none
 # changed or the user approved them, `failure` only when something is broken (the shots didn't render, a screen
 # wasn't ready on the PR's side), `error` when this job fails. Its link goes to the viewer
 # (https://yoicks.y011d4.com/vrt/) on the changed shots, else to the Screenshots run. Pending is no failure: it
 # blocks the merge as a failure would, without a failed run (GitHub notifies of failed runs, not of statuses).
 #
-# The user approves by adding the `ui-change` label after looking at the comment (only the user: CLAUDE.md). The
-# approval is bound to a digest of the changed shots' before and after PNGs, which the comment's first line keeps
-# (`shown=` what it shows, `approved=` what the label approved): a label added after the comment last changed
-# approves what it shows (`shown`), and only if this run's shots are those; a label added while it showed other
-# pixels approves nothing, and a later push that changes them again takes the label off. A label change starts a
-# Screenshots run (screenshots.yml), and so this.
+# The user approves by ticking "Approve these N visual changes" in the comment after looking (only the user:
+# CLAUDE.md). A tick counts only when GitHub says its sender may write to the repository (the API, never the
+# comment's text), only on the bot's own comment, and only when the digest that comment shows (its first line's
+# `shown=`, a digest of the changed shots' before and after PNGs) is that of the head's shots now: the comment's
+# `approved=` then keeps it. A tick on an outdated comment approves nothing; unticking takes the approval back. A
+# push whose shots differ from the approved ones brings the comment back unticked and the status back to pending.
 #
 # The PNGs go to refs/screenshots/pr-<n> (outside refs/heads: not in a clone, not in the branch list; each run
 # replaces the last), which the viewer reads through raw.githubusercontent.com. A fork's PR (its Screenshots run
@@ -28,68 +28,78 @@ name: Screenshots publish
 on:
   workflow_run:
     workflows: [Screenshots]
-    types: [requested, completed]
+    types: [completed]
+  issue_comment:
+    types: [edited]
 
 permissions: {}
 
-# one at a time per PR branch, in order; a run whose PR has moved on does nothing
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
-
-# only the event's own fields (numbers, SHAs, names, URLs GitHub made) reach the scripts, through env
 env:
   GH_TOKEN: ${{ github.token }}
   REPO: ${{ github.repository }}
-  PR: ${{ github.event.workflow_run.pull_requests[0].number }}
-  HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-  HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
-  CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-  RUN_URL: ${{ github.event.workflow_run.html_url }}
 
 jobs:
-  # A run starting on the same head (a label added or taken off) takes back what the last one decided: a success
-  # left standing would let the PR merge while its approval is being withdrawn. A new head has no status yet,
-  # which blocks too.
-  shooting:
-    if: >-
-      github.event.action == 'requested' && github.event.workflow_run.event == 'pull_request'
-      && github.event.workflow_run.head_repository.full_name == github.repository
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    permissions:
-      statuses: write
-    steps:
-      - name: Set the status to pending
-        run: |
-          gh api "repos/$REPO/statuses/$HEAD_SHA" -f state=pending -f context=screenshots \
-            -f "description=shooting the screens: see the Screenshots run" -f "target_url=$RUN_URL" > /dev/null
-
   publish:
-    # a cancelled run's PR has a newer one
+    # a Screenshots run that finished (a cancelled one's PR has a newer one), or an edit of the bot's comment
     if: >-
-      github.event.action == 'completed' && github.event.workflow_run.event == 'pull_request'
-      && github.event.workflow_run.conclusion != 'cancelled'
+      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request'
+        && github.event.workflow_run.conclusion != 'cancelled')
+      || (github.event_name == 'issue_comment' && github.event.issue.pull_request
+        && github.event.comment.user.login == 'github-actions[bot]' && startsWith(github.event.comment.body, '<!-- yoicks-shots'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # one at a time per PR, in order; a run whose PR has moved on does nothing
+    concurrency:
+      group: screenshots-publish-${{ github.event.workflow_run.pull_requests[0].number || github.event.issue.number }}
     permissions:
-      actions: read # the Screenshots run's artifact
+      actions: read # the Screenshots runs and their artifacts
       contents: write # refs/screenshots/pr-<n>
-      pull-requests: write # the comment, the label
+      pull-requests: write # the comment
       statuses: write # the screenshots status
     steps:
-      - name: Which PR, and is this its latest run?
+      # only the event's own fields (numbers, SHAs, names, URLs GitHub made) reach the scripts, through env
+      - name: Which PR, which shots, and is this the latest?
         id: pr
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          ISSUE: ${{ github.event.issue.number }}
+          SENDER: ${{ github.event.sender.login }}
         run: |
           set -euo pipefail
-          status() { gh api "repos/$REPO/statuses/$HEAD_SHA" -f state="$1" -f context=screenshots -f "description=${2:0:140}" -f "target_url=$RUN_URL" > /dev/null; }
-          if [[ $HEAD_REPO != "$REPO" ]]; then status success "a fork's PR isn't shot: the user looks at it by hand"; exit 0; fi
-          if [[ ! $PR =~ ^[0-9]+$ ]]; then echo "::error::no PR for this run"; exit 1; fi
-          if [[ $(gh api "repos/$REPO/pulls/$PR" --jq 'select(.state == "open") | .head.sha') != "$HEAD_SHA" ]]; then
-            echo "the PR has moved on or is closed: nothing to do"; exit 0
+          if [[ $EVENT == workflow_run ]]; then
+            pr=$RUN_PR sha=$RUN_SHA run=$RUN_ID url=$RUN_URL
+            echo "sha=$sha" >> "$GITHUB_OUTPUT"
+            status() { gh api "repos/$REPO/statuses/$sha" -f state="$1" -f context=screenshots -f "description=${2:0:140}" -f "target_url=$url" > /dev/null; }
+            if [[ $RUN_REPO != "$REPO" ]]; then status success "a fork's PR isn't shot: the user looks at it by hand"; exit 0; fi
+            if [[ ! $pr =~ ^[0-9]+$ ]]; then echo "::error::no PR for this run"; exit 1; fi
+            head=$(gh api "repos/$REPO/pulls/$pr" --jq 'select(.state == "open") | .head.sha')
+            if [[ $head != "$sha" ]]; then
+              echo "the PR has moved on or is closed: nothing to do"; exit 0
+            fi
+            # the comment stays as it was
+            if [[ $CONCLUSION != success ]]; then status failure "the shots didn't render ($CONCLUSION): see the Screenshots run"; exit 0; fi
+          else
+            # a tick counts only from someone GitHub lets write to the repository
+            if [[ ! $SENDER =~ ^[A-Za-z0-9-]+(\[bot\])?$ ]]; then echo "::error::odd sender"; exit 1; fi
+            perm=$(gh api "repos/$REPO/collaborators/$SENDER/permission" --jq .permission)
+            if [[ $perm != admin && $perm != write ]]; then echo "::notice::$SENDER may not approve ($perm): nothing done"; exit 0; fi
+            pr=$ISSUE
+            sha=$(gh api "repos/$REPO/pulls/$pr" --jq 'select(.state == "open") | .head.sha')
+            if [[ -z $sha ]]; then echo "the PR is closed: nothing to do"; exit 0; fi
+            echo "sha=$sha" >> "$GITHUB_OUTPUT"
+            # the head's shots now: its latest Screenshots run that finished
+            r=$(gh api "repos/$REPO/actions/workflows/screenshots.yml/runs?head_sha=$sha&status=success&per_page=1" \
+              --jq '.workflow_runs[0] | "\(.id) \(.html_url)"')
+            read -r run url <<< "$r"
+            if [[ ! $run =~ ^[0-9]+$ ]]; then echo "the head isn't shot yet: its run decides"; exit 0; fi
           fi
-          # the comment stays as it was
-          if [[ $CONCLUSION != success ]]; then status failure "the shots didn't render ($CONCLUSION): see the Screenshots run"; exit 0; fi
-          echo "go=1" >> "$GITHUB_OUTPUT"
+          { echo "pr=$pr"; echo "run=$run"; echo "url=$url"; echo "go=1"; } >> "$GITHUB_OUTPUT"
 
       # into the runner's temp dir, away from anything that runs
       - name: Download the shots
@@ -98,11 +108,16 @@ jobs:
         with:
           name: shots
           path: ${{ runner.temp }}/shots
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ steps.pr.outputs.run }}
           github-token: ${{ github.token }}
 
       - name: Decide, publish, set the status
         if: steps.pr.outputs.go
+        env:
+          PR: ${{ steps.pr.outputs.pr }}
+          HEAD_SHA: ${{ steps.pr.outputs.sha }}
+          RUN_URL: ${{ steps.pr.outputs.url }}
+          TICKED: ${{ github.event.comment.id }} # the comment a tick event is about; empty after a Screenshots run
         run: |
           set -euo pipefail
           marker='<!-- yoicks-shots'
@@ -146,52 +161,38 @@ jobs:
           digest=-
           if (( n )); then digest=$(printf '%s\n' "${lines[@]}" | sort | sha256sum | cut -c1-16); fi
 
-          # the bot's comment: its id, when it last changed, and its first line
-          # (<!-- yoicks-shots shown=<digest|-> approved=<digest|-> -->)
-          c=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --jq '.[]
-            | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- yoicks-shots")))
-            | [.id, .updated_at, (.body | split("\n")[0])] | @tsv' | sed -n 1p)
-          id= updated= first=
-          IFS=$'\t' read -r id updated first <<< "$c" || true
+          # the bot's comment, whose first line is <!-- yoicks-shots shown=<digest|-> approved=<digest|-> -->
+          id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --jq '.[]
+            | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- yoicks-shots"))) | .id' | sed -n 1p)
+          old=
+          if [[ -n $id ]]; then old=$(gh api "repos/$REPO/issues/comments/$id" --jq .body); fi
+          first=${old%%$'\n'*}
           shown=$(sed -nE 's/.* shown=([0-9a-f]{16}|-) .*/\1/p' <<< "$first")
           approved=$(sed -nE 's/.* approved=([0-9a-f]{16}|-) .*/\1/p' <<< "$first")
           approved=${approved:--}
-          labels=$(gh api "repos/$REPO/issues/$PR/labels" --paginate --jq '.[].name')
-          label=
-          if grep -qx ui-change <<< "$labels"; then label=1; fi
-          # the label added after the comment last changed: it approves what the comment shows (the comment changes only
-          # when what it says does, below; ISO 8601 UTC times compare as strings)
-          added=$(gh api "repos/$REPO/issues/$PR/events" --paginate --jq '.[]
-            | select(.event == "labeled" and .label.name == "ui-change") | .created_at' | tail -n 1)
-          fresh=
-          if [[ -n $label && $added > $updated ]]; then fresh=1; fi
+          if [[ -n $TICKED ]]; then
+            if [[ $TICKED != "$id" ]]; then echo "not the screenshots comment: nothing to do"; exit 0; fi
+            if grep -qE '^- \[[xX]\] Approve th' <<< "$old"; then
+              # what the comment shows is what is approved, and only if those are the head's shots now
+              if [[ $shown == "$digest" ]]; then approved=$digest; else echo "ticked on an outdated comment: nothing approved"; fi
+            else
+              approved=-
+            fi
+          fi
 
-          state=pending unlabel= s=s
-          if (( n == 1 )); then s=; fi
+          s=s these="these $n visual changes"
+          if (( n == 1 )); then s= these="this visual change"; fi
+          state=pending
           if (( ${#notready[@]} )); then
             state=failure reason="not ready on the PR's side within 10 s: ${notready[*]} (a broken screen or component, or its ready/el in tools/shots-fixture.ts)"
           elif (( n == 0 )); then
             state=success reason="no shot changed"
-          elif [[ -n $fresh ]]; then
-            if [[ $digest == "$shown" ]]; then
-              state=success approved=$digest reason="the user approved the $n changed shot$s"
-            else
-              unlabel=1 approved=- reason="the shots changed since the comment showed them: look again, then add ui-change again"
-            fi
-          elif [[ -n $label && $digest == "$approved" ]]; then
-            state=success reason="the $n changed shot$s are the ones the user approved"
-          elif [[ -n $label ]]; then
-            unlabel=1 approved=- reason="the shots changed since the user approved them: look again, then add ui-change again"
+          elif [[ $digest == "$approved" ]]; then
+            state=success reason="the user approved the $n changed shot$s"
           else
-            reason="$n shot$s changed: waiting for the user's ui-change label"
+            approved=- reason="$n shot$s changed: tick the box in the PR's screenshots comment to approve"
           fi
           echo "**screenshots**: $state: $reason" >> "$GITHUB_STEP_SUMMARY"
-
-          # off it comes (a label event by this token starts no run). Should it fail, the next run sees the label with
-          # approved=- and takes it off again.
-          if [[ -n $unlabel ]]; then
-            gh api -X DELETE "repos/$REPO/issues/$PR/labels/ui-change" > /dev/null || echo "could not take the ui-change label off"
-          fi
 
           target=$RUN_URL
           if (( n )); then
@@ -218,8 +219,12 @@ jobs:
             if (( n )); then
               echo "**UI screenshots**: $n of $total shots changed, ${#same[@]} unchanged (${HEAD_SHA:0:7}). Made-up data: \`tools/shots-fixture.ts\`."
               echo
-              echo "[Step through the $n changed shot$s in the viewer]($target)"
+              echo "[Look at the $n changed shot$s in the viewer]($target), then tick the box to approve them:"
               echo
+              box=' '; if [[ $state == success ]]; then box=x; fi
+              echo "- [$box] Approve $these"
+              echo
+              echo "Changed:"
               for c in "${changed[@]}"; do
                 k=screen; if [[ " ${parts[*]} " == *" $c "* ]]; then k=component; fi
                 echo "- \`$c\` ($k, ${px[$c]} px differ): [open comparison]($target#$c)"
@@ -233,12 +238,10 @@ jobs:
           } > "$body"
           cat "$body" >> "$GITHUB_STEP_SUMMARY"
 
-          # one comment per PR, updated in place only when what it says changes; none is made just to say that nothing
-          # changed and all is well
+          # one comment per PR, updated in place only when what it says changes (an edit by this token starts no run);
+          # none is made just to say that nothing changed and all is well
           if [[ -n $id ]]; then
-            if [[ $(gh api "repos/$REPO/issues/comments/$id" --jq .body) != "$(cat "$body")" ]]; then
-              gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$body" > /dev/null
-            fi
+            if [[ $old != "$(cat "$body")" ]]; then gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$body" > /dev/null; fi
           elif (( n )) || [[ $state != success ]]; then
             gh api "repos/$REPO/issues/$PR/comments" -F "body=@$body" > /dev/null
           fi
@@ -248,8 +251,9 @@ jobs:
             -f "target_url=$target" > /dev/null
 
       - name: Say so on the PR when this job fails
-        if: failure()
+        if: failure() && steps.pr.outputs.sha
         env:
+          HEAD_SHA: ${{ steps.pr.outputs.sha }}
           JOB_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh api "repos/$REPO/statuses/$HEAD_SHA" -f state=error -f context=screenshots \

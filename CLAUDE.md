@@ -699,14 +699,17 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   context per shot, a frozen clock, UTC, no animations (CSS transitions off; not reduced motion, which made a
   popover's raster flip between runs), images decoded, one origin (a fixed port, 8397) for both builds and every run, the entry script
   under a fixed name (the app shows its hash). screenshots.yml only shoots (the PR's code, no token that can write)
-  and uploads the shots; `screenshots-publish.yml` (`workflow_run`: main's copy, never the PR's, so a PR changes it
-  only once merged) compares, publishes and sets the PR head's **`screenshots` commit status, the gate** (a required
-  check): `pending` while a shot's bytes differ from main's and the user hasn't approved exactly those pixels with
-  the **`ui-change` label** (the comment's first line keeps the digest it shows and the one approved; a label added
-  after the comment last changed approves what it shows, one added while it showed other pixels approves nothing, a
-  push that changes them again takes the label off), `success` when nothing changed or the user approved it,
-  `failure` only when something is broken (the shots didn't render, a screen not ready on the PR's side), `error`
-  when the publish job fails; it links to the viewer on the changed shots. Pending blocks the merge without a failed
+  and uploads the shots; `screenshots-publish.yml` (`workflow_run` after each of its runs, and `issue_comment` when
+  the bot's comment is edited: main's copy both, never the PR's, so a PR changes it only once merged; it checks out
+  nothing) compares, publishes and sets the PR head's **`screenshots` commit status, the gate** (a required check):
+  `pending` while a shot's bytes differ from main's and the user hasn't approved exactly those pixels by **ticking
+  "Approve these N visual changes" in the bot's comment** (a tick counts only from a sender the API says may write,
+  on the bot's comment, and only when the digest that comment shows, its first line's `shown=`, is that of the head's
+  shots now, recomputed from its latest Screenshots run's artifact; `approved=` then keeps it; a tick on an outdated
+  comment approves nothing, unticking takes it back, a push whose shots differ brings the box back unticked),
+  `success` when nothing changed or the user approved it, `failure` only when something is broken (the shots didn't
+  render, a screen not ready on the PR's side), `error` when the publish job fails; it links to the viewer on the
+  changed shots. Pending blocks the merge without a failed
   run, so without a failure notification. No threshold, no masks: both sides render on one machine, in one Chrome.
   A change to `screenshots-publish.yml` runs only after it merges (no PR runs it first): check one by running its
   scripts locally with a stub `gh` on made-up manifests. By hand, for a
@@ -719,13 +722,13 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
 ## Conventions
 
 - Lowercase conventional commits, no emojis, no AI co-author lines.
-- **Only the user adds or removes the `ui-change` label** (it approves a PR's changed screens: PR screenshots,
-  above). A worker never does, by any means (`gh pr create --label`, `gh pr edit`, the API): workers share the
-  user's GitHub account, so GitHub can't tell them apart, and this rule is the only thing keeping the approval
-  the user's. Likewise a worker never sets the `screenshots` status (main requires it from GitHub Actions, so the
-  user's token can't, but a workflow a PR adds could). A pending or failing `screenshots` status over intended
-  changes is reported to the user, not worked around (no edit to the fixture, a scene or the workflows to make it
-  pass).
+- **Only the user ticks or unticks the approval box in the bot's screenshots comment** (it approves a PR's changed
+  screens: PR screenshots, above). A worker never does, by any means (an edit of the comment through `gh` or the API):
+  workers share the user's GitHub account, so GitHub can't tell them apart, and this rule is the only thing keeping
+  the approval the user's. Likewise a worker never sets the `screenshots` status (main requires it from GitHub
+  Actions, so the user's token can't, but a workflow a PR adds could). A pending or failing `screenshots` status over
+  intended changes is reported to the user, not worked around (no edit to the fixture, a scene or the workflows to
+  make it pass).
 - **Neutral names only** (this repo is public): fixtures, tests, docs, commits, PR text and comments never carry the
   user's work names (Homes, organisations, repositories), even ones seen in production data or a herdr pane; use
   `personal`, `work`, `side`, `o/r`. A local git hook may refuse a commit or a push: report it to the user, never

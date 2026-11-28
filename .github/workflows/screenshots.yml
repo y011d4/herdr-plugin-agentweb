@@ -9,19 +9,18 @@ name: Screenshots
 # This is the untrusted half: it runs the PR's code and its npm dependencies, so it holds no token that can write,
 # and uploads the shots as an artifact. Each run's end starts screenshots-publish.yml (`workflow_run`: main's copy,
 # never the PR's), which compares them, updates the PR's comment and sets the PR head's `screenshots` status, the
-# gate (a required check): pending while changed shots wait for the user's `ui-change` label, failure only when
-# something is broken. Same machine, same Chrome, same fonts on both sides, so the comparison is the bytes: no
-# threshold, no masks.
+# gate (a required check): pending while changed shots wait for the user to tick the approval box in the comment,
+# failure only when something is broken. Same machine, same Chrome, same fonts on both sides, so the comparison is
+# the bytes: no threshold, no masks.
 #
 # `pull_request`, never `pull_request_target` (see ci.yml). Every PR push runs it, not only those a `paths` filter
 # would match: that filter compares the whole PR with main, so a push taking the PR's last web change back wouldn't
 # run it, the comment would go on showing the change and the head would never get its status. render looks at the
-# merge's diff itself and, when the web UI didn't change, shoots nothing (seconds). A label change runs it again,
-# for screenshots-publish.yml to decide anew.
+# merge's diff itself and, when the web UI didn't change, shoots nothing (seconds).
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened]
 
 permissions: {}
 
@@ -93,7 +92,7 @@ jobs:
         with:
           name: shots
           path: ${{ runner.temp }}/shots
-          retention-days: 7
+          retention-days: 30 # a tick in the comment decides on them again
           if-no-files-found: error
 
   # Transitional: main's branch protection requires a `screens` check until it requires the `screenshots` status
