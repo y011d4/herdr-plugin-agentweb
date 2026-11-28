@@ -193,12 +193,11 @@ const REPLY_ICON = (
 
 /** A message a Home can reply to (`of`: whose, `text`: its words): Reply puts its quote line into the
  *  composer, Copy copies its words. Both from a long press on a phone or a right click on a PC (Mantine's
- *  Menu.ContextMenu), Reply also from the ↩ in its box's top-right corner (its first child's: the bubble, a
- *  notice's line), shown on a PC's hover or keyboard focus (inside the box, so the mouse reaches it without
- *  leaving the message; the box keeps room for it, `!` to beat the inline padding of Mantine's `px`), on a
- *  phone there for a screen reader only. On a link or a button, or with its text selected, the browser's own
- *  menu instead. A mouse still selects its text; a long press selects none (Copy is for that). Its
- *  data-quote is that quote line: a reply's QuoteRef finds it by it. */
+ *  Menu.ContextMenu), Reply also from the ↩ over its top-right corner, shown on a PC's hover or keyboard
+ *  focus (inside the message, so the mouse reaches it without leaving it; on its own background, over the
+ *  text while shown), on a phone there for a screen reader only. On a link or a button, or with its text
+ *  selected, the browser's own menu instead. A mouse still selects its text; a long press selects none (Copy
+ *  is for that). Its data-quote is that quote line: a reply's QuoteRef finds it by it. */
 function Repliable({ className, of, text, time, children }: { className: string; of: Exclude<QuoteOf, 'todo'>; text: string; time?: string; children: ReactNode }) {
   const reply = useContext(ReplyTo);
   const [native, setNative] = useState(false);
@@ -216,12 +215,12 @@ function Repliable({ className, of, text, time, children }: { className: string;
   return (
     <Menu position="bottom-start" returnFocus={false}>
       <Menu.ContextMenu disabled={native}>
-        <div className={`group/msg relative rounded-[14px] pointer-fine:select-text! pointer-fine:[&>:first-child]:pr-9! data-flash:outline-2 data-flash:outline-offset-2 data-flash:outline-(--color-accent) ${className}`}
+        <div className={`group/msg relative rounded-[14px] pointer-fine:select-text! data-flash:outline-2 data-flash:outline-offset-2 data-flash:outline-(--color-accent) ${className}`}
           data-quote={quote} data-time={time} onTouchStart={press} onMouseDown={press}>
           {children}
-          {/* a notice has no bubble: beside its line, centered */}
+          {/* a notice has no bubble: at its line's end, centered on it */}
           <ActionIcon className={`chat-reply absolute right-1 ${of === 'notice' ? 'top-1/2 -translate-y-1/2' : 'top-1'} opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 focus-visible:outline-current pointer-coarse:sr-only`}
-            variant="subtle" color="gray" size={28} aria-label="Reply" onClick={() => reply(quote)}>{REPLY_ICON}</ActionIcon>
+            variant="default" size={28} aria-label="Reply" onClick={() => reply(quote)}>{REPLY_ICON}</ActionIcon>
         </div>
       </Menu.ContextMenu>
       <Menu.Dropdown>
