@@ -16,7 +16,7 @@ export function Token({ message, onToken }: { message?: string; onToken: (token:
       <form id="token-form" className="w-full max-w-[360px]" onSubmit={submit}>
         <Stack gap={12}>
           {/* the eye shows what was pasted; Tab reaches it (Mantine's default leaves it out) */}
-          <PasswordInput id="token-input" ref={input} aria-label="Access token" placeholder="Paste access token…"
+          <PasswordInput id="token-input" ref={input} aria-label="Access token" placeholder="Paste the access token…"
             autoComplete="off" autoCorrect="off" spellCheck={false} visibilityToggleFocusable />
           <Button type="submit" fullWidth>Connect</Button>
         </Stack>
