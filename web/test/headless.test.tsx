@@ -295,6 +295,36 @@ describe("a headless orchestrator's Home", () => {
     assert.deepEqual(posts('answer'), [{ id: '1a2b3c4d', answers: { 'Which fruit?': 'a ripe one', 'Size?': 'L, XL', 'When?': 'now' } }]);
   });
 
+  it('minimizes its questions to one line above the composer and back as they were; kept while open, a new question comes in full', async () => {
+    const three = (p: OrchestratorView): void => {
+      const q = p.headless!.pending!.questions[0];
+      p.headless!.pending!.questions = [q, { question: 'Size?', header: 'Size', multiSelect: false, options: [{ label: 'S', description: '' }, { label: 'L', description: '' }] },
+        { question: 'When?', header: 'When', multiSelect: false, options: [{ label: 'now', description: '' }] }];
+    };
+    await home(withPilot(three));
+    const panel = $('#headless-prompt');
+    await fire(() => opts()[1].click()); // cherry: on to 2/3
+    await fire(() => $('#headless-prompt-minimize').click());
+    assert.ok(container.querySelector('#headless-prompt[data-minimized]') !== null, 'minimized');
+    assert.equal(opts().length, 0, 'no options shown');
+    assert.match($('#headless-prompt-expand').textContent!, /^⏳ Questions \(3\) — tap to answer/);
+    assert.ok(container.querySelector('#pane-input') !== null, 'the composer below it');
+    await fire(() => $('#headless-prompt-expand').click());
+    assert.ok($('#headless-prompt') === panel, 'the same element: no second flash');
+    assert.match($('#headless-prompt .chat-prompt-head').textContent!, /Size \(2\/3\)/, 'where it was');
+    await fire(() => opts()[1].click()); // L
+    await fire(() => $('#headless-prompt-minimize').click());
+    await unmount();
+    await home(withPilot(three)); // the Home again, the same question open
+    assert.ok(container.querySelector('#headless-prompt[data-minimized]') !== null, 'still minimized');
+    await fire(() => setAppState(withPilot((p) => { three(p); p.headless!.pending!.id = 'q2'; })));
+    assert.ok(container.querySelector('#headless-prompt[data-minimized]') === null, 'a new question comes in full');
+    await fire(() => opts()[0].click());
+    await fire(() => opts()[0].click());
+    await fire(() => opts()[0].click());
+    assert.deepEqual(posts('answer'), [{ id: 'q2', answers: { 'Which fruit?': 'apple', 'Size?': 'S', 'When?': 'now' } }], 'one per question, then together');
+  });
+
   describe('its composer, while its question is open', () => {
     const input = () => $<HTMLTextAreaElement>('#pane-input');
     const key = draftKey('hl:pilot', 'pilot');

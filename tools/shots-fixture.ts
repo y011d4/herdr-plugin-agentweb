@@ -176,6 +176,11 @@ export const scenes: Scene[] = [
     { name: 'headless-prompt', el: q('#headless-prompt') },
     { name: 'composer-locked', el: q('.input-bar') }, // its question open: no message but its Chat about this
   ] },
+  // its question minimized, the chat in view: the ready check taps Minimize (once: then the bar shows)
+  { name: 'home-headless-minimized', hash: '#/home/work', ready: `${items('')} && (!!document.querySelector('#headless-prompt[data-minimized]')
+    || void document.querySelector('#headless-prompt-minimize')?.click())`, parts: [
+    { name: 'headless-prompt-minimized', el: q('#headless-prompt') },
+  ] },
   { name: 'home-stopped', hash: '#/home/side', ready: "!!document.querySelector('#screen-home-stopped')", screen: false, parts: [
     { name: 'home-status-stopped', el: q('#home-status') },
     { name: 'home-stopped-text', el: `${q('#btn-home-start')}?.previousElementSibling` },
