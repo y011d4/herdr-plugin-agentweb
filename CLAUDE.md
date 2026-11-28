@@ -211,7 +211,7 @@ All in `internal/bridge/` (one package):
   usage, warnings (unknown events, unreadable lines, the init check). Its state's `paneId` is
   `hl:<name>` while the child runs; the pane/agent routes and `watch_pane` refuse `hl:` (404 /
   nothing read), only the transcript route serves it (`resolvePaneTranscript`'s head). Saved in
-  `<state>/headless/<name>.json` (`{sessionId, wanted, watches, completionSeq, model}`: the count goes on across restarts, a phone's seen-done is keyed on it). Its
+  `<state>/headless/<name>.json` (`{sessionId, wanted, watches, completionSeq, model, usage}`: the count goes on across restarts, a phone's seen-done is keyed on it; the usage, since Claude Code sends a `rate_limit_event` only once a figure changes or at a child's first answer, is shown again from the start, Clear keeping its limits, a limit dropped from the view once past its `resetsAt`). Its
   model: each child gets an `initialize` control request at its start, whose answer lists Claude Code's `/model`
   choices (state `headless.models`; the answer also has the account's email: only `models` is read); `POST …/model`
   switches a running child in place with `set_model` (refused mid-turn; Claude Code applies it from the next turn),

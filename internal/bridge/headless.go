@@ -344,6 +344,9 @@ type headlessState struct {
 	// keyed on it, so a count starting over would pass a new completion off as one seen
 	CompletionSeq int64  `json:"completionSeq,omitempty"`
 	Model         string `json:"model,omitempty"` // its model (SetModel); "" = none chosen
+	// the usage Claude Code last reported, so the Home shows it again from a bridge's start: a
+	// rate_limit_event comes only once a limit's figure changes, or at a child's first answer
+	Usage *HeadlessUsage `json:"usage,omitempty"`
 }
 
 // newHeadlessRunner is def's runner; the server fills in its herdr calls, profiles and
@@ -362,7 +365,7 @@ func newHeadlessRunner(def OrchestratorDef, stateDir, rules string) *headlessRun
 	var saved headlessState
 	if b, err := os.ReadFile(headlessPath(stateDir, def.Name, ".json")); err == nil && json.Unmarshal(b, &saved) == nil && (saved.SessionID == "" || sessionIDRe.MatchString(saved.SessionID)) {
 		r.sessionID, r.wanted, r.interrupted, r.saved, r.wakes = saved.SessionID, saved.Wanted, saved.Interrupted, saved.Watches, saved.Wakes
-		r.model.CompletionSeq = saved.CompletionSeq
+		r.model.CompletionSeq, r.model.Usage = saved.CompletionSeq, saved.Usage
 		if modelRe.MatchString(saved.Model) {
 			r.modelChoice = saved.Model
 		}
@@ -411,6 +414,13 @@ func (r *headlessRunner) view() (HeadlessView, bool) {
 	}
 	if u := r.model.Usage; u != nil {
 		c := *u
+		// a limit whose window has reset since: its figure is the old window's (a saved one, say)
+		now := r.clock.Now().UnixMilli()
+		for _, w := range []**UsageWindow{&c.FiveHour, &c.SevenDay, &c.Fable} {
+			if *w != nil && (*w).ResetsAt != 0 && (*w).ResetsAt <= now {
+				*w = nil
+			}
+		}
 		v.Usage = &c
 	}
 	if p := r.pending; p != nil {
@@ -486,7 +496,7 @@ func (r *headlessRunner) persist() {
 		}
 	}
 	slices.SortFunc(watches, func(a, b hlWatch) int { return strings.Compare(a.Pane, b.Pane) })
-	b, _ := json.Marshal(headlessState{r.sessionID, r.wanted, r.interrupted, watches, r.wakes, r.model.CompletionSeq, r.modelChoice})
+	b, _ := json.Marshal(headlessState{r.sessionID, r.wanted, r.interrupted, watches, r.wakes, r.model.CompletionSeq, r.modelChoice, r.model.Usage})
 	if os.MkdirAll(filepath.Join(r.stateDir, "headless"), 0o700) == nil {
 		writeFile0600(headlessPath(r.stateDir, r.def.Name, ".json"), b)
 	}
@@ -1453,7 +1463,12 @@ func (r *headlessRunner) Clear() error {
 	r.resetLocked()
 	r.sessionID, r.interrupted = "", false // saved now: a refused start leaves a fresh session to come
 	r.alerted = map[string]bool{}
-	r.model = hlModel{Status: r.model.Status, CompletionSeq: r.model.CompletionSeq, check: r.model.check, models: r.model.models}
+	// the account's limits stay (its next rate_limit_event may be a while); the old session's context goes
+	var limits *HeadlessUsage
+	if u := r.model.Usage; u != nil && u.At != 0 {
+		limits = &HeadlessUsage{FiveHour: u.FiveHour, SevenDay: u.SevenDay, Fable: u.Fable, At: u.At}
+	}
+	r.model = hlModel{Status: r.model.Status, CompletionSeq: r.model.CompletionSeq, check: r.model.check, models: r.model.models, Usage: limits}
 	r.persist()
 	r.mu.Unlock()
 	return r.start(false)

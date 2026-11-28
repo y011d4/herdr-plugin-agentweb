@@ -437,9 +437,11 @@ func (f *fake) reply(ctx context.Context, text string) {
 	content := []any{map[string]any{"type": "text", "text": text}}
 	f.emit(assistant(content))
 	f.record(map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "model": "fake", "content": content}})
+	// the windows reset ahead of now (whole minutes, as the real ones): a window past its reset is dropped
+	reset := func(d time.Duration) int64 { return time.Now().Add(d).Truncate(time.Minute).Unix() }
 	f.emit(map[string]any{"type": "rate_limit_event", "session_id": f.id, "rate_limit_info": map[string]any{"status": "allowed",
-		"unifiedWindows": map[string]any{"five_hour": map[string]any{"utilization": 0.25, "resetsAt": 1795665000, "status": "allowed"},
-			"seven_day": map[string]any{"utilization": 0.5, "resetsAt": 1795928400, "status": "allowed"}}}})
+		"unifiedWindows": map[string]any{"five_hour": map[string]any{"utilization": 0.25, "resetsAt": reset(2 * time.Hour), "status": "allowed"},
+			"seven_day": map[string]any{"utilization": 0.5, "resetsAt": reset(3 * 24 * time.Hour), "status": "allowed"}}}})
 	if text == "echo: replyhold" {
 		<-ctx.Done() // held in the window between a reply and its result until an interrupt (a test's cleanup ends a fake left waiting)
 	}
