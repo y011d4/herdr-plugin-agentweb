@@ -1,10 +1,10 @@
 /**
  * ui/Modals.tsx — the modal dialogs, one at a time, on Mantine's Modal in #modal-root: Confirm, Rename,
- * a headless Home's Compact and the image preview (full screen). A modal closes on a backdrop tap, Escape or its
+ * a headless Home's Compact and its way back to the TUI, and the image preview (full screen). A modal closes on a backdrop tap, Escape or its
  * buttons; its close() is idempotent and fires the opener's onClose exactly once (so a
  * confirm resolves on dismiss). Opening one closes the one before.
  */
-import { Button, CloseButton, Group, Modal, Text, TextInput } from '@mantine/core';
+import { Button, CloseButton, Code, Group, List, Modal, Text, TextInput } from '@mantine/core';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { apiPost, orchestratorPost } from '../api.ts';
 import { back } from '../nav.ts';
@@ -211,4 +211,23 @@ function Compact({ name, close }: { name: string; close: () => void }) {
       <Actions ids={['cp-cancel', 'cp-ok']} label="Compact" busy={busy} close={close} onAction={() => { void run(); }} />
     </>
   );
+}
+
+// ── Back to the TUI (a headless Home's ⋮ and its warnings, ui/Pane.tsx) ───────
+
+const PLUGIN = 'y011d4.yoicks';
+
+/** The way back from headless to the TUI for the orchestrator `name`, by hand: the app never writes the config. */
+export function openTuiSteps(name: string): void {
+  showModal((close) => (
+    <>
+      <Title>Back to the TUI</Title>
+      <List type="ordered" className="tui-steps wrap-anywhere" fz={13} lh={1.5} pl={20} mb={14}>
+        <List.Item>In the bridge's <Code fz={12}>config.json</Code> (its folder: <Code fz={12}>{`herdr plugin config-dir ${PLUGIN}`}</Code>), remove <Code fz={12}>"mode": "headless"</Code> from the orchestrator <Code fz={12}>{`"${name}"`}</Code>.</List.Item>
+        <List.Item>Restart the bridge: <Code fz={12}>{`herdr plugin action invoke ${PLUGIN}.stop`}</Code>, wait until it has stopped, then <Code fz={12}>{`herdr plugin action invoke ${PLUGIN}.start`}</Code>.</List.Item>
+        <List.Item>Open its Home and tap Start: it runs in a herdr pane again, in a fresh session.</List.Item>
+      </List>
+      <Group justify="flex-end"><Button id="tui-close" px={20} onClick={close} data-autofocus>Close</Button></Group>
+    </>
+  ));
 }

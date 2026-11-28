@@ -17,7 +17,7 @@ describe('Settings', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
 
   it('saves the notification toggle', async () => {
-    const { container, unmount } = await render(<Settings toast={() => {}} onSignedOut={() => {}} />);
+    const { container, unmount } = await render(<Settings onSignedOut={() => {}} />);
     const toggle = container.querySelector<HTMLInputElement>('#toggle-notif')!;
     assert.equal(toggle.checked, false);
     await fire(() => toggle.click());
@@ -28,11 +28,26 @@ describe('Settings', () => {
     await unmount();
   });
 
+  it('asks the browser for permission when turned on before it has asked, and only then', async () => {
+    const requestPermission = vi.fn(async () => 'granted');
+    vi.stubGlobal('Notification', { permission: 'default', requestPermission });
+    const { container, unmount } = await render(<Settings onSignedOut={() => {}} />);
+    assert.equal(value(container, 'Permission status'), 'default');
+    await fire(() => container.querySelector<HTMLInputElement>('#toggle-notif')!.click());
+    assert.equal(requestPermission.mock.calls.length, 1);
+    assert.equal(value(container, 'Permission status'), 'granted');
+    assert.equal(localStorage.getItem('herdr_notifications'), 'true');
+    await fire(() => container.querySelector<HTMLInputElement>('#toggle-notif')!.click()); // off
+    await fire(() => container.querySelector<HTMLInputElement>('#toggle-notif')!.click()); // on again: asked already
+    assert.equal(requestPermission.mock.calls.length, 1);
+    await unmount();
+  });
+
   it('signs out: drops the token and the State, then hands over once', async () => {
     setToken('tok');
     setAppState(state('0.9.5'));
     const onSignedOut = vi.fn();
-    const { container, unmount } = await render(<Settings toast={() => {}} onSignedOut={onSignedOut} />);
+    const { container, unmount } = await render(<Settings onSignedOut={onSignedOut} />);
     await fire(() => container.querySelector<HTMLElement>('#btn-clear-token')!.click());
     assert.equal(getToken(), null);
     assert.equal(localStorage.getItem('herdr_token'), null);
@@ -43,10 +58,10 @@ describe('Settings', () => {
 
   it('re-renders on a new State', async () => {
     setAppState(state('0.9.5'));
-    const { container, unmount } = await render(<Settings toast={() => {}} onSignedOut={() => {}} />);
-    assert.equal(value(container, 'herdr version'), '0.9.5');
+    const { container, unmount } = await render(<Settings onSignedOut={() => {}} />);
+    assert.equal(value(container, 'herdr version'), '0.9.5 (protocol 22)');
     await fire(() => setAppState(state('0.9.6')));
-    assert.equal(value(container, 'herdr version'), '0.9.6');
+    assert.equal(value(container, 'herdr version'), '0.9.6 (protocol 22)');
     await unmount();
   });
 
@@ -55,7 +70,7 @@ describe('Settings', () => {
     vi.stubGlobal('caches', { keys: async () => keys });
     const sw = new EventTarget();
     Object.defineProperty(navigator, 'serviceWorker', { value: sw, configurable: true });
-    const { container, unmount } = await render(<Settings toast={() => {}} onSignedOut={() => {}} />);
+    const { container, unmount } = await render(<Settings onSignedOut={() => {}} />);
     const shown = () => container.querySelector('#app-version')!.textContent;
     assert.match(shown()!, /^0\.1\.0 \(dev\) cache bbbbbbbb$/);
     keys = ['herdr-yoicks-bbbbbbbb'];

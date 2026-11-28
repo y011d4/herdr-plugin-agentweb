@@ -1196,8 +1196,9 @@ async function p16(c: Ctx) {
 
   const rows: Array<[string, string]> = await pg.ev(`[...document.querySelectorAll('.settings-row')].map((r) => [r.querySelector('.settings-row-label')?.textContent ?? '', r.querySelector('.settings-row-value')?.textContent ?? ''])`);
   const hv = rows.find(([l]) => l === 'herdr version')?.[1];
-  const want = (await api(c, 'GET', '/api/state')).herdr.version;
-  result(c, hv === String(want), 'P16.herdr', `shown=${hv},state=${want}`, 'herdr version = /api/state');
+  const { herdr } = await api(c, 'GET', '/api/state');
+  const want = `${herdr.version} (protocol ${herdr.protocol})`;
+  result(c, hv === want, 'P16.herdr', `shown=${hv},state=${want}`, "herdr version = /api/state's '<version> (protocol <n>)'");
 
   if (c.build.vite) {
     // ' cache X' lands a moment after the render (caches.keys() is async)
@@ -1945,7 +1946,7 @@ async function h5(c: Ctx) {
     "two messages sent during 'slow 2': both user items and both replies, in order, within 10s; two user bubbles in that order on the Home");
 }
 
-/** H8: lines it can't read: a stream_broken warning with the way back to the TUI, which opens in place. */
+/** H8: lines it can't read: a stream_broken warning with the way back to the TUI, which opens in a dialog. */
 async function h8(c: Ctx) {
   const { pg } = c;
   await hlHome(c, 'wc-h1');
@@ -1955,7 +1956,7 @@ async function h8(c: Ctx) {
   let steps = { v: false, timeout: true, ms: 0 };
   if (!warn.timeout) {
     await pg.tapEl(`${row}.querySelector('[data-action="tui"]')`);
-    steps = await pg.until(`(document.querySelector('.home-warnings .tui-steps')?.textContent ?? '').includes('"wc-h1"')`, 2000);
+    steps = await pg.until(`(document.querySelector('#modal-root .tui-steps')?.textContent ?? '').includes('"wc-h1"')`, 2000);
   }
   result(c, !warn.timeout && !steps.timeout, 'H8', `warning=${ms(warn)},steps=${ms(steps)}`,
     "'garbage 3': a stream_broken warning line within 5s; its 'Back to TUI' shows the steps naming wc-h1");

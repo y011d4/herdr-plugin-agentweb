@@ -524,7 +524,7 @@ describe("a headless orchestrator's Home", () => {
     const menu = () => fire(() => $('#btn-home-menu').click());
     const item = (id: string) => document.querySelector<HTMLButtonElement>(`#hm-${id}`)!;
     await menu();
-    assert.deepEqual([...document.querySelectorAll('[id^=hm-]')].map((e) => e.textContent), ['Compact…', 'Clear (fresh session)…', 'Stop…']);
+    assert.deepEqual([...document.querySelectorAll('[id^=hm-]')].map((e) => e.textContent), ['Compact…', 'Clear (fresh session)…', 'Stop…', 'Back to the TUI…']);
     await fire(() => item('clear').click());
     assert.equal(cleared, 1);
     await menu();
@@ -547,8 +547,15 @@ describe("a headless orchestrator's Home", () => {
       assert.ok(document.querySelector('#cp-focus') === null, `no dialog while ${status}`);
       await unmount();
     }
-    await home(withPilot(idle)); // no actions (a test's bare Home): no ⋮
-    assert.ok(container.querySelector('#btn-home-menu') === null);
+    // no actions (a stopped Home's bar): its ⋮ has Back to the TUI alone, and no Compact hint
+    await home(withPilot((p) => { idle(p); p.headless!.usage!.contextPct = 90; }));
+    assert.ok(container.querySelector('#home-status [data-hint]') === null);
+    await menu();
+    assert.deepEqual([...document.querySelectorAll('[id^=hm-]')].map((e) => e.textContent), ['Back to the TUI…']);
+    await fire(() => item('tui').click());
+    assert.match($('.tui-steps').textContent!, /remove "mode": "headless" from the orchestrator "pilot".*y011d4\.yoicks\.stop.*Start/);
+    await fire(() => document.querySelector<HTMLElement>('#tui-close')!.click());
+    assert.ok(document.querySelector('.tui-steps') === null, 'closed');
   });
 
   it('suggests a Compact once the context is 70% full (a dot on ⋮, the context on its item), and never runs one', async () => {
@@ -640,9 +647,9 @@ describe("a headless orchestrator's Home", () => {
       ['silent:interrupt,clear', 'unknown_event:', 'version:tui']);
     await fire(() => rows[0].querySelector<HTMLElement>('[data-action=clear]')!.click());
     assert.equal(cleared, 1);
-    assert.equal(container.querySelector('.tui-steps'), null);
+    assert.ok(document.querySelector('.tui-steps') === null);
     await fire(() => rows[2].querySelector<HTMLElement>('[data-action=tui]')!.click());
-    assert.match($('.tui-steps').textContent!, /remove "mode": "headless" from the orchestrator "pilot".*y011d4\.yoicks\.stop.*Start/);
+    assert.match(document.querySelector('.tui-steps')!.textContent!, /remove "mode": "headless" from the orchestrator "pilot".*y011d4\.yoicks\.stop.*Start/);
   });
 
   it("opens when each limit resets from its usage, a button, and counts down at each minute's start with no State push", async () => {
@@ -930,9 +937,9 @@ describe('around a headless orchestrator', () => {
   it('the Claude Code check reads as off when none has run or the last is over a day old', () => {
     const now = Date.now();
     assert.match(claudeCheckText(null, now), /none yet: the periodic check is off/);
-    assert.match(claudeCheckText({ at: now - 60_000, version: '2.1.322', ok: true, failed: [] }, now), /^Claude Code 2\.1\.322 passed, 1m ago$/);
+    assert.match(claudeCheckText({ at: now - 60_000, version: '2.1.322', ok: true, failed: [] }, now), /^2\.1\.322 passed, 1m ago$/);
     assert.match(claudeCheckText({ at: now - 30 * 3_600_000, version: '2.1.330', ok: false, failed: ['interrupt'] }, now),
-      /^Claude Code 2\.1\.330 failed \(interrupt\), 30h ago: none since, the periodic check looks off$/);
+      /^2\.1\.330 failed \(interrupt\), 30h ago: none since, the periodic check looks off$/);
   });
 
   it("shows the bridge's [yoicks] words as a dim line, escaped, the worker's name a button", () => {

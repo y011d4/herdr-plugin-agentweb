@@ -121,7 +121,7 @@ export function App() {
       <main id="screen" inert={under}>{slot(node)}</main>
       <div id="toast-container" aria-live="assertive" aria-atomic="false"><Toasts /></div>
       {createPortal(<><AgentDrawer sheet={kind === 'token' ? null : drawer} actions={agentActions} />
-        <SettingsSheet open={settings}><Settings toast={showToast} onSignedOut={() => renderTokenScreen()} /></SettingsSheet><Modals /></>, document.getElementById('modal-root')!)}
+        <SettingsSheet open={settings}><Settings onSignedOut={() => renderTokenScreen()} /></SettingsSheet><Modals /></>, document.getElementById('modal-root')!)}
     </>
   );
 }
