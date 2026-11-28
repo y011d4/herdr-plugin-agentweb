@@ -192,8 +192,8 @@ const REPLY_ICON = (
 );
 
 /** A message a Home can reply to (`of`: whose, `text`: its words): Reply puts its quote line into the
- *  composer, Copy copies its words. Both from a long press on a phone or a right click on a PC (Mantine's
- *  Menu.ContextMenu), Reply also from the ↩ over its top-right corner, shown on a PC's hover or keyboard
+ *  composer, Copy copies its words (a [yoicks] notice has Copy only). Both from a long press on a phone or
+ *  a right click on a PC (Mantine's Menu.ContextMenu), Reply also from the ↩ over its top-right corner, shown on a PC's hover or keyboard
  *  focus (inside the message, so the mouse reaches it without leaving it; on its own background, over the
  *  text while shown), on a phone there for a screen reader only. On a link or a button, or with its text
  *  selected, the browser's own menu instead. A mouse still selects its text; a long press selects none (Copy
@@ -202,7 +202,8 @@ function Repliable({ className, of, text, time, children }: { className: string;
   const reply = useContext(ReplyTo);
   const [native, setNative] = useState(false);
   if (!reply || !text.trim()) return <div className={className} data-time={time}>{children}</div>;
-  const quote = quoteLine(of, text);
+  const quote = quoteLine(of, text); // a notice's too: an earlier reply to one still finds it
+  const canReply = of !== 'notice'; // the bridge's line: Copy only
   // before the menu's own handlers see the press
   const press = (e: SyntheticEvent<HTMLDivElement>): void => {
     const sel = getSelection();
@@ -218,13 +219,12 @@ function Repliable({ className, of, text, time, children }: { className: string;
         <div className={`group/msg relative rounded-[14px] pointer-fine:select-text! data-flash:outline-2 data-flash:outline-offset-2 data-flash:outline-(--color-accent) ${className}`}
           data-quote={quote} data-time={time} onTouchStart={press} onMouseDown={press}>
           {children}
-          {/* a notice has no bubble: at its line's end, centered on it */}
-          <ActionIcon className={`chat-reply absolute right-1 ${of === 'notice' ? 'top-1/2 -translate-y-1/2' : 'top-1'} opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 focus-visible:outline-current pointer-coarse:sr-only`}
-            variant="default" size={28} aria-label="Reply" onClick={() => reply(quote)}>{REPLY_ICON}</ActionIcon>
+          {canReply && <ActionIcon className="chat-reply absolute top-1 right-1 opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 focus-visible:outline-current pointer-coarse:sr-only"
+            variant="default" size={28} aria-label="Reply" onClick={() => reply(quote)}>{REPLY_ICON}</ActionIcon>}
         </div>
       </Menu.ContextMenu>
       <Menu.Dropdown>
-        <Menu.Item className="min-h-11" fz="md" data-action="reply" onClick={() => reply(quote)}>Reply</Menu.Item>
+        {canReply && <Menu.Item className="min-h-11" fz="md" data-action="reply" onClick={() => reply(quote)}>Reply</Menu.Item>}
         <Menu.Item className="min-h-11" fz="md" data-action="copy" onClick={copy}>Copy</Menu.Item>
       </Menu.Dropdown>
     </Menu>
