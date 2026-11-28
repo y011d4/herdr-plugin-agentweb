@@ -540,7 +540,10 @@ function startChrome(dir: string, args: string[]): { proc: ReturnType<typeof spa
   });
   gone.catch(() => {});
   const url = (async () => {
-    const port = await Promise.race([waitFn(() => fs.readFileSync(path.join(dir, 'DevToolsActivePort'), 'utf8').split('\n')[0], CHROME_START_MS), gone]);
+    // a port from a Chrome that has exited since is no port: its exit reports it
+    const listening = () => proc.exitCode === null && proc.signalCode === null
+      && fs.readFileSync(path.join(dir, 'DevToolsActivePort'), 'utf8').split('\n')[0];
+    const port = await Promise.race([waitFn(listening, CHROME_START_MS), gone]);
     if (port.timeout) throw env(`chrome did not start in ${CHROME_START_MS / 1000} s:\n${tail}`);
     console.log(`chrome started in ${Date.now() - t0} ms`);
     return (await (await fetch(`http://127.0.0.1:${port.v}/json/version`)).json()).webSocketDebuggerUrl as string;
