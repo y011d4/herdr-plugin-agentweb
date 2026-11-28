@@ -473,13 +473,17 @@ func TestHeadlessCompact(t *testing.T) {
 		t.Fatalf("compact: %d %s", status, body)
 	}
 	b.waitStdin(t, `"content":"/compact"`)
-	v := b.waitFor(t, "the failure", func(v OrchestratorView) bool { return compactOf(v) != nil && compactOf(v).State == "failed" })
-	if c := compactOf(v); c.Error != "Not enough messages to compact." || v.Headless.Status != "idle" || v.Headless.CompletionSeq != 0 {
+	// its end: the result after it (compact_result comes first, then an init, which reads working)
+	v := b.waitFor(t, "the failure", func(v OrchestratorView) bool {
+		return compactOf(v) != nil && compactOf(v).State == "failed" && v.Headless.Status == "idle"
+	})
+	if c := compactOf(v); c.Error != "Not enough messages to compact." || v.Headless.CompletionSeq != 0 {
 		t.Fatalf("%+v %+v", c, v.Headless)
 	}
 
 	b.send(t, "hello")
-	v = b.waitStatus(t, "done")
+	// and told: the notifications get it once the state shows it (onLine's statusChanged)
+	v = b.waitFor(t, "done, told", func(v OrchestratorView) bool { return v.Headless.Status == "done" && len(told()) > 0 })
 	if *v.Headless.Usage.ContextPct != 1 || compactOf(v) != nil || !slices.Equal(told(), []string{"working→done"}) {
 		t.Fatalf("a turn: %+v, %v", v.Headless, told())
 	}
