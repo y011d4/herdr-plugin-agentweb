@@ -1116,9 +1116,10 @@ func (r *headlessRunner) running() (*hlChild, error) {
 // Code would hold it, unseen, until the question is answered.
 func (r *headlessRunner) Send(text string, images []any, answers map[string]any, question string) error {
 	r.mu.Lock()
-	waits := r.pending != nil && r.pending.id != question
+	named := r.pending != nil && r.pending.id == question
+	waits := r.pending != nil && !named
 	for _, reached := range r.asks {
-		waits = waits || question == "" && !reached
+		waits = waits || !reached && !named // one on its way: no one has seen it to name it
 	}
 	r.mu.Unlock()
 	if waits {

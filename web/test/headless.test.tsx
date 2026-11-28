@@ -352,6 +352,39 @@ describe("a headless orchestrator's Home", () => {
       assert.deepEqual([input().disabled, input().value, getDraft(key)], [false, 'my draft', 'my draft'], 'the draft is back');
     });
 
+    it("sets the draft's images aside while writing about the question; an image-only one on its way leaves the draft as it was", async () => {
+      const pick = (name: string): Promise<void> => {
+        const picker = $<HTMLInputElement>('#input-image-picker');
+        Object.defineProperty(picker, 'files', { configurable: true, value: [new File(['x'], name, { type: 'image/png' })] });
+        return fire(() => picker.dispatchEvent(new Event('change', { bubbles: true })));
+      };
+      const thumbs = (): number => container.querySelectorAll('#input-images [aria-label="View image"]').length;
+      setDraft(key, 'my draft');
+      await home(withPilot(idle));
+      await pick('a.png');
+      assert.equal(thumbs(), 1);
+      await fire(() => setAppState(withPilot()));
+      await fire(() => $('#headless-prompt-chat').click());
+      assert.equal(thumbs(), 0, 'aside');
+      await pick('b.png');
+      await fire(() => $('#btn-send-enter').click());
+      assert.deepEqual(posts('send'), [{ text: '', images: [{ mediaType: 'image/jpeg', data: 'b.png' }], question: '1a2b3c4d' }]);
+      await fire(() => setAppState(withPilot(idle))); // declined before the send answers
+      await answer('POST /api/orchestrators/pilot/send', { ok: true });
+      assert.equal(input().value, 'my draft');
+      assert.equal(thumbs(), 1, "the draft's image back, the sent one gone");
+    });
+
+    it('keeps unsent text about the question with the draft when the Home is left', async () => {
+      setDraft(key, 'my draft');
+      await home(withPilot());
+      await fire(() => $('#headless-prompt-chat').click());
+      await type(input(), 'half written');
+      await unmount();
+      unmount = async () => {};
+      assert.equal(getDraft(key), 'my draft\n\nhalf written');
+    });
+
     it('the question gone while its Chat about this is on its way: the draft once sent; unsent, the draft and what was written', async () => {
       setDraft(key, 'my draft');
       await home(withPilot());

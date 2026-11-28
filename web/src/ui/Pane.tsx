@@ -380,12 +380,16 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
   const locked = !!question && !chatting;
   const chatNow = useRef(chatting);
   chatNow.current = chatting;
-  const chatSending = useRef(''); // a Chat about this in flight: once it ends, the draft is back (if the question went meanwhile)
-  // the draft again (it stayed in drafts.ts), with what was written about the question and not sent
+  const chatSending = useRef(false); // a Chat about this in flight: once it ends, the draft is back (if the question went meanwhile)
+  const draftImages = useRef<ImageAttachment[]>([]); // the draft's images, set aside while writing about the question
+  // the draft again (it stayed in drafts.ts) and its images, with what was written about the question and not sent
   const backToDraft = (t: HTMLTextAreaElement, rest: string): void => {
     t.value = [getDraft(key), rest].filter(Boolean).join('\n\n');
     if (rest) setDraft(key, t.value);
     autoGrow(t);
+    const aside = draftImages.current;
+    draftImages.current = [];
+    if (aside.length) setImages((cur) => fitImages(aside, cur));
   };
   const wasChatting = useRef(false);
   useLayoutEffect(() => {
@@ -395,6 +399,8 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
     if (chatting) {
       t.value = '';
       autoGrow(t);
+      draftImages.current = shown.current;
+      setImages([]);
       t.focus();
     } else if (!chatSending.current) backToDraft(t, t.value);
   }, [chatting]);
@@ -426,7 +432,11 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
       t.value = draft;
       autoGrow(t);
     }
-    return () => { if (shownInput === t) shownInput = null; };
+    return () => {
+      if (shownInput === t) shownInput = null;
+      // leaving with text about the question unsent: kept with the draft (images aren't kept, as ever)
+      if (chatNow.current && t.value && !chatSending.current) setDraft(key, [getDraft(key), t.value].filter(Boolean).join('\n\n'));
+    };
   }, [paneId, key]);
 
   const send = async (): Promise<void> => {
@@ -436,7 +446,7 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
     if ((!text && !sent.length) || sendingImages.current || preparing || locked) return;
     sendingImages.current = sent.length > 0; // an upload takes a while: a second tap mustn't send them twice
     const about = chatting ? question : ''; // Chat about this: not the draft
-    if (about) chatSending.current = text;
+    if (about) chatSending.current = true;
     else if (text) sendingDrafts.set(key, text);
     try {
       // clear:true wipes the pane's composer first so this message submits on its own — never
@@ -479,7 +489,7 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
       showToast('Send failed', (err as Error).message);
     } finally {
       sendingImages.current = false;
-      chatSending.current = '';
+      chatSending.current = false;
       if (sendingDrafts.get(key) === text) sendingDrafts.delete(key);
     }
   };

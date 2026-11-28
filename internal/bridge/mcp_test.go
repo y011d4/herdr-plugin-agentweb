@@ -238,8 +238,10 @@ func TestHeadlessSendBehindAQuestion(t *testing.T) {
 		defer h.mu.Unlock()
 		return len(h.asks) == 1
 	})
-	if status, out := b.post(t, "send", `{"text":"and this?"}`); status != 409 || !strings.Contains(out, `"question_pending"`) {
-		t.Fatalf("send: %d %s", status, out)
+	for _, body := range []string{`{"text":"and this?"}`, `{"text":"and this?","question":"an-answered-one"}`} {
+		if status, out := b.post(t, "send", body); status != 409 || !strings.Contains(out, `"question_pending"`) {
+			t.Fatalf("send %s: %d %s", body, status, out)
+		}
 	}
 	b.release(t)
 	v := b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
