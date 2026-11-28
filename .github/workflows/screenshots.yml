@@ -4,10 +4,11 @@ name: Screenshots
 # over tools/shots-fixture.ts's made-up data (`node tools/webcheck.ts shots`, headless Chrome, no herdr, no
 # bridge), on a phone and a PC: a full screen per kind of screen and the components cut out of them (agent card,
 # Home status bar, chat items, answer panel, settings sections…: tools/shots-fixture.ts's `parts`), so a diff names
-# the component that changed. The shots whose pixels changed go into one comment, components first, before | after and
-# where they differ (tools/webcheck.ts's diff: the after dimmed, the changed pixels magenta), with links to the
-# viewer on the Pages site (https://yoicks.y011d4.com/vrt/: slider, blink, diff, side by side), updated on each
-# push. The fixture is all the shots ever see: they are public.
+# the component that changed. One comment, updated on each push, counts the changed and unchanged shots and names
+# the changed ones, components first, each with a link to it in the viewer on the Pages site
+# (https://yoicks.y011d4.com/vrt/: slider, blink, where they differ (tools/webcheck.ts's diff: the after dimmed, the
+# changed pixels magenta), side by side), and one link to step through them all; it embeds no image. The fixture is
+# all the shots ever see: they are public.
 #
 # The `screens` job is a gate (a required check): it fails while a screen differs from main's and the user hasn't
 # approved exactly those pixels. The user approves by adding the `ui-change` label after looking at the comment
@@ -296,45 +297,24 @@ jobs:
             if [[ $VERDICT == pass ]]; then echo "**screens passed**: $REASON."; else echo "**screens failing**: $REASON."; fi
             echo
             if (( ${#changed[@]} )); then
-              echo "**UI screenshots**: ${#changed[@]} of $total shots changed: ${#parts[@]} components, ${#screens[@]} screens (${HEAD_SHA:0:7}). Made-up data: \`tools/shots-fixture.ts\`."
-              # the viewer (site/static/vrt/index.html, on the Pages site): this commit's changed shots, in this order, by
-              # slider, blink, diff or side by side; the PNGs it shows are the ones linked here
+              echo "**UI screenshots**: ${#changed[@]} of $total shots changed, ${#same[@]} unchanged (${HEAD_SHA:0:7}). Made-up data: \`tools/shots-fixture.ts\`."
+              # no image here: the viewer (site/static/vrt/index.html, on the Pages site) shows this commit's changed
+              # shots, in this order, by slider, blink, diff or side by side
               vrt="https://yoicks.y011d4.com/vrt/?sha=$sha&pr=$PR&s=$(IFS=,; echo "${changed[*]}")"
               echo
-              echo "[Compare them: slider, blink, diff]($vrt)"
-              # a PNG's width (its IHDR), in CSS px: the phone's are shot at 2x
-              pngw() { echo $(( 16#$(od -An -tx1 -j16 -N4 "$1" | tr -d ' \n') )); }
-              show() { # $1 the shot, $2 open or not
-                n=$1
-                if [[ " ${screens[*]} " == *" $n "* ]]; then
-                  w=260; if [[ $n == *-pc ]]; then w=440; fi
-                else # a component at its own size (both sides' wider), at most half the comment
-                  w=$(pngw "$pub/$n.after.png"); b=$(pngw "$pub/$n.before.png"); if (( b > w )); then w=$b; fi
-                  if [[ $n == *-phone ]]; then w=$(( w / 2 )); fi
-                  if (( w > 440 )); then w=440; fi
-                fi
-                cell() { if [[ -f $pub/$n.$1.png ]]; then echo "<img src=\"https://raw.githubusercontent.com/$REPO/$sha/$n.$1.png\" width=\"$w\">"; else echo "(none)"; fi; }
-                # the diff under the pair, not beside it: three PC shots don't fit the comment's width
-                printf '\n<details%s><summary><code>%s</code>: %s px differ</summary>\n\n[Open the comparison](%s)\n\n| before | after |\n| --- | --- |\n| %s | %s |\n\nWhere they differ (magenta):<br>%s\n\n</details>\n' \
-                  "$2" "$n" "${px[$n]}" "$vrt#$n" "$(cell before)" "$(cell after)" "$(cell diff)"
-              }
-              if (( ${#parts[@]} )); then
-                printf '\n#### Components\n'
-                for n in "${parts[@]}"; do show "$n" ' open'; done
-              fi
-              # the screens show how the components sit together; mostly a repeat once a component changed: closed then
-              if (( ${#screens[@]} )); then
-                printf '\n#### Screens\n'
-                o=' open'; if (( ${#parts[@]} )); then o=''; fi
-                for n in "${screens[@]}"; do show "$n" "$o"; done
-              fi
+              s=s; if (( ${#changed[@]} == 1 )); then s=; fi
+              echo "[Step through the ${#changed[@]} changed shot$s in the viewer]($vrt)"
+              echo
+              for n in "${changed[@]}"; do
+                k=screen; if [[ " ${parts[*]} " == *" $n "* ]]; then k=component; fi
+                echo "- \`$n\` ($k, ${px[$n]} px differ): [open comparison]($vrt#$n)"
+              done
             elif (( total )); then
               echo "**UI screenshots**: no screen changed ($total shots, ${HEAD_SHA:0:7})."
             else
               echo "**UI screenshots**: the PR no longer changes the web UI (${HEAD_SHA:0:7})."
             fi
             if (( ${#notready[@]} )); then printf '\nNot ready within 10 s (shot anyway): %s\n' "${notready[*]}"; fi
-            if (( ${#same[@]} )); then printf '\n<details><summary>Unchanged (%s)</summary>\n\n%s\n\n</details>\n' "${#same[@]}" "${same[*]}"; fi
           } > "$body"
           cat "$body" >> "$GITHUB_STEP_SUMMARY"
 
