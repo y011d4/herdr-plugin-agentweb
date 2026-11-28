@@ -8,7 +8,8 @@ name: Screenshots publish
 # bounded size, the PNGs are compared here (not the manifest's word for it), and the comment and the status are
 # built from those checked names only.
 #
-# The status: `pending` while shots changed and the user hasn't approved exactly those pixels, `success` when none
+# The status: `pending` while a Screenshots run shoots, and while shots changed and the user hasn't approved exactly
+# those pixels, `success` when none
 # changed or the user approved them, `failure` only when something is broken (the shots didn't render, a screen
 # wasn't ready on the PR's side), `error` when this job fails. Its link goes to the viewer
 # (https://yoicks.y011d4.com/vrt/) on the changed shots, else to the Screenshots run. Pending is no failure: it
@@ -27,7 +28,7 @@ name: Screenshots publish
 on:
   workflow_run:
     workflows: [Screenshots]
-    types: [completed]
+    types: [requested, completed]
 
 permissions: {}
 
@@ -35,10 +36,39 @@ permissions: {}
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
 
+# only the event's own fields (numbers, SHAs, names, URLs GitHub made) reach the scripts, through env
+env:
+  GH_TOKEN: ${{ github.token }}
+  REPO: ${{ github.repository }}
+  PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+  HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+  HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+  CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+  RUN_URL: ${{ github.event.workflow_run.html_url }}
+
 jobs:
+  # A run starting on the same head (a label added or taken off) takes back what the last one decided: a success
+  # left standing would let the PR merge while its approval is being withdrawn. A new head has no status yet,
+  # which blocks too.
+  shooting:
+    if: >-
+      github.event.action == 'requested' && github.event.workflow_run.event == 'pull_request'
+      && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      statuses: write
+    steps:
+      - name: Set the status to pending
+        run: |
+          gh api "repos/$REPO/statuses/$HEAD_SHA" -f state=pending -f context=screenshots \
+            -f "description=shooting the screens: see the Screenshots run" -f "target_url=$RUN_URL" > /dev/null
+
   publish:
     # a cancelled run's PR has a newer one
-    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled'
+    if: >-
+      github.event.action == 'completed' && github.event.workflow_run.event == 'pull_request'
+      && github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -46,16 +76,6 @@ jobs:
       contents: write # refs/screenshots/pr-<n>
       pull-requests: write # the comment, the label
       statuses: write # the screenshots status
-    # only the event's own fields (numbers, SHAs, names, URLs GitHub made) reach the scripts, through env
-    env:
-      GH_TOKEN: ${{ github.token }}
-      REPO: ${{ github.repository }}
-      PR: ${{ github.event.workflow_run.pull_requests[0].number }}
-      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-      HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
-      CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-      RUN_ID: ${{ github.event.workflow_run.id }}
-      RUN_URL: ${{ github.event.workflow_run.html_url }}
     steps:
       - name: Which PR, and is this its latest run?
         id: pr
@@ -94,8 +114,11 @@ jobs:
           jq -e '(.shots | type) == "array" and (.shots | length) <= 100' manifest.json > /dev/null
           parts=() screens=() same=() notready=() late=() lines=()
           declare -A px
+          # read first, so that jq failing on an entry fails here rather than leave a shorter list (or none)
+          entries=$(jq -r '.shots[] | [.name, .kind, (.pixels | tostring), (.notReady | join(","))] | @tsv' manifest.json)
           # notReady last: read collapses a tab run, so an empty field anywhere else would shift the rest
           while IFS=$'\t' read -r n k p nr; do
+            if [[ -z $n ]]; then continue; fi # the one empty line of an empty list
             if [[ ! $n =~ ^[a-z0-9-]{1,64}$ || ! $k =~ ^(screen|part)$ || ! $p =~ ^([0-9]{1,8}|null)$ || ! $nr =~ ^(|before|after|before,after)$ ]]; then
               echo "bad manifest entry"; exit 1
             fi
@@ -117,7 +140,7 @@ jobs:
             px[$n]=$p
             cp "${ok[@]}" "$pub/" # the checked files only
             if [[ $k == part ]]; then parts+=("$n"); else screens+=("$n"); fi
-          done < <(jq -r '.shots[] | [.name, .kind, (.pixels | tostring), (.notReady | join(","))] | @tsv' manifest.json)
+          done <<< "$entries"
           changed=("${parts[@]}" "${screens[@]}")
           n=${#changed[@]} total=$(( ${#changed[@]} + ${#same[@]} ))
           digest=-
