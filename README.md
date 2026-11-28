@@ -222,10 +222,10 @@ tailscale serve --bg 8390                        # tailnet-only HTTPS, valid cer
 ```
 
 Then open `https://<machine>.<tailnet>.ts.net/?token=<token>` (stop with `tailscale
-serve reset`; don't use `tailscale funnel`). With a plain VPN IP instead — e.g.
-`"public_url": "http://100.x.y.z:8390"` — it works over HTTP but without a secure
-context, so the PWA features above stay off; front it with a reverse proxy if you
-want them.
+serve reset`; don't use `tailscale funnel`). With a plain VPN IP instead, the bridge must listen on it: set
+`"host": "100.x.y.z"` as well as `"public_url": "http://100.x.y.z:8390"` (the default `127.0.0.1` isn't
+reachable from the phone). It works over HTTP but without a secure context, so the PWA features above stay
+off; front it with a reverse proxy if you want them.
 
 Whichever you pick, open `<public_url>/?token=<token>` on the phone (the connect QR
 pane builds exactly this link) and use Chrome's "Add to Home screen".
