@@ -13,9 +13,10 @@ import { homeTopbar, Pane, paneViewOnState } from '../src/ui/Pane.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
 import { fire, render } from './render.ts';
 
-// The socket: pane-view.ts subscribes itself; nothing is pushed here.
+// The socket: pane-view.ts subscribes itself; the test delivers messages to whoever listens.
+const wsListeners = new Set<(msg: WsMessage) => void>();
 vi.mock('../src/ws.ts', () => ({
-  onWsMessage: (_fn: (msg: WsMessage) => void) => () => {},
+  onWsMessage: (fn: (msg: WsMessage) => void) => { wsListeners.add(fn); return () => { wsListeners.delete(fn); }; },
   wsSendWatch: () => {},
 }));
 
@@ -399,6 +400,57 @@ describe('read-only chat', () => {
     await answer('/read?source=visible', read[1]);
     await answer('/transcript', { available: false });
     assert.equal(bar().style.display, '');
+  });
+});
+
+describe('the chat’s ↓', () => {
+  const jump = () => $<HTMLButtonElement>('#btn-chat-bottom');
+  const log = () => $('#chat-log');
+  // happy-dom lays nothing out: the log is 500px tall, each item 100px over 1800px of the rest
+  const layout = (): void => {
+    Object.defineProperty(log(), 'scrollHeight', { configurable: true, get: () => 1800 + 100 * log().querySelectorAll('.chat-item').length });
+    Object.defineProperty(log(), 'clientHeight', { configurable: true, get: () => 500 });
+  };
+  const scroll = (top: number): Promise<void> => fire(() => { log().scrollTop = top; log().dispatchEvent(new Event('scroll')); });
+  const more = (paneId: string): Promise<void> => fire(() => {
+    for (const fn of wsListeners) fn({ type: 'transcript_items', paneId, available: true, sessionId: transcript[0].sessionId!,
+      items: [{ kind: 'assistant', text: 'more', sidechain: false }], cursor: 300, reset: false });
+  });
+  beforeEach(() => { vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === '(prefers-reduced-motion: reduce)' })); });
+
+  it("a pane's: shown while scrolled up, a dot once messages come, the newest on a tap; above the home indicator with nothing under it", async () => {
+    await show('p1'); // working: ■ Interrupt under its chat
+    layout();
+    await answer('/transcript', transcript[0]);
+    await scroll(log().scrollTop); // its jump to the end, as a browser tells it
+    assert.ok(!jump(), 'on its newest message: none');
+    await scroll(100);
+    assert.equal(jump().getAttribute('aria-label'), 'Jump to the latest message');
+    assert.ok(!container.querySelector('.mantine-Indicator-indicator'), 'no dot');
+    assert.match(jump().parentElement!.className, /(^| )bottom-3( |$)/, 'over the chat, above the bar under it');
+    await more('p1');
+    assert.equal(log().scrollTop, 100, 'stays where the user reads');
+    assert.equal(jump().getAttribute('aria-label'), 'Jump to the latest message (new messages)');
+    assert.ok(container.querySelector('.mantine-Indicator-indicator'), 'a dot');
+    const s = fresh();
+    s.workspaces[0].tabs[0].panes[0].agent!.status = 'idle';
+    await fire(() => setAppState(s));
+    assert.match(jump().parentElement!.className, /bottom-\[calc\(var\(--safe-bottom\)\+12px\)\]/, 'nothing under its chat: above the home indicator');
+    await fire(() => jump().click());
+    assert.equal(log().scrollTop, 2100, 'on its newest message (reduced motion: at once)');
+    assert.ok(!jump());
+  });
+
+  it("a Home's too", async () => {
+    location.hash = '#/home/personal';
+    await show('p4', true);
+    layout();
+    await answer('/transcript', transcript[0]);
+    await scroll(log().scrollTop); // its jump to the end, as a browser tells it
+    await scroll(0);
+    await fire(() => jump().click());
+    assert.equal(log().scrollTop, log().scrollHeight);
+    assert.ok(!jump());
   });
 });
 

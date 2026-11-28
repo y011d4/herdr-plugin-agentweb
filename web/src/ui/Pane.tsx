@@ -14,7 +14,7 @@
  * State pushes re-render it constantly. The composer's textarea is uncontrolled (React never sets its
  * value), so a push never resets what is being typed, an IME composition included.
  */
-import { ActionIcon, Button, CloseButton, FileButton, Group, Image, Menu, NativeSelect, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Button, CloseButton, FileButton, Group, Image, Indicator, Menu, NativeSelect, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
@@ -136,7 +136,9 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
   const { mode } = useToggle(paneId);
   const [activity, setActivity] = useState<string | null>(null); // Home: the latest tool call since it last spoke
   const [prompt, setPrompt] = useState<PanelPrompt | null>(null); // the answer panel's, while blocked in chat
+  const [jump, setJump] = useState<{ unread: boolean } | null>(null); // the chat's ↓, while scrolled up from its end
   const body = useRef<HTMLDivElement>(null);
+  const own = useRef<PaneView | null>(null); // this screen's view (paneView: the one on show, a drawer's over a Home)
   // Reads the screen first, then the scrollback, then polls and probes for a transcript.
   useEffect(() => {
     const view = createPaneView(body.current!, paneId, {
@@ -144,8 +146,9 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
       modeChanged: () => setToggle(paneId, { mode: store.view.paneViewMode }),
       activity: setActivity,
       prompt: setPrompt,
+      jump: (away, unread) => setJump(away ? { unread } : null),
     });
-    paneView = view;
+    paneView = own.current = view;
     paneViewPane = paneId;
     return () => {
       view.destroy();
@@ -153,6 +156,7 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
       if (waiting === view) { waiting = null; waitingPane = ''; }
       toggles.delete(paneId);
       setPrompt(null);
+      setJump(null);
     };
   }, [paneId]);
   // "doing now": only while the orchestrator works — its latest tool call, or "thinking…" between them
@@ -168,6 +172,18 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
       {home && <HomeStatus name={name} state={state} actions={actions} />}
       {/* the engine's (pane-view.ts): the terminal and the chat (its images and workers' names: ui/ChatLog.tsx) */}
       <div id="pane-view" ref={body} style={{ display: 'contents' }}></div>
+      {/* over the chat's bottom-right corner, above whatever is under it; with nothing under it (a pane's chat
+          at rest), above the phone's home indicator. On a PC at the readable column's edge. */}
+      {jump && (
+        <div className="relative z-[1] h-0 shrink-0">
+          <Indicator className={`absolute right-4 lg:right-(--wide-gutter) ${readOnly && !working && !prompt ? 'bottom-[calc(var(--safe-bottom)+12px)]' : 'bottom-3'}`}
+            color="accent" size={10} offset={5} withBorder disabled={!jump.unread}>
+            <ActionIcon id="btn-chat-bottom" variant="default" size="xl" radius="xl" fz={18} className="shadow-md"
+              aria-label={jump.unread ? 'Jump to the latest message (new messages)' : 'Jump to the latest message'} title="Jump to the latest message"
+              onClick={() => own.current?.toBottom()}>&#8595;</ActionIcon>
+          </Indicator>
+        </div>
+      )}
       {prompt && paneView && <PromptPanel paneId={paneId} prompt={prompt} view={paneView} />}
       {hl && pending && <HeadlessPrompt key={pending.id} name={hl} pending={pending} />}
       {home && (
