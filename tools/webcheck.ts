@@ -2524,10 +2524,14 @@ async function shots(o: Record<string, any>): Promise<number> {
         await ev(`document.fonts.ready.then(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))))
           .then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))`);
         await sleep(300);
-        // the page's text and its inputs' values, for each of its shots: publishing checks it against the names
-        // denylist, as a PNG's text can't be read back (.github/workflows/screenshots-publish.yml)
+        // the page's text, its inputs' values and placeholders, and its CSS-generated text, for each of its shots:
+        // publishing checks it against the names denylist, as a PNG's text can't be read back
+        // (.github/workflows/screenshots-publish.yml). ponytail: text drawn inside an image or a canvas isn't read
+        // (no OCR); such an image is in the tree, which the check also reads, as are the names that would draw it.
         const text = String(await ev(`[document.title, document.body.innerText,
-          ...[...document.querySelectorAll('input, textarea')].map((e) => e.value)].join('\\n')`) ?? '');
+          ...[...document.querySelectorAll('input, textarea')].flatMap((e) => [e.value, e.placeholder]),
+          ...[...document.querySelectorAll('*')].flatMap((e) => ['::before', '::after'].map((p) => getComputedStyle(e, p).content))
+            .filter((c) => c && c !== 'none' && c !== 'normal')].join('\\n')`) ?? '');
         const shot: Array<{ name: string; kind: 'screen' | 'part'; png: Buffer; ready: boolean; text: string }> = [];
         if (scene.screen !== false) {
           const { data } = await S('Page.captureScreenshot', { format: 'png' });

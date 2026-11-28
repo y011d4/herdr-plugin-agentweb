@@ -63,7 +63,7 @@ tree() {
   git rev-parse -q --verify "$1^{tree}" > /dev/null || die "no such commit: $1"
   g git grep -I -i -E -c -f "$pat" "$1" -- # REV:path:count
   sed -E 's/^[^:]*:(.*):[0-9]+$/\1/' "$tmp/out" > "$tmp/hits"; report "the tree of $1"
-  git ls-tree -r --name-only "$1" > "$tmp/paths"
+  git -c core.quotePath=false ls-tree -r --name-only "$1" > "$tmp/paths" # a non-ASCII path as itself, not escaped
   g grep -i -E -f "$pat" "$tmp/paths"
   sed 's/$/ (its path)/' "$tmp/out" > "$tmp/hits"; report "the paths of $1"
 }
@@ -82,7 +82,8 @@ commits() {
   git log --format='%B' "$@" > "$tmp/msgs"
   g grep -i -E -c -f "$pat" "$tmp/msgs"
   sed -E 's/^([1-9][0-9]*)$/\1 line(s) of their messages/; /^0$/d' "$tmp/out" > "$tmp/hits"; report "the commits of git log $*"
-  git log -p --format= --no-color --no-ext-diff --text "$@" | added > "$tmp/added"
+  # a merge too, against its first parent: what its resolution brings in
+  git log -p --diff-merges=first-parent --format= --no-color --no-ext-diff --text "$@" | added > "$tmp/added"
   g grep -i -E -c -f "$pat" "$tmp/added"
   sed -E 's/^([1-9][0-9]*)$/\1 line(s) their patches add/; /^0$/d' "$tmp/out" > "$tmp/hits"; report "the commits of git log $*"
 }
@@ -96,12 +97,12 @@ install() {
     printf '#!/bin/sh\nexec sh "$(dirname "$0")/check-names.sh" %s "$@"\n' "$h" > "$d/$h"
     chmod +x "$d/$h"
   done
-  # pre-push: our line first, in front of whatever is there (roborev's, say: it doesn't read stdin)
-  line='sh "$(dirname "$0")/check-names.sh" pre-push "$@" || exit 1 # check-names'
-  if [ ! -e "$d/pre-push" ]; then printf '#!/bin/sh\n%s\n' "$line" > "$d/pre-push"
-  elif ! grep -q 'check-names' "$d/pre-push"; then
-    { head -n 1 "$d/pre-push"; echo "$line"; tail -n +2 "$d/pre-push"; } > "$tmp/pre-push" && cat "$tmp/pre-push" > "$d/pre-push"
-  fi
+  # pre-push: our line first, in front of whatever is there (roborev's, say), which then reads the same ref
+  # updates from stdin: they are kept in a file, and the rest of the hook reads that (an earlier line of ours goes)
+  line='i=$(mktemp) && cat > "$i" && { sh "$(dirname "$0")/check-names.sh" pre-push "$@" < "$i" || { rm -f "$i"; exit 1; }; } && exec < "$i" && rm -f "$i" # check-names'
+  if [ ! -e "$d/pre-push" ]; then printf '#!/bin/sh\n' > "$d/pre-push"; fi
+  { head -n 1 "$d/pre-push"; echo "$line"; tail -n +2 "$d/pre-push" | grep -v '# check-names$' || true; } > "$tmp/pre-push"
+  cat "$tmp/pre-push" > "$d/pre-push"
   chmod +x "$d/pre-push"
   load
   echo "check-names: hooks installed in $d ($(grep -c . "$pat") names in the denylist)"
@@ -120,20 +121,21 @@ case $cmd in
     git diff --cached -U0 --no-color --no-ext-diff --text | added > "$tmp/added"
     g grep -i -E -c -f "$pat" "$tmp/added"
     sed -E 's/^([1-9][0-9]*)$/\1 line(s) it adds/; /^0$/d' "$tmp/out" > "$tmp/hits"; report "the staged change"
-    git diff --cached --name-only --diff-filter=ACR > "$tmp/paths"
+    git -c core.quotePath=false diff --cached --name-only --diff-filter=ACR > "$tmp/paths"
     g grep -i -E -f "$pat" "$tmp/paths"
     sed 's/$/ (its path)/' "$tmp/out" > "$tmp/hits"; report "the staged paths"
     ;;
   pre-push)
     load
-    z=0000000000000000000000000000000000000000
+    z=0000000000000000000000000000000000000000 remote=${1:-}
     while read -r lref lsha rref rsha; do
       [ "$lsha" = "$z" ] && continue # a deletion
       printf '%s\n' "$rref" > "$tmp/ref"
       g grep -i -E -c -f "$pat" "$tmp/ref"
       sed "/^0\$/d; s#.*#the name of the ref it pushes to#" "$tmp/out" > "$tmp/hits"; report "$rref"
       tree "$lsha"
-      commits "$lsha" --not --remotes
+      # what the destination has already: its remote-tracking refs only (a push to a bare URL: none, so all of it)
+      if [ -n "$remote" ]; then commits "$lsha" --not --remotes="$remote"; else commits "$lsha"; fi
     done
     ;;
   *) die "usage: check-names.sh tree REV | text FILE... | pre-commit | commit-msg FILE | commits ARGS... | pre-push | install" ;;
