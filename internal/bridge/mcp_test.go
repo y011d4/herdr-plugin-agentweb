@@ -179,7 +179,7 @@ func TestHeadlessAskAndAnswer(t *testing.T) {
 			t.Errorf("%s: %d %s", body, status, out)
 		}
 	}
-	if status, out := b.post(t, "send", `{"text":"what is cherry?","question":"`+v.Headless.Pending.ID+`","answers":{"Which fruit?":"cherry"}}`); status != 200 { // the panel's so far
+	if status, out := b.post(t, "send", `{"text":"what is cherry?","question":"`+v.Headless.Pending.ID+`","answers":{"Which fruit?":"cherry"}}`); status != 200 || out != `{"ok":true}` { // the panel's so far
 		t.Fatalf("send: %d %s", status, out)
 	}
 	b.waitStdin(t, `"content":"what is cherry?"`)
@@ -197,7 +197,7 @@ func TestHeadlessAskAndAnswer(t *testing.T) {
 	b.send(t, "ask")
 	v = b.waitFor(t, "the question", func(v OrchestratorView) bool { return v.Headless.Pending != nil })
 	b.send(t, "not about it")
-	if status, out := b.post(t, "send", `{"text":"nor this","question":"older","answers":{"Which fruit?":"cherry"}}`); status != 200 {
+	if status, out := b.post(t, "send", `{"text":"nor this","question":"older","answers":{"Which fruit?":"cherry"}}`); status != 200 || out != `{"ok":true,"held":true}` {
 		t.Fatalf("send: %d %s", status, out)
 	}
 	b.waitStdin(t, `"content":"nor this"`)
@@ -243,7 +243,7 @@ func TestHeadlessSendBehindAQuestion(t *testing.T) {
 		defer h.mu.Unlock()
 		return len(h.asks) == 1
 	})
-	if status, out := b.post(t, "send", `{"text":"and this?"}`); status != 200 {
+	if status, out := b.post(t, "send", `{"text":"and this?"}`); status != 200 || out != `{"ok":true,"held":true}` { // so the web says so
 		t.Fatalf("send: %d %s", status, out)
 	}
 	b.waitStdin(t, `"content":"and this?"`)

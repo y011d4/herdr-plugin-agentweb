@@ -379,6 +379,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
   const attach = async (files: File[]): Promise<void> => {
     const picked = files.filter((f) => f.type.startsWith('image/'));
     if (!picked.length) return;
+    begun.current ??= Date.now(); // picked now, whatever scaling takes
     let added: ImageAttachment[];
     setPreparing((n) => n + 1);
     try {
@@ -389,7 +390,6 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
     } finally {
       setPreparing((n) => n - 1);
     }
-    begun.current ??= Date.now();
     const next = fitImages(shown.current, added);
     if (next.length < shown.current.length + added.length) showToast('Not every image was added', `At most ${MAX_IMAGES}, 1 MB in all, per message`);
     setImages(next);
@@ -424,16 +424,17 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
       // raw control byte a full-screen / non-readline TUI could act on. Other panes just get
       // text+enter. enter:true then submits in the same request.
       const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
-      const aboutIt = hl && about ? { question: about, ...(answersSoFar.has(hl) ? { answers: answersSoFar.get(hl) } : {}) } : {};
-      await (hl ? orchestratorPost(hl, 'send', { text, ...(sent.length ? { images: sent } : {}), ...aboutIt }) : apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) }));
+      let held = false; // a question holds it (the bridge's answer): it came as this was written, or is still on its way
+      if (hl) {
+        const aboutIt = about ? { question: about, ...(answersSoFar.has(hl) ? { answers: answersSoFar.get(hl) } : {}) } : {};
+        held = !!(await orchestratorPost<{ held?: boolean }>(hl, 'send', { text, ...(sent.length ? { images: sent } : {}), ...aboutIt })).held;
+      } else await apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) });
       if (t.value === text) { // clear on success, but keep text typed mid-send
         t.value = '';
         autoGrow(t);
         begun.current = null;
       }
-      // not about the question open (it came as this was written): it holds this, which the chat won't show yet. ponytail: one
-      // that comes after the response isn't told of; the bridge's answer would need to say whether one holds it
-      if (hl && !about && store.appState?.orchestrators?.find((o) => o.name === hl)?.headless?.pending) {
+      if (held) { // the chat won't show it until then
         showToast('Your message waits', `${orchestratorLabel(orchestratorOfPane(store.appState, paneId))} reads it once the question is answered. To make it about the question, tap Chat about this.`);
       }
       if (text && getDraft(key) === text) setDraft(key, '');
@@ -502,7 +503,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
         {/* Mantine's look, the composer's own text: 14px (iOS zooms in on focus, as before), at most 120px tall (autoGrow) */}
         <Textarea id="pane-input" ref={input} rows={1} placeholder={placeholder} autoCorrect="off" autoCapitalize="off" spellCheck={false}
           className="flex-1" styles={{ input: { fontSize: 14, lineHeight: 1.4, maxHeight: 120, background: 'var(--color-bg)', paddingTop: 10, paddingBottom: 10 } }}
-          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); setDraft(key, e.currentTarget.value); begun.current = e.currentTarget.value ? begun.current ?? Date.now() : null; }} />
+          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); setDraft(key, e.currentTarget.value); begun.current = e.currentTarget.value || shown.current.length ? begun.current ?? Date.now() : null; }} />
         <Button id="btn-send-enter" miw={64} px={12} fz={13} disabled={preparing > 0} onClick={() => { void send(); }}>Send</Button>
       </Group>
     </>

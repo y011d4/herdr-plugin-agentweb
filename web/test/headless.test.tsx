@@ -348,7 +348,7 @@ describe("a headless orchestrator's Home", () => {
       vi.stubGlobal('matchMedia', () => ({ matches: true }));
       await fire(() => input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))); // …as Enter is pressed
       assert.deepEqual(posts('send'), [{ text: 'and run the tests' }], 'not about the question');
-      await answer('POST /api/orchestrators/pilot/send', { ok: true });
+      await answer('POST /api/orchestrators/pilot/send', { ok: true, held: true }); // the bridge: a question holds it
       assert.ok(container.querySelector('#headless-prompt'), 'the question stays open');
       assert.deepEqual(getToasts().map((t) => [t.title, t.body]), [['Your message waits', 'Pilot reads it once the question is answered. To make it about the question, tap Chat about this.']]);
       assert.equal(input().value, '', 'sent');
@@ -380,6 +380,25 @@ describe("a headless orchestrator's Home", () => {
       await type(input(), 'what are the options?');
       await fire(() => $('#btn-send-enter').click());
       assert.deepEqual(posts('send')[3], { text: 'what are the options?', question: '1a2b3c4d' });
+    });
+
+    it('counts an image picked before the question as the message begun then, its text typed again or not', async () => {
+      await home(withPilot(idle));
+      let release = () => {};
+      scaled = new Promise((r) => { release = r; });
+      const picker = $<HTMLInputElement>('#input-image-picker');
+      Object.defineProperty(picker, 'files', { configurable: true, value: [new File(['x'], 'a.png', { type: 'image/png' })] });
+      await fire(() => picker.dispatchEvent(new Event('change', { bubbles: true }))); // picked…
+      later(200);
+      await fire(() => setAppState(withPilot())); // …the question comes while it is scaled
+      await act(async () => { release(); await flush(); });
+      scaled = Promise.resolve();
+      later(2000);
+      await type(input(), 'x');
+      await type(input(), ''); // text cleared, the image still there
+      await type(input(), 'this one');
+      await fire(() => $('#btn-send-enter').click());
+      assert.deepEqual(posts('send'), [{ text: 'this one', images: [{ mediaType: 'image/jpeg', data: 'a.png' }] }]);
     });
   });
 

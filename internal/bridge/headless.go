@@ -1114,9 +1114,9 @@ func (r *headlessRunner) running() (*hlChild, error) {
 // the panel had so far, so the model reads the two together at the boundary the refusal makes.
 // Without one, or once that question is gone, a question pending stays: Claude Code holds the
 // message until it is answered. Never a question the user didn't see: one that came as the
-// message was sent isn't about it.
-func (r *headlessRunner) Send(text string, images []any, answers map[string]any, question string) error {
-	var err error
+// message was sent isn't about it. held: a question holds it (pending, or on its way: in the
+// stream, not at the permission route yet), which the chat won't show until it is answered.
+func (r *headlessRunner) Send(text string, images []any, answers map[string]any, question string) (held bool, err error) {
 	if len(images) == 0 {
 		err = r.write(text)
 	} else {
@@ -1125,10 +1125,19 @@ func (r *headlessRunner) Send(text string, images []any, answers map[string]any,
 		}
 		err = r.write(images)
 	}
-	if err == nil && question != "" {
+	if err != nil {
+		return false, err
+	}
+	if question != "" {
 		r.Chat(question, answers) // answered or replaced meanwhile (a 409): the message stands on its own
 	}
-	return err
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	held = r.pending != nil
+	for _, reached := range r.asks {
+		held = held || !reached
+	}
+	return held, nil
 }
 
 // The images a message may carry: JPEG, PNG or GIF that decode whole (a broken one in the

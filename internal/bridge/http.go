@@ -594,6 +594,7 @@ func stringMap(v any) (map[string]any, bool) {
 // headlessRoute is POST /api/orchestrators/:name/<action> for a headless orchestrator.
 func (s *server) headlessRoute(w http.ResponseWriter, r *http.Request, h *headlessRunner, action string) {
 	var err error
+	var held bool // a send's message waits behind a question
 	switch action {
 	case "start":
 		err = h.Start()
@@ -621,7 +622,7 @@ func (s *server) headlessRoute(w http.ResponseWriter, r *http.Request, h *headle
 			jsonError(w, http.StatusBadRequest, "invalid_params", "text must be a non-empty string, or images given; question, if any, an id; answers, if any, question → label")
 			return
 		}
-		err = h.Send(text, images, answers, question)
+		held, err = h.Send(text, images, answers, question)
 	case "answer":
 		// {id, answers: {question: label(s)}} answers the pending question; {id, deny: message} refuses
 		// it; {id, chat: true, answers?: those given so far} is Claude Code's "Chat about this"
@@ -664,6 +665,12 @@ func (s *server) headlessRoute(w http.ResponseWriter, r *http.Request, h *headle
 			PaneID string `json:"paneId"`
 			Name   string `json:"name"`
 		}{true, "hl:" + h.def.Name, h.def.Name})
+		return
+	}
+	if held {
+		jsonOK(w, okWith(struct {
+			Held bool `json:"held"`
+		}{true}))
 		return
 	}
 	jsonOK(w, okWith(struct{}{}))

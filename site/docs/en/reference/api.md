@@ -56,7 +56,7 @@
   (`"question": "<its id>"`) is about it, not an answer: it is written, then the question is refused as `answer`'s `chat` refuses it, with the
   send's `"answers"` (the panel's so far), if any. The web UI names it only for a message begun with the question on screen, at least 1 s
   before the send. Without it (or naming a question no longer pending), the question stays: Claude Code holds the message until it is
-  answered. A send may
+  answered, and the send answers `{"ok": true, "held": true}` (also for a question on its way, not pending yet). A send may
   carry `"images": [{"mediaType": "image/jpeg", "data": "<base64>"}]` (JPEG, PNG or GIF that decode
   whole, at most 4, 2000 px a side and 1 MiB in all; `text` may then be empty), written as image
   blocks before the text; 400 otherwise. The web UI's + and paste
