@@ -85,7 +85,9 @@ describe('Sidebar', () => {
     await unfold(c);
     assert.equal(all.getAttribute('aria-expanded'), 'true');
     assert.match(all.textContent!, /^All agents\s*4 ▾$/);
-    assert.deepEqual(groups(c), [['personal', 'Personal', ['p1', 'p3']], ['work', 'work', []], ['', 'Other', ['p7', 'p6']]]);
+    assert.deepEqual(groups(c), [['personal', 'Personal ›', ['p1', 'p3']], ['work', 'work ›', []], ['', 'Other', ['p7', 'p6']]]);
+    assert.equal([...c.querySelectorAll('section.sidebar-group > a.sidebar-home-list')].map((a) => a.getAttribute('href')).join(' '),
+      '#/agents/personal #/agents/work', "a Home's heading opens its list; Other's is none");
     assert.equal(c.querySelectorAll('a[data-home="personal"]').length, 1, "a Home's link is its heading on top only");
     assert.ok(!c.querySelector('[data-sidebar-pane="p4"]'), 'an orchestrator is a heading, never an agent');
     await unfold(c);

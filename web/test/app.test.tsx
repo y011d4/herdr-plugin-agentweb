@@ -563,6 +563,38 @@ describe('App', () => {
     await go('#/agents');
   });
 
+  it("a Home's Needs you and agent counts are a phone's only: on a PC the sidebar has them, its switcher and ⋮ share a row", async () => {
+    const s = fresh();
+    s.orchestrators[0].todos = [{ id: 't1', text: 'Review the PR', agent: null, url: null, due: null, createdAt: 0 }];
+    await act(async () => push!({ type: 'state', state: s }));
+    await go('#/home/personal');
+    const bar = (): string => ['#sidebar', '#home-status [data-action="needs"]', '#home-status .home-counts', '#home-status .home-switch', '#btn-home-menu']
+      .map((sel) => ($(sel) ? 1 : 0)).join('');
+    assert.equal(bar(), '01111', 'a phone: no sidebar; Needs you, the counts, the switcher, ⋮');
+    await setWide(true);
+    assert.equal(bar(), '10011', 'a PC: the sidebar; the switcher, ⋮');
+    assert.ok($('#sidebar .sidebar-home[data-home="personal"] .home-todo'), "the sidebar has the Home's to-do item");
+    assert.equal($('#home-status')!.children.length, 1, 'one row');
+    assert.ok($('#home-status .home-row .home-switch') && $('#home-status .home-row #btn-home-menu'), 'the switcher and ⋮ in it');
+    await click($('#sidebar .sidebar-all'));
+    await click($('#sidebar .sidebar-group[data-home="personal"] .sidebar-home-list'));
+    assert.equal(location.hash, '#/agents/personal', "the Home's list: its heading under All agents (a phone's is in the counts' popover)");
+    assert.equal($('#sidebar .sidebar-home-list[aria-current="page"]')?.getAttribute('href'), '#/agents/personal', 'marked');
+    await go('#/home/personal');
+    await setWide(false);
+    assert.equal(bar(), '01111', 'a phone again');
+    // a stopped TUI Home, the only one: on a PC nothing for its bar to show, so none
+    const one = fresh();
+    one.orchestrators = [one.orchestrators[1]];
+    await act(async () => push!({ type: 'state', state: one }));
+    await go('#/home/work');
+    assert.ok($('#screen-home-stopped #home-status .home-counts'), 'a phone: its counts');
+    await setWide(true);
+    assert.ok($('#screen-home-stopped') && !$('#home-status'), 'a PC: no bar');
+    await setWide(false);
+    await go('#/agents');
+  });
+
   it("a pane's ⋮ has Open in herdr on a PC only: it focuses the pane in herdr and says so", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/agents');

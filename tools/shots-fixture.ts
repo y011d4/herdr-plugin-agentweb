@@ -175,15 +175,17 @@ export const scenes: Scene[] = [
     { name: 'chat-notice', el: q('#chat-log .chat-notice') },
     { name: 'composer', el: q('.input-bar') },
   ] },
-  // its Needs you popover: the ready check taps the button (once: then it's aria-expanded) until the list shows
-  { name: 'home-needs', hash: '#/home/personal', ready: `${items('')} && (!!document.querySelector('[data-needs-list] .home-todo')
+  // its Needs you popover: the ready check taps the button (once: then it's aria-expanded) until the list shows; a phone's
+  // only (a PC's sidebar has what it lists)
+  { name: 'home-needs', hash: '#/home/personal', ready: `innerWidth >= 1024 || ${items('')} && (!!document.querySelector('[data-needs-list] .home-todo')
     || void document.querySelector('[data-action=needs][aria-expanded=false]')?.click())`, screen: false, parts: [
-    { name: 'needs-popover', el: q('[data-needs-list]') },
+    { name: 'needs-popover', el: q('[data-needs-list]'), sizes: ['phone'] },
   ] },
-  // its agents' popover, from its counts: the ready check taps them (once: then they're aria-expanded) until the rows show
-  { name: 'home-agents', hash: '#/home/personal', ready: `${items('')} && (!!document.querySelector('[data-agents-list] .agent-row')
+  // its agents' popover, from its counts: the ready check taps them (once: then they're aria-expanded) until the rows show;
+  // a phone's only, as Needs you
+  { name: 'home-agents', hash: '#/home/personal', ready: `innerWidth >= 1024 || ${items('')} && (!!document.querySelector('[data-agents-list] .agent-row')
     || void document.querySelector('[data-action=agents][aria-expanded=false]')?.click())`, screen: false, parts: [
-    { name: 'agents-popover', el: q('[data-agents-list]') },
+    { name: 'agents-popover', el: q('[data-agents-list]'), sizes: ['phone'] },
   ] },
   // a reply in its chat, and a Reply on a message: the ready check taps one's ↩ (then takes the focus off: no caret),
   // then focuses the reply's own ↩, as a keyboard does (on a PC it shows, in its bubble's corner; on a phone it is sr-only)
