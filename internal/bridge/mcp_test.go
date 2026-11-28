@@ -610,10 +610,13 @@ func TestHeadlessWakeUps(t *testing.T) {
 	t.Run("a stalled prompt goes on with the level wait", func(t *testing.T) {
 		b := startHeadless(t, t.TempDir(), nil, nil)
 		w := worker(t, b, "idle", nil)
-		w.StallAfter(300 * time.Millisecond)
+		w.StallAfter(2 * time.Second) // after the delivery window, as herdr's 5 s after 1.5 s
 		b.start(t)
 		b.waitStatus(t, "idle")
-		b.prompt(t) // the delivery window passes the stall: herdr answers stalled
+		b.prompt(t) // delivered: the window passes
+		// the stall on an advance of its own: inside prompt's (the stall, then the window), the
+		// wait for a move could be armed before the clock's last step, so never 8 s from now
+		b.clock.Advance(2*time.Second - deliveryWindow) // herdr answers stalled
 		// the level wait finds it idle as before: it waits for a move
 		b.waiting(t, "the wait for a move", 8*time.Second)
 		w.Set("w1p", "working") // later than the stall
@@ -693,6 +696,7 @@ func TestHeadlessNotifications(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		readUntil(t, c, "state") // registered: Dial returns before the server adds the client
 		b.start(t)
 		b.waitStatus(t, "idle")
 		b.send(t, "hello")

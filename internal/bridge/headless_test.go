@@ -892,6 +892,7 @@ func TestHeadlessDetectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.CloseNow()
+	readUntil(t, c, "state") // registered: Dial returns before the server adds the client
 	b.start(t)
 	b.waitStatus(t, "idle")
 	for _, script := range []string{"unknown", "garbage", "askstdio"} {

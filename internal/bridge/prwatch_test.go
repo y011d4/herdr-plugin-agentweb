@@ -134,13 +134,19 @@ func TestHeadlessPRWatch(t *testing.T) {
 	b.srv.watchPRs()
 	fail = errors.New("gh failed: HTTP 502")
 	b.srv.watchPRs()
-	b.srv.bg.Wait()
-	var shown []string
-	for _, n := range b.world.Notifications() {
-		if n["title"] == "H1: github" {
-			shown = append(shown, n["body"].(string))
+	titled := func(title string) (bodies []string) {
+		for _, n := range b.world.Notifications() {
+			if n["title"] == title {
+				bodies = append(bodies, n["body"].(string))
+			}
 		}
+		return bodies
 	}
+	// the Home's turn on the wake-ups (one write) ends with a notification of its own: begun
+	// before bg.Wait, which a first bg.Go must not overlap
+	waitUntil(t, 10*time.Second, "the Home's turn told", func() bool { return len(titled("H1 → done")) == 1 })
+	b.srv.bg.Wait()
+	shown := titled("H1: github")
 	if !sameSet(shown, []string{"PR merges aren't noticed: gh is not logged in: run `gh auth login` on the PC", "PR merges aren't noticed: gh failed: HTTP 502"}) {
 		t.Errorf("%q", shown)
 	}
