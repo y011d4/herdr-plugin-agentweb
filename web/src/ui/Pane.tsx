@@ -419,13 +419,12 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
     } finally {
       setPreparing((n) => n - 1);
     }
-    if (forDraft && chatNow.current) { // picked for the draft, read once Chat about this opened: the draft's
-      draftImages.current = fitImages(draftImages.current, added);
-      return;
-    }
-    const next = fitImages(shown.current, added);
-    if (next.length < shown.current.length + added.length) showToast('Not every image was added', `At most ${MAX_IMAGES}, 1 MB in all, per message`);
-    setImages(next);
+    const toDraft = forDraft && chatNow.current; // picked for the draft, read once Chat about this opened: the draft's
+    const into = toDraft ? draftImages.current : shown.current;
+    const next = fitImages(into, added);
+    if (next.length < into.length + added.length) showToast('Not every image was added', `At most ${MAX_IMAGES}, 1 MB in all, per message`);
+    if (toDraft) draftImages.current = next;
+    else setImages(next);
   };
   useLayoutEffect(() => {
     const t = input.current!;
