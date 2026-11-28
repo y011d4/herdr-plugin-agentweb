@@ -375,3 +375,49 @@ export function latestActivity(items: TimelineItem[], prev: string | null): stri
   }
   return cur;
 }
+
+// A reply (a Home's Reply on a message, or Ask on a to-do item): the message sent starts with one quote line,
+// a Markdown blockquote the orchestrator reads as it is, then a blank line and the user's words. The line
+// names what it quotes (`of`), and the chat finds a message's original by it (ui/ChatLog.tsx's data-quote).
+export type QuoteOf = 'you' | 'me' | 'notice' | 'todo';
+const QUOTE_HEAD: Record<QuoteOf, string> = {
+  you: 'Replying to your message', // the orchestrator's
+  me: 'Replying to my message', // the user's
+  notice: 'Replying to this notice', // the bridge's [yoicks] line
+  todo: 'To-do',
+};
+const QUOTE_OF = new Map(Object.entries(QUOTE_HEAD).map(([of, head]) => [head, of as QuoteOf]));
+const QUOTE_RE = /^> (Replying to your message|Replying to my message|Replying to this notice|To-do): (.+)(?:\n\n|\n?$)/;
+const EXCERPT = 100; // characters of the quoted message, on one line
+const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim();
+
+/** The quote line of a message: its text on one line, cut short. */
+export function quoteLine(of: Exclude<QuoteOf, 'todo'>, text: string): string {
+  const cs = [...oneLine(text)];
+  return `> ${QUOTE_HEAD[of]}: ${cs.length > EXCERPT ? `${cs.slice(0, EXCERPT).join('').trimEnd()}…` : cs.join('')}`;
+}
+
+/** The quote line of a to-do item: its text, then its id (the orchestrator's `todo` knows it by it), worker and link. */
+export function todoQuote(item: { id: string; text: string; agent: string | null; url: string | null }): string {
+  const more = [`id ${item.id}`, ...(item.agent ? [`worker ${item.agent}`] : []), ...(item.url ? [item.url] : [])];
+  return `> ${QUOTE_HEAD.todo}: ${oneLine(item.text)} (${more.join(', ')})`;
+}
+
+export interface Quote {
+  of: QuoteOf;
+  /** the line as sent (an original's data-quote is the same line) */
+  line: string;
+  /** what it shows of the original: its excerpt (a to-do item's text, without its id) */
+  excerpt: string;
+  /** the user's words after it */
+  body: string;
+}
+
+/** The quote a message starts with, or null. */
+export function parseQuote(text: string): Quote | null {
+  const m = QUOTE_RE.exec(text);
+  if (!m) return null;
+  const of = QUOTE_OF.get(m[1])!;
+  const excerpt = of === 'todo' ? m[2].replace(/ \(id [^)]*\)$/, '') : m[2];
+  return { of, line: `> ${m[1]}: ${m[2]}`, excerpt, body: text.slice(m[0].length) };
+}

@@ -44,6 +44,8 @@ export interface PaneViewOpts {
   /** the chat's ↓: `away`, the user left its newest item (it no longer follows); `unread`, items came
    *  meanwhile. Told only when either changes. */
   jump(away: boolean, unread: boolean): void;
+  /** a Home's Reply on one of its messages: that message's quote line, for the composer */
+  reply?(quote: string): void;
 }
 
 /** What the answer panel (ui/PromptPanel.tsx) shows. */
@@ -173,7 +175,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
   let epoch = 0; // bumped by each suspend: a response to a request from before it never applies
   let wanted: { mode: 'terminal' | 'chat'; persist: boolean } | null = null; // a setMode while suspended, for the resume
   const home = view.homeMode; // a Home's view (the global changes under a drawer)
-  const chat = createChatLog(chatEl, { home }); // draws the items (React) into chatEl; this keeps the scroll
+  const chat = createChatLog(chatEl, { home, reply: home ? opts.reply : undefined }); // draws the items (React) into chatEl; this keeps the scroll
   let historyLoaded = false; // the terminal's scrollback is in (read with a look at the terminal until it is)
   let chatAvailable = false;
   let chatSessionId: string | null = null;

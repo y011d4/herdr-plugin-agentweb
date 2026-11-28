@@ -5,16 +5,19 @@
  * account's blocked agents (a tap: the drawer), its orchestrator's own question (answered below the
  * chat) and the to-do list, what its orchestrator wrote down (todos.ts). An item due later waits
  * under Later until its time; ✓ ticks one off (DELETE …/todos/:id, the State push then drops it). A
- * link shows its host; an agent's name opens its drawer.
+ * link shows its host; an agent's name opens its drawer. On a running Home, Ask puts an item's quote into the
+ * composer (transcript.ts's todoQuote: its text, id, worker and link), to ask its orchestrator about it.
  */
 import { ActionIcon, Anchor, Badge, Button, Group, Popover, Stack, Text, UnstyledButton } from '@mantine/core';
 import { useEffect, useState, type ReactNode } from 'react';
 import { apiDelete } from '../api.ts';
+import { draftKey, setQuote } from '../drafts.ts';
 import { homeSummary, orchestratorStatus, type HomeSummary } from '../dashboard-group.ts';
 import { openAgent, openAgentNamed } from '../nav.ts';
 import { showToast } from '../notify.ts';
 import { findPane, store } from '../store.ts';
 import { dueLabel, linkHost, splitTodos } from '../todos.ts';
+import { todoQuote } from '../transcript.ts';
 import type { AppState, OrchestratorView, TodoItem } from '../types.ts';
 import { agentCards, cardTitle, orchestratorLabel } from './Dashboard.tsx';
 
@@ -48,9 +51,17 @@ export function NeedsBadge({ n }: { n: number }) {
  *  while only items due later wait; nothing while nothing does. A tap opens the popover under it: on a
  *  phone as wide as the screen allows, and no taller than the room below it (it scrolls); Escape, a
  *  tap outside or a tap on it again closes it, and so does leaving the screen (a blocked agent or a
- *  worker's name opens its drawer). The keyboard's focus goes into it, and back to the button. */
+ *  worker's name opens its drawer, an Ask the composer). The keyboard's focus goes into it, and back to the
+ *  button (after an Ask: into the composer). */
 export function NeedsButton({ o, s, n, now }: { o: OrchestratorView; s: HomeSummary; n: number; now: number }) {
   const [opened, setOpened] = useState(false);
+  const [asked, setAsked] = useState(false); // closed by an Ask: the focus stays in the composer
+  // a running Home's composer takes it (it focuses in this tap: a phone's keyboard opens)
+  const ask = o.paneId ? (it: TodoItem): void => {
+    setQuote(draftKey('', o.name), todoQuote(it));
+    setAsked(true);
+    setOpened(false);
+  } : undefined;
   useEffect(() => {
     if (!opened) return;
     const close = (): void => setOpened(false);
@@ -64,22 +75,22 @@ export function NeedsButton({ o, s, n, now }: { o: OrchestratorView; s: HomeSumm
   }
   return (
     <Popover opened={opened} onChange={setOpened} position="bottom-start" width="min(400px, calc(100vw - 24px))" radius="md" shadow="md"
-      trapFocus returnFocus middlewares={{ shift: { padding: 12 }, size: { padding: 12 } }}>
+      trapFocus returnFocus={!asked} middlewares={{ shift: { padding: 12 }, size: { padding: 12 } }}>
       <Popover.Target>
         <Button className="shrink-0" data-action="needs" size="compact-sm" radius="xl" fz={13} fw={700} variant={n ? 'filled' : 'default'}
           color="blocked" c={n ? 'white' : 'dimmed'} data-blocked={s.blocked.length} rightSection={<span className="text-[10px]">&#9662;</span>}
-          onClick={() => setOpened(!opened)}>
+          onClick={() => { setAsked(false); setOpened(!opened); }}>
           {n ? `Needs you · ${n}` : `To-do · ${todos}`}
         </Button>
       </Popover.Target>
       <Popover.Dropdown className="overflow-y-auto overscroll-contain" data-needs-list="">
-        <NeedsList o={o} s={s} now={now} />
+        <NeedsList o={o} s={s} now={now} ask={ask} />
       </Popover.Dropdown>
     </Popover>
   );
 }
 
-function NeedsList({ o, s, now }: { o: OrchestratorView; s: HomeSummary; now: number }) {
+function NeedsList({ o, s, now, ask }: { o: OrchestratorView; s: HomeSummary; now: number; ask?: (it: TodoItem) => void }) {
   const head = (text: string): ReactNode => <Text fz={11} fw={700} c="dimmed" tt="uppercase" lts="0.06em">{text}</Text>;
   return (
     <Stack gap={12}>
@@ -97,31 +108,33 @@ function NeedsList({ o, s, now }: { o: OrchestratorView; s: HomeSummary; now: nu
           </Group>
         </Stack>
       )}
-      {(o.todos?.length ?? 0) > 0 && <Stack gap={4}>{head('To-do')}<Todos o={o} now={now} /></Stack>}
+      {(o.todos?.length ?? 0) > 0 && <Stack gap={4}>{head('To-do')}<Todos o={o} now={now} ask={ask} /></Stack>}
     </Stack>
   );
 }
 
-/** Home `o`'s items: the ones to do now, then Later (n), closed until tapped. Nothing without items. */
-export function Todos({ o, now }: { o: OrchestratorView; now: number }) {
+/** Home `o`'s items: the ones to do now, then Later (n), closed until tapped. Nothing without items. `ask`:
+ *  each has Ask, off while its orchestrator's question is open (the composer is the question's then). */
+export function Todos({ o, now, ask }: { o: OrchestratorView; now: number; ask?: (it: TodoItem) => void }) {
+  const off = !!o.headless?.pending;
   const [open, setOpen] = useState(false);
   const { now: due, later } = splitTodos(o.todos ?? [], now);
   if (!due.length && !later.length) return null;
   return (
     <Stack className="home-todos" gap={0}>
-      {due.map((it) => <Todo key={it.id} home={o.name} item={it} now={now} />)}
+      {due.map((it) => <Todo key={it.id} home={o.name} item={it} now={now} ask={ask && (() => ask(it))} off={off} />)}
       {later.length > 0 && (
         <UnstyledButton className="self-start py-1 text-[12px] font-semibold text-(--color-text-dim) hover:text-(--color-text)" data-action="todo-later"
           aria-expanded={open} onClick={() => setOpen(!open)}>
           {`Later (${later.length}) ${open ? '▾' : '›'}`}
         </UnstyledButton>
       )}
-      {open && later.map((it) => <Todo key={it.id} home={o.name} item={it} now={now} />)}
+      {open && later.map((it) => <Todo key={it.id} home={o.name} item={it} now={now} ask={ask && (() => ask(it))} off={off} />)}
     </Stack>
   );
 }
 
-function Todo({ home, item, now }: { home: string; item: TodoItem; now: number }) {
+function Todo({ home, item, now, ask, off }: { home: string; item: TodoItem; now: number; ask?: () => void; off: boolean }) {
   const [busy, setBusy] = useState(false);
   const host = item.url ? linkHost(item.url) : null;
   const due = item.due != null ? dueLabel(item.due, now) : null;
@@ -150,6 +163,10 @@ function Todo({ home, item, now }: { home: string; item: TodoItem; now: number }
           </Group>
         )}
       </div>
+      {ask && (
+        <Button className="shrink-0" variant="subtle" size="compact-sm" fz={13} data-action="todo-ask" aria-label={`Ask about: ${item.text}`}
+          disabled={off} title={off ? 'Answer the question first' : undefined} onClick={ask}>Ask</Button>
+      )}
     </Group>
   );
 }

@@ -8,7 +8,7 @@
  * a part of the scene that shows it (`el`: the element, by the hooks the tests use; a new hook is a data-* attribute).
  */
 import type { AppState } from '../web/src/types.ts';
-import type { TimelineItem } from '../web/src/transcript.ts';
+import { quoteLine, type TimelineItem } from '../web/src/transcript.ts';
 
 /** The fixture's "now" (ms); the browser's clock is frozen 30s after it. */
 export const T0 = Date.UTC(2026, 0, 15, 9, 0, 0);
@@ -73,13 +73,15 @@ const tool = (id: string, name: string, summary: string, rest: { todos?: Extract
 const result = (forId: string, text: string, isError = false, truncated = false): Item =>
   ({ kind: 'tool_result', forId, text, truncated, isError, sidechain: false, ts: T0 });
 
+const PRS_OPEN = 'Started **flaky-test**. Two PRs are open:\n- #108 the token screen\n- #109 the toasts\n\nBoth have green CI.';
 /** By pane id; a pane without one has no transcript (its terminal shows). */
 export const transcripts: Record<string, Item[]> = {
   p4: [
     user('Review the open PRs, and start a worker on the flaky test in herdr-yoicks.'),
     said("I'll look at the open PRs first, then start **flaky-test** in `herdr-yoicks`."),
     user('[yoicks] started flaky-test (pane p2): the first task was sent'),
-    said('Started **flaky-test**. Two PRs are open:\n- #108 the token screen\n- #109 the toasts\n\nBoth have green CI.'),
+    said(PRS_OPEN),
+    user(`${quoteLine('you', PRS_OPEN)}\n\nMerge #109 first.`),
     user('[yoicks] review: working → blocked'),
     user('This is the screenshot.', ['/icons/icon-512.png']),
   ],
@@ -170,6 +172,12 @@ export const scenes: Scene[] = [
   { name: 'home-needs', hash: '#/home/personal', ready: `${items('')} && (!!document.querySelector('[data-needs-list] .home-todo')
     || void document.querySelector('[data-action=needs][aria-expanded=false]')?.click())`, screen: false, parts: [
     { name: 'needs-popover', el: q('[data-needs-list]') },
+  ] },
+  // a reply in its chat, and a Reply on a message: the ready check taps one's ↩ (then takes the focus off: no caret)
+  { name: 'home-reply', hash: '#/home/personal', ready: `${items('')} && (!!document.querySelector('#composer-quote')
+    || void (document.querySelector('#chat-log .chat-assistant .chat-reply')?.click(), document.activeElement?.blur()))`, screen: false, parts: [
+    { name: 'chat-reply', el: `${q('#chat-log .chat-quote-ref')}?.closest('.chat-item')` },
+    { name: 'composer-quote', el: q('.input-bar') },
   ] },
   { name: 'home-headless', hash: '#/home/work', ready: `${items('')} && !!document.querySelector('.ask-opt')`, screen: false, parts: [
     { name: 'home-status-headless', el: q('#home-status') },

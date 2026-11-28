@@ -247,6 +247,10 @@ pane builds exactly this link) and use Chrome's "Add to Home screen".
 - In a chat (a Claude pane's or a Home's), scrolling up from the newest message shows a
   **↓** at its bottom right, with a dot once new messages arrive; tapping it scrolls back to the
   newest message, and the chat follows new ones again.
+- On a Home, a long press on a message (on a PC a right click, or the ↩ beside it) offers **Reply**: the
+  composer shows a line of that message (✕ cancels it), and what you send starts with it as a quote, so
+  the orchestrator knows what you answer. A reply shows that line on top of its bubble; tapping it
+  scrolls to the message. The same menu has **Copy**.
 
 Tip: Claude Code's `"tui": "fullscreen"` setting is what prevents scrollback
 from accumulating. Remove it (default renderer) and restarted sessions build
@@ -422,7 +426,7 @@ From 70% of the context in use, the ctx turns orange and a small orange dot mark
 limit). The chat marks where a compaction cut the conversation (`[yoicks] compacted`). It
 also keeps a to-do list for you (its `todo` tool), under "Needs you" on its Home: what only you can do, such
 as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; ✓ ticks one off and tells the Home, which takes up what follows
-(a stopped Home isn't told). Each Home's switcher button
+(a stopped Home isn't told), and **Ask** quotes one (with its id) in the composer, to ask the orchestrator about it. Each Home's switcher button
 (and its heading in the PC sidebar) counts what waits on you there. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
