@@ -149,7 +149,7 @@ export function Todos({ o, now, ask, dense }: { o: OrchestratorView; now: number
   );
 }
 
-// `dense` (the sidebar's): smaller, ✓ at the first line, the text two lines at most (all of it on hover), and Ask at the
+// `dense` (the sidebar's): smaller, ✓ centered on the row as the popover's, the text two lines at most (all of it on hover), and Ask at the
 // right end of the line under it with the worker, the link and the due time (`inline`), so the text has the row's width
 function Todo({ home, item, now, ask, off, dense }: { home: string; item: TodoItem; now: number; ask?: () => void; off: boolean; dense?: boolean }) {
   const [busy, setBusy] = useState(false);
@@ -174,7 +174,7 @@ function Todo({ home, item, now, ask, off, dense }: { home: string; item: TodoIt
   return (
     // a line under each but the list's last, so items of two or three lines don't run together
     <Group className={`home-todo border-b border-(--color-border) last:border-b-0 ${dense ? 'py-1' : 'py-1.5'}`} data-todo={item.id} gap={dense ? 8 : 10}
-      wrap="nowrap" align={dense ? 'flex-start' : 'center'}>
+      wrap="nowrap">
       <ActionIcon variant="default" radius="xl" size={dense ? 'sm' : undefined} className="shrink-0" aria-label={`Done: ${item.text}`} data-action="todo-done"
         loading={busy} onClick={() => { void done(); }}>&#10003;</ActionIcon>
       <div className="min-w-0 flex-1">
