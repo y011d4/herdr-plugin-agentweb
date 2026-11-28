@@ -29,7 +29,7 @@ import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts
 import { parseQuote, type QuoteOf } from '../transcript.ts';
 import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
 import { emit, findPane, store, subscribe } from '../store.ts';
-import { useWide } from '../theme.ts';
+import { usePanel, useWide } from '../theme.ts';
 import { dueLabel } from '../todos.ts';
 import type { AppState, HeadlessCompact, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
 import { QuoteText } from './ChatLog.tsx';
@@ -37,6 +37,7 @@ import { AgentRow, SettingsButton, TopbarIcon, agentCards, orchestratorLabel, re
 import { StatusDot } from './Status.tsx';
 import { NeedsBadge, NeedsButton, needsYou, useMinute } from './Todos.tsx';
 import type { Topbar } from './App.tsx';
+import { HomePanel } from './HomePanel.tsx';
 import { openCompact, previewImage } from './Modals.tsx';
 import { answersSoFar, HeadlessPrompt, PromptPanel } from './PromptPanel.tsx';
 import { TuiSteps } from './Settings.tsx';
@@ -189,7 +190,9 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
   const compacted = headless?.compact && !compacting ? compactLine(headless.compact) : null;
   const [chatting, setChatting] = useState(''); // the question whose Chat about this was pressed: the composer writes about it
   const chatOn = !!pending && chatting === pending.id;
-  return (
+  const panel = usePanel();
+  // a Home's panel (a PC's, from PANEL_QUERY) after it, in #screen: the screen stays the same element as it comes and goes
+  return (<>
     <div id="screen-pane" className={home ? 'screen-home' : undefined} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       {home && <HomeStatus name={name} state={state} actions={actions} paneId={paneId} />}
       {/* the engine's (pane-view.ts): the terminal and the chat (its images and workers' names: ui/ChatLog.tsx) */}
@@ -235,7 +238,8 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
         </div>
       </div>
     </div>
-  );
+    {home && panel && <HomePanel name={name} />}
+  </>);
 }
 
 // With two or more orchestrators configured, a Home's topbar is their switcher (homeTopbar, stoppedHomeTopbar): every
@@ -319,18 +323,20 @@ function HomeTools({ name, paneId, actions, className }: { name: string; paneId?
   );
 }
 
-// Home status bar on a phone, one row (wrapping where it must): "Needs you · n" (its account's blocked agents, its own
-// question, its to-do items: Todos.tsx's NeedsButton, a popover), the counts of its agents (AgentsButton, a popover of
-// them), then at the right the Home's own tools (HomeTools). Under it a headless one's warnings (`clear`: their Clear, on
-// a stopped Home too). On a PC (WIDE_QUERY: ui/App.tsx's sidebar beside it has what waits at each Home, and the topbar
-// is the Home's header, its name and status, then its tools) only the warnings, and no bar without any.
+// Home status bar, one row (wrapping where it must): "Needs you · n" (its account's blocked agents, its own question, its
+// to-do items: Todos.tsx's NeedsButton, a popover), the counts of its agents (AgentsButton, a popover of them), then on a
+// phone at the right the Home's own tools (HomeTools: on a PC, WIDE_QUERY, the topbar is the Home's header, its name and
+// status, then its tools). Under it a headless one's warnings (`clear`: their Clear, on a stopped Home too). From
+// PANEL_QUERY the Home's panel beside it (ui/HomePanel.tsx) has what the two popovers have: only the warnings then, and no
+// bar without any.
 function HomeStatus({ name, state, actions, clear = actions?.clear, paneId }:
   { name: string; state: AppState | null; actions?: HomeActions; clear?: () => void; paneId?: string }) {
   const now = useMinute();
   const wide = useWide(); // as the sidebar's (App.tsx)
+  const panel = usePanel();
   const self = state?.orchestrators?.find((o) => o.name === name);
   const warnings = self?.headless && <HeadlessWarnings o={self} clear={clear} />;
-  if (wide) return self?.headless?.warnings?.length ? <Stack id="home-status" gap={8} py={8} className={`px-3.5 ${STATUS_BAR}`}>{warnings}</Stack> : null;
+  if (panel) return self?.headless?.warnings?.length ? <Stack id="home-status" gap={8} py={8} className={`px-3.5 ${STATUS_BAR}`}>{warnings}</Stack> : null;
   if (!state) return <Stack id="home-status" className={STATUS_BAR}></Stack>;
   const s = homeSummary(agentCards(state, self), store.seenDone);
   return (
@@ -338,7 +344,7 @@ function HomeStatus({ name, state, actions, clear = actions?.clear, paneId }:
       <Group className="home-row" gap="6px 14px">
         {self && <NeedsButton o={self} s={s} n={needsYou(self, state, now)} now={now} />}
         <AgentsButton name={name} s={s} />
-        <HomeTools name={name} paneId={paneId} actions={actions} className="ml-auto" />
+        {!wide && <HomeTools name={name} paneId={paneId} actions={actions} className="ml-auto" />}
       </Group>
       {warnings}
     </Stack>
@@ -899,11 +905,12 @@ export const stoppedHomeTopbar = (name: string): Topbar => ({
 });
 
 /** #/home/<name> while that orchestrator isn't running: its account's agents and Start (a headless
- *  one's warnings too, with `clear`). Once the State shows it running, the shell (ui/App.tsx) opens
+ *  one's warnings too, with `clear`; on a PC from PANEL_QUERY its panel beside it). Once the State shows it running, the shell (ui/App.tsx) opens
  *  its running Home in place of this. */
 export function StoppedHome({ name, clear }: { name: string; clear?: () => void }) {
   const state = useAppState();
   const [busy, setBusy] = useState(false);
+  const panel = usePanel(); // a PC's, from PANEL_QUERY: its agents and what waits there, beside it
   const start = async (): Promise<void> => {
     setBusy(true); // until the State shows it running
     try {
@@ -913,7 +920,7 @@ export function StoppedHome({ name, clear }: { name: string; clear?: () => void 
       showToast('Could not start the orchestrator', (err as Error).message);
     }
   };
-  return (
+  return (<>
     <div id="screen-home-stopped" className="screen-home" style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       <HomeStatus name={name} state={state} clear={clear} />
       <Stack flex={1} align="center" justify="center" gap={12} px={16} py={24}>
@@ -921,5 +928,6 @@ export function StoppedHome({ name, clear }: { name: string; clear?: () => void 
         <Button id="btn-home-start" px={28} disabled={busy} onClick={() => { void start(); }}>{busy ? 'Starting…' : 'Start'}</Button>
       </Stack>
     </div>
-  );
+    {panel && <HomePanel name={name} />}
+  </>);
 }

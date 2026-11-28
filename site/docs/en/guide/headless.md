@@ -12,8 +12,8 @@ From 70% of the context in use, the ctx turns orange and a small orange dot mark
 limit). The chat marks where a compaction cut the conversation (`[yoicks] compacted`). It
 also keeps a to-do list for you (its `todo` tool), under "Needs you" on its Home: what only you can do, such
 as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; a tap on one opens its menu: **Mark done** ticks it off, and **Ask the orchestrator** quotes it (with its id) in the composer, to ask the orchestrator about it. A phone's switcher button
-for each Home (and its heading in the PC sidebar) counts what waits on you there. On a PC the sidebar lists it under that heading, in place of the Home's Needs you
-(its blocked agents, its question, its to-do list: each item two lines at most, all of it on hover); the agents themselves are folded into one row, **All agents**, kept at the bottom of the sidebar, which a click unfolds. It has no herdr pane: on the PC,
+for each Home (and its row in the PC's left rail) counts what waits on you there. On a PC from 1280px wide the Home's panel, beside its chat, lists it in place of the
+Home's Needs you (its blocked agents, its question, its to-do list), then its other agents. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
 fresh session); the Home's warnings and Settings show the same steps.

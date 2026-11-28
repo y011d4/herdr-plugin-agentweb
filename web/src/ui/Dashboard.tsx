@@ -8,10 +8,10 @@
  * what changed: scrollTop and iOS momentum hold. While a finger is down the list doesn't change at all
  * (a rewrite mid-drag can cancel the scroll); the latest State shows once it lifts.
  */
-import { ActionIcon, Badge, Button, Card, Center, Group, Loader, NavLink, Text } from '@mantine/core';
-import { useEffect, useRef, useState, useSyncExternalStore, type ComponentPropsWithRef, type HTMLAttributes, type TouchEvent } from 'react';
+import { ActionIcon, Badge, Button, Card, Center, Group, Loader, Menu, NavLink, Text } from '@mantine/core';
+import { useEffect, useRef, useState, useSyncExternalStore, type ComponentPropsWithRef, type HTMLAttributes, type SyntheticEvent, type TouchEvent } from 'react';
 import { dashboardCards, shownStatus, type DashboardCard } from '../dashboard-group.ts';
-import { go, openAgent } from '../nav.ts';
+import { focusInHerdr, go, openAgent, showAgent } from '../nav.ts';
 import { agentsScope, defaultHome, homeHash } from '../routes.ts';
 import { findPane, lastHome, store, subscribe } from '../store.ts';
 import { useWide } from '../theme.ts';
@@ -39,7 +39,7 @@ export function cardLocation(card: DashboardCard): string {
   return tab === cardTitle(card) ? card.workspaceLabel : `${card.workspaceLabel} › ${tab}`;
 }
 
-/** The start of a card's (or a sidebar row's) dim last line: the location, then the branch; short of room,
+/** The start of a card's (or an agent row's) dim last line: the location, then the branch; short of room,
  *  the location is cut short faster (the branch says more). */
 export function CardWhere({ card }: { card: DashboardCard }) {
   return (
@@ -71,7 +71,7 @@ export function relativeTime(ms: number): string {
 }
 
 /**
- * The State a list of agents draws (this list, the PC sidebar) and the touch handlers for its scroll
+ * The State a list of agents draws (this list, the PC rail, a Home panel, the agents popover) and the touch handlers for its scroll
  * container. While a finger is down the list doesn't change at all (a rewrite mid-drag can cancel the
  * scroll); the latest State shows on the macrotask after the last finger lifts, so a still tap's
  * click lands first, on the card it pressed.
@@ -118,9 +118,10 @@ const SCROLLER = 'flex-1 overflow-y-auto [overflow-anchor:none] pb-[calc(var(--s
 // one column of cards, side by side from lg
 const LIST = 'agent-list mt-4 flex flex-col gap-2.5 px-4 min-[600px]:px-6 lg:grid lg:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]';
 
-// One card: the name and the status; the purpose (two lines at most, all of it on hover); then one dim
-// line, cut short rather than wrapped: the location and the branch (the list is flat, so each card names
-// its own), the kind, the `worktree` chip (from that workspace), the time.
+// One card: the name and the status (on a PC its ⋮ after them, AgentMore); the purpose (two lines at most, all of it on
+// hover); then one dim line, cut short rather than wrapped: the location and the branch (the list is flat, so each card
+// names its own), the kind, the `worktree` chip (from that workspace), the time. A click opens it (openAgent: on a PC in
+// herdr).
 function AgentCard({ card }: { card: DashboardCard }) {
   const { pane, purpose, isWorktree } = card;
   const { paneId, agent, title } = pane;
@@ -130,6 +131,7 @@ function AgentCard({ card }: { card: DashboardCard }) {
   const agentKind = name || displayName || 'agent';
   const status = shownStatus(pane, store.seenDone) || 'unknown';
   const relTime = relativeTime(sinceUnixMs);
+  const wide = useWide();
   return (
     <Card className={CARD} data-pane-id={paneId} role="button" tabIndex={0} withBorder radius={10} padding={0} px={16} py={14}
       onClick={() => openAgent(paneId)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openAgent(paneId); }}>
@@ -137,6 +139,7 @@ function AgentCard({ card }: { card: DashboardCard }) {
         <Text className="agent-name min-w-0" fw={600} truncate>{cardTitle(card)}</Text>
         <span className="ml-auto" />
         <StatusBadge status={status} />
+        {wide && <span className="-my-1.5 -mr-2"><AgentMore paneId={paneId} name={cardTitle(card)} /></span>}
       </Group>
       {purpose ? <Text className="card-purpose" fz={14} lh={1.35} mb={6} lineClamp={2} title={purpose}>{purpose}</Text> : null}
       <Group gap={12} fz={13} c="dimmed" wrap="nowrap">
@@ -150,20 +153,43 @@ function AgentCard({ card }: { card: DashboardCard }) {
   );
 }
 
-/** An agent in a Home's agents popover (ui/Pane.tsx's AgentsButton), as the PC sidebar's rows have it: the name, then
- *  at the line's right end how long ago its status changed and the status; under it its purpose (two lines at most,
- *  all of it on hover) and the location and branch. A click opens its drawer. */
+/** An agent in a Home's agents popover (ui/Pane.tsx's AgentsButton) and a PC's Home panel (ui/HomePanel.tsx): the name,
+ *  then at the line's right end how long ago its status changed and the status; under it its purpose (two lines at most,
+ *  all of it on hover) and the location and branch. A click opens it (nav.ts's openAgent: on a PC in herdr, with its ⋮
+ *  beside it, AgentMore, for Show here). */
 export function AgentRow({ card }: { card: DashboardCard }) {
   const { pane, purpose } = card;
   const rel = relativeTime(pane.agent!.sinceUnixMs);
-  return (
-    <NavLink component="button" className="agent-row rounded-lg" data-pane-id={pane.paneId} noWrap
+  const wide = useWide();
+  const row = (
+    <NavLink component="button" className={`agent-row rounded-lg ${wide ? 'min-w-0 flex-1' : ''}`} data-pane-id={pane.paneId} noWrap
       label={<span className="flex items-center gap-2"><span className="min-w-0 truncate">{cardTitle(card)}</span><span className="ml-auto" />
         {rel ? <span className="shrink-0 text-[12px] text-(--color-text-dim)">{rel}</span> : null}<StatusBadge status={shownStatus(pane, store.seenDone) || 'unknown'} small /></span>}
       // spans (a button holds no <p>), each a line of its own; the purpose wraps, under the row's noWrap
       description={<>{purpose ? <Text span className="card-purpose my-0.5 whitespace-normal text-(--color-text)" fz={13} lh={1.3} lineClamp={2} title={purpose}>{purpose}</Text> : null}
         <CardWhere card={card} /></>}
       onClick={() => openAgent(pane.paneId)} />
+  );
+  return wide ? <div className="agent-row-wrap flex items-start">{row}<AgentMore paneId={pane.paneId} name={cardTitle(card)} /></div> : row;
+}
+
+/** On a PC, an agent's ⋮ beside it: Open in herdr (what a click on it does there) and Show here, its drawer in this app
+ *  (the PC's terminal may be out of sight, or another machine's). The menu stays in the row's DOM (fixed: no scroll box
+ *  clips it), so a popover it sits in doesn't take a click in it for one outside (Todos.tsx's item menu does the same); a
+ *  click or a key in it is its own, not a card's under it. */
+function AgentMore({ paneId, name }: { paneId: string; name: string }) {
+  const own = (e: SyntheticEvent): void => e.stopPropagation();
+  return (
+    <Menu position="bottom-end" width={190} radius="md" withinPortal={false} floatingStrategy="fixed">
+      <Menu.Target>
+        <ActionIcon variant="subtle" color="gray" size="lg" mt={4} className="agent-more shrink-0 text-(--color-text-dim) hover:text-(--color-text)"
+          aria-label={`More for ${name}`} data-agent-menu={paneId} onClick={own} onKeyDown={own}>&#8942;</ActionIcon>
+      </Menu.Target>
+      <Menu.Dropdown data-agent-more={paneId} onClick={own} onKeyDown={own}>
+        <Menu.Item data-action="herdr" onClick={() => focusInHerdr(paneId)}>Open in herdr</Menu.Item>
+        <Menu.Item data-action="show" onClick={() => showAgent(paneId)}>Show here</Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
   );
 }
 
@@ -179,7 +205,7 @@ const useAppState = (): AppState | null => useSyncExternalStore(subscribe, () =>
 
 // Orchestrators have no cards, so this is the way to a Home (its chat, as a new entry: the list may
 // have been opened from anywhere). A Home's own list (#/agents/<name>): back to that Home, by its
-// name, at every width. The full list: ← Home, to the one used last (on a PC the sidebar's headings
+// name, at every width. The full list: ← Home, to the one used last (on a PC the rail's Home rows
 // do that instead, style.css).
 function HomeButton({ hash }: { hash: string }) {
   const state = useAppState();

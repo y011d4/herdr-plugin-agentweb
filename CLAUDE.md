@@ -69,7 +69,8 @@ All in `internal/bridge/` (one package):
   its terminal only when chosen for it, remembered per pane for the app's life (pane-view's `chosenView`);
   `#/settings` likewise opens Settings in `ui/SettingsSheet.tsx`, Mantine's Modal, centered at 1024px and
   up, the whole screen on a phone, a Home under it running on; one overlay at a time, `isOverlay`),
-  `nav.ts` (`openAgent`/`go`: overlay → overlay replaces the history entry, so Settings from a drawer
+  `nav.ts` (`openAgent`: a click on an agent, its drawer on a phone, on a PC `focusInHerdr`, herdr's `pane.focus` (the PC's
+  herdr switches to it; `showAgent`, a PC's ⋮ Show here, is the drawer); `go`: overlay → overlay replaces the history entry, so Settings from a drawer
   takes its place; `closeOverlay` (`closeAgent`): back to the entry under it when it was opened on it,
   `view.paneOverBase`, else a replace; ✕, the dimmed screen, Escape with no other layer over it and the
   phone's Back close it), the topbar (each screen fills its three slots), the connection dot and the
@@ -82,8 +83,8 @@ All in `internal/bridge/` (one package):
   (socket, ping, backoff, state polling, watches) and `notify.ts` (the toast store: short-lived
   results of the user's actions, and the OS notifications; a status push or an alert never
   toasts). The screens are in `web/src/ui/`: Settings, Token, the agents list `Dashboard.tsx`,
-  `Pane.tsx` and `PromptPanel.tsx`, and on a PC the sidebar `Sidebar.tsx` beside them; `Status.tsx` is an agent's
-  status as they show it (`StatusBadge`, `StatusDot`); `Toasts.tsx` draws into `#toast-container` (each toast
+  `Pane.tsx` and `PromptPanel.tsx`, and on a PC the rail of Homes `Sidebar.tsx` beside them and a Home's panel
+  `HomePanel.tsx`; `Status.tsx` is an agent's status as they show it (`StatusBadge`, `StatusDot`, a Home's `StatusCounts`); `Toasts.tsx` draws into `#toast-container` (each toast
   Mantine's Notification; only the toasts take taps, the box too while the stack overflows) and `Modals.tsx`
   (Confirm, Rename and the image preview, all on Mantine's Modal) is portalled into `#modal-root`;
   a pane's ⋮ is a Mantine Menu (`Pane.tsx`'s `AgentMenu`, in its drawer's header, its dropdown in `#modal-root`
@@ -180,15 +181,17 @@ All in `internal/bridge/` (one package):
   `homeMode` (Stop leaves the Home stopped; a Clear holds it ≤8s for the replacement) — on a phone with 2+ configured, its
   topbar (a stopped one's too) is the switcher between them (`HomeSwitcher`, in the title slot; stopped ones dimmed; each with
   its "needs you" count, `ui/Todos.tsx`'s `needsYou`: its account's blocked agents, its question, its to-do items due now; the
-  PC sidebar's Home headings have it too; it scrolls sideways, keeps the Home on show in view, clear of its fades, and fades
+  PC rail's Home rows have it too; it scrolls sideways, keeps the Home on show in view, clear of its fades, and fades
   an edge with more past it, `data-fade`), else the Home's name and status; then a
   status bar of one row (wrapping only where it must): "Needs you · n" (that count, orange; `To-do · n`, dim, while only items
   due later wait; none at all otherwise: `NeedsButton`), the counts of its account's agents (`homeSummary`; no orchestrators),
   and at the right a headless one's usage and model, `>_` and its ⋮ (`HomeMenu`: a headless one's Compact, Clear, Stop; ■ stays on the
-  "doing now" line; those four are `HomeTools`). On a PC (`WIDE_QUERY`, as the sidebar: `theme.ts`'s `useWide`) there is
-  no switcher and no such bar: the sidebar has what waits at each Home and the agents (under All agents a Home's heading
-  opens `#/agents/<name>`), and the topbar is the Home's header, its name and status, then `HomeTools`; under it only a
-  headless one's warnings (no bar without any). Needs you opens a Mantine Popover (Escape, a tap outside
+  "doing now" line; those four are `HomeTools`). On a PC (`WIDE_QUERY`, as the rail: `theme.ts`'s `useWide`) there is
+  no switcher (the rail lists the Homes) and the topbar is the Home's header, its name and status, then `HomeTools`; the bar
+  keeps Needs you and the counts until, from `PANEL_QUERY` (1280px, `usePanel`), the Home's panel at its right
+  (`ui/HomePanel.tsx`, drawn after the screen in `#screen`, a row then: its needs, the blocked agents as `AgentRow`s, the
+  to-do list, its other agents by urgency, Open the list) has them; then only a headless one's warnings (no bar without
+  any). Needs you opens a Mantine Popover (Escape, a tap outside
   and leaving the screen close it; as wide as a phone allows, no taller than the room below it): the blocked agents' chips, its
   question's line, and its to-do list (`ui/Todos.tsx` over the pure `todos.ts`: a tap on an item opens its menu, Mark done = `DELETE …/todos/:id`, an item due ahead under
   Later until its time, a link shown by its host, a worker's name opening its drawer; a stopped Home has them too), dialogue-only chat
@@ -197,8 +200,8 @@ All in `internal/bridge/` (one package):
   the fallback when there's no transcript). Orchestrators get no card in any agents list (`agentCards`
   in `ui/Dashboard.tsx` feeds both the list and `homeSummary`); the full list's ← Home opens `defaultHome()`.
   Home's counts (its status bar's: an outlined pill with a ▾, `Pane.tsx`'s `AgentsButton`) open a popover as Needs you's: those
-  agents, blocked first, then working, done, idle (`byUrgency`), as the sidebar's rows (`AgentRow`, with the time; a tap: its
-  drawer), and at its bottom Open the list, `#/agents/<name>`: only the panes in its state `agents` (its Claude
+  agents, blocked first, then working, done, idle (`byUrgency`), as the Home panel's rows (`AgentRow`, with the time; a tap
+  opens it, `openAgent`; on a PC its ⋮, `AgentMore`: Open in herdr, Show here), and at its bottom Open the list, `#/agents/<name>`: only the panes in its state `agents` (its Claude
   account's, via `paneAccount`, cached per agent pane and re-checked every 60s by `paneAccountCache`;
   `null` = unknown → every agent),
   with `← <its Home>` (`Back to …`; at every width) to that Home; a pane opened from there opens over that list. Any route to
@@ -450,7 +453,7 @@ Verified live against herdr 0.7.3 / protocol 16:
   herdr's authoritative identity — so a wandering pane can't repoint or clear the repo; an
   untagged checkout has no herdr identity, so it derives its full worktree info from the
   pane cwd (and clears when that stops resolving). `repo_key` uses git's
-  shared `--git-common-dir`, matching herdr's own repoKey. In the UI each card (and sidebar
+  shared `--git-common-dir`, matching herdr's own repoKey. In the UI each card (and agent
   row) shows the agent's herdr name (`herdrName`, else its tab name), under it its purpose
   (state `purposes`, when given: two lines at most, all of it on hover), then one dim line,
   its location and git branch; the drawer title is the name and location, the purpose a small
@@ -551,17 +554,17 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   as it is. It keeps the scroll containers full width and makes the readable column with their padding
   (`--wide-gutter`; the bars and the composer around the chat take it as a `lg:px-(--wide-gutter)` class).
   At that width (`WIDE_QUERY`, `theme.ts`; theme.test checks it against style.css and `lg`) the shell
-  also draws the sidebar (`ui/Sidebar.tsx`) on every screen but the token one: on top, each orchestrator's
-  Home a heading over what waits there (`ui/Todos.tsx`'s `NeedsList`, the Needs you popover's), then Other's
-  blocked agents; under them the agents folded into one row (All agents, the count), a click unfolding them under Open the list (`#/agents`),
-  by Home (`homeGroups`; a Home's heading opens its list, `#/agents/<name>`), then Other. Its top, the topbar's height, has
+  also draws the rail of Homes (`#sidebar`, `ui/Sidebar.tsx`, 248px) on every screen but the token one: a row per
+  orchestrator's Home (its dot, its name, its needs count, under them its agents' counts, `StatusCounts`; a click opens
+  the Home), then Other's blocked agents (`homeGroups`), and at its bottom, pinned, All agents (`#/agents`). Its top, the topbar's height, has
   the app's name, the connection dot (`#conn-dot`: App.tsx draws it there, else in the topbar) and ⚙ (`SettingsButton`:
   the topbar's on a phone, the sidebar's on a PC, one `#btn-settings`), so the topbar beside it is the screen's own. It comes first in `#app`, in a
   slot of its own, so `#topbar`/`#reconnect-banner`/`#screen` stay the same elements as it comes and
   goes; while it is there `#app` is a two-column grid (`#app:has(> #sidebar)`) and `--sidebar-w` is its
-  width, for an overlay that should leave it usable. Like the list it holds still while a finger is
-  down (`useHeldState`), and it opens an agent the list's way (`nav.ts`'s `openAgent`: its drawer, over
-  the screen on show; the dimmed part starts at `--sidebar-w`, so the sidebar stays usable under it).
+  width, for an overlay that should leave it usable (an agent's drawer, from Show here or a notification: the dimmed part
+  starts at `--sidebar-w`, so the rail stays usable under it). Like the list it holds still while a finger is down
+  (`useHeldState`). A click on an agent at this width (a list card, a panel's row, a blocked chip, a worker's name) opens
+  it in herdr (`openAgent` → `focusInHerdr`), and its ⋮ (`AgentMore`, on a card and a row) has Show here, the drawer.
 
 ## Security invariants
 

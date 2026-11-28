@@ -1,196 +1,125 @@
 // @vitest-environment happy-dom
-// ui/Sidebar.tsx, the PC sidebar: on top a heading per Home over what waits there, then Other's blocked agents;
-// under them the agents folded into one row, unfolding into a group per Home over its account's agents, then
-// Other; its links, the one on show marked; holding still while a finger is down. The recorded State: personal
-// (p4, running; its account p1 p3 p4) and work (stopped, its account unknown); agents p1 p7 p6 p3 in the list's
-// order, p6 blocked (its account no Home's).
+// ui/Sidebar.tsx, the PC's rail of Homes: at its top the app's name, the dot it is given and ⚙; a row per Home in config
+// order (its dot, its name, what waits there as a count, under them its agents' counts), the one on show marked; Other's
+// blocked agents; All agents at the bottom, a link to the list; holding still while a finger is down. The recorded
+// State: personal (p4, running; its account p1 p3 p4) and work (stopped, its account unknown: every agent); agents p1
+// (working) p7 (unknown) p6 (blocked, its account no Home's) p3 (done).
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { act } from 'react';
-import { draftKey, getQuote, setQuote } from '../src/drafts.ts';
 import { setAppState, store } from '../src/store.ts';
-import { todoQuote } from '../src/transcript.ts';
+import { WIDE_QUERY } from '../src/theme.ts';
 import type { AppState, TodoItem } from '../src/types.ts';
 import { Sidebar } from '../src/ui/Sidebar.tsx';
 import { state as recorded } from './contract.gen.ts';
-import { fire, render } from './render.ts';
+import { fakeMedia, fire, render } from './render.ts';
 
 const fresh = (): AppState => structuredClone(recorded);
 const settle = (): Promise<void> => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 const item = (id: string, text: string): TodoItem => ({ id, text, agent: null, url: null, due: null, createdAt: Date.now() - 60_000 });
-/** the recorded State with a to-do item at each Home */
-const withTodos = (): AppState => {
-  const s = fresh();
-  s.orchestrators[0].todos = [item('t1', 'Merge the PR')];
-  s.orchestrators[1].todos = [item('t2', 'Log in')];
-  return s;
-};
 
 let unmount: (() => Promise<void>) | null = null;
 async function show(hash: string, state: AppState | null): Promise<HTMLElement> {
   location.hash = hash;
   await settle();
   setAppState(state);
-  const r = await render(<Sidebar />);
+  const r = await render(<Sidebar dot={<div id="conn-dot" />} />);
   unmount = r.unmount;
   return r.container;
 }
-const unfold = (c: HTMLElement): Promise<void> => fire(() => c.querySelector<HTMLElement>('.sidebar-all')!.click());
-const homes = (c: HTMLElement): Array<[string, string[], string[]]> => [...c.querySelectorAll<HTMLElement>('section.sidebar-home')]
-  .map((s) => [s.dataset.home!, [...s.querySelectorAll<HTMLElement>('.home-chip')].map((e) => e.dataset.paneId!),
-    [...s.querySelectorAll<HTMLElement>('.home-todo')].map((e) => e.dataset.todo!)]);
-const groups = (c: HTMLElement): Array<[string, string, string[]]> => [...c.querySelectorAll<HTMLElement>('section.sidebar-group')]
-  .map((s) => [s.dataset.home!, s.querySelector('.sidebar-heading')!.textContent!, [...s.querySelectorAll<HTMLElement>('[data-sidebar-pane]')].map((e) => e.dataset.sidebarPane!)]);
+/** each Home's row: its name, its dot's status, its count, its agents' counts (working, done, idle; '' for none) */
+const rows = (c: HTMLElement): Array<[string, string, string, string]> => [...c.querySelectorAll<HTMLAnchorElement>('a.sidebar-home')]
+  .map((a) => [a.dataset.home!, a.querySelector<HTMLElement>('.status-dot')!.dataset.status!, a.querySelector('.home-needs')?.textContent ?? '',
+    [...a.querySelectorAll<HTMLElement>('.status-counts [data-count]')].map((e) => (e.classList.contains('invisible') ? '-' : e.textContent!.trim().split(' ')[0])).join(' ')]);
 const marked = (c: HTMLElement): string[] => [...c.querySelectorAll<HTMLElement>('[aria-current="page"]')]
-  .map((e) => e.dataset.home ?? e.dataset.sidebarPane ?? e.getAttribute('href')!);
+  .map((e) => e.dataset.home ?? e.getAttribute('href')!);
 
-beforeEach(() => { store.seenDone = {}; });
+beforeEach(() => {
+  store.seenDone = {};
+  fakeMedia(WIDE_QUERY, true); // a PC: ⚙ is the rail's
+});
 afterEach(async () => {
   await unmount?.();
   unmount = null;
   setAppState(null);
-  setQuote(draftKey('', 'personal'), '');
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
 describe('Sidebar', () => {
-  it('shows on top a heading per Home, in config order, over what waits there, then the blocked agents no Home has', async () => {
-    const c = await show('#/agents', withTodos());
-    // work's account is unknown: it counts every blocked agent, as its Home does
-    assert.deepEqual(homes(c), [['personal', [], ['t1']], ['work', ['p6'], ['t2']], ['', ['p6'], []]]);
-    const personal = c.querySelector<HTMLAnchorElement>('a[data-home="personal"]')!;
-    assert.equal(personal.textContent, 'Personal1'); // its count: t1
-    assert.equal(personal.querySelector<HTMLElement>('.status-dot')!.dataset.status, 'idle'); // p4's status
-    const work = c.querySelector<HTMLAnchorElement>('a[data-home="work"]')!;
-    assert.equal(work.textContent, 'work2'); // no label: its name; p6 and t2
-    assert.match(work.style.color, /dimmed/); // not running
-    assert.equal(work.querySelector<HTMLElement>('.status-dot')!.dataset.status, 'stopped');
-    assert.equal(c.querySelector('section.sidebar-home[data-home=""] .sidebar-heading')!.textContent, 'Other');
+  it("has at its top the app's name, the dot it is given and ⚙", async () => {
+    const c = await show('#/agents', fresh());
+    const top = c.querySelector('#sidebar')!.firstElementChild!;
+    assert.ok(top.textContent!.startsWith('Yoicks') && top.querySelector('#conn-dot') && top.querySelector('#btn-settings'));
+    await fire(() => top.querySelector<HTMLElement>('#btn-settings')!.click());
+    assert.equal(location.hash, '#/settings');
   });
 
-  it('is a Home\'s heading alone while nothing waits there; no Other without a blocked agent there', async () => {
+  it('has a row per Home in config order: its dot, its name, what waits there, and under them its agents as counts', async () => {
     const s = fresh();
-    s.workspaces[1].tabs[0].panes[1].agent!.status = 'idle'; // p6
+    s.orchestrators[0].todos = [item('t1', 'Merge the PR')];
     const c = await show('#/agents', s);
-    assert.deepEqual(homes(c), [['personal', [], []], ['work', [], []]]);
-    for (const sec of c.querySelectorAll('section.sidebar-home')) assert.equal(sec.childElementCount, 1, 'its heading only');
+    // personal: p1 working, p3 done, t1 due; work's account is unknown: every agent, p6 blocked (its count), p7 unknown (idle)
+    assert.deepEqual(rows(c), [['personal', 'idle', '1', '1 1 -'], ['work', 'stopped', '1', '1 1 1']]);
+    const personal = c.querySelector<HTMLAnchorElement>('a[data-home="personal"]')!;
+    assert.equal(personal.getAttribute('href'), '#/home/personal');
+    assert.equal(personal.querySelector('.mantine-NavLink-label')!.textContent, 'Personal');
+    const work = c.querySelector<HTMLAnchorElement>('a[data-home="work"]')!;
+    assert.equal(work.querySelector('.mantine-NavLink-label')!.textContent, 'work', 'no label: its name');
+    assert.match(work.style.color, /dimmed/, 'not running');
+    assert.ok(!c.querySelector('.home-todo, .agent-row'), 'neither what waits there nor the agents: those are its Home\'s');
   });
 
-  it('folds the agents into one row with their count; a click unfolds them by Home, then Other, and folds them again', async () => {
-    const c = await show('#/agents', fresh());
-    const all = c.querySelector<HTMLButtonElement>('button.sidebar-all')!;
-    assert.match(all.textContent!, /^All agents\s*4 ›$/);
-    assert.equal(all.getAttribute('aria-expanded'), 'false');
-    assert.ok(!c.querySelector('section.sidebar-group, [data-sidebar-pane]'), 'no agents while folded');
-    await unfold(c);
-    assert.equal(all.getAttribute('aria-expanded'), 'true');
-    assert.match(all.textContent!, /^All agents\s*4 ▾$/);
-    assert.deepEqual(groups(c), [['personal', 'Personal ›', ['p1', 'p3']], ['work', 'work ›', []], ['', 'Other', ['p7', 'p6']]]);
-    assert.equal([...c.querySelectorAll('section.sidebar-group > a.sidebar-home-list')].map((a) => a.getAttribute('href')).join(' '),
-      '#/agents/personal #/agents/work', "a Home's heading opens its list; Other's is none");
-    assert.equal(c.querySelectorAll('a[data-home="personal"]').length, 1, "a Home's link is its heading on top only");
-    assert.ok(!c.querySelector('[data-sidebar-pane="p4"]'), 'an orchestrator is a heading, never an agent');
-    await unfold(c);
-    assert.ok(!c.querySelector('section.sidebar-group'), 'folded again');
+  it('has no counts under a Home without agents, and no count on it while nothing waits there', async () => {
+    const s = fresh();
+    s.orchestrators[1].agents = []; // work: none
+    const c = await show('#/agents', s);
+    assert.deepEqual(rows(c), [['personal', 'idle', '', '1 1 -'], ['work', 'stopped', '', '']]);
+    assert.equal(c.querySelector('a[data-home="work"] .mantine-NavLink-description')!.childElementCount, 0, 'one line');
   });
 
-  it('pins All agents after what waits at the Homes, unfolds the agents below it and scrolls them into view; its to-do items are dense', async () => {
-    const scrolled: Array<[Element, unknown]> = [];
-    vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element, arg) { scrolled.push([this, arg]); });
-    const c = await show('#/agents', withTodos());
-    const kids = [...c.querySelector('#sidebar')!.children];
-    const row = c.querySelector('.sidebar-all')!.parentElement!;
-    assert.equal(kids.at(-1), row, 'its own row, last while folded');
-    assert.ok(kids.at(-2)!.matches('section.sidebar-home'));
-    assert.ok(c.querySelector('[data-todo="t1"] [data-line-clamp]'), 'dense');
-    await unfold(c);
-    const list = c.querySelector('[data-sidebar-agents]')!;
-    assert.ok(row.nextElementSibling === list && list.querySelector('a.sidebar-list') && list.querySelector('section.sidebar-group'));
-    assert.deepEqual(scrolled, [[list, { block: 'nearest' }]]);
-    await unfold(c);
-    assert.equal(scrolled.length, 1, 'not as it folds');
-    vi.restoreAllMocks();
-  });
-
-  it('shows an agent as its card does: the name and its status (a seen done as idle), its purpose, the location and branch', async () => {
-    store.seenDone = { p3: 4 };
-    const c = await show('#/agents', fresh());
-    await unfold(c);
-    const p1 = c.querySelector<HTMLElement>('[data-sidebar-pane="p1"]')!;
-    assert.equal(p1.textContent, 'one #1' + 'working' + 'repo' + 'main'); // the name and its status, the location, the branch
-    assert.deepEqual(['.card-location', '.card-branch'].map((s) => p1.querySelector(s)!.textContent), ['repo', 'main']);
-    assert.ok(!p1.querySelector('.card-purpose'), 'none given');
-    const p3 = c.querySelector<HTMLElement>('[data-sidebar-pane="p3"]')!;
-    assert.equal(p3.textContent, 'w-review' + 'idle' + 'レビューの指摘を直す' + 'repo-wt-feat › feat #1'); // herdr's name, its purpose
-    assert.ok(p3.querySelector('.mantine-NavLink-label .status-badge') && !p3.querySelector('.mantine-NavLink-section'), 'the status on the name line: nothing beside the purpose');
-    assert.equal(p3.querySelector<HTMLElement>('.card-purpose')!.title, 'レビューの指摘を直す', 'all of it on hover');
-    assert.equal(p1.querySelector<HTMLElement>('.status-badge')!.dataset.status, 'working');
-    assert.equal(c.querySelector('[data-sidebar-pane="p3"] .status-badge')!.textContent, 'idle');
-    assert.equal(c.querySelector('[data-sidebar-pane="p6"] .status-badge')!.textContent, 'blocked');
-  });
-
-  it("links a Home's heading to its Home and, unfolded, Open the list to the list; marks the one on show", async () => {
+  it('marks the Home on show; All agents, at the bottom, links the list and is marked on it', async () => {
     const c = await show('#/home/personal', fresh());
-    assert.equal(c.querySelector('a[data-home="personal"]')!.getAttribute('href'), '#/home/personal');
-    assert.equal(c.querySelector('a[data-home="work"]')!.getAttribute('href'), '#/home/work');
-    assert.ok(!c.querySelector('a.sidebar-list'), 'folded: no link to the list');
     assert.deepEqual(marked(c), ['personal']);
-    await unfold(c);
-    assert.equal(c.querySelector('a.sidebar-list')!.getAttribute('href'), '#/agents');
+    const all = c.querySelector<HTMLAnchorElement>('a.sidebar-all')!;
+    assert.equal(all.getAttribute('href'), '#/agents');
+    assert.match(all.textContent!, /^All agents\s*4 ›$/);
+    assert.ok(c.querySelector('#sidebar')!.lastElementChild!.contains(all), 'last');
     location.hash = '#/agents';
     await settle();
     assert.deepEqual(marked(c), ['#/agents']);
+    location.hash = '#/home/work';
+    await settle();
+    assert.deepEqual(marked(c), ['work']);
   });
 
-  it("opens a blocked agent's pane from its chip, and an agent's from its row, marked while it is shown", async () => {
+  it("lists under Other the blocked agents no Home's account lists, as chips; none without them", async () => {
     const c = await show('#/home/personal', fresh());
-    await fire(() => c.querySelector<HTMLElement>('section.sidebar-home[data-home=""] .home-chip[data-pane-id="p6"]')!.click());
-    await settle();
-    assert.equal(location.hash, '#/pane/p6');
-    location.hash = '#/home/personal';
-    await settle();
-    await unfold(c);
-    await fire(() => c.querySelector<HTMLElement>('[data-sidebar-pane="p6"]')!.click());
-    await settle();
-    assert.equal(location.hash, '#/pane/p6');
-    assert.deepEqual(marked(c), ['p6']);
-    location.hash = '#/pane/%E0%A4%A'; // malformed: nothing marked, nothing thrown
-    await settle();
-    assert.deepEqual(marked(c), []);
-  });
-
-  it("Ask quotes an item in its running Home's composer and opens that Home; a stopped Home's items have none", async () => {
-    const s = withTodos();
-    const c = await show('#/agents', s);
-    const menu = async (home: string): Promise<HTMLElement> => {
-      await fire(() => c.querySelector<HTMLElement>(`section.sidebar-home[data-home="${home}"] .home-todo`)!.click());
-      return c.querySelector<HTMLElement>(`section.sidebar-home[data-home="${home}"] [role="menu"]`)!;
-    };
-    const work = await menu('work');
-    assert.ok(work.querySelector('[data-action="todo-done"]') && !work.querySelector('[data-action="todo-ask"]'), 'work is stopped');
-    const personal = await menu('personal');
-    await fire(() => personal.querySelector<HTMLElement>('[data-action="todo-ask"]')!.click());
-    await settle();
-    assert.equal(getQuote(draftKey('', 'personal')), todoQuote(s.orchestrators[0].todos![0]));
-    assert.equal(location.hash, '#/home/personal');
+    const other = c.querySelector<HTMLElement>('section.sidebar-other')!;
+    assert.equal(other.querySelector('.sidebar-heading')!.textContent, 'Other');
+    assert.deepEqual([...other.querySelectorAll<HTMLElement>('.home-chip')].map((e) => e.dataset.paneId), ['p6']);
+    await unmount!();
+    const s = fresh();
+    s.workspaces[1].tabs[0].panes[1].agent!.status = 'idle'; // p6
+    const c2 = await show('#/home/personal', s);
+    assert.ok(!c2.querySelector('section.sidebar-other'));
   });
 
   it('holds still while a finger is down; the latest State shows after the last one lifts, in the same #sidebar', async () => {
     const c = await show('#/agents', fresh());
-    await unfold(c);
     const aside = c.querySelector('#sidebar')!;
     const touch = (type: string, fingers = 0) =>
       fire(() => aside.dispatchEvent(new TouchEvent(type, { bubbles: true, touches: Array.from({ length: fingers }, () => ({ clientX: 0 }) as Touch) })));
-    const title = (): string => c.querySelector('[data-sidebar-pane="p1"]')!.textContent!;
-    const renamed = (label: string): AppState => { const s = fresh(); s.workspaces[0].tabs[0].label = label; return s; };
+    const label = (): string => c.querySelector('a[data-home="personal"] .mantine-NavLink-label')!.textContent!;
+    const renamed = (l: string): AppState => { const s = fresh(); s.orchestrators[0].label = l; return s; };
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     await touch('touchstart', 1);
-    await fire(() => setAppState(renamed('pushed')));
-    assert.match(title(), /^one #1/);
+    await fire(() => setAppState(renamed('Pushed')));
+    assert.equal(label(), 'Personal');
     await touch('touchend');
-    assert.match(title(), /^one #1/); // not at once: a still tap's click lands first
+    assert.equal(label(), 'Personal'); // not at once: a still tap's click lands first
     await act(async () => { vi.runAllTimers(); });
-    assert.match(title(), /^pushed #1/);
+    assert.equal(label(), 'Pushed');
     assert.ok(c.querySelector('#sidebar') === aside, '#sidebar is the same element');
   });
 });

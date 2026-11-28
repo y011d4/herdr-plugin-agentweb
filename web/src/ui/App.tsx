@@ -1,5 +1,5 @@
 /**
- * ui/App.tsx — the app shell, drawn into #app: on a wide screen the PC sidebar (ui/Sidebar.tsx),
+ * ui/App.tsx — the app shell, drawn into #app: on a wide screen the PC sidebar, the rail of Homes (ui/Sidebar.tsx),
  * the topbar (the screen on show fills its three slots), the connection dot and the reconnect
  * banner, #screen, the toasts, the agent drawer and the modals (portalled into #modal-root). Hash routing:
  *   #/agents        — the list (ui/Dashboard.tsx); #/agents/:name one orchestrator's account's agents
@@ -20,7 +20,7 @@ import { Fragment, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { apiDelete, apiGet, apiPost, getToken, headlessName, loadToken, onUnauthorized, orchestratorPost, setToken } from '../api.ts';
 import { dismissNotificationsForPane, notifyAgentStatus, notifyOrchestratorAlert, showToast } from '../notify.ts';
-import { closeAgent, closingDrawer, go, openAgent } from '../nav.ts';
+import { closeAgent, closingDrawer, focusInHerdr, go, showAgent } from '../nav.ts';
 import { openingMode } from '../pane-view.ts';
 import { homeOf, isAgentsRoute, nextOverlayBase, nextOverlayOverBase, resolveRoute } from '../routes.ts';
 import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, store, subscribe, type View } from '../store.ts';
@@ -455,11 +455,7 @@ function agentActions(paneId: string): AgentActions {
     clear: () => { void clearAgentFlow(paneId); },
     stop: () => { void stopAgentFlow(paneId); },
     // herdr's pane.focus: the PC's herdr switches to its workspace, tab and pane
-    openInHerdr: () => {
-      apiPost(`/api/panes/${encodeURIComponent(paneId)}/focus`).then(
-        () => showToast('Opened in herdr', 'Its pane has the focus in herdr'),
-        (err: Error) => showToast('Could not open in herdr', err.message));
-    },
+    openInHerdr: () => focusInHerdr(paneId),
   };
 }
 
@@ -485,7 +481,7 @@ async function clearAgentFlow(paneId: string): Promise<void> {
     // timer bounds the Clear's flag too: it ends within 8s even if no gap is ever seen.
     if (view.homeMode) { if (homeClearing) holdHomeForReplacement(); return; }
     if (!drawerShows(paneId)) return; // another pane (or none) opened meanwhile: it stays
-    if (res.paneId) openAgent(res.paneId);
+    if (res.paneId) showAgent(res.paneId); // the replacement, in the drawer the Clear came from
     else closeAgent();
   } catch (err) {
     stopHoldingHome();

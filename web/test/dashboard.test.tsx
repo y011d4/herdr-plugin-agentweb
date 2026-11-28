@@ -38,7 +38,8 @@ afterEach(async () => {
 });
 
 describe('Dashboard cards', () => {
-  it('opens a card on a click, Enter or Space', async () => {
+  it("opens a card on a click, Enter or Space (a phone's: its drawer)", async () => {
+    fakeMedia(WIDE_QUERY, false);
     const c = await show('#/agents', fresh());
     const card = c.querySelector<HTMLElement>('.agent-card[data-pane-id="p7"]')!;
     for (const go of [() => card.click(), () => card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })),
@@ -50,6 +51,7 @@ describe('Dashboard cards', () => {
     location.hash = '#/agents';
     await fire(() => card.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true })));
     assert.equal(location.hash, '#/agents');
+    vi.unstubAllGlobals();
   });
 
   it("names a card by herdr's name for its agent, else by its tab; under it its purpose; last, the location its name doesn't say and the branch", async () => {

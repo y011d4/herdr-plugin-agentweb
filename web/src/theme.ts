@@ -51,3 +51,8 @@ export const WIDE_QUERY = '(min-width: 1024px)';
 
 /** Whether the screen is that wide now (read at once: no first render without it). */
 export const useWide = (): boolean => useMediaQuery(WIDE_QUERY, false, { getInitialValueInEffect: false });
+
+/** From this width (the xl breakpoint, 80em) a Home has its panel at its right (ui/HomePanel.tsx): the rail, the chat's
+ *  column and the panel fit side by side. Between WIDE_QUERY and this the Home's status bar has a phone's popovers. */
+export const PANEL_QUERY = '(min-width: 1280px)';
+export const usePanel = (): boolean => useMediaQuery(PANEL_QUERY, false, { getInitialValueInEffect: false });
