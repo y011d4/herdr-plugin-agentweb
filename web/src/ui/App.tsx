@@ -443,9 +443,9 @@ function signIn(token: string): void {
 
 // ── Agent lifecycle UI (rename / clear / stop) ────────────────────────────────
 
-// A pane's ⋮ (ui/Pane.tsx's AgentMenu): Rename… (the header follows the store), Clear, Stop. A Home
-// has no ⋮: its Clear and Stop are buttons on its status bar (ui/Pane.tsx), through the same confirm
-// flows. A headless orchestrator's (hl:<name>) go to /api/orchestrators/:name/*: it has no herdr pane.
+// A pane's ⋮ (ui/Pane.tsx's AgentMenu): Rename… (the header follows the store), Clear, Stop. A Home's
+// ⋮ is on its status bar (ui/Pane.tsx's HomeMenu: a headless one's Compact, Clear, Stop), through the same
+// confirm flows. A headless orchestrator's (hl:<name>) go to /api/orchestrators/:name/*: it has no herdr pane.
 function agentActions(paneId: string): AgentActions {
   return {
     rename: () => { const agent = findPane(paneId)?.pane.agent; openRename(paneId, agent?.displayName || agent?.name || ''); },

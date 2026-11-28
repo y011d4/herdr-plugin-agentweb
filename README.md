@@ -21,8 +21,8 @@ mobile-first PWA:
   each card shows its git branch, and a linked worktree's agents appear inside their
   main checkout, chipped as a worktree
 - Rename, clear, and stop agents from the phone: each pane's **⋮** menu renames, clears
-  (fresh session), or stops it (an orchestrator's Home has **Clear** and **Stop** buttons
-  instead). Agents are started by the orchestrators, not by hand. **⚙** at the top right
+  (fresh session), or stops it (an orchestrator's Home has **Clear** and **Stop**, and a headless
+  one's **Compact**, in the **⋮** on its status bar). Agents are started by the orchestrators, not by hand. **⚙** at the top right
   opens the settings
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
   scrollback by swiping down, multiline input, and quick keys
@@ -416,9 +416,9 @@ billing). Its Home is then the chat alone: messages go out also while it works, 
 "doing now" line interrupts it, its questions get an answer panel, and the status bar shows its
 usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable), the model it runs on (a pick from
 Claude Code's `/model` list switches it between turns, or for its next start) and what went wrong, each with what to do.
-**Compact** there (between turns; an optional focus says what the summary should keep) runs Claude Code's `/compact` in
+**Compact** in its status bar's **⋮** (with Clear and Stop; between turns; an optional focus says what the summary should keep) runs Claude Code's `/compact` in
 place: the session goes on from the summary, and the "doing now" line says `compacting…`, then `compacted: ctx 64% → 12%`.
-From 70% of the context in use, the ctx and Compact turn orange: a suggestion only (Claude Code compacts by itself near the
+From 70% of the context in use, the ctx turns orange and a small orange dot marks the ⋮: a suggestion only (Claude Code compacts by itself near the
 limit). The chat marks where a compaction cut the conversation (`[yoicks] compacted`). It
 also keeps a to-do list for you (its `todo` tool), under "Needs you" on its Home: what only you can do, such
 as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; ✓ ticks one off and tells the Home, which takes up what follows

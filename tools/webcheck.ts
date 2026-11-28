@@ -1941,7 +1941,9 @@ async function ht2(c: Ctx) {
   step('midTurn', !busy.timeout && still && !!t0 && !bubble.timeout && !cut.timeout, `${ms(busy)}/working=${still}/${ms(bubble)}/${ms(cut)}`);
   await status(['done', 'idle'], 60_000);
 
-  await pg.tapEl(`document.getElementById('btn-home-clear')`);
+  await pg.tapEl(`document.getElementById('btn-home-menu')`); // its ⋮, then Clear
+  await pg.until(`!!document.getElementById('hm-clear')`, 3000); // Mantine's menu opens through a transition
+  await pg.tapEl(`document.getElementById('hm-clear')`);
   await pg.until(`!!document.querySelector('#modal-root #cf-ok')`, 3000); // Mantine's modal mounts through a transition
   await pg.tapEl(`document.querySelector('#modal-root #cf-ok')`);
   const cleared = await pg.until(`${CHAT} === 'No messages yet.'`, 15_000, 300);
@@ -2093,7 +2095,7 @@ async function p10t2(c: Ctx) {
 
 /** Clears an orchestrator from its Home. stayed: #/home/<name> held from the clear request through 8s and
  *  through the wait for the replacement (ready, in the pinned account), however long that took. */
-/** Clears an orchestrator through the API, or (viaHome) with its Home's Clear button and the confirm. */
+/** Clears an orchestrator through the API, or (viaHome) with its Home's ⋮, Clear and the confirm. */
 async function clearOrch(c: Ctx, name: string, viaHome = false): Promise<{ fresh: string; stayed: boolean }> {
   const old = c.rec.names[name.slice(3)];
   guard(c.rec, old);
@@ -2107,10 +2109,12 @@ async function clearOrch(c: Ctx, name: string, viaHome = false): Promise<{ fresh
   try {
     let fresh: string;
     if (viaHome) {
-      const btn = `document.getElementById('btn-home-clear')`;
+      const btn = `document.getElementById('btn-home-menu')`;
       const at = await c.pg.at(btn);
       await c.pg.uncovered(btn, at); // toasts (P15-T2's "Renamed") sit right below the topbar, over the status bar
       await c.pg.tap(at.x, at.y);
+      if ((await c.pg.until(`!!document.getElementById('hm-clear')`, 3000)).timeout) throw new Error(`${name}: no menu after the Home's ⋮`);
+      await c.pg.tapEl(`document.getElementById('hm-clear')`);
       if ((await c.pg.until(`!!document.getElementById('cf-ok')`, 3000)).timeout) throw new Error(`${name}: no confirm after the Home's Clear`);
       await c.pg.tapEl(`document.getElementById('cf-ok')`);
       // the page's POST (through guardRequest) answers with the replacement, which the State then names
@@ -2155,8 +2159,8 @@ async function p15t2(c: Ctx) {
   const ok = pg.resps.find((x) => x.t >= tr && x.url.endsWith(`/api/panes/${enc(cl)}/rename`))?.status;
   const r = { timeout: toast.timeout || named.timeout || ok !== 200, ms: Date.now() - tr };
   await pg.goto('#/home/wc-o1');
-  // a Home has no ⋮: Settings in its topbar, Clear and Stop on its status bar
-  const bar = await pg.until(`!!document.getElementById('btn-home-clear') && !!document.getElementById('btn-home-stop')
+  // a Home has no pane ⋮ in its topbar: Settings there, Clear and Stop in its status bar's ⋮
+  const bar = await pg.until(`!!document.getElementById('btn-home-menu')
     && !!document.getElementById('btn-settings') && !document.getElementById('btn-agent-menu')`, 5000);
   const t0 = Date.now();
   const { fresh, stayed } = await clearOrch(c, 'wc-o1', true);
@@ -2164,7 +2168,7 @@ async function p15t2(c: Ctx) {
   const watched = pg.wsSent.some((f) => f.t >= t0 && f.payload.includes(js(fresh)));
   result(c, !r.timeout && !bar.timeout && stayed && now === fresh && watched, 'P15-T2',
     `renamePost=${ok},toast=${ms(toast)},herdrName=${ms(named)},homeButtons=${!bar.timeout},stayedHome8s=${stayed},replaced=${now === fresh},followed=${watched}`,
-    "UI rename: POST ok, a 'Renamed' toast and herdr's agent name wc-renamed within 3s; wc-o1's Home has Settings, Clear and Stop and no ⋮; its Clear button keeps #/home/wc-o1 and follows the new pane");
+    "UI rename: POST ok, a 'Renamed' toast and herdr's agent name wc-renamed within 3s; wc-o1's Home has Settings and its status bar's ⋮ (Clear, Stop), no pane ⋮; its Clear keeps #/home/wc-o1 and follows the new pane");
 }
 
 async function p8t2(c: Ctx) {
@@ -2233,10 +2237,12 @@ async function p8t2(c: Ctx) {
   await sleep(1000);
   const o2 = c.rec.names.o2;
   guard(c.rec, o2);
-  const stopBtn = `document.getElementById('btn-home-stop')`;
-  const sat = await pg.at(stopBtn);
-  await pg.uncovered(stopBtn, sat);
+  const menuBtn = `document.getElementById('btn-home-menu')`; // its ⋮, then Stop
+  const sat = await pg.at(menuBtn);
+  await pg.uncovered(menuBtn, sat);
   await pg.tap(sat.x, sat.y);
+  if ((await pg.until(`!!document.getElementById('hm-stop')`, 3000)).timeout) throw new Error('no menu after the Home\'s ⋮');
+  await pg.tapEl(`document.getElementById('hm-stop')`);
   if ((await pg.until(`!!document.getElementById('cf-ok')`, 3000)).timeout) throw new Error('no confirm after the Home\'s Stop');
   const ts = Date.now();
   await pg.tapEl(`document.getElementById('cf-ok')`);

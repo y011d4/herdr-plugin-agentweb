@@ -494,11 +494,17 @@ describe("a headless orchestrator's Home", () => {
     assert.deepEqual(posts('interrupt'), [{}]);
   });
 
-  it('compacts between turns, with a focus if given; a refusal stays in the dialog', async () => {
-    await home(withPilot(idle), { clear: () => {}, stop: () => {} });
-    const button = () => $<HTMLButtonElement>('#btn-home-compact');
-    assert.equal(button().disabled, false);
-    await fire(() => button().click());
+  it("compacts from its ⋮ between turns, with a focus if given; a refusal stays in the dialog", async () => {
+    let cleared = 0;
+    await home(withPilot(idle), { clear: () => { cleared++; }, stop: () => {} });
+    const menu = () => fire(() => $('#btn-home-menu').click());
+    const item = (id: string) => document.querySelector<HTMLButtonElement>(`#hm-${id}`)!;
+    await menu();
+    assert.deepEqual([...document.querySelectorAll('[id^=hm-]')].map((e) => e.textContent), ['Compact…', 'Clear (fresh session)…', 'Stop…']);
+    await fire(() => item('clear').click());
+    assert.equal(cleared, 1);
+    await menu();
+    await fire(() => item('compact').click());
     const focus = document.querySelector<HTMLInputElement>('#cp-focus')!;
     await fire(() => { focus.value = '  the open PRs  '; });
     await fire(() => document.querySelector<HTMLElement>('#cp-ok')!.click());
@@ -511,22 +517,29 @@ describe("a headless orchestrator's Home", () => {
     await unmount();
     for (const status of ['working', 'blocked'] as const) {
       await home(withPilot((p) => { idle(p); p.headless!.status = status; }), { clear: () => {}, stop: () => {} });
-      assert.equal(button().disabled, true, status);
+      await menu();
+      assert.ok(item('compact').disabled && item('compact').textContent === 'Compact…after this turn', status);
+      await fire(() => item('compact').click());
+      assert.ok(document.querySelector('#cp-focus') === null, `no dialog while ${status}`);
       await unmount();
     }
-    await home(withPilot(idle)); // no actions (a test's bare Home): no buttons
-    assert.ok(container.querySelector('#btn-home-compact') === null);
+    await home(withPilot(idle)); // no actions (a test's bare Home): no ⋮
+    assert.ok(container.querySelector('#btn-home-menu') === null);
   });
 
-  it('suggests a Compact once the context is 70% full, and never runs one', async () => {
+  it('suggests a Compact once the context is 70% full (a dot on ⋮, the context on its item), and never runs one', async () => {
+    const hint = () => container.querySelector<HTMLElement>('#home-status [data-hint]');
     await home(withPilot(idle), { clear: () => {}, stop: () => {} });
-    assert.equal($('#btn-home-compact').dataset.hint, undefined);
+    assert.ok(hint() === null);
     assert.equal($('#home-usage .high'), null);
+    assert.equal($('#btn-home-menu').getAttribute('aria-label'), 'Orchestrator actions');
     await unmount();
     await home(withPilot((p) => { idle(p); p.headless!.usage!.contextPct = 71.4; }), { clear: () => {}, stop: () => {} });
-    assert.equal($('#btn-home-compact').dataset.hint, '');
-    assert.equal($('#btn-home-compact').title, 'ctx 71%: compact it to free the context');
+    assert.ok(hint() !== null && hint()!.contains($('#btn-home-menu')));
+    assert.equal($('#btn-home-menu').getAttribute('aria-label'), 'Orchestrator actions (ctx 71%: Compact suggested)');
     assert.equal($('#home-usage .high').textContent, ' · ctx 71%');
+    await fire(() => $('#btn-home-menu').click());
+    assert.equal(document.querySelector('#hm-compact')!.textContent, 'Compact…ctx 71%');
     assert.deepEqual(posts('compact'), []);
   });
 
