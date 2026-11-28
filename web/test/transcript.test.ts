@@ -352,6 +352,7 @@ describe('quotes (a Reply on a message, Ask on a to-do item)', () => {
     assert.equal(quoteLine('me', 'is x ** 2 > 3 & <b>?\n```ts\nconst y = 1;\n```'), '> Replying to my message: is x ** 2 > 3 & <b>? const y = 1;', 'a lone mark, and code, stay');
     assert.equal(quoteLine('you', 'try `run(**x**)` or ```hello``` now'), '> Replying to your message: try run(**x**) or hello now', "code's own marks stay");
     assert.equal(quoteLine('you', '```\n```'), '> Replying to your message: ``` ```', 'nothing shown: its text');
+    assert.equal(quoteLine('notice', '[yoicks] sent to w-a: rm *foo* **bar**'), '> Replying to this notice: [yoicks] sent to w-a: rm *foo* **bar**', 'a notice: as it is shown');
     assert.deepEqual(parseQuote(quoteLine('notice', '[yoicks] w-a: working → done')),
       { of: 'notice', line: '> Replying to this notice: [yoicks] w-a: working → done', excerpt: '[yoicks] w-a: working → done', body: '' });
   });

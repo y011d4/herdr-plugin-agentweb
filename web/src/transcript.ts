@@ -398,9 +398,9 @@ const plain = (s: string): string => renderMarkdown(s)
   .replace(/<[^>]*>/g, ' ')
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
 
-/** The quote line of a message: its text on one line, as it reads, cut short. */
+/** The quote line of a message: its text on one line, as it reads (a notice's: as it is, the chat shows it so), cut short. */
 export function quoteLine(of: Exclude<QuoteOf, 'todo'>, text: string): string {
-  const cs = [...(oneLine(plain(text)) || oneLine(text))]; // nothing shown (an empty code block): its text
+  const cs = [...((of === 'notice' ? '' : oneLine(plain(text))) || oneLine(text))]; // nothing shown (an empty code block): its text
   return `> ${QUOTE_HEAD[of]}: ${cs.length > EXCERPT ? `${cs.slice(0, EXCERPT).join('').trimEnd()}…` : cs.join('')}`;
 }
 
