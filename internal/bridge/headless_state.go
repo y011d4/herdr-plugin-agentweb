@@ -160,6 +160,7 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 		// failed with compact_error); on success compact_boundary, whose context Claude Code is asked for
 		case sub == "status" && ev["status"] == "compacting":
 			m.compact = &HeadlessCompact{State: "running", From: m.contextPct()}
+			m.contextAsk = "" // the one before's answer would be taken for this one's
 		case sub == "status" && res != "":
 			if m.compact == nil {
 				m.compact = &HeadlessCompact{From: m.contextPct()}
@@ -231,9 +232,10 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 			m.CompletionSeq++
 		}
 		if cmd == "" {
-			// a turn ended: the compaction before it, or in it, has been shown, and its context is
-			// now this turn's (a late answer would set an older one)
-			m.compact, m.contextAsk = nil, ""
+			m.compact = nil // a turn ended: the compaction before it, or in it, has been shown
+		}
+		if cmd == "" && m.ctxTokens > 0 {
+			m.contextAsk = "" // the context is this turn's: a late answer would set an older one
 		}
 		usage, _ := ev["modelUsage"].(map[string]any)
 		mu, _ := usage[m.model].(map[string]any)

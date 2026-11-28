@@ -105,6 +105,18 @@ func TestHeadlessCompactStream(t *testing.T) {
 		if pct(m2.Usage.ContextPct) != 2.8 {
 			t.Errorf("after the turn: %v", pct(m2.Usage.ContextPct))
 		}
+		// a turn that said no context of its own (interrupted at once) leaves it wanted
+		m3 := hlModel{Status: "working"}
+		applyAll(&m3, lineCompacting, lineCompacted, lineInit, lineBoundary, lineCompactEnd, lineInit, lineAborted, lineContext)
+		if m3.Usage == nil || pct(m3.Usage.ContextPct) != 12.0 {
+			t.Errorf("after an interrupted turn: %+v", m3.Usage)
+		}
+		// a new compaction: the one before's answer isn't its
+		m4 := hlModel{Status: "working"}
+		applyAll(&m4, lineCompacting, lineCompacted, lineInit, lineBoundary, lineCompactEnd, lineCompacting, lineContext)
+		if c := m4.compact; c.State != "running" || c.To != nil {
+			t.Errorf("the next compaction: %+v", c)
+		}
 	})
 
 	t.Run("a failed one says why, and changes nothing else", func(t *testing.T) {
