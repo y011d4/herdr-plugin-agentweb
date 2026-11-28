@@ -90,7 +90,9 @@ All in `internal/bridge/` (one package):
   too, over the drawer). An opened
   pane's body is `pane-view.ts` (`createPaneView` → setMode/onState/echo/destroy, one per opened
   pane or Home: the chat log, the transcript probe, its own WS messages and agent_status, the 3s
-  refresh, the pane's visibilitychange, the prompt poll and closing the drawer after an answer) over `terminal.ts` (`createTerminal`:
+  refresh, the pane's visibilitychange, the prompt poll and closing the drawer after an answer, and the chat's pin to its
+  end: `pinned` follows appends, images coming in and a shrinking box; a scroll up or an opened tool result past the end
+  unpins it, and `Pane.tsx`'s ↓ (`opts.jump`, `toBottom`) shows meanwhile) over `terminal.ts` (`createTerminal`:
   the continuous buffer, fit/pinch, wheel forwarding and fling). These two are the imperative
   engines, and an engine owns only its own DOM subtree: `#pane-view`'s children, an empty
   container React draws and never renders into. `ui/Pane.tsx` draws Home's topbar and

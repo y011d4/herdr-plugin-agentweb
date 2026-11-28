@@ -15,6 +15,9 @@
   short delay per step — the app repaints remotely.
 - While you read history, live updates pause; returning to the bottom (or
   double-tapping) resumes them.
+- In a chat (a Claude pane's or a Home's), scrolling up from the newest message shows a
+  **↓** at its bottom right, with a dot once new messages arrive; tapping it scrolls back to the
+  newest message, and the chat follows new ones again.
 
 Tip: Claude Code's `"tui": "fullscreen"` setting is what prevents scrollback
 from accumulating. Remove it (default renderer) and restarted sessions build

@@ -41,6 +41,9 @@ export interface PaneViewOpts {
   activity(text: string | null): void;
   /** the answer panel's content while the pane is blocked in chat; null: no panel */
   prompt(p: PanelPrompt | null): void;
+  /** the chat's ↓: `away`, the user left its newest item (it no longer follows); `unread`, items came
+   *  meanwhile. Told only when either changes. */
+  jump(away: boolean, unread: boolean): void;
 }
 
 /** What the answer panel (ui/PromptPanel.tsx) shows. */
@@ -69,8 +72,13 @@ export interface PaneView {
   answered(id: string, chat: boolean, post: Promise<unknown>): void;
   /** after a 409: read the prompt on screen now and show it, unless `current()` turned false */
   reread(current: () => boolean): Promise<void>;
+  /** the ↓: the chat scrolls to its newest item (smoothly, unless the user asks for reduced motion) and
+   *  follows new ones again */
+  toBottom(): void;
   destroy(): void;
 }
+
+const NEAR_BOTTOM_PX = 60; // a chat scrolled this close to its end is on its newest item: it follows again, no ↓
 
 // The view a pane was switched to here, for the app's life (not stored): a pane opens on its chat, but for
 // one whose terminal was chosen. (One terminal choice once made every pane open on its terminal.)
@@ -118,6 +126,41 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     e.preventDefault();
     sel.removeAllRanges();
   }, { signal });
+
+  // `pinned`: the chat stays at its newest item: an append follows, and so does the log growing under it (an
+  // image coming in after its item was drawn) or its box shrinking (the composer growing, the phone's keyboard).
+  // The user unpins it, scrolling up (a scroll down to the end, or the ↓, pins it again) or opening a tool
+  // result that runs past the end; not the log growing, which a scroll position alone can't tell from it.
+  // The ↓ (opts.jump) shows while it is unpinned, with a dot once items came meanwhile.
+  let pinned = true;
+  let unread = false;
+  let newest = ''; // the newest item on show (JSON): a reset keeping the reader's place has news when its own differs
+  let lastTop = 0;
+  let told = { away: false, unread: false };
+  const fromBottom = (): number => chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight;
+  function reportJump(): void {
+    const away = mode === 'chat' && !pinned;
+    if (!away) unread = false;
+    if (away === told.away && unread === told.unread) return;
+    told = { away, unread };
+    opts.jump(away, unread);
+  }
+  const toEnd = (): void => { pinned = true; chatEl.scrollTop = chatEl.scrollHeight; };
+  chatEl.addEventListener('scroll', () => {
+    if (fromBottom() < NEAR_BOTTOM_PX) pinned = true;
+    else if (chatEl.scrollTop < lastTop) pinned = false;
+    lastTop = chatEl.scrollTop;
+    reportJump();
+  }, { signal, passive: true });
+  chatEl.addEventListener('toggle', () => { // a <details>: the user's own change to the log
+    pinned = fromBottom() < NEAR_BOTTOM_PX;
+    reportJump();
+  }, { signal, capture: true });
+  const stay = (): void => { if (mode === 'chat' && pinned) toEnd(); };
+  chatEl.addEventListener('load', stay, { signal, capture: true });
+  const resized = new ResizeObserver(stay);
+  resized.observe(chatEl);
+  signal.addEventListener('abort', () => resized.disconnect());
 
   // ── Chat view (Claude Code transcript) ──────────────────────────────────────
   // A claude pane can be shown as its structured transcript instead of the raw
@@ -198,6 +241,7 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     if (persist) chosenView.set(paneId, 'terminal');
     chatEl.style.setProperty('display', 'none');
     terminalEl.style.setProperty('display', '');
+    reportJump(); // no ↓ over the terminal
     opts.modeChanged();
     updatePromptPanel(); // hide the answer panel (chat-only)
     wsSendWatch(); // server: stop transcript watch, resume pane watch
@@ -240,7 +284,6 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
     // A reconnect re-watch resends the same session's tail; keep the user where
     // they were reading instead of snapping to the bottom.
     const prevTop = chatEl.scrollTop;
-    const prevFromBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight;
     if (home) {
       activity = latestActivity(items, null);
       opts.activity(activity);
@@ -248,9 +291,15 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       items = conversationItems(items, calls);
     }
     chat.reset(items);
-    chatEl.scrollTop = preserveScroll
-      ? (prevFromBottom < 40 ? chatEl.scrollHeight : prevTop)
-      : chatEl.scrollHeight;
+    const last = JSON.stringify(items.at(-1) ?? null);
+    if (preserveScroll && !pinned) {
+      chatEl.scrollTop = prevTop;
+      // items came meanwhile (its cursor also moves over lines never drawn). A reset is a capped tail: what it shows
+      // is newer than an item on show that fell out of it, but a Home's may show nothing (its hidden tools filled it)
+      if (items.length && last !== newest) unread = true;
+    } else toEnd();
+    newest = last;
+    reportJump();
   }
 
   function appendChatItems(items: TimelineItem[]): void {
@@ -261,11 +310,12 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       items = conversationItems(items, calls);
       if (items.length === 0) return;
     }
-    // follow the bottom only if the user is already there — don't yank them out of
-    // history they've scrolled up to read.
-    const atBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 60;
+    // follow the end only while pinned there — don't yank the user out of history they've scrolled up to read
     chat.append(items);
-    if (atBottom) chatEl.scrollTop = chatEl.scrollHeight;
+    newest = JSON.stringify(items.at(-1));
+    if (pinned) toEnd();
+    else unread = true;
+    reportJump();
   }
 
   // No transcript: a pane falls back to its terminal. A headless orchestrator has none: its chat
@@ -587,6 +637,12 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       const reqEpoch = epoch;
       const live = await readPromptScreen();
       if (current() && !destroyed && !suspended && reqEpoch === epoch) renderPromptPanel(live?.parsed ?? null, live?.id ?? '');
+    },
+    toBottom() {
+      if (destroyed || mode !== 'chat') return;
+      pinned = true; // a scroll up on its way unpins it again
+      chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      reportJump();
     },
     destroy() {
       destroyed = true;

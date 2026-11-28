@@ -38,12 +38,12 @@ const ASK = ['─'.repeat(28), ' ☐ Fruit', 'Pick a fruit', '', '❯ 1. apple',
 
 let container: HTMLElement;
 let view: PaneView;
-let calls: { toggle: boolean[]; modes: number; activity: Array<string | null>; prompt: Array<PanelPrompt | null> };
+let calls: { toggle: boolean[]; modes: number; activity: Array<string | null>; prompt: Array<PanelPrompt | null>; jump: string[] };
 function open(paneId: string): void {
-  calls = { toggle: [], modes: 0, activity: [], prompt: [] };
+  calls = { toggle: [], modes: 0, activity: [], prompt: [], jump: [] };
   view = createPaneView(container, paneId, {
     showToggle: (v) => calls.toggle.push(v), modeChanged: () => calls.modes++, activity: (a) => calls.activity.push(a),
-    prompt: (p) => calls.prompt.push(p),
+    prompt: (p) => calls.prompt.push(p), jump: (away, unread) => calls.jump.push(away ? (unread ? 'away+new' : 'away') : 'end'),
   });
 }
 const chatLog = () => container.querySelector<HTMLElement>('#chat-log')!;
@@ -284,6 +284,156 @@ describe('pane view: chat', () => {
     await answer('/transcript', { ...transcript[0], reset: true });
     assert.deepEqual(calls.toggle, [true]);
     store.wsConnected = true;
+  });
+});
+
+describe('pane view: the chat’s ↓', () => {
+  // happy-dom lays nothing out: the log's box is `tall`, each item 100px over 1800px of the rest
+  let reduced: boolean; // prefers-reduced-motion
+  let grown: number; // what images that came in added
+  let tall: number; // the log's box
+  let resized: () => void; // its ResizeObserver's callback
+  const more = (text: string): void => push({ type: 'transcript_items', paneId: 'p1', available: true, sessionId: transcript[0].sessionId!,
+    items: [{ kind: 'assistant', text, sidechain: false }], cursor: 300, reset: false });
+  /** the user (or a smooth scroll) moves the log to `top`: the browser tells it with a scroll event */
+  const scroll = (top: number): void => { chatLog().scrollTop = top; chatLog().dispatchEvent(new Event('scroll')); };
+  async function opened(): Promise<HTMLElement> {
+    open('p1');
+    Object.defineProperty(chatLog(), 'scrollHeight', { configurable: true, get: () => 1800 + 100 * chatLog().querySelectorAll('.chat-item').length + grown });
+    Object.defineProperty(chatLog(), 'clientHeight', { configurable: true, get: () => tall });
+    await answer('/transcript', transcript[0]);
+    chatLog().dispatchEvent(new Event('scroll')); // its jump to the end, as a browser tells it
+    return chatLog();
+  }
+  beforeEach(() => {
+    reduced = false;
+    grown = 0;
+    tall = 500;
+    vi.stubGlobal('ResizeObserver', class { constructor(fn: () => void) { resized = fn; } observe() {} disconnect() {} });
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === '(prefers-reduced-motion: reduce)' && reduced }));
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('shows while scrolled up from the newest item, with a dot once items come (none yanks the user down), told once per change', async () => {
+    const log = await opened();
+    assert.equal(log.scrollTop, 2000, 'opens on its newest item');
+    assert.deepEqual(calls.jump, [], 'at its end: no ↓');
+    scroll(1460); // 40px up: still at its end
+    assert.deepEqual(calls.jump, []);
+    scroll(1300);
+    scroll(1200);
+    assert.deepEqual(calls.jump, ['away'], 'told once');
+    more('one');
+    more('two');
+    assert.equal(log.scrollTop, 1200, 'stays where the user reads');
+    assert.deepEqual(calls.jump, ['away', 'away+new']);
+    scroll(1700); // back at its end by hand
+    assert.deepEqual(calls.jump, ['away', 'away+new', 'end']);
+    more('three');
+    assert.equal(log.scrollTop, 2300, 'at its end, an append follows');
+    assert.deepEqual(calls.jump.at(-1), 'end');
+  });
+
+  it('a re-watch that moved on (a reconnect, a resume) keeps the reader where they were, with a dot only for new items', async () => {
+    const log = await opened();
+    scroll(300);
+    assert.deepEqual(calls.jump, ['away']);
+    const tail = { type: 'transcript_items', paneId: 'p1', available: true, sessionId: transcript[0].sessionId!, reset: true } as const;
+    push({ ...tail, items: transcript[0].items!, cursor: 800 }); // past lines never drawn only
+    assert.equal(log.scrollTop, 300);
+    assert.deepEqual(calls.jump, ['away'], 'no dot: nothing new on show');
+    push({ ...tail, items: [], cursor: 850 }); // a tail with nothing to show (a Home's, its hidden tools filling it)
+    assert.deepEqual(calls.jump, ['away'], 'nor for that');
+    push({ ...tail, items: [...transcript[0].items!, { kind: 'assistant', text: 'meanwhile', sidechain: false }], cursor: 900 });
+    assert.equal(log.scrollTop, 300);
+    assert.deepEqual(calls.jump, ['away', 'away+new']);
+    scroll(log.scrollHeight);
+    push({ ...tail, items: transcript[0].items!, cursor: 1000 });
+    assert.equal(log.scrollTop, log.scrollHeight, 'at its end: there still');
+    assert.deepEqual(calls.jump, ['away', 'away+new', 'end']);
+  });
+
+  it('a tap scrolls smoothly to the newest item and follows again (an append mid-way too); scrolling up mid-way shows it again', async () => {
+    const log = await opened();
+    const to: ScrollToOptions[] = [];
+    log.scrollTo = ((o: ScrollToOptions) => { to.push(o); }) as typeof log.scrollTo;
+    scroll(500);
+    more('one');
+    assert.deepEqual(calls.jump, ['away', 'away+new']);
+    view.toBottom();
+    assert.deepEqual(to, [{ top: 2100, behavior: 'smooth' }]);
+    assert.deepEqual(calls.jump.at(-1), 'end', 'gone at the tap, its dot too');
+    scroll(900); // on its way
+    assert.deepEqual(calls.jump.at(-1), 'end');
+    more('two');
+    assert.equal(log.scrollTop, 2200, 'an append mid-way follows');
+    scroll(1700); // arrived
+    scroll(1000); // and up again
+    assert.deepEqual(calls.jump.at(-1), 'away');
+
+    view.toBottom();
+    scroll(1200); // on its way
+    scroll(1100); // the user scrolls up in it: the scroll is theirs
+    assert.deepEqual(calls.jump.at(-1), 'away');
+    more('three');
+    assert.equal(log.scrollTop, 1100, 'no longer followed');
+  });
+
+  it('with reduced motion it is there at once; on the terminal there is none', async () => {
+    reduced = true;
+    const log = await opened();
+    scroll(100);
+    view.toBottom();
+    assert.equal(log.scrollTop, 2000, 'no smooth scroll: there at once');
+    assert.deepEqual(calls.jump, ['away', 'end']);
+    scroll(1500); // as a browser clamps it and tells it
+    scroll(100);
+    view.setMode('terminal', false);
+    assert.deepEqual(calls.jump, ['away', 'end', 'away', 'end'], 'none over the terminal');
+    view.toBottom();
+    assert.equal(log.scrollTop, 100, 'a late tap does nothing there');
+  });
+
+  it('at its end the view stays there as an image comes in or its box shrinks; scrolled up, where it is', async () => {
+    const log = await opened();
+    push({ type: 'transcript_items', paneId: 'p1', available: true, sessionId: transcript[0].sessionId!, cursor: 300, reset: false,
+      items: [{ kind: 'user', text: '', images: ['data:image/png;base64,AAAA'], sidechain: false }] });
+    assert.equal(log.scrollTop, 2100);
+    const img = log.querySelector('img')!;
+    grown = 150; // it decoded: the log grew
+    img.dispatchEvent(new Event('load')); // which doesn't bubble: heard on its way down
+    assert.equal(log.scrollTop, 2250);
+    scroll(1760); // its end, as a browser clamps it
+    tall = 300; // the bars around it filled in
+    resized();
+    assert.equal(log.scrollTop, 2250);
+    assert.deepEqual(calls.jump, [], 'no ↓ for either');
+    scroll(1000);
+    grown = 300;
+    img.dispatchEvent(new Event('load'));
+    tall = 200;
+    resized();
+    assert.equal(log.scrollTop, 1000);
+  });
+
+  it("opening a tool result that runs past the end unpins it (what comes next doesn't yank the reader); closed again, the view is at the end", async () => {
+    const log = await opened();
+    push({ type: 'transcript_items', paneId: 'p1', available: true, sessionId: transcript[0].sessionId!, cursor: 300, reset: false,
+      items: [{ kind: 'tool_result', forId: 'u1', text: 'a long result', truncated: false, isError: false, sidechain: false }] });
+    assert.equal(log.scrollTop, 2100);
+    scroll(1600); // as a browser clamps it and tells it
+    const result = log.querySelector('details')!;
+    grown = 400; // opened, below the view
+    result.dispatchEvent(new Event('toggle')); // which doesn't bubble
+    assert.deepEqual(calls.jump, ['away']);
+    grown = 0;
+    result.dispatchEvent(new Event('toggle'));
+    assert.deepEqual(calls.jump, ['away', 'end']);
+    grown = 400;
+    result.dispatchEvent(new Event('toggle'));
+    more('next');
+    assert.equal(log.scrollTop, 1600, 'stays on the result');
+    assert.deepEqual(calls.jump, ['away', 'end', 'away', 'away+new']);
   });
 });
 
