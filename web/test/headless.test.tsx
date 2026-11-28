@@ -13,11 +13,11 @@ import { findPane, markPaneSeen, setAppState, store } from '../src/store.ts';
 import type { AppState, OrchestratorView, WsMessage, WsStateMessage } from '../src/types.ts';
 import { Modals } from '../src/ui/Modals.tsx';
 import { quoteLine } from '../src/transcript.ts';
-import { compactLine, homeTopbar, Pane, StoppedHome, usageParts } from '../src/ui/Pane.tsx';
+import { compactLine, homeTopbar, Pane, resetRows, StoppedHome, untilText, usageParts } from '../src/ui/Pane.tsx';
 import { claudeCheckText } from '../src/ui/Settings.tsx';
 import { watchMessages } from '../src/watch.ts';
 import { messages, state as recorded, transcript } from './contract.gen.ts';
-import { chatDom, fire, render } from './render.ts';
+import { chatDom, fire, render, settle } from './render.ts';
 
 vi.mock('../src/ws.ts', () => ({
   onWsMessage: (_fn: (msg: WsMessage) => void) => () => {},
@@ -621,6 +621,60 @@ describe("a headless orchestrator's Home", () => {
     await fire(() => rows[2].querySelector<HTMLElement>('[data-action=tui]')!.click());
     assert.match($('.tui-steps').textContent!, /remove "mode": "headless" from the orchestrator "pilot".*y011d4\.yoicks\.stop.*Start/);
   });
+
+  it("opens when each limit resets from its usage, a button, and counts down at each minute's start with no State push", async () => {
+    const T = new Date(2026, 0, 15, 9, 0).getTime(); // local time, as the clock times are; the limits read at T, the page opened 30 s on
+    vi.useFakeTimers({ now: T + 30_000, toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      setAppState(withPilot((p) => {
+        idle(p);
+        p.headless!.usage = { fiveHour: { utilization: 0.42, resetsAt: T + (2 * 60 + 13) * 60_000 }, sevenDay: { utilization: 0.34, resetsAt: T + (3 * 24 + 4) * 3_600_000 },
+          fable: null, contextPct: 23, at: T };
+      }));
+      location.hash = '#/home/pilot';
+      store.view.activePaneId = 'hl:pilot';
+      store.view.homeMode = true;
+      ({ container, unmount } = await render(<Pane paneId="hl:pilot" home={true} name="pilot" />));
+      await settle(0);
+      const btn = $('[data-action=usage]');
+      const rows = () => [...container.querySelectorAll('[data-usage-resets] [data-limit]')].map((r) => [...r.children].map((c) => c.textContent).join(' '));
+      assert.equal(btn.tagName, 'BUTTON'); // a keyboard's Tab reaches it, Enter or Space opens it
+      assert.equal($('#home-usage').textContent, '5h 42% · 7d 34% · ctx 23%'); // the figures as they were: no time in them
+      assert.deepEqual([btn.getAttribute('aria-expanded'), rows()], ['false', []]);
+
+      await fire(() => { btn.focus(); btn.click(); }); // as a keyboard does: Tab to it, then Enter
+      await settle(0);
+      assert.equal(btn.getAttribute('aria-expanded'), 'true');
+      assert.deepEqual(rows(), ['5h 42% resets in 2h13m · today 11:13', '7d 34% resets in 3d4h · 1/18 13:00']);
+      assert.ok(document.activeElement === $('[data-usage-resets]'), 'the focus is in the popover');
+      await settle(29_999);
+      assert.deepEqual(rows(), ['5h 42% resets in 2h13m · today 11:13', '7d 34% resets in 3d4h · 1/18 13:00']);
+      await settle(1);
+      assert.deepEqual(rows(), ['5h 42% resets in 2h12m · today 11:13', '7d 34% resets in 3d3h · 1/18 13:00']);
+      await settle((2 * 60 + 12) * 60_000);
+      assert.deepEqual(rows(), ['5h 42% has reset (today 11:13)', '7d 34% resets in 3d1h · 1/18 13:00']);
+
+      // Escape closes it, the focus back on the figures; so does a tap outside
+      await fire(() => $('[data-usage-resets]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+      await settle(0);
+      assert.deepEqual([btn.getAttribute('aria-expanded'), rows()], ['false', []]);
+      assert.ok(document.activeElement === btn, 'the focus is back on the figures');
+      await fire(() => btn.click());
+      await settle(0);
+      assert.equal(rows().length, 2);
+      await fire(() => document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+      await settle(0);
+      assert.deepEqual([btn.getAttribute('aria-expanded'), rows()], ['false', []]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('has no popover while no limit is known: the context alone', async () => {
+    await home(withPilot((p) => { idle(p); p.headless!.usage = { fiveHour: null, sevenDay: null, fable: null, contextPct: 23, at: 0 }; }));
+    assert.equal($('#home-usage').textContent, 'ctx 23%');
+    assert.equal(container.querySelector('[data-action=usage]'), null);
+  });
 });
 
 describe('replying on a Home, and asking about a to-do item', () => {
@@ -767,6 +821,26 @@ describe('around a headless orchestrator', () => {
     assert.deepEqual(usageParts({ fiveHour: null, sevenDay: null, fable: { utilization: 0.04, resetsAt: 0 }, contextPct: 7, at: now - 11 * 60_000 }, now),
       [{ text: 'fable 4%', stale: true }, { text: 'ctx 7%', stale: false }]);
     assert.deepEqual(usageParts({ fiveHour: null, sevenDay: null, fable: null, contextPct: null, at: 0 }, now), []);
+  });
+
+  it('resetRows says when each known limit resets: the time left and the clock time, or that it has reset', () => {
+    const now = new Date(2026, 0, 15, 9, 0, 30).getTime(); // local: the clock times are
+    const w = (utilization: number, resetsAt: number) => ({ utilization, resetsAt });
+    assert.deepEqual(resetRows({ fiveHour: w(0.42, now + 45 * 60_000 - 30_000), sevenDay: w(0.34, now - 30_000), fable: w(0.04, now + 6 * 86_400_000 - 30_000),
+      contextPct: 12, at: now - 1000 }, now), [
+      { name: '5h', used: '42%', when: 'resets in 45m · today 09:45' },
+      { name: '7d', used: '34%', when: 'has reset (today 09:00)' },
+      { name: 'fable', used: '4%', when: 'resets in 6d · 1/21 09:00' }]);
+    assert.deepEqual(resetRows({ fiveHour: w(0.1, 0), sevenDay: null, fable: null, contextPct: 12, at: now }, now), [{ name: '5h', used: '10%', when: 'reset time unknown' }]);
+    assert.deepEqual(resetRows({ fiveHour: null, sevenDay: null, fable: null, contextPct: 12, at: now }, now), []);
+  });
+
+  it('untilText rounds up to whole minutes and names the two largest units', () => {
+    const now = Date.UTC(2026, 0, 15, 9, 0, 30);
+    const m = 60_000, h = 60 * m, d = 24 * h;
+    assert.deepEqual([1, 30_000, m, m + 1, 45 * m, h, h + 1, 2 * h + 13 * m, 23 * h + 59 * m + 1, d, 3 * d + 4 * h + 59 * m, 7 * d].map((ms) => untilText(now + ms, now)),
+      ['1m', '1m', '1m', '2m', '45m', '1h', '1h1m', '2h13m', '1d', '1d', '3d4h', '7d']);
+    assert.deepEqual([0, -1, -h].map((ms) => untilText(now + ms, now)), ['', '', '']);
   });
 
   it('the Claude Code check reads as off when none has run or the last is over a day old', () => {

@@ -55,7 +55,7 @@ export const state: AppState = {
       status: 'blocked', completionSeq: 4, model: '', activeModel: 'claude-opus-5-5', models: [], compact: null,
       pending: { id: 'q1', questions: [{ question: 'Which PR should go first?', header: 'Order', multiSelect: false,
         options: [{ label: '#112', description: 'the toast scrollbar fix' }, { label: 'PR3', description: 'the agents list' }] }] },
-      usage: { fiveHour: { utilization: 0.42, resetsAt: T0 + 3_600_000 }, sevenDay: { utilization: 0.18, resetsAt: T0 + 86_400_000 }, fable: null, contextPct: 23, at: T0 - 60_000 },
+      usage: { fiveHour: { utilization: 0.42, resetsAt: T0 + (2 * 60 + 13) * 60_000 }, sevenDay: { utilization: 0.18, resetsAt: T0 + (3 * 24 + 4) * 3_600_000 }, fable: null, contextPct: 23, at: T0 - 60_000 },
       warnings: [{ kind: 'canary', message: 'The last Claude Code check failed (mcp_failure)', since: T0 - 3_600_000, actions: ['clear', 'tui'] }] } },
     { name: 'side', label: 'side', paneId: null, agents: null, mode: 'tui', headless: null, todos: [todo('4d5e6f', "Run /login in side's pane")] },
   ],
@@ -197,6 +197,11 @@ export const scenes: Scene[] = [
   { name: 'home-headless-minimized', hash: '#/home/work', ready: `${items('')} && (!!document.querySelector('#headless-prompt[data-minimized]')
     || void document.querySelector('#headless-prompt-minimize')?.click())`, parts: [
     { name: 'headless-prompt-minimized', el: q('#headless-prompt') },
+  ] },
+  // its usage's popover, when each limit resets: the ready check taps the figures (once: then they're aria-expanded)
+  { name: 'home-usage', hash: '#/home/work', ready: `${items('')} && (!!document.querySelector('[data-usage-resets] [data-limit]')
+    || void document.querySelector('[data-action=usage][aria-expanded=false]')?.click())`, screen: false, parts: [
+    { name: 'usage-popover', el: q('[data-usage-resets]') },
   ] },
   { name: 'home-stopped', hash: '#/home/side', ready: "!!document.querySelector('#screen-home-stopped')", screen: false, parts: [
     { name: 'home-status-stopped', el: q('#home-status') },

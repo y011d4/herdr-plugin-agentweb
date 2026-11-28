@@ -16,7 +16,7 @@
  * State pushes re-render it constantly. The composer's textarea is uncontrolled (React never sets its
  * value), so a push never resets what is being typed, an IME composition included.
  */
-import { ActionIcon, Button, CloseButton, FileButton, Group, Image, Indicator, Menu, NativeSelect, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Button, CloseButton, FileButton, Group, Image, Indicator, Menu, NativeSelect, Popover, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
@@ -28,6 +28,7 @@ import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts
 import { parseQuote, type QuoteOf } from '../transcript.ts';
 import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
 import { emit, findPane, store, subscribe } from '../store.ts';
+import { dueLabel } from '../todos.ts';
 import type { AppState, HeadlessCompact, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
 import { QuoteText } from './ChatLog.tsx';
 import { TopbarIcon, agentCards, orchestratorLabel, relativeTime } from './Dashboard.tsx';
@@ -247,7 +248,7 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
   const all = state.orchestrators ?? [];
   const self = all.find((o) => o.name === name);
   const s = homeSummary(agentCards(state, self), store.seenDone);
-  const usage = self?.headless?.usage ? <Usage usage={self.headless.usage} /> : null;
+  const usage = self?.headless?.usage ? <Usage usage={self.headless.usage} now={now} /> : null;
   return (
     <Stack id="home-status" gap={8} py={8} className={`px-3.5 ${STATUS_BAR}`}>
       {/* a PC's sidebar does this (style.css hides it there): the row scrolls sideways, its scrollbar hidden */}
@@ -315,13 +316,59 @@ export function usageParts(u: HeadlessUsage, now: number): Array<{ text: string;
   return parts;
 }
 
-function Usage({ usage }: { usage: HeadlessUsage }) {
-  const parts = usageParts(usage, Date.now());
+/** How long until `at`, as a limit's countdown says it: whole minutes, rounded up (so 1m until the moment itself),
+ *  in its two largest units, a zero one left out (45m, 2h13m, 2h, 3d4h); '' once it has come. */
+export function untilText(at: number, now: number): string {
+  const m = Math.ceil((at - now) / 60_000);
+  if (m <= 0) return '';
+  const [d, h, min] = [Math.floor(m / 1440), Math.floor(m / 60) % 24, m % 60];
+  return d ? `${d}d${h ? `${h}h` : ''}` : h ? `${h}h${min ? `${min}m` : ''}` : `${min}m`;
+}
+
+/** The usage popover's rows: each known limit, its use and when it resets (Claude Code's `resetsAt`): the time
+ *  left and the clock time, or that it has reset since it was read. */
+export function resetRows(u: HeadlessUsage, now: number): Array<{ name: string; used: string; when: string }> {
+  const rows: Array<{ name: string; used: string; when: string }> = [];
+  for (const [name, w] of [['5h', u.fiveHour], ['7d', u.sevenDay], ['fable', u.fable]] as const) {
+    if (!w) continue;
+    const left = untilText(w.resetsAt, now), clock = dueLabel(w.resetsAt, now).text;
+    rows.push({ name, used: pct(w.utilization * 100), when: !w.resetsAt ? 'reset time unknown' : left ? `resets in ${left} · ${clock}` : `has reset (${clock})` });
+  }
+  return rows;
+}
+
+// The usage figures (`now`: HomeStatus's useMinute, so an open popover's countdowns tick at each minute's start). With a
+// limit known, they are a button opening a popover of when each resets (Escape, a tap outside close it; the focus
+// goes into it and back, as Needs you's does).
+function Usage({ usage, now }: { usage: HeadlessUsage; now: number }) {
+  const [opened, setOpened] = useState(false);
+  const parts = usageParts(usage, now);
   if (!parts.length) return null;
-  return (
-    <Text id="home-usage" fz={12} c="dimmed" className="tabular-nums">
+  const text = (
+    <Text id="home-usage" span fz={12} c="dimmed" className="tabular-nums">
       {parts.map((p, i) => <span key={p.text} className={p.stale ? 'stale opacity-50' : p.high ? 'high text-(--color-blocked)' : undefined}>{i ? ` · ${p.text}` : p.text}</span>)}
     </Text>
+  );
+  const rows = resetRows(usage, now);
+  if (!rows.length) return text;
+  return (
+    <Popover opened={opened} onChange={setOpened} position="bottom-end" radius="md" shadow="md" trapFocus returnFocus middlewares={{ shift: { padding: 12 } }}>
+      <Popover.Target>
+        <UnstyledButton data-action="usage" title="When the usage limits reset" className="-mx-1 flex rounded-sm px-1 hover:bg-(--color-surface-2)"
+          onClick={() => setOpened(!opened)}>
+          {text}
+        </UnstyledButton>
+      </Popover.Target>
+      <Popover.Dropdown data-usage-resets="" px={14} py={10}>
+        <div className="grid grid-cols-[auto_auto_auto] gap-x-3 gap-y-1.5 text-[13px] tabular-nums">
+          {rows.map((r) => (
+            <div key={r.name} data-limit={r.name} className="contents">
+              <span className="font-semibold">{r.name}</span><span className="text-right">{r.used}</span><span className="text-(--color-text-dim)">{r.when}</span>
+            </div>
+          ))}
+        </div>
+      </Popover.Dropdown>
+    </Popover>
   );
 }
 
