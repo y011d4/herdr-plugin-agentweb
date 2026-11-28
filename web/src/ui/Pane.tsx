@@ -376,7 +376,7 @@ function AgentsButton({ name, s }: { name: string; s: HomeSummary }) {
   const ask = o?.paneId && o.agents ? (c: DashboardCard): void => { askAbout(name, c); setAsked(true); setOpened(false); } : undefined;
   return (
     <Popover opened={opened} onChange={setOpened} position="bottom-start" width="min(400px, calc(100vw - 24px))" radius="md" shadow="md"
-      trapFocus returnFocus={!asked} middlewares={{ shift: { padding: 12 }, size: { padding: 12 } }}>
+      trapFocus returnFocus={!asked} middlewares={{ shift: { padding: 12 }, size: { padding: 12 } }} closeOnEscape={false}>
       <Popover.Target>
         <Button {...SMALL} className="home-counts shrink-0 bg-transparent hover:bg-(--color-surface-2)" classNames={{ label: 'gap-x-3' }} size="compact-sm" fz={13} fw={400}
           data-action="agents" title="Agents" aria-label={`Agents: ${s.working} working, ${s.done} done, ${s.idle} idle`}
@@ -386,7 +386,9 @@ function AgentsButton({ name, s }: { name: string; s: HomeSummary }) {
           <span data-count=""><Dot status="idle" />{s.idle}<span className="max-sm:hidden"> idle</span></span>
         </Button>
       </Popover.Target>
-      <Popover.Dropdown className="overflow-y-auto overscroll-contain [overflow-anchor:none]" p={6} data-agents-list="" {...hold}>
+      {/* Mantine's own Escape (closeOnEscape) would take one meant for a row's menu inside it too, as NeedsButton's */}
+      <Popover.Dropdown className="overflow-y-auto overscroll-contain [overflow-anchor:none]" p={6} data-agents-list="" {...hold}
+        onKeyDownCapture={(e) => { if (e.key === 'Escape' && !(e.target as Element).closest('[role="menu"]')) setOpened(false); }}>
         {cards.length ? cards.map((c) => <AgentRow key={c.pane.paneId} card={c} ask={ask} askOff={!!o?.headless?.pending} />) : <Text c="dimmed" fz={13} px={12} py={8}>No active agents.</Text>}
       </Popover.Dropdown>
     </Popover>
