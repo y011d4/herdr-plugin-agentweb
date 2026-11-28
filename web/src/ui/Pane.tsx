@@ -491,7 +491,7 @@ function HomeMenu({ name, o, actions }: { name: string; o?: OrchestratorView; ac
     <Indicator color="blocked" size={7} offset={3} disabled={!hint} data-hint={hint ? '' : undefined}>
       <Menu id="btn-home-menu" position="bottom-end" width={240} radius="md">
         <Menu.Target>
-          <Button {...SMALL} variant="subtle" px={9} fz={14} aria-label={hint ? `Orchestrator actions (ctx ${pct(ctx)}: Compact suggested)` : 'Orchestrator actions'}>&#8942;</Button>
+          <Button {...SMALL} variant="subtle" px={6} fz={20} aria-label={hint ? `Orchestrator actions (ctx ${pct(ctx)}: Compact suggested)` : 'Orchestrator actions'}>&#8942;</Button>
         </Menu.Target>
         <Menu.Dropdown>
           {h && (
