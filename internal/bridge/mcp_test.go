@@ -632,10 +632,14 @@ func TestHeadlessWakeUps(t *testing.T) {
 		b.waitStatus(t, "idle")
 		b.prompt(t)
 		b.srv.shutdownHeadless()
-		saved, _ := os.ReadFile(headlessPath(state, "h1", ".json"))
-		if !strings.Contains(string(saved), `"pane":"w1p"`) {
-			t.Fatalf("saved %s", saved)
-		}
+		// the watch, cancelled, notes the delivered task's working as its wait ends, after
+		// Shutdown has saved the status from before the send: b2 reads that last save
+		waitUntil(t, 10*time.Second, "the watch saved at working", func() bool {
+			saved, _ := os.ReadFile(headlessPath(state, "h1", ".json"))
+			var st struct{ Watches []hlWatch }
+			json.Unmarshal(saved, &st)
+			return len(st.Watches) == 1 && st.Watches[0].Pane == "w1p" && st.Watches[0].Status == "working"
+		})
 		w.Set("w1p", "done") // while no bridge runs
 
 		b2 := startHeadless(t, state, nil, nil) // another herdr world: the worker there, done
