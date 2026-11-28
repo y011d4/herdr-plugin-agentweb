@@ -1,5 +1,5 @@
-/** ui/Settings.tsx — #/settings (in ui/SettingsSheet.tsx): notifications, the bridge and herdr, the last Claude
- *  Code check (with a headless orchestrator), sign-out and the app's build. */
+/** ui/Settings.tsx — #/settings (in ui/SettingsSheet.tsx): notifications, the connection (the bridge, herdr and, with a
+ *  headless orchestrator, the last Claude Code check), sign-out and the app's version and build. */
 import { Button, Group, Image, Paper, Switch, Text } from '@mantine/core';
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { clearToken } from '../api.ts';
@@ -9,10 +9,14 @@ import type { ClaudeCheck } from '../types.ts';
 import { wsSignOut } from '../ws.ts';
 import { relativeTime } from './Dashboard.tsx';
 
-const APP_VERSION = '0.1.0';
 // The built JS file's content hash (assets/index-<hash>.js), shown here and in the prompt
 // panel, so a stale cached bundle is immediately visible. 'dev' unbuilt.
 export const BUILD = import.meta.url.match(/-([\w-]{8})\.js$/)?.[1] ?? 'dev';
+
+// the browser's notification permission (Notification.permission; 'unavailable': no such API), in words
+const PERMISSION: Record<string, string> = {
+  default: 'Not asked yet', granted: 'Allowed', denied: 'Blocked — change it in the browser settings', unavailable: 'Not available in this browser',
+};
 
 const CHECK_STALE_MS = 26 * 3_600_000; // the check runs a day apart at most: older means its timer is off
 
@@ -48,11 +52,17 @@ export function Settings({ onSignedOut }: { onSignedOut: () => void }) {
     return () => sw?.removeEventListener('controllerchange', show);
   }, []);
 
-  // turned on before the browser has asked: it asks now (a tap, as it requires); the status row shows its answer
+  // turned on before the browser has asked: it asks now (a tap, as it requires), and anything but a yes turns it back
+  // off; the status row shows its answer
   const setNotifications = (on: boolean): void => {
     localStorage.setItem(STORAGE_NOTIF, on ? 'true' : 'false');
     setNotif(on);
-    if (on && permission === 'default') void Notification.requestPermission().then(setPermission);
+    if (on && permission === 'default') {
+      void Notification.requestPermission().then((result) => {
+        setPermission(result);
+        if (result !== 'granted') setNotifications(false);
+      });
+    }
   };
   const signOut = (): void => {
     wsSignOut();
@@ -67,19 +77,14 @@ export function Settings({ onSignedOut }: { onSignedOut: () => void }) {
         <Row label="Enable notifications">
           <Switch id="toggle-notif" className="toggle" size="lg" withThumbIndicator={false} aria-label="Enable notifications" checked={notif} onChange={(e) => setNotifications(e.currentTarget.checked)} />
         </Row>
-        <Row label="Permission status" value={permission} valueId="notif-permission" />
+        <Row label="Permission status" value={PERMISSION[permission] ?? permission} valueId="notif-permission" />
       </Section>
 
       <Section title="Connection">
         <Row label="Bridge URL" value={`${location.protocol}//${location.host}`} />
         <Row label="herdr version" value={`${state?.herdr?.version ?? '—'}${state?.herdr?.protocol == null ? '' : ` (protocol ${state.herdr.protocol})`}`} />
+        {headless && <Row label="Claude Code check" value={claudeCheckText(state?.claudeCheck ?? null, Date.now())} valueId="claude-check" />}
       </Section>
-
-      {headless && (
-        <Section title="Headless orchestrators" id="settings-headless">
-          <Row label="Claude Code check" value={claudeCheckText(state?.claudeCheck ?? null, Date.now())} valueId="claude-check" />
-        </Section>
-      )}
 
       <Section title="Account">
         <Row><Button id="btn-clear-token" variant="default" fullWidth fw={400} fz={14} c="blocked" onClick={signOut}>Clear token &amp; sign out</Button></Row>
@@ -87,16 +92,16 @@ export function Settings({ onSignedOut }: { onSignedOut: () => void }) {
 
       <Section title="About">
         <Row><Image src="/icons/lockup.svg" alt="Yoicks" h={28} w="auto" /></Row>
-        <Row label="App version" value={`${APP_VERSION} (${BUILD})${cache === null ? '' : ` cache ${cache}`}`} valueId="app-version" />
+        <Row label="App version" value={`${state?.version ?? '—'} (${BUILD})${cache === null ? '' : ` cache ${cache}`}`} valueId="app-version" />
       </Section>
     </div>
   );
 }
 
 /** A group of rows on the surface, under its title in small capitals. */
-function Section({ title, id, children }: { title: string; id?: string; children: ReactNode }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <Paper id={id} className="settings-section overflow-hidden" withBorder radius={10} bg="dark.7" mb={20}>
+    <Paper className="settings-section overflow-hidden" withBorder radius={10} bg="dark.7" mb={20}>
       <Text className="settings-section-title border-b border-(--color-border)" px={16} py={10} bg="dark.6" fz={11} fw={600} c="dimmed" tt="uppercase" lts="0.08em">
         {title}
       </Text>
