@@ -14,13 +14,14 @@
  *
  * shots needs no herdr and no bridge: it serves tools/shots-fixture.ts's made-up data and a web build (DIR = a
  * web/dist), shoots each scene on a phone and a PC, before and after: its screen (<scene>-<phone|pc>.<side>.png,
- * unless `screen: false`) and each of its parts, cut out of the same page (<part>-<phone|pc>.<side>.png), and writes
+ * unless `screen: false`) and each of its parts, cut out of the same page (<part>-<phone|pc>.<side>.png), each with
+ * its page's text beside it (<name>.<side>.txt: what publishing checks against the names denylist), and writes
  * for each changed one <name>.diff.png (where its pixels differ), and manifest.json (screen or part; which changed:
  * the PNGs' bytes differ; how many pixels) into --out. Each shot gets a browser context of its own
  * (the app keeps seen-done, the last Home, drafts in localStorage), a frozen clock (the fixture's T0 + 30s), UTC,
  * en-US, no animations (CSS transitions off: Mantine's JS-timed ones then show their end state two frames in), and
- * its images decoded, so the same build shoots the same bytes. CI (.github/workflows/screenshots.yml) posts the
- * changed ones on the PR and fails its `screens` check until the user approves them with the ui-change label.
+ * its images decoded, so the same build shoots the same bytes. CI (.github/workflows/screenshots.yml, then
+ * screenshots-publish.yml) posts the changed ones on the PR and fails its `screens` check until the user approves them with the ui-change label.
  *
  * A preview is a throwaway bridge (state/config under $WC_ROOT/preview-<port>, `env -u HERDR_BIN_PATH`)
  * over the REAL herdr, which production also shows, unless the root has a private herdr: `herdr start` runs a
@@ -2523,10 +2524,14 @@ async function shots(o: Record<string, any>): Promise<number> {
         await ev(`document.fonts.ready.then(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))))
           .then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))`);
         await sleep(300);
-        const shot: Array<{ name: string; kind: 'screen' | 'part'; png: Buffer; ready: boolean }> = [];
+        // the page's text and its inputs' values, for each of its shots: publishing checks it against the names
+        // denylist, as a PNG's text can't be read back (.github/workflows/screenshots-publish.yml)
+        const text = String(await ev(`[document.title, document.body.innerText,
+          ...[...document.querySelectorAll('input, textarea')].map((e) => e.value)].join('\\n')`) ?? '');
+        const shot: Array<{ name: string; kind: 'screen' | 'part'; png: Buffer; ready: boolean; text: string }> = [];
         if (scene.screen !== false) {
           const { data } = await S('Page.captureScreenshot', { format: 'png' });
-          shot.push({ name: `${scene.name}-${size.id}`, kind: 'screen', png: Buffer.from(data, 'base64'), ready });
+          shot.push({ name: `${scene.name}-${size.id}`, kind: 'screen', png: Buffer.from(data, 'base64'), ready, text });
         }
         // each part after the screen: its own box (whole pixels, within the viewport), scrolled into its container's
         // view first; one not found is a 1x1 shot, not ready
@@ -2538,7 +2543,7 @@ async function shots(o: Record<string, any>): Promise<number> {
             const w = Math.min(innerWidth, Math.ceil(b.right)) - x, h = Math.min(innerHeight, Math.ceil(b.bottom)) - y;
             return w > 0 && h > 0 ? { x: x + scrollX, y: y + scrollY, width: w, height: h, scale: 1 } : null; })()`) : null;
           const { data } = await S('Page.captureScreenshot', { format: 'png', clip: box ?? { x: 0, y: 0, width: 1, height: 1, scale: 1 } });
-          shot.push({ name: `${part.name}-${size.id}`, kind: 'part', png: Buffer.from(data, 'base64'), ready: !!box });
+          shot.push({ name: `${part.name}-${size.id}`, kind: 'part', png: Buffer.from(data, 'base64'), ready: !!box, text });
         }
         return shot;
       } finally {
@@ -2583,6 +2588,7 @@ async function shots(o: Record<string, any>): Promise<number> {
           const s = shots.get(r.name) ?? { kind: r.kind, got: {}, notReady: [] };
           shots.set(r.name, s);
           fs.writeFileSync(path.join(out, `${r.name}.${side}.png`), r.png);
+          fs.writeFileSync(path.join(out, `${r.name}.${side}.txt`), r.text);
           s.got[side] = r.png;
           if (!r.ready) s.notReady.push(side);
         }

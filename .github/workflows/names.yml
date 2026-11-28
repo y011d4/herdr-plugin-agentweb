@@ -1,0 +1,67 @@
+name: Names
+
+# A required check: no name from the user's denylist (names that must never be public, kept in the NAMES_DENYLIST
+# secret, never in the repo: scripts/check-names.sh) in what a PR would make public: its tree, its commits (their
+# messages and the lines they add, even ones a later commit takes out again), its branch's name, title and body.
+#
+# `pull_request_target`, unlike ci.yml (see there): it runs main's definition of this file and main's
+# scripts/check-names.sh, so a PR can't change or skip the check, and it gets the secret, fork PRs included. That
+# trigger's danger is running the PR's code with the base repo's secrets and token; this job never does: the PR's
+# commits are fetched as git objects and only read with `git grep` / `git log` (no checkout, no hook, no build), its
+# text goes through env, never into the script, and the token can only read. The log says how many places matched,
+# never where (a path could carry the name): scripts/check-names.sh, run locally, says where.
+#
+# Its ceiling: a PR can't weaken this check, but anyone who can push here can run any workflow of their own; the
+# check is about mistakes, not about someone with push access set on publishing.
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  names:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # main (pull_request_target's default ref), with its history: the PR's base is in it
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check the PR
+        env:
+          DENYLIST: ${{ secrets.NAMES_DENYLIST }}
+          CI: "true" # scripts/check-names.sh then says how many places, never where: the log is public
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          if [[ -z $DENYLIST ]]; then echo "::error::the NAMES_DENYLIST secret isn't set: nothing to check against"; exit 1; fi
+          # the PR's commits, as objects only (a public repo: no token needed)
+          git fetch -q --no-tags origin "+refs/pull/$PR/head:refs/remotes/pr/head"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          t=$RUNNER_TEMP/pr
+          mkdir -p "$t"
+          printf '%s\n' "$TITLE" > "$t/title"
+          printf '%s\n' "$BODY" > "$t/body"
+          printf '%s\n' "$HEAD_REF" > "$t/branch"
+          r=0
+          sh scripts/check-names.sh tree "$HEAD_SHA" || r=1
+          sh scripts/check-names.sh commits "$BASE_SHA..$HEAD_SHA" || r=1
+          sh scripts/check-names.sh text "$t/title" "$t/body" "$t/branch" || r=1
+          if (( r )); then echo "::error::a name from the denylist is in this PR (tree, commits, branch, title or body): scripts/check-names.sh says where, locally"; exit 1; fi
+          echo "no denylisted name in the PR"

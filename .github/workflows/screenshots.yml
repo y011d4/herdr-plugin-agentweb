@@ -16,12 +16,12 @@ name: Screenshots
 # whatever the label. Same machine, same Chrome, same fonts on both sides, so the comparison is the bytes: no
 # threshold, no masks.
 #
-# `pull_request`, never `pull_request_target` (see ci.yml). Three jobs, so that the one running the PR's code and
-# its npm dependencies (render) never holds a token that can write, and the gate holds none either. screens and
-# publish run none of the PR's code: they take only the PNGs the manifest names and check them; publish pushes
-# them to refs/screenshots/pr-<n> (outside refs/heads: not in a clone, not in the branch list; each run replaces
-# the last), points the comment at that commit through raw.githubusercontent.com and takes the label off when
-# screens says so. Dependabot's PRs get the write token through the jobs' `permissions` too.
+# `pull_request`, never `pull_request_target` (see ci.yml). Two jobs, neither holding a token that can write: render
+# runs the PR's code and its npm dependencies; screens runs none of it, takes only the PNGs the manifest names and
+# checks them. Nothing here publishes: screenshots-publish.yml does, after this run, as main defines it (a
+# `workflow_run`), so a PR can't change what is published or skip its check against the names denylist (the names
+# that must never be public: scripts/check-names.sh). render writes each shot's page text next to its PNG for that
+# check, and screens hands its verdict over as the `verdict` artifact.
 #
 # Every PR push runs it, not only those a `paths` filter would match: that filter compares the whole PR with main,
 # so a push taking the PR's last web change back wouldn't run it, and the comment would go on showing the change
@@ -101,7 +101,8 @@ jobs:
           if-no-files-found: error
 
   # The gate (see the header): the PNGs compared again here, not the manifest's word for it, and the bot's comment
-  # for what was shown and approved. Its verdict goes to publish as outputs, then fails this job when it isn't pass.
+  # for what was shown and approved. Its verdict goes to screenshots-publish.yml as the `verdict` artifact, then
+  # fails this job when it isn't pass.
   screens:
     needs: render
     # also when render failed: a job skipped for it would count as passed. A fork's PR (render skipped: nothing of
@@ -111,14 +112,8 @@ jobs:
     timeout-minutes: 5
     permissions:
       pull-requests: read # the comment
-    outputs:
-      verdict: ${{ steps.decide.outputs.verdict }}
-      reason: ${{ steps.decide.outputs.reason }}
-      shown: ${{ steps.decide.outputs.shown }}
-      approved: ${{ steps.decide.outputs.approved }}
-      unlabel: ${{ steps.decide.outputs.unlabel }}
     steps:
-      # no verdict then, so publish leaves the comment as it was
+      # no verdict then, so the comment stays as it was
       - name: Did the shots render?
         if: needs.render.result != 'success'
         env:
@@ -190,11 +185,19 @@ jobs:
           {
             echo "verdict=$verdict"
             echo "reason=$reason"
-            echo "shown=$digest"
-            echo "approved=$approved"
-            echo "unlabel=$unlabel"
           } >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/verdict"
+          jq -n --arg verdict "$verdict" --arg reason "$reason" --arg shown "$digest" --arg approved "$approved" --arg unlabel "$unlabel" \
+            '{$verdict, $reason, $shown, $approved, $unlabel}' > "$RUNNER_TEMP/verdict/verdict.json"
           echo "**screens**: $verdict: $reason" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the verdict
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verdict
+          path: ${{ runner.temp }}/verdict
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Gate
         env:
@@ -203,134 +206,3 @@ jobs:
         run: |
           if [[ $VERDICT != pass ]]; then echo "::error::$REASON"; exit 1; fi
           echo "$REASON"
-
-  publish:
-    needs: screens
-    # whatever the verdict (a failing one is when the comment matters most), but not a cancelled run's (a newer run
-    # has the PR) nor one screens couldn't decide
-    if: ${{ !cancelled() && needs.screens.outputs.verdict != '' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write # refs/screenshots/pr-<n>
-      pull-requests: write # the comment, the label
-    steps:
-      - name: Download the shots
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: shots
-          path: shots
-
-      # Only event context (numbers, a SHA, this repo's name) and screens' verdict reach the script, through env;
-      # the artifact (made by the PR's code) is data: each manifest entry must match a strict pattern, each file
-      # must be a PNG of bounded size, and the comment is built from those checked names only.
-      - name: Publish the changed screens and update the comment
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          VERDICT: ${{ needs.screens.outputs.verdict }}
-          REASON: ${{ needs.screens.outputs.reason }}
-          SHOWN: ${{ needs.screens.outputs.shown }}
-          APPROVED: ${{ needs.screens.outputs.approved }}
-          UNLABEL: ${{ needs.screens.outputs.unlabel }}
-        run: |
-          set -euo pipefail
-          marker='<!-- yoicks-shots'
-          if [[ ! $SHOWN =~ ^([0-9a-f]{16}|-)$ || ! $APPROVED =~ ^([0-9a-f]{16}|-)$ ]]; then echo "bad digest"; exit 1; fi
-          # screens said the label approves other pixels than these: off it comes (a label event by this token starts
-          # no run). Should it fail, the next run sees the label with approved=- and fails again.
-          if [[ -n $UNLABEL ]]; then
-            gh api -X DELETE "repos/$REPO/issues/$PR/labels/ui-change" > /dev/null || echo "could not take the ui-change label off"
-          fi
-          pub="$RUNNER_TEMP/pub"
-          body="$RUNNER_TEMP/body.md"
-          mkdir -p "$pub"
-          cd shots
-          jq -e '(.shots | type) == "array" and (.shots | length) <= 100' manifest.json > /dev/null
-          parts=() screens=() same=() notready=()
-          declare -A px
-          # notReady last: read collapses a tab run, so an empty field anywhere else would shift the rest
-          while IFS=$'\t' read -r n k ch p nr; do
-            if [[ ! $n =~ ^[a-z0-9-]{1,64}$ || ! $k =~ ^(screen|part)$ || ! $ch =~ ^(true|false|null)$ || ! $nr =~ ^(|before|after|before,after)$ \
-              || ! $p =~ ^([0-9]{1,8}|null)$ ]]; then
-              echo "bad manifest entry"; exit 1
-            fi
-            if [[ -n $nr ]]; then notready+=("$n ($nr)"); fi
-            if [[ $ch != true ]]; then same+=("$n"); continue; fi
-            px[$n]=$p
-            for side in before after diff; do
-              f="$n.$side.png"
-              if [[ ! -f $f || -L $f ]]; then continue; fi
-              if [[ $(head -c 8 "$f" | od -An -tx1 | tr -d ' \n') != 89504e470d0a1a0a ]]; then echo "not a PNG: $f"; exit 1; fi
-              if (( $(stat -c %s "$f") > 2000000 )); then echo "too big: $f"; exit 1; fi
-              cp "$f" "$pub/"
-            done
-            if [[ $k == part ]]; then parts+=("$n"); else screens+=("$n"); fi
-          done < <(jq -r '.shots[] | [.name, .kind, (.changed | tostring), (.pixels | tostring), (.notReady | join(","))] | @tsv' manifest.json)
-          changed=("${parts[@]}" "${screens[@]}")
-
-          if (( ${#changed[@]} )); then
-            cd "$pub"
-            git init -q -b shots
-            git add -A
-            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-              commit -qm "screenshots of #$PR at $HEAD_SHA"
-            sha=$(git rev-parse HEAD)
-            auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
-            git -c http.extraheader="AUTHORIZATION: basic $auth" push -qf "https://github.com/$REPO.git" "HEAD:refs/screenshots/pr-$PR"
-          fi
-
-          total=$(( ${#changed[@]} + ${#same[@]} ))
-          {
-            echo "$marker shown=$SHOWN approved=$APPROVED -->"
-            if [[ $VERDICT == pass ]]; then echo "**screens passed**: $REASON."; else echo "**screens failing**: $REASON."; fi
-            echo
-            if (( ${#changed[@]} )); then
-              echo "**UI screenshots**: ${#changed[@]} of $total shots changed: ${#parts[@]} components, ${#screens[@]} screens (${HEAD_SHA:0:7}). Made-up data: \`tools/shots-fixture.ts\`."
-              # a PNG's width (its IHDR), in CSS px: the phone's are shot at 2x
-              pngw() { echo $(( 16#$(od -An -tx1 -j16 -N4 "$1" | tr -d ' \n') )); }
-              show() { # $1 the shot, $2 open or not
-                n=$1
-                if [[ " ${screens[*]} " == *" $n "* ]]; then
-                  w=260; if [[ $n == *-pc ]]; then w=440; fi
-                else # a component at its own size (both sides' wider), at most half the comment
-                  w=$(pngw "$pub/$n.after.png"); b=$(pngw "$pub/$n.before.png"); if (( b > w )); then w=$b; fi
-                  if [[ $n == *-phone ]]; then w=$(( w / 2 )); fi
-                  if (( w > 440 )); then w=440; fi
-                fi
-                cell() { if [[ -f $pub/$n.$1.png ]]; then echo "<img src=\"https://raw.githubusercontent.com/$REPO/$sha/$n.$1.png\" width=\"$w\">"; else echo "(none)"; fi; }
-                # the diff under the pair, not beside it: three PC shots don't fit the comment's width
-                printf '\n<details%s><summary><code>%s</code>: %s px differ</summary>\n\n| before | after |\n| --- | --- |\n| %s | %s |\n\nWhere they differ (magenta):<br>%s\n\n</details>\n' \
-                  "$2" "$n" "${px[$n]}" "$(cell before)" "$(cell after)" "$(cell diff)"
-              }
-              if (( ${#parts[@]} )); then
-                printf '\n#### Components\n'
-                for n in "${parts[@]}"; do show "$n" ' open'; done
-              fi
-              # the screens show how the components sit together; mostly a repeat once a component changed: closed then
-              if (( ${#screens[@]} )); then
-                printf '\n#### Screens\n'
-                o=' open'; if (( ${#parts[@]} )); then o=''; fi
-                for n in "${screens[@]}"; do show "$n" "$o"; done
-              fi
-            elif (( total )); then
-              echo "**UI screenshots**: no screen changed ($total shots, ${HEAD_SHA:0:7})."
-            else
-              echo "**UI screenshots**: the PR no longer changes the web UI (${HEAD_SHA:0:7})."
-            fi
-            if (( ${#notready[@]} )); then printf '\nNot ready within 10 s (shot anyway): %s\n' "${notready[*]}"; fi
-            if (( ${#same[@]} )); then printf '\n<details><summary>Unchanged (%s)</summary>\n\n%s\n\n</details>\n' "${#same[@]}" "${same[*]}"; fi
-          } > "$body"
-          cat "$body" >> "$GITHUB_STEP_SUMMARY"
-
-          # one comment per PR: updated in place; none is made just to say that nothing changed and all is well
-          ids=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
-            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id")
-          id=${ids%%$'\n'*}
-          if [[ -n $id ]]; then
-            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$body" > /dev/null
-          elif (( ${#changed[@]} )) || [[ $VERDICT != pass ]]; then
-            gh api "repos/$REPO/issues/$PR/comments" -F "body=@$body" > /dev/null
-          fi

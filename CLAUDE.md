@@ -685,6 +685,9 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   web build and the PR's (`node tools/webcheck.ts shots`) and posts the screens whose pixels changed,
   before | after and where they differ (the after dimmed, the changed pixels magenta, with their count; Chrome
   decodes and compares the PNGs), in one comment it updates (images in `refs/screenshots/pr-<n>`, outside the branches).
+  `screenshots.yml` only renders and gates, with no token that can write; `screenshots-publish.yml` (a `workflow_run`,
+  so always main's definition) publishes, and refuses (the comment then says only that) when a shot's page text (render
+  writes it next to each PNG), the manifest, the PR's tree or the comment has a name from the names denylist (below).
   No herdr, no bridge: a stand-in serves `tools/shots-fixture.ts` (made-up data, typed as the web's
   `State`, so `npm run check:contract` fails when it goes stale; the shots are public, so never real
   data in it). One full screen per kind of screen, plus the components cut out of them (a scene's `parts`: an
@@ -711,6 +714,16 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   user's GitHub account, so GitHub can't tell them apart, and this rule is the only thing keeping the approval
   the user's. A failing `screens` check over intended changes is reported to the user, not worked around (no edit
   to the fixture, a scene or the workflow to make it pass).
+- **Names that must never be public** (the user's work names: Homes, organisations, repositories; this repo is
+  public). They are on a denylist that is never in the repo: `~/.config/herdr-yoicks/denylist` locally, the
+  `NAMES_DENYLIST` secret in CI (one case-insensitive extended regex per line; keep the two in step).
+  `scripts/check-names.sh` checks against it: the `Names` check (`names.yml`, required: a `pull_request_target` that
+  runs main's script over the PR's tree, commits, branch, title and body as data, never its code), the screenshots'
+  publishing (above), and the git hooks `sh scripts/check-names.sh install` puts in a clone (pre-commit, commit-msg,
+  pre-push; all its worktrees). Never write such a name in the tree, a commit, a PR, a comment or a fixture, even one
+  seen in production data or a herdr pane: use a neutral one (`personal`, `work`, `side`, `o/r`). A hit is reported
+  to the user, never worked around (no edit to the denylist, the check or its workflow to pass), and the log names no
+  place where it matched (a path could carry the name): the script, run locally, says where.
 - Docs: the user-facing docs are `site/docs/en/` and `site/docs/ja/`, the same pages in both languages (a page in
   one only fails the build); a behavior change updates the page in both, in the same PR. The READMEs still carry the
   same text until they are cut down to a pointer to the site: change them too until then.

@@ -1,0 +1,202 @@
+name: Screenshots publish
+
+# Publishes what a Screenshots run (screenshots.yml) shot on a PR: pushes the changed shots to refs/screenshots/pr-<n>
+# (outside refs/heads: not in a clone, not in the branch list; each run replaces the last), points the PR's one bot
+# comment at that commit through raw.githubusercontent.com and takes the ui-change label off when the run's screens
+# job says so (see screenshots.yml's header for the gate and its approval).
+#
+# A `workflow_run`: GitHub runs main's definition of this file, never a PR's, so no PR can change what gets published
+# or skip the check before it. Nothing is published that has a name from the names denylist (the names that must
+# never be public, in the NAMES_DENYLIST secret, never in the repo: scripts/check-names.sh, main's copy): not in the
+# text of any page shot (render writes it next to each PNG; a PNG without its text isn't published), the manifest,
+# the verdict, the PR's tree, nor the comment itself. Then the comment says only that nothing was published, and
+# this job fails. The artifacts are the PR's code's output, so they are data: each manifest entry must match a strict
+# pattern, each file must be a PNG of bounded size, the verdict's fields theirs, and the comment is built from those
+# checked values only. The PR's number and head come from the event (GitHub's word), and a run for a head the PR has
+# since moved on from publishes nothing: the newer run does.
+on:
+  workflow_run:
+    workflows: [Screenshots]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # a PR's run from this repo (a fork's shoots nothing), not a cancelled one (a newer run has the PR)
+    if: >-
+      github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled'
+      && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read # the run's artifacts
+      contents: write # refs/screenshots/pr-<n>
+      pull-requests: write # the comment, the label
+    steps:
+      # main: scripts/check-names.sh is main's, as this file is
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # outside the checkout: nothing of the artifacts can land on main's files
+      - name: Download the run's shots and verdict
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/in
+
+      - name: Check the names, publish the changed shots and update the comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          PRS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
+          DENYLIST: ${{ secrets.NAMES_DENYLIST }}
+          CI: "true" # scripts/check-names.sh then says how many places, never where: the log is public
+        run: |
+          set -euo pipefail
+          marker='<!-- yoicks-shots'
+          in=$RUNNER_TEMP/in
+          check=$PWD/scripts/check-names.sh
+          if [[ ! -f $in/verdict/verdict.json ]]; then echo "no verdict (the shots didn't render): the comment stays as it was"; exit 0; fi
+
+          PR=$(jq -r --arg sha "$HEAD_SHA" '[.[] | select(.base.ref == "main" and .head.sha == $sha) | .number] | if length == 1 then .[0] else empty end' <<< "$PRS")
+          if [[ ! $PR =~ ^[0-9]{1,8}$ ]]; then echo "no single PR into main at $HEAD_SHA: nothing to publish"; exit 0; fi
+          cur=$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)
+          if [[ $cur != "$HEAD_SHA" ]]; then echo "#$PR is at $cur now: its own run publishes"; exit 0; fi
+
+          # one comment per PR: updated in place
+          comment() {
+            ids=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+              --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id")
+            id=${ids%%$'\n'*}
+            if [[ -n $id ]]; then gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$1" > /dev/null
+            elif [[ $2 == new ]]; then gh api "repos/$REPO/issues/$PR/comments" -F "body=@$1" > /dev/null; fi
+          }
+          # nothing published, and the comment says only that (shown=-: no label can approve what nobody saw)
+          refuse() {
+            printf '%s shown=- approved=- -->\n**UI screenshots**: not published (%s): %s.\n' "$marker" "${HEAD_SHA:0:7}" "$1" > "$RUNNER_TEMP/refused.md"
+            comment "$RUNNER_TEMP/refused.md" new
+            echo "::error::not published: $1"
+            exit 1
+          }
+          if [[ -z $DENYLIST ]]; then refuse "the NAMES_DENYLIST secret isn't set, so the names couldn't be checked"; fi
+          names() { refuse "a name from the names denylist is in $1 (scripts/check-names.sh, run locally, says where)"; }
+
+          v=$in/verdict/verdict.json
+          VERDICT=$(jq -r .verdict "$v") REASON=$(jq -r .reason "$v") SHOWN=$(jq -r .shown "$v") APPROVED=$(jq -r .approved "$v") UNLABEL=$(jq -r .unlabel "$v")
+          # the reason goes into the comment: one line of plain words, no markup
+          plain="^[A-Za-z0-9 .,:;'/()_+=-]{1,400}\$"
+          if [[ ! $VERDICT =~ ^(pass|fail)$ || ! $SHOWN =~ ^([0-9a-f]{16}|-)$ || ! $APPROVED =~ ^([0-9a-f]{16}|-)$ || ! $UNLABEL =~ ^1?$ \
+            || ! $REASON =~ $plain ]]; then echo "bad verdict"; exit 1; fi
+
+          # the PR's tree (its objects only: nothing of it runs), then every shot's text, the manifest and the verdict
+          git fetch -q --no-tags --depth=1 origin "+refs/pull/$PR/head:refs/remotes/pr/head"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          sh "$check" tree "$HEAD_SHA" || names "the PR's tree"
+          cd "$in/shots"
+          shopt -s nullglob
+          texts=(*.txt)
+          sh "$check" text manifest.json "$v" "${texts[@]}" || names "the shots' text"
+
+          # screens said the label approves other pixels than these: off it comes (a label event by this token starts
+          # no run). Should it fail, the next run sees the label with approved=- and fails again.
+          if [[ -n $UNLABEL ]]; then
+            gh api -X DELETE "repos/$REPO/issues/$PR/labels/ui-change" > /dev/null || echo "could not take the ui-change label off"
+          fi
+          pub="$RUNNER_TEMP/pub"
+          body="$RUNNER_TEMP/body.md"
+          mkdir -p "$pub"
+          jq -e '(.shots | type) == "array" and (.shots | length) <= 100' manifest.json > /dev/null
+          parts=() screens=() same=() notready=()
+          declare -A px
+          # notReady last: read collapses a tab run, so an empty field anywhere else would shift the rest
+          while IFS=$'\t' read -r n k ch p nr; do
+            if [[ ! $n =~ ^[a-z0-9-]{1,64}$ || ! $k =~ ^(screen|part)$ || ! $ch =~ ^(true|false|null)$ || ! $nr =~ ^(|before|after|before,after)$ \
+              || ! $p =~ ^([0-9]{1,8}|null)$ ]]; then
+              echo "bad manifest entry"; exit 1
+            fi
+            if [[ -n $nr ]]; then notready+=("$n ($nr)"); fi
+            if [[ $ch != true ]]; then same+=("$n"); continue; fi
+            px[$n]=$p
+            for side in before after diff; do
+              f="$n.$side.png"
+              if [[ ! -f $f || -L $f ]]; then continue; fi
+              if [[ $(head -c 8 "$f" | od -An -tx1 | tr -d ' \n') != 89504e470d0a1a0a ]]; then echo "not a PNG: $f"; exit 1; fi
+              if (( $(stat -c %s "$f") > 2000000 )); then echo "too big: $f"; exit 1; fi
+              # a side's page text was checked above; the diff is made of the two sides
+              if [[ $side != diff && ( ! -f $n.$side.txt || -L $n.$side.txt ) ]]; then refuse "the shot $f has no page text to check"; fi
+              cp "$f" "$pub/"
+            done
+            if [[ $k == part ]]; then parts+=("$n"); else screens+=("$n"); fi
+          done < <(jq -r '.shots[] | [.name, .kind, (.changed | tostring), (.pixels | tostring), (.notReady | join(","))] | @tsv' manifest.json)
+          changed=("${parts[@]}" "${screens[@]}")
+
+          # the commit first (its SHA goes into the comment), pushed once the comment is checked too
+          sha=
+          if (( ${#changed[@]} )); then
+            cd "$pub"
+            git init -q -b shots
+            git add -A
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -qm "screenshots of #$PR at $HEAD_SHA"
+            sha=$(git rev-parse HEAD)
+          fi
+
+          total=$(( ${#changed[@]} + ${#same[@]} ))
+          {
+            echo "$marker shown=$SHOWN approved=$APPROVED -->"
+            if [[ $VERDICT == pass ]]; then echo "**screens passed**: $REASON."; else echo "**screens failing**: $REASON."; fi
+            echo
+            if (( ${#changed[@]} )); then
+              echo "**UI screenshots**: ${#changed[@]} of $total shots changed: ${#parts[@]} components, ${#screens[@]} screens (${HEAD_SHA:0:7}). Made-up data: \`tools/shots-fixture.ts\`."
+              # a PNG's width (its IHDR), in CSS px: the phone's are shot at 2x
+              pngw() { echo $(( 16#$(od -An -tx1 -j16 -N4 "$1" | tr -d ' \n') )); }
+              show() { # $1 the shot, $2 open or not
+                n=$1
+                if [[ " ${screens[*]} " == *" $n "* ]]; then
+                  w=260; if [[ $n == *-pc ]]; then w=440; fi
+                else # a component at its own size (both sides' wider), at most half the comment
+                  w=$(pngw "$pub/$n.after.png"); b=$(pngw "$pub/$n.before.png"); if (( b > w )); then w=$b; fi
+                  if [[ $n == *-phone ]]; then w=$(( w / 2 )); fi
+                  if (( w > 440 )); then w=440; fi
+                fi
+                cell() { if [[ -f $pub/$n.$1.png ]]; then echo "<img src=\"https://raw.githubusercontent.com/$REPO/$sha/$n.$1.png\" width=\"$w\">"; else echo "(none)"; fi; }
+                # the diff under the pair, not beside it: three PC shots don't fit the comment's width
+                printf '\n<details%s><summary><code>%s</code>: %s px differ</summary>\n\n| before | after |\n| --- | --- |\n| %s | %s |\n\nWhere they differ (magenta):<br>%s\n\n</details>\n' \
+                  "$2" "$n" "${px[$n]}" "$(cell before)" "$(cell after)" "$(cell diff)"
+              }
+              if (( ${#parts[@]} )); then
+                printf '\n#### Components\n'
+                for n in "${parts[@]}"; do show "$n" ' open'; done
+              fi
+              # the screens show how the components sit together; mostly a repeat once a component changed: closed then
+              if (( ${#screens[@]} )); then
+                printf '\n#### Screens\n'
+                o=' open'; if (( ${#parts[@]} )); then o=''; fi
+                for n in "${screens[@]}"; do show "$n" "$o"; done
+              fi
+            elif (( total )); then
+              echo "**UI screenshots**: no screen changed ($total shots, ${HEAD_SHA:0:7})."
+            else
+              echo "**UI screenshots**: the PR no longer changes the web UI (${HEAD_SHA:0:7})."
+            fi
+            if (( ${#notready[@]} )); then printf '\nNot ready within 10 s (shot anyway): %s\n' "${notready[*]}"; fi
+            if (( ${#same[@]} )); then printf '\n<details><summary>Unchanged (%s)</summary>\n\n%s\n\n</details>\n' "${#same[@]}" "${same[*]}"; fi
+          } > "$body"
+          sh "$check" text "$body" || names "the comment"
+          cat "$body" >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ -n $sha ]]; then
+            auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+            git -C "$pub" -c http.extraheader="AUTHORIZATION: basic $auth" push -qf "https://github.com/$REPO.git" "HEAD:refs/screenshots/pr-$PR"
+          fi
+          # none is made just to say that nothing changed and all is well
+          if (( ${#changed[@]} )) || [[ $VERDICT != pass ]]; then comment "$body" new; else comment "$body" update; fi
