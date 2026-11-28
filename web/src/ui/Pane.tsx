@@ -408,6 +408,7 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
   const attach = async (files: File[]): Promise<void> => {
     const picked = files.filter((f) => f.type.startsWith('image/'));
     if (!picked.length) return;
+    const forDraft = !chatNow.current;
     let added: ImageAttachment[];
     setPreparing((n) => n + 1);
     try {
@@ -417,6 +418,10 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
       return;
     } finally {
       setPreparing((n) => n - 1);
+    }
+    if (forDraft && chatNow.current) { // picked for the draft, read once Chat about this opened: the draft's
+      draftImages.current = fitImages(draftImages.current, added);
+      return;
     }
     const next = fitImages(shown.current, added);
     if (next.length < shown.current.length + added.length) showToast('Not every image was added', `At most ${MAX_IMAGES}, 1 MB in all, per message`);
@@ -466,8 +471,8 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
       if (sent.length) setImages((cur) => cur.filter((i) => !sent.includes(i))); // and images added mid-send
       paneView?.echo();
     } catch (err) {
-      if (about) { // still in the field; the draft with it, if the question went meanwhile
-        if (!chatNow.current) backToDraft(t, t.value);
+      if (about) { // still in the field; the draft with it, if the question (or the Home) went meanwhile
+        if (!chatNow.current || !t.isConnected) backToDraft(t, t.value);
         showToast('Send failed', (err as Error).message);
         return;
       }

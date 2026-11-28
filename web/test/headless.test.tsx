@@ -313,7 +313,7 @@ describe("a headless orchestrator's Home", () => {
       assert.deepEqual([input().disabled, input().value, $<HTMLButtonElement>('#btn-send-enter').disabled], [true, 'and run the tests', true]);
       assert.equal($('#composer-locked').textContent!.trim(), 'Answer the question above, or press Chat about this to write about it.');
       await fire(() => setAppState(withPilot(idle))); // answered
-      assert.equal(container.querySelector('#composer-locked'), null);
+      assert.ok(container.querySelector('#composer-locked') === null, 'unlocked');
       await enter();
       assert.deepEqual(posts('send'), [{ text: 'and run the tests' }]);
     });
@@ -375,14 +375,38 @@ describe("a headless orchestrator's Home", () => {
       assert.equal(thumbs(), 1, "the draft's image back, the sent one gone");
     });
 
-    it('keeps unsent text about the question with the draft when the Home is left', async () => {
+    it('keeps unsent text about the question with the draft when the Home is left, or its send fails once it is', async () => {
       setDraft(key, 'my draft');
       await home(withPilot());
       await fire(() => $('#headless-prompt-chat').click());
       await type(input(), 'half written');
       await unmount();
-      unmount = async () => {};
       assert.equal(getDraft(key), 'my draft\n\nhalf written');
+      setDraft(key, 'my draft');
+      await home(withPilot());
+      await fire(() => $('#headless-prompt-chat').click());
+      await type(input(), 'on its way');
+      await fire(() => $('#btn-send-enter').click());
+      await unmount();
+      unmount = async () => {};
+      await answer('POST /api/orchestrators/pilot/send', { error: { code: 'x', message: 'down' } }, 500);
+      assert.equal(getDraft(key), 'my draft\n\non its way');
+    });
+
+    it('gives an image picked for the draft, still read as Chat about this opens, to the draft', async () => {
+      await home(withPilot(idle));
+      let release = () => {};
+      scaled = new Promise((r) => { release = r; });
+      const picker = $<HTMLInputElement>('#input-image-picker');
+      Object.defineProperty(picker, 'files', { configurable: true, value: [new File(['x'], 'a.png', { type: 'image/png' })] });
+      await fire(() => picker.dispatchEvent(new Event('change', { bubbles: true })));
+      await fire(() => setAppState(withPilot()));
+      await fire(() => $('#headless-prompt-chat').click());
+      await act(async () => { release(); await flush(); });
+      scaled = Promise.resolve();
+      assert.ok(container.querySelector('#input-images') === null, 'not in the message about the question');
+      await fire(() => setAppState(withPilot(idle)));
+      assert.equal(container.querySelectorAll('#input-images [aria-label="View image"]').length, 1, "the draft's");
     });
 
     it('the question gone while its Chat about this is on its way: the draft once sent; unsent, the draft and what was written', async () => {
