@@ -93,11 +93,12 @@ jobs:
             sha=$(gh api "repos/$REPO/pulls/$pr" --jq 'select(.state == "open") | .head.sha')
             if [[ -z $sha ]]; then echo "the PR is closed: nothing to do"; exit 0; fi
             echo "sha=$sha" >> "$GITHUB_OUTPUT"
-            # the head's shots now: its latest Screenshots run that finished
-            r=$(gh api "repos/$REPO/actions/workflows/screenshots.yml/runs?head_sha=$sha&status=success&per_page=1" \
-              --jq '.workflow_runs[0] | "\(.id) \(.html_url)"')
-            read -r run url <<< "$r"
-            if [[ ! $run =~ ^[0-9]+$ ]]; then echo "the head isn't shot yet: its run decides"; exit 0; fi
+            # the head's shots now: its latest Screenshots run, if it shot them (one that failed has set the status to
+            # failure; one still going decides when it ends)
+            r=$(gh api "repos/$REPO/actions/workflows/screenshots.yml/runs?head_sha=$sha&per_page=1" \
+              --jq '.workflow_runs[0] | "\(.id) \(.conclusion) \(.html_url)"')
+            read -r run concl url <<< "$r"
+            if [[ ! $run =~ ^[0-9]+$ || $concl != success ]]; then echo "the head's latest Screenshots run didn't shoot it ($concl): nothing to do"; exit 0; fi
           fi
           { echo "pr=$pr"; echo "run=$run"; echo "url=$url"; echo "go=1"; } >> "$GITHUB_OUTPUT"
 
@@ -118,6 +119,7 @@ jobs:
           HEAD_SHA: ${{ steps.pr.outputs.sha }}
           RUN_URL: ${{ steps.pr.outputs.url }}
           TICKED: ${{ github.event.comment.id }} # the comment a tick event is about; empty after a Screenshots run
+          TICK_BODY: ${{ github.event.comment.body }} # as the user left it
         run: |
           set -euo pipefail
           marker='<!-- yoicks-shots'
@@ -172,9 +174,11 @@ jobs:
           approved=${approved:--}
           if [[ -n $TICKED ]]; then
             if [[ $TICKED != "$id" ]]; then echo "not the screenshots comment: nothing to do"; exit 0; fi
-            if grep -qE '^- \[[xX]\] Approve th' <<< "$old"; then
-              # what the comment shows is what is approved, and only if those are the head's shots now
-              if [[ $shown == "$digest" ]]; then approved=$digest; else echo "ticked on an outdated comment: nothing approved"; fi
+            # the comment as the user ticked or unticked it, not as it is now: a publish may have drawn it again since
+            if grep -qE '^- \[[xX]\] Approve th' <<< "$TICK_BODY"; then
+              # what the comment showed is what is approved, and only if those are the head's shots now
+              seen=$(sed -nE '1s/.* shown=([0-9a-f]{16}|-) .*/\1/p' <<< "$TICK_BODY")
+              if [[ $seen == "$digest" ]]; then approved=$digest; else echo "ticked on an outdated comment: nothing approved"; fi
             else
               approved=-
             fi
@@ -186,7 +190,8 @@ jobs:
           if (( ${#notready[@]} )); then
             state=failure reason="not ready on the PR's side within 10 s: ${notready[*]} (a broken screen or component, or its ready/el in tools/shots-fixture.ts)"
           elif (( n == 0 )); then
-            state=success reason="no shot changed"
+            # changes coming back later are new ones
+            state=success approved=- reason="no shot changed"
           elif [[ $digest == "$approved" ]]; then
             state=success reason="the user approved the $n changed shot$s"
           else
