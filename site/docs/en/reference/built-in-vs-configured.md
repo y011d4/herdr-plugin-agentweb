@@ -5,7 +5,7 @@ expect, this page says where it was decided, and so where to change it, or that 
 
 ## Where the files are {#files}
 
-Every file and directory yoicks reads or writes, by location. Each line says who writes it, then
+Every file and directory yoicks reads or writes, by location. Under each entry: who writes it, then
 what it is: **yoicks** (the bridge or a `yoicks` command), **you**, **Claude Code**, or another
 tool. *Rewritten* means yoicks writes it again at each bridge start and each start of that
 orchestrator, so edits there are lost.
@@ -19,12 +19,15 @@ herdr's plugin commands the state dir is `$HERDR_PLUGIN_STATE_DIR` and the confi
 
 ```text
 ~/.config/herdr/
-├── herdr.sock                    herdr: its socket, the bridge's way in
-└── plugins/
-    ├── config/y011d4.yoicks/
-    │   └── config.json           you: the plugin's configuration
-    └── github-installations/y011d4.yoicks-…/
-        └── bin/yoicks            herdr, at install and update: the binary
+├── herdr.sock
+│     herdr: its API socket
+├── plugins/config/y011d4.yoicks/
+│   └── config.json
+│         you: the plugin's config
+└── plugins/github-installations/
+    └── y011d4.yoicks-…/bin/yoicks
+          herdr, at install and
+          update: the binary
 ```
 
 `herdr plugin config-dir y011d4.yoicks` prints the config dir. Restart the bridge after editing
@@ -33,14 +36,24 @@ herdr's plugin commands the state dir is `$HERDR_PLUGIN_STATE_DIR` and the confi
 ### The orchestrators' directories {#orchestrator-dirs}
 
 ```text
-~/.local/share/herdr-yoicks/orchestrators/
-└── <name>/                      one per Home (none configured: default)
-    ├── CLAUDE.md                yoicks, rewritten: loads rules.md, local.md
-    ├── rules.md                 yoicks, rewritten: its mode's bundled rules
-    ├── local.md                 you: your rules for this Home
+~/.local/share/herdr-yoicks/
+└── orchestrators/<name>/
+    │ one per Home (none configured:
+    │ one named default)
+    ├── CLAUDE.md
+    │     yoicks, rewritten: loads
+    │     rules.md, then local.md
+    ├── rules.md
+    │     yoicks, rewritten: the
+    │     bundled rules for its mode
+    ├── local.md
+    │     you: this Home's own rules
     └── .claude/
-        ├── settings.json        yoicks, rewritten: what a TUI one may run
-        └── settings.local.json  you: your additions to that
+        ├── settings.json
+        │     yoicks, rewritten: what
+        │     a TUI one may run
+        └── settings.local.json
+              you: your additions
 ```
 
 yoicks creates `local.md` once, with only a comment in it, and never writes it again. Each
@@ -49,16 +62,29 @@ orchestrator runs in its directory; that is how a TUI one is told from the other
 ### The plugin's state {#state-dir}
 
 ```text
-~/.local/state/herdr/plugins/y011d4.yoicks/
-├── token                       yoicks: the access token
-├── bridge.log                  yoicks: the bridge's log
-├── bridge.pid, bridge-run.pid  yoicks: the running bridge's process ids
-├── pane-profiles.json          yoicks: each agent's launch profile
-├── agent-purposes.json         yoicks: the workers' purpose lines
-├── todos/<name>.json           yoicks: a headless Home's to-do list
-├── headless/<name>.json        yoicks: session, watches, model, usage
-├── headless/<name>.mcp.json    yoicks: its Claude Code's MCP config
-└── canary.json                 claude-canary.sh: the last Claude Code check
+~/.local/state/herdr/plugins/
+└── y011d4.yoicks/
+    ├── token
+    │     yoicks: the access token
+    ├── bridge.log
+    │     yoicks: the bridge's log
+    ├── bridge.pid, bridge-run.pid
+    │     yoicks: the bridge's pids
+    ├── pane-profiles.json
+    │     yoicks: launch profiles
+    ├── agent-purposes.json
+    │     yoicks: workers' purposes
+    ├── todos/<name>.json
+    │     yoicks: a headless Home's
+    │     to-do list
+    ├── headless/<name>.json
+    │     yoicks: a headless Home's
+    │     session, model and usage
+    ├── headless/<name>.mcp.json
+    │     yoicks: its MCP config
+    └── canary.json
+          claude-canary.sh: the last
+          Claude Code check
 ```
 
 None of these is for editing. Deleting `token` rotates it ([Security model](./security)).
@@ -66,14 +92,21 @@ None of these is for editing. Deleting `token` rotates it ([Security model](./se
 ### Claude Code's accounts {#claude-accounts}
 
 ```text
-~/.claude/                      the default account (no CLAUDE_CONFIG_DIR)
-├── settings.json               you: the account's settings
-└── projects/…/<session>.jsonl  Claude Code: transcripts the chat reads
-~/.claude.json                  Claude Code: the default account's login
-~/.config/claude/work/          another account, named by CLAUDE_CONFIG_DIR
-├── settings.json               you
-├── projects/…                  Claude Code
-└── .claude.json                Claude Code
+~/.claude/
+│ the default account (no
+│ CLAUDE_CONFIG_DIR set)
+├── settings.json
+│     you: the account's settings
+└── projects/…/<session>.jsonl
+      Claude Code: transcripts,
+      which the chat reads
+~/.claude.json
+  Claude Code: the default
+  account's login
+~/.config/claude/work/
+  another account (its
+  CLAUDE_CONFIG_DIR): the same
+  files, .claude.json inside
 ```
 
 `work` is only an example: any `CLAUDE_CONFIG_DIR` is an account, and yoicks tells accounts apart
@@ -84,13 +117,23 @@ the account's `settings.json`, the orchestrator directory's two and the managed 
 ### Your repositories {#repositories}
 
 ```text
-~/src/work/                          your repositories (an example dir)
-├── .envrc                           you (direnv): the account below it
-├── <repo>/                          a repository a worker runs in
-│   ├── .claude/settings.json        you: a worker's permissions there
-│   ├── .claude/settings.local.json  you: the same, local to you
-│   └── .git/hooks/                  you: git hooks (yoicks installs none)
-└── <repo>-wt-<branch>/              yoicks, through herdr: a new worktree
+~/src/work/
+│ your repositories (an example)
+├── .envrc
+│     you (direnv): the account for
+│     everything below
+├── <repo>/
+│   │ a repository a worker runs in
+│   ├── .claude/settings.json
+│   │     you: a worker's permissions
+│   ├── .claude/settings.local.json
+│   │     you: the same, local to you
+│   └── .git/hooks/
+│         you: git hooks (yoicks
+│         installs none)
+└── <repo>-wt-<branch>/
+      yoicks, through herdr: a new
+      worktree
 ```
 
 The `.envrc` is for example `export CLAUDE_CONFIG_DIR=$HOME/.config/claude/work`. A new worktree
@@ -101,8 +144,12 @@ but letters, digits, `.`, `_` and `-` becomes `-`.
 
 ```text
 ~/.config/systemd/user/
-├── yoicks-claude-canary.service   claude-canary.sh install: runs the check
-└── yoicks-claude-canary.timer     the same: hourly, once you enable it
+├── yoicks-claude-canary.service
+│     claude-canary.sh install:
+│     runs the check
+└── yoicks-claude-canary.timer
+      the same: hourly, once you
+      enable it
 ```
 
 ### A checkout of yoicks {#checkout}
@@ -111,11 +158,20 @@ Only when you link a checkout as the plugin, or work on yoicks.
 
 ```text
 herdr-yoicks/
-├── bin/yoicks                plugin-build.sh: the binary, built from source
-├── orchestrator/rules.md     yoicks: the bundled rules (in the binary)
-├── scripts/claude-canary.sh  yoicks: the Claude Code check
-├── .claude/settings.json     yoicks: allows sh scripts/redeploy.sh main
-└── .git/hooks/               you: git hooks (the repository ships none)
+├── bin/yoicks
+│     plugin-build.sh: the binary,
+│     built from source
+├── orchestrator/rules.md
+│     yoicks: the bundled rules
+│     (built into the binary)
+├── scripts/claude-canary.sh
+│     yoicks: the Claude Code check
+├── .claude/settings.json
+│     yoicks: allows
+│     sh scripts/redeploy.sh main
+└── .git/hooks/
+      you: git hooks (the repository
+      ships none)
 ```
 
 ## The five sources {#sources}
