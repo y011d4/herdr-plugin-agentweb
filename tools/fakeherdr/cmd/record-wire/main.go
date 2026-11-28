@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"os"
@@ -429,13 +430,24 @@ func (r *recorder) cli(rec *record, extraEnv []string, args ...string) error {
 		return err
 	}
 	defer os.RemoveAll(dir)
+	// the command waits on gate until setsid's parent is reaped: until it exits, the command's
+	// ancestors are still this process's (a run inside Claude Code has a claude among them)
+	gate, release, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	defer release.Close()
 	out, errf, code := filepath.Join(dir, "out"), filepath.Join(dir, "err"), filepath.Join(dir, "code")
-	wrap := `"$@" >"$OUT_" 2>"$ERR_" </dev/null; echo $? >"$CODE_.tmp"; mv "$CODE_.tmp" "$CODE_"`
+	wrap := `read _; "$@" >"$OUT_" 2>"$ERR_" </dev/null; echo $? >"$CODE_.tmp"; mv "$CODE_.tmp" "$CODE_"`
 	cmd := exec.Command("setsid", append([]string{"-f", "sh", "-c", wrap, "sh"}, append(argv, args...)...)...)
 	cmd.Env = append(append(append([]string{}, r.baseEnv...), extraEnv...), "OUT_="+out, "ERR_="+errf, "CODE_="+code)
-	if err := cmd.Run(); err != nil { // returns at once; the command goes on detached
+	cmd.Stdin = gate
+	err = cmd.Run() // returns at once, setsid's parent reaped; the command goes on detached
+	gate.Close()
+	if err != nil {
 		return fmt.Errorf("setsid: %v", err)
 	}
+	release.Close() // EOF on gate: the command runs, reparented by now
 	var exit []byte
 	for end := time.Now().Add(2 * time.Minute); ; time.Sleep(50 * time.Millisecond) {
 		if exit, err = os.ReadFile(code); err == nil || time.Now().After(end) {
@@ -461,23 +473,15 @@ func run() error {
 		func(op string) bool { return op == "ws-watch-pane" },
 		func(op string) bool { return op == "ws-watch-transcript" },
 	}
-	// each listener held until all are picked, so none comes twice (port isn't held: skipped)
-	ports, held := []string{port}, []net.Listener{}
+	ports := []string{port}
 	for len(ports) < len(picks) {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		p, err := pickPort()
 		if err != nil {
-			break
+			return err
 		}
-		held = append(held, ln)
-		if _, p, _ := net.SplitHostPort(ln.Addr().String()); !slices.Contains(ports, p) {
+		if !slices.Contains(ports, p) {
 			ports = append(ports, p)
 		}
-	}
-	for _, ln := range held {
-		ln.Close()
-	}
-	if len(ports) < len(picks) {
-		return fmt.Errorf("no free ports for the WS watches' bridges")
 	}
 	errs := make([]error, len(picks))
 	var wg sync.WaitGroup
@@ -490,6 +494,24 @@ func run() error {
 	}
 	wg.Wait()
 	return errors.Join(errs...)
+}
+
+// pickPort is a free loopback port below the ephemeral range: one from :0 is free only until it
+// is closed, and any connect on this machine may take it as its source port before the bridge
+// binds it. Below the range, only something binding that very port can.
+func pickPort() (string, error) {
+	lo := 32768 // Linux's default ip_local_port_range start
+	if b, err := os.ReadFile("/proc/sys/net/ipv4/ip_local_port_range"); err == nil {
+		fmt.Sscan(string(b), &lo)
+	}
+	for range 100 {
+		p := strconv.Itoa(10000 + rand.IntN(max(lo-10000, 1)))
+		if ln, err := net.Listen("tcp", "127.0.0.1:"+p); err == nil {
+			ln.Close()
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("no free port below the ephemeral range (%d)", lo)
 }
 
 // runGroup records the operations pick takes, through a bridge on port.
