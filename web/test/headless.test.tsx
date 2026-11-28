@@ -403,6 +403,40 @@ describe("a headless orchestrator's Home", () => {
       assert.deepEqual(posts('send'), [{ text: 'this one', images: [{ mediaType: 'image/jpeg', data: 'a.png' }] }]);
     });
 
+    it('keeps the start while another image is still read when one fails; drops it once the last image is removed', async () => {
+      await home(withPilot(idle));
+      const pick = (name: string): Promise<void> => {
+        const picker = $<HTMLInputElement>('#input-image-picker'); // this screen's
+        Object.defineProperty(picker, 'files', { configurable: true, value: [new File(['x'], name, { type: 'image/png' })] });
+        return fire(() => picker.dispatchEvent(new Event('change', { bubbles: true })));
+      };
+      let release = () => {};
+      scaled = new Promise((r) => { release = r; });
+      await pick('a.png'); // still being read…
+      scaled = Promise.reject(new Error('unreadable'));
+      scaled.catch(() => {});
+      await pick('b.png'); // …as this one fails
+      later(200);
+      await fire(() => setAppState(withPilot()));
+      later(1500);
+      await type(input(), 'and this');
+      await act(async () => { release(); await flush(); });
+      scaled = Promise.resolve();
+      await fire(() => $('#btn-send-enter').click());
+      assert.deepEqual(posts('send'), [{ text: 'and this', images: [{ mediaType: 'image/jpeg', data: 'a.png' }] }], 'begun before the question');
+      await answer('POST /api/orchestrators/pilot/send', { ok: true, held: true });
+      await unmount();
+      await home(withPilot(idle));
+      await pick('c.png');
+      await fire(() => $<HTMLButtonElement>('[aria-label="Remove image"]').click()); // the composer empty again
+      later(200);
+      await fire(() => setAppState(withPilot()));
+      later(1500);
+      await type(input(), 'what about c?');
+      await fire(() => $('#btn-send-enter').click());
+      assert.deepEqual(posts('send')[1], { text: 'what about c?', question: '1a2b3c4d' });
+    });
+
     it("forgets an image that couldn't be read: a message begun after it with the question on screen is about it", async () => {
       await home(withPilot(idle));
       scaled = Promise.reject(new Error('unreadable'));

@@ -374,26 +374,34 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
   const shown = useRef(images);
   shown.current = images;
   const sendingImages = useRef(false);
-  const begun = useRef<number | null>(null); // when what it holds was begun (Date.now(); 0: before this screen, a kept draft); null: empty
+  // when what it holds (text, images, images still being read) was begun: Date.now(), 0 for a draft kept
+  // from before this screen; null while it holds nothing. touch() after each change keeps it.
+  const begun = useRef<number | null>(null);
+  const reading = useRef(0); // images picked, still being read
+  const touch = (): void => {
+    begun.current = input.current?.value || shown.current.length || reading.current ? begun.current ?? Date.now() : null;
+  };
+  // the images change in `shown` at once, so the touch() sees them
+  const changeImages = (next: ImageAttachment[]): void => { shown.current = next; setImages(next); touch(); };
   const [preparing, setPreparing] = useState(0); // images being scaled: no send until they are there
   const attach = async (files: File[]): Promise<void> => {
     const picked = files.filter((f) => f.type.startsWith('image/'));
     if (!picked.length) return;
-    begun.current ??= Date.now(); // picked now, whatever scaling takes
-    let added: ImageAttachment[];
+    reading.current++;
+    touch(); // begun as they are picked, however long reading them takes
+    let added: ImageAttachment[] | null = null;
     setPreparing((n) => n + 1);
     try {
       added = await Promise.all(picked.map(toAttachment));
     } catch {
-      if (!input.current?.value && !shown.current.length) begun.current = null; // nothing else begun
       showToast('Image not added', 'This browser could not read it');
-      return;
-    } finally {
-      setPreparing((n) => n - 1);
     }
+    reading.current--;
+    setPreparing((n) => n - 1);
+    if (!added) { touch(); return; }
     const next = fitImages(shown.current, added);
     if (next.length < shown.current.length + added.length) showToast('Not every image was added', `At most ${MAX_IMAGES}, 1 MB in all, per message`);
-    setImages(next);
+    changeImages(next);
   };
   useLayoutEffect(() => {
     const t = input.current!;
@@ -433,13 +441,13 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
       if (t.value === text) { // clear on success, but keep text typed mid-send
         t.value = '';
         autoGrow(t);
-        begun.current = null;
       }
       if (held) { // the chat won't show it until then
         showToast('Your message waits', `${orchestratorLabel(orchestratorOfPane(store.appState, paneId))} reads it once the question is answered. To make it about the question, tap Chat about this.`);
       }
       if (text && getDraft(key) === text) setDraft(key, '');
-      if (sent.length) setImages((cur) => cur.filter((i) => !sent.includes(i))); // and images added mid-send
+      if (sent.length) changeImages(shown.current.filter((i) => !sent.includes(i))); // and images added mid-send
+      touch();
       paneView?.echo();
     } catch (err) {
       // the draft again, unless a newer one is stored (a later send's success left none); a composer
@@ -487,7 +495,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
                   <Image src={src} alt="" h={56} w="auto" maw={96} fit="cover" radius={6} className="border border-(--color-border)" />
                 </UnstyledButton>
                 <CloseButton className="absolute -top-1.5 -right-1.5" size={22} radius="xl" variant="filled" bg="dark.6" c="dark.0"
-                  aria-label="Remove image" onClick={() => setImages((cur) => cur.filter((x) => x !== a))} />
+                  aria-label="Remove image" onClick={() => changeImages(shown.current.filter((x) => x !== a))} />
               </span>
             );
           })}
@@ -504,7 +512,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
         {/* Mantine's look, the composer's own text: 14px (iOS zooms in on focus, as before), at most 120px tall (autoGrow) */}
         <Textarea id="pane-input" ref={input} rows={1} placeholder={placeholder} autoCorrect="off" autoCapitalize="off" spellCheck={false}
           className="flex-1" styles={{ input: { fontSize: 14, lineHeight: 1.4, maxHeight: 120, background: 'var(--color-bg)', paddingTop: 10, paddingBottom: 10 } }}
-          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); setDraft(key, e.currentTarget.value); begun.current = e.currentTarget.value || shown.current.length || preparing ? begun.current ?? Date.now() : null; }} />
+          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); setDraft(key, e.currentTarget.value); touch(); }} />
         <Button id="btn-send-enter" miw={64} px={12} fz={13} disabled={preparing > 0} onClick={() => { void send(); }}>Send</Button>
       </Group>
     </>
