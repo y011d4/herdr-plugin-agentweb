@@ -437,11 +437,17 @@ func (f *fake) reply(ctx context.Context, text string) {
 	content := []any{map[string]any{"type": "text", "text": text}}
 	f.emit(assistant(content))
 	f.record(map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "model": "fake", "content": content}})
-	f.emit(map[string]any{"type": "rate_limit_event", "session_id": f.id, "rate_limit_info": map[string]any{"status": "allowed",
-		"unifiedWindows": map[string]any{"five_hour": map[string]any{"utilization": 0.25, "resetsAt": 1795665000, "status": "allowed"},
-			"seven_day": map[string]any{"utilization": 0.5, "resetsAt": 1795928400, "status": "allowed"}}}})
+	// the windows reset ahead of now (whole minutes, as the real ones): a window past its reset is dropped
+	reset := func(d time.Duration) int64 { return time.Now().Add(d).Truncate(time.Minute).Unix() }
+	limits := func(fiveHour float64) {
+		f.emit(map[string]any{"type": "rate_limit_event", "session_id": f.id, "rate_limit_info": map[string]any{"status": "allowed",
+			"unifiedWindows": map[string]any{"five_hour": map[string]any{"utilization": fiveHour, "resetsAt": reset(2 * time.Hour), "status": "allowed"},
+				"seven_day": map[string]any{"utilization": 0.5, "resetsAt": reset(3 * 24 * time.Hour), "status": "allowed"}}}})
+	}
+	limits(0.25)
 	if text == "echo: replyhold" {
 		<-ctx.Done() // held in the window between a reply and its result until an interrupt (a test's cleanup ends a fake left waiting)
+		limits(0.3)  // a limit's figure moved meanwhile: its event comes as it stops
 	}
 	f.finish(ctx, map[string]any{"type": "result", "subtype": "success", "is_error": false, "terminal_reason": "completed", "result": text,
 		"session_id": f.id, "modelUsage": map[string]any{"fake": map[string]any{"contextWindow": 200000}}})

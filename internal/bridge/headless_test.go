@@ -614,6 +614,72 @@ func TestHeadlessResumesAcrossBridgeRestarts(t *testing.T) {
 	}
 }
 
+// The usage Claude Code reported is saved with the rest (a rate_limit_event comes only once a figure changes,
+// or at a child's first answer), so a bridge's start shows it at once, a restart mid-turn too; Clear keeps the
+// account's limits and drops the old session's context; a limit drops out once its window has reset.
+func TestHeadlessUsageKept(t *testing.T) {
+	state := t.TempDir()
+	b := startHeadless(t, state, nil, nil)
+	b.start(t)
+	b.waitStatus(t, "idle")
+	b.send(t, "replyhold") // its rate_limit_event, then held before its result
+	u := b.waitFor(t, "the limits", func(v OrchestratorView) bool { return v.Headless.Usage != nil && v.Headless.Usage.FiveHour != nil }).Headless.Usage
+	b.srv.shutdownHeadless() // its interrupt: one more reading comes as it stops (5h 0.3)
+
+	same := func(got *HeadlessUsage) bool {
+		return got != nil && got.FiveHour != nil && got.SevenDay != nil && *got.FiveHour == *u.FiveHour && *got.SevenDay == *u.SevenDay && got.At == u.At
+	}
+	b2 := startHeadless(t, state, nil, nil)
+	if v := b2.view(t).Headless; v.Status != "stopped" || v.Usage == nil || v.Usage.FiveHour == nil || v.Usage.FiveHour.Utilization != 0.3 ||
+		v.Usage.At < u.At || v.Usage.ContextPct != nil {
+		t.Fatalf("after a restart mid-turn, before a start: %+v %+v", v, v.Usage)
+	} else {
+		u = v.Usage
+	}
+	b2.srv.startHeadless() // it resumes, is told, and answers: a newer reading, and a result with its context
+	if v := b2.waitStatus(t, "done").Headless; v.Usage == nil || v.Usage.At <= u.At || v.Usage.ContextPct == nil || *v.Usage.ContextPct != 1 {
+		t.Fatalf("done: %+v", v.Usage)
+	} else {
+		u = v.Usage
+	}
+	b2.srv.shutdownHeadless()
+
+	b3 := startHeadless(t, state, nil, nil)
+	if v := b3.view(t).Headless; !same(v.Usage) || v.Usage.ContextPct == nil || *v.Usage.ContextPct != 1 {
+		t.Fatalf("after a restart: %+v", v.Usage)
+	}
+	b3.start(t)
+	b3.waitStatus(t, "idle")
+	// a compaction's context comes with no turn's end: saved at the shutdown, idle as it is
+	if status, body := b3.post(t, "compact", ""); status != 200 {
+		t.Fatalf("compact: %d %s", status, body)
+	}
+	b3.waitFor(t, "the compacted context", func(v OrchestratorView) bool {
+		return v.Headless.Status == "idle" && v.Headless.Usage.ContextPct != nil && *v.Headless.Usage.ContextPct == 0.5
+	})
+	b3.srv.shutdownHeadless()
+
+	b4 := startHeadless(t, state, nil, nil)
+	if v := b4.view(t).Headless; !same(v.Usage) || v.Usage.ContextPct == nil || *v.Usage.ContextPct != 0.5 {
+		t.Fatalf("after a restart past a compaction: %+v", v.Usage)
+	}
+	b4.start(t)
+	b4.waitStatus(t, "idle")
+	if status, body := b4.post(t, "clear", ""); status != 200 {
+		t.Fatalf("clear: %d %s", status, body)
+	}
+	if v := b4.view(t).Headless; !same(v.Usage) || v.Usage.ContextPct != nil {
+		t.Fatalf("after clear: %+v", v.Usage)
+	}
+	if status, body := b4.post(t, "stop", ""); status != 200 {
+		t.Fatalf("stop: %d %s", status, body)
+	}
+	b4.clock.Advance(2 * time.Hour) // the 5h window (2 h ahead in fakeclaude) has reset; the 7d one hasn't
+	if v := b4.view(t).Headless; v.Usage == nil || v.Usage.FiveHour != nil || v.Usage.SevenDay == nil || *v.Usage.SevenDay != *u.SevenDay {
+		t.Fatalf("past the 5h reset: %+v", v.Usage)
+	}
+}
+
 // The model: the models come from the child's initialize answer; a running child switches in place
 // between turns (refused mid-turn), a stopped one starts on it (--model), and the choice is kept
 // across Clear and a bridge restart.

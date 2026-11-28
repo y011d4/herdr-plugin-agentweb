@@ -420,7 +420,7 @@ this boundary is about what each orchestrator, and so each account, sees.
 instead of an agent in a herdr pane (your Claude subscription only: the bridge refuses API-key
 billing). Its Home is then the chat alone: messages go out also while it works, ■ on the
 "doing now" line interrupts it, its questions get an answer panel, and the status bar shows its
-usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable; a tap on it lists when each limit resets: the time left and the clock time), the model it runs on (a pick from
+usage (`5h · 7d · fable · ctx`; fable only while it runs on Fable; a tap on it lists when each limit resets: the time left and the clock time; the limits stay across a bridge restart and a Clear until each resets), the model it runs on (a pick from
 Claude Code's `/model` list switches it between turns, or for its next start) and what went wrong, each with what to do.
 **Compact** in its status bar's **⋮** (with Clear and Stop; between turns; an optional focus says what the summary should keep) runs Claude Code's `/compact` in
 place: the session goes on from the summary, and the "doing now" line says `compacting…`, then `compacted: ctx 64% → 12%`.
