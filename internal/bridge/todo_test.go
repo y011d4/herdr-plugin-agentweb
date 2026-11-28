@@ -175,7 +175,7 @@ func TestTodoStore(t *testing.T) {
 func TestTodoText(t *testing.T) {
 	due := time.Date(2026, 11, 28, 9, 0, 0, 0, tokyo).UnixMilli()
 	items := []TodoItem{{ID: "a1b2c3", Text: "merge PR #108", Agent: new("w-foo"), URL: new("https://github.com/o/r/pull/108"), Due: &due}, {ID: "d4e5f6", Text: "run /login"}}
-	want := "already gone (the user ticked them off): 0a0b0c\nthe user's to-do list (2):\n" +
+	want := "already gone (the user ticked them off or dismissed them): 0a0b0c\nthe user's to-do list (2):\n" +
 		"- a1b2c3: merge PR #108 (agent w-foo, https://github.com/o/r/pull/108, due 2026-11-28 09:00)\n- d4e5f6: run /login"
 	if got := todoText(items, []string{"0a0b0c"}, tokyo); got != want {
 		t.Errorf("%q", got)
@@ -231,7 +231,7 @@ func TestHeadlessTodo(t *testing.T) {
 			t.Errorf("%s: %d", p, status)
 		}
 	}
-	if text, _ := call(map[string]any{"done": []any{ids[0][1]}}); !strings.HasPrefix(text, "already gone (the user ticked them off): "+ids[0][1]+"\n") {
+	if text, _ := call(map[string]any{"done": []any{ids[0][1]}}); !strings.HasPrefix(text, "already gone (the user ticked them off or dismissed them): "+ids[0][1]+"\n") {
 		t.Errorf("%q", text)
 	}
 
@@ -279,9 +279,10 @@ func TestHeadlessTodo(t *testing.T) {
 	}
 }
 
-// The user ticking items off wakes the Home: those ticked off together in one message, one line
-// each; ticked off while it is stopped, never (not at its next start either). The PR watch's
-// removal and the orchestrator's own done wake nothing of this kind.
+// The user ticking items off or dismissing them wakes the Home: those within wakeCoalesce in one
+// message, one line each, a dismissed one's its own (no next step follows it); while it is stopped,
+// never (not at its next start either). The PR watch's removal and the orchestrator's own done
+// wake nothing of this kind; a dismiss that isn't 1 removes nothing.
 func TestHeadlessTodoTickWake(t *testing.T) {
 	b := startHeadless(t, t.TempDir(), nil, nil)
 	b.start(t)
@@ -289,17 +290,19 @@ func TestHeadlessTodoTickWake(t *testing.T) {
 	items, _, err := b.srv.todos.Apply(b.name, []todoAdd{
 		{Text: "add the ui-change label to #157", Agent: "w-vrt", URL: "https://github.com/o/r/pull/157"},
 		{Text: "run /login"}, {Text: "while stopped"}, {Text: "after the start"}, {Text: "done by the orchestrator"},
+		{Text: "merge #158", Agent: "w-vrt", URL: "https://github.com/o/r/pull/158"},
 	}, nil, nowMs())
 	if err != nil {
 		t.Fatal(err)
 	}
-	tick := func(i int) {
+	del := func(i int, query string, want int) {
 		t.Helper()
-		if status, body, _ := b.do(t, "DELETE", "/api/orchestrators/"+b.name+"/todos/"+items[i].ID, b.token, nil); status != 200 {
-			t.Fatalf("%d %s", status, body)
+		if status, body, _ := b.do(t, "DELETE", "/api/orchestrators/"+b.name+"/todos/"+items[i].ID+query, b.token, nil); status != want {
+			t.Fatalf("%s: %d %s", query, status, body)
 		}
 	}
-	const prefix = "[yoicks] to-do done by the user: "
+	tick := func(i int) { t.Helper(); del(i, "", 200) }
+	const prefix, dismissed = "[yoicks] to-do done by the user: ", "[yoicks] to-do dismissed by the user: "
 	// the messages written to the child that carry such a line
 	tickMessages := func() []string {
 		_, stdin := b.runs(t)
@@ -307,7 +310,7 @@ func TestHeadlessTodoTickWake(t *testing.T) {
 		for _, l := range stdin {
 			var m struct{ Message struct{ Content string } }
 			json.Unmarshal([]byte(l), &m)
-			if strings.Contains(m.Message.Content, prefix) {
+			if strings.Contains(m.Message.Content, "[yoicks] to-do ") {
 				out = append(out, m.Message.Content)
 			}
 		}
@@ -324,9 +327,12 @@ func TestHeadlessTodoTickWake(t *testing.T) {
 		return got
 	}
 
+	del(5, "?dismiss=yes", 400)
 	tick(0)
+	del(5, "?dismiss=1", 200)
 	tick(1)
-	want := prefix + "add the ui-change label to #157 (w-vrt, https://github.com/o/r/pull/157)\n" + prefix + "run /login"
+	want := prefix + "add the ui-change label to #157 (w-vrt, https://github.com/o/r/pull/157)\n" +
+		dismissed + "merge #158 (w-vrt, https://github.com/o/r/pull/158)\n" + prefix + "run /login"
 	if got := waitTicks(1); !slices.Equal(got, []string{want}) {
 		t.Errorf("%q", got)
 	}

@@ -78,8 +78,12 @@
   `", "` でつなぎます。自由なテキストも使えます (Claude Code の "Type something.")。`chat` は Claude Code の "Chat about
   this" で、Claude Code の文言で質問を断ります。その文言には、質問とそれまでに出した回答が並びます。その id が
   保留中のものでなければ 409 を返します。
-- `DELETE /api/orchestrators/:name/todos/:id` — その Home のやることリストの項目を済みにします。その項目が無ければ
-  (すでに済みにした、またはその orchestrator が完了にした) 404 になります。
+- `DELETE /api/orchestrators/:name/todos/:id` — その Home のやることリストの項目を済みにします。動いている
+  headless の Home は `[yoicks] to-do done by the user: <text> (<agent>, <url>)` で起こされます (3 秒以内の分は
+  1 通にまとめます。止まっている Home には伝えません)。`?dismiss=1` を付けると、済みにせずに外します (Dismiss)。
+  その行は `[yoicks] to-do dismissed by the user: <text> (<agent>, <url>)` で、orchestrator はそこから次の作業を
+  しません (`dismiss` がほかの値なら 400)。その項目が無ければ (すでに済みにした・外した、またはその orchestrator
+  が完了にした) 404 になります。
 - `DELETE /api/panes/:paneId` — ペインを閉じてエージェントを止めます
 - `POST /api/panes/:paneId/rename` `{"name": "worker-2"}` — ペインで動いているエージェントの名前を変えます
 - `POST /api/agents/:target/clear` — 代わりの新しいエージェントを (同じプロファイルと cwd で) 起動し、

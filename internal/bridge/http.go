@@ -71,7 +71,7 @@ var (
 	paneIDRoute = regexp.MustCompile(`^/api/panes/([^/]+)$`) // DELETE = stop the agent
 	agentRoute  = regexp.MustCompile(`^/api/agents/([^/]+)/(\w+)$`)
 	orchRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/(start|send|answer|interrupt|clear|stop|model|compact)$`)
-	todoRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/todos/([^/]+)$`) // DELETE = the user did it
+	todoRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/todos/([^/]+)$`) // DELETE = the user did it (?dismiss=1: dropped it)
 )
 
 // server is the HTTP + WS server over one herdr client.
@@ -447,12 +447,18 @@ func (s *server) route(w http.ResponseWriter, r *http.Request, pathname string) 
 		return
 	}
 
-	// The user ticked an item of a Home's to-do list off.
+	// The user ticked an item of a Home's to-do list off, or dismissed it (?dismiss=1): removed
+	// without being done, so its orchestrator takes no step from it.
 	if m := todoRoute.FindStringSubmatch(pathname); m != nil && method == "DELETE" {
 		name, ok := decodePathSegment(m[1])
 		id, idOK := decodePathSegment(m[2])
 		if !ok || !idOK || !slices.ContainsFunc(s.cfg.Orchestrators, func(d OrchestratorDef) bool { return d.Name == name }) {
 			jsonError(w, http.StatusNotFound, "not_found", "no such orchestrator")
+			return
+		}
+		dismiss := r.URL.Query().Get("dismiss")
+		if dismiss != "" && dismiss != "1" { // never read as done: that wakes its next step
+			jsonError(w, http.StatusBadRequest, "bad_request", "dismiss: 1 or absent")
 			return
 		}
 		item, err := s.todos.Done(name, id)
@@ -465,7 +471,7 @@ func (s *server) route(w http.ResponseWriter, r *http.Request, pathname string) 
 			return
 		}
 		if h := s.headless[name]; h != nil {
-			h.tickedOff(*item)
+			h.tickedOff(*item, dismiss == "1")
 		}
 		jsonOK(w, okWith(struct{}{}))
 		return

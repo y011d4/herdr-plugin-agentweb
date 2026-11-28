@@ -193,7 +193,7 @@ All in `internal/bridge/` (one package):
   to-do list, its other agents by urgency, Open the list) has them; then only a headless one's warnings (no bar without
   any). Needs you opens a Mantine Popover (Escape, a tap outside
   and leaving the screen close it; as wide as a phone allows, no taller than the room below it): the blocked agents' chips, its
-  question's line, and its to-do list (`ui/Todos.tsx` over the pure `todos.ts`: a tap on an item opens its menu, Mark done = `DELETE …/todos/:id`, an item due ahead under
+  question's line, and its to-do list (`ui/Todos.tsx` over the pure `todos.ts`: a tap on an item opens its menu, Mark done = `DELETE …/todos/:id`, Dismiss = `…?dismiss=1`, an item due ahead under
   Later until its time, a link shown by its host, a worker's name opening its drawer; a stopped Home has them too), dialogue-only chat
   (`conversationItems` hides tools/injected turns, but for questions and worker starts), a "doing now" line (`latestActivity`) and a
   composer (the terminal + quick keys stay one `>_` tap away — the only way to send Esc/Ctrl+C, and
@@ -249,7 +249,8 @@ All in `internal/bridge/` (one package):
   (`todo.go`: one list per orchestrator in `<state>/todos/<name>.json`, kept across Stop, Clear and restarts; an item
   `{id, text, agent, url (http(s) only), due, createdAt}`, sent as state `orchestrators[].todos`; the user ticks one off with
   `DELETE /api/orchestrators/:name/todos/:id`, which wakes a running Home with `[yoicks] to-do done by the user: <text> (<agent>,
-  <url>)` (`tickedOff`: coalesced as a worker's wake-ups; a stopped Home is never told, its next start neither: the user knows, and
+  <url>)`, or dismisses it (`?dismiss=1`: undone, not needed; `[yoicks] to-do dismissed by the user: …`, after which rules.md has it
+  take no next step, take no PR's dismissal for its merge, and not add the item again unless asked; the PR watch only sees what is on the list) (`tickedOff`: coalesced as a worker's wake-ups; a stopped Home is never told, its next start neither: the user knows, and
   the list shows it), unlike the orchestrator's own done or the PR watch's removal; the items come due are reminded once from the bridge's minute tick, in one
   `orchestrator_alert` of kind `todo` per Home (the phone tags notifications by Home), ntfy and `notification.show`; blocked workers and the Home's question are not
   items: the web shows those from the State; with config `pr_watch`, `prwatch.go` looks up the github.com PR links on

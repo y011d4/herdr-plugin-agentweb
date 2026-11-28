@@ -100,17 +100,17 @@ describe('Todos', () => {
     assert.equal(menu(), null);
   });
 
-  it('a tap on an item opens its menu: Mark done, and Ask the orchestrator where the Home has a composer, off while its question is open', async () => {
+  it('a tap on an item opens its menu: Mark done, Ask the orchestrator where the Home has a composer (off while its question is open), Dismiss', async () => {
     const o = home([item('a1b2c3', 'merge it')]);
     await show(o);
     assert.equal(menu(), null);
     await fire(() => row('a1b2c3').click());
-    assert.deepEqual(items(), ['Mark done']);
+    assert.deepEqual(items(), ['Mark done', 'DismissNot needed: no follow-up']);
     await unmount();
     let asked = 0;
     ({ container, unmount } = await render(<Todos o={o} now={NOW} ask={() => { asked++; }} />));
     await fire(() => row('a1b2c3').click());
-    assert.deepEqual(items(), ['Mark done', 'Ask the orchestrator']);
+    assert.deepEqual(items(), ['Mark done', 'Ask the orchestrator', 'DismissNot needed: no follow-up']);
     await fire(() => menu()!.querySelector<HTMLElement>('[data-action="todo-ask"]')!.click());
     assert.equal(asked, 1);
     assert.equal(menu(), null, 'closed by it');
@@ -156,6 +156,22 @@ describe('Todos', () => {
     await tick('d4e5f6');
     await fire(() => reqs[1].answer(500, { error: { code: 'error', message: 'could not save the to-do list: disk full' } }));
     assert.deepEqual(getToasts().map((t) => `${t.title}: ${t.body}`), ['Could not tick it off: could not save the to-do list: disk full']);
+    assert.equal(row('d4e5f6').hasAttribute('aria-busy'), false, 'tappable again');
+  });
+
+  it('✕ dismisses it: the same DELETE with ?dismiss=1, never read as done; a failure says so', async () => {
+    await show(home([item('a1b2c3', 'merge it'), item('d4e5f6', 'log in')]));
+    const dismiss = async (id: string): Promise<void> => {
+      await fire(() => row(id).click());
+      await fire(() => menu()!.querySelector<HTMLElement>('[data-action="todo-dismiss"]')!.click());
+    };
+    await dismiss('a1b2c3');
+    assert.deepEqual(reqs.map((r) => `${r.method} ${r.url}`), ['DELETE /api/orchestrators/personal/todos/a1b2c3?dismiss=1']);
+    assert.equal(row('a1b2c3').getAttribute('aria-busy'), 'true', 'busy until the State drops it');
+    await fire(() => reqs[0].answer(200, { ok: true }));
+    await dismiss('d4e5f6');
+    await fire(() => reqs[1].answer(500, { error: { code: 'error', message: 'could not save the to-do list: disk full' } }));
+    assert.deepEqual(getToasts().map((t) => `${t.title}: ${t.body}`), ['Could not dismiss it: could not save the to-do list: disk full']);
     assert.equal(row('d4e5f6').hasAttribute('aria-busy'), false, 'tappable again');
   });
 

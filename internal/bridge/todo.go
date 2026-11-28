@@ -2,7 +2,7 @@ package bridge
 
 // The user's to-do list, one per Home: what only the user can do and nothing else shows (merge a
 // PR, a login, a step on the PC, a later cleanup). Its orchestrator writes it (the headless child's
-// `todo` tool, mcp.go); the user ticks items off (DELETE /api/orchestrators/:name/todos/:id). Kept in
+// `todo` tool, mcp.go); the user ticks items off or dismisses them (DELETE /api/orchestrators/:name/todos/:id). Kept in
 // <state>/todos/<name>.json, apart from the session: Stop, Clear and a bridge restart keep it. A
 // blocked worker and the Home's own question are not items: the web shows those from the State.
 
@@ -284,7 +284,7 @@ func (s *todoStore) save(name string, list []todoEntry) error {
 func todoText(items []TodoItem, gone []string, loc *time.Location) string {
 	var b strings.Builder
 	if len(gone) > 0 {
-		fmt.Fprintf(&b, "already gone (the user ticked them off): %s\n", strings.Join(gone, ", "))
+		fmt.Fprintf(&b, "already gone (the user ticked them off or dismissed them): %s\n", strings.Join(gone, ", "))
 	}
 	if len(items) == 0 {
 		b.WriteString("the user's to-do list is empty")

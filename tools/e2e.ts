@@ -506,7 +506,7 @@ class Page {
     const u = new URL(p.request.url);
     try {
       const id = u.pathname.match(/^\/api\/(?:panes|agents)\/([^/]+)/)?.[1];
-      if (p.request.method !== 'GET' && !/^\/api\/orchestrators\/(?:wc-o[12]\/start|wc-h[12]\/(?:start|send|answer|interrupt|clear|stop))$/.test(u.pathname)) {
+      if (p.request.method !== 'GET' && !/^\/api\/orchestrators\/(?:wc-o[12]\/start|wc-h[12]\/(?:start|send|answer|interrupt|clear|stop|todos\/[0-9a-f]{6}))$/.test(u.pathname)) {
         if (!id) throw new Error(`REFUSED ${p.request.method} ${u.pathname}`);
         guard(this.c.rec, decodeURIComponent(id));
       }
@@ -1810,7 +1810,7 @@ async function p20(c: Ctx) {
       "28px clear of a faded edge, and data-fade = the edges with more past them, each within 3s; three or more Homes overflow it");
 }
 
-// ── the headless orchestrators: wc-h1 on the fake claude (H1-H8), the real wc-h2 (H-T2) ──
+// ── the headless orchestrators: wc-h1 on the fake claude (H1-H9), the real wc-h2 (H-T2) ──
 
 const hlView = async (c: Ctx, name: string): Promise<any> => (await api(c, 'GET', '/api/state')).orchestrators.find((o: any) => o.name === name);
 const hlStatus = async (c: Ctx, name: string): Promise<string | undefined> => (await hlView(c, name))?.headless?.status;
@@ -1964,6 +1964,54 @@ async function h8(c: Ctx) {
   }
   result(c, !warn.timeout && !steps.timeout && !closed.timeout, 'H8', `warning=${ms(warn)},steps=${ms(steps)},closed=${ms(closed)}`,
     "'garbage 3': a stream_broken warning line within 5s; its 'Back to TUI' shows the steps naming wc-h1 in a dialog, which Close closes");
+}
+
+/** H9: the to-do menu on a phone: Dismiss and Mark done each send their own DELETE (?dismiss=1 only for Dismiss), the
+ *  item leaves the list, and wc-h1 is woken with a line of its own for each: dismissed (no next step) or done. Its two
+ *  items are written into its list while the preview is stopped: its orchestrator has no todo tool here. */
+async function h9(c: Ctx) {
+  const { pg } = c;
+  if (!c.preview) throw env('no preview record: H9 restarts the preview to give wc-h1 two to-do items');
+  const tag = `wc-h9-${Date.now() % 100000}`;
+  const ids = ['e2e901', 'e2e902'];
+  const todo = (id: string, text: string) => ({ id, text: `${tag} ${text}`, agent: null, url: null, due: null, createdAt: Date.now() });
+  await previewCtl(c.preview, 'stop');
+  const file = path.join(previewDir(c.preview.port), 'state', 'todos', 'wc-h1.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, js([todo(ids[0], 'not needed'), todo(ids[1], 'did it')]), { mode: 0o600 });
+  await previewCtl(c.preview, 'start');
+  try {
+    await hlHome(c, 'wc-h1');
+    const mark = await hlMark(c, 'wc-h1');
+    const needs = `document.querySelector('#home-status [data-action="needs"]')`;
+    const listed = await pg.until(`${needs}?.textContent.startsWith('Needs you · 2') && document.getElementById('conn-dot').classList.contains('connected')`, 20_000, 300);
+    const pick = async (id: string, action: string): Promise<number> => {
+      if (!(await pg.ev(`!!document.querySelector('[data-needs-list]')`))) await pg.tapEl(needs);
+      const row = `document.querySelector('[data-needs-list] [data-todo="${id}"]')`;
+      if ((await pg.until(`!!${row}`, 3000)).timeout) throw env(`no to-do ${id} in the Needs you popover`);
+      await pg.tapEl(row);
+      const opt = `document.querySelector('[data-todo-menu="${id}"] [data-action="${action}"]')`;
+      if ((await pg.until(`!!${opt}`, 2000)).timeout) throw env(`no ${action} in ${id}'s menu`);
+      return pg.tapEl(opt);
+    };
+    const t0 = await pick(ids[0], 'todo-dismiss');
+    const del = (id: string) => pg.reqs.filter((q) => q.t >= t0 - 1000 && q.method === 'DELETE' && new URL(q.url).pathname.endsWith(`/todos/${id}`)).map((q) => new URL(q.url).search);
+    const gone0 = await waitFn(async () => !(await hlView(c, 'wc-h1'))?.todos?.some((t: any) => t.id === ids[0]), 3000, 100);
+    await pick(ids[1], 'todo-done');
+    const gone1 = await waitFn(async () => !(await hlView(c, 'wc-h1'))?.todos?.length, 3000, 100);
+    const said = (line: string) => async () => (await hlItemsSince(c, 'wc-h1', mark)).some((i: any) => i.text?.includes(line));
+    const dismissed = await waitFn(said(`[yoicks] to-do dismissed by the user: ${tag} not needed`), 10_000, 300);
+    const done = await waitFn(said(`[yoicks] to-do done by the user: ${tag} did it`), 10_000, 300);
+    const wrong = await said(`[yoicks] to-do done by the user: ${tag} not needed`)();
+    const q0 = del(ids[0]).join(), q1 = del(ids[1]).join();
+    result(c, !listed.timeout && q0 === '?dismiss=1' && q1 === '' && !gone0.timeout && !gone1.timeout && !dismissed.timeout && !done.timeout && !wrong, 'H9',
+      `listed=${ms(listed)},dismiss=${q0 || 'none'},done=${q1 === '' ? 'plain' : q1 || 'none'},gone=${ms(gone0)}/${ms(gone1)},woken=${ms(dismissed)}/${ms(done)},doneForDismissed=${wrong}`,
+      "wc-h1 with two to-do items (written while the preview was stopped): Needs you · 2 within 20s; Dismiss on the first sends DELETE …/todos/<it>?dismiss=1, " +
+        'Mark done on the second a plain DELETE, each off /api/state within 3s; its transcript gets "[yoicks] to-do dismissed by the user: <first>" and ' +
+        '"[yoicks] to-do done by the user: <second>" within 10s, and never a done line for the first');
+  } finally {
+    for (const id of ids) await api(c, 'DELETE', `/api/orchestrators/wc-h1/todos/${id}?dismiss=1`).catch(() => {}); // a failed run's leftovers
+  }
 }
 
 /** H7: the preview restarts: wc-h1 comes back on the same session, its chat still there. */
@@ -2390,6 +2438,7 @@ const ITEMS: Item[] = [
   { id: 'H4', tier: 1, needs: ['hl'], run: h4 },
   { id: 'H5', tier: 1, needs: ['hl'], run: h5 },
   { id: 'H8', tier: 1, needs: ['hl'], run: h8 },
+  { id: 'H9', tier: 1, needs: ['hl'], run: h9 },
   { id: 'H7', tier: 1, needs: ['hl'], run: h7 },
   ...['P2.old', 'P2.upgrade', 'P2.downgrade'].map((id): Item => ({ id, tier: 1, manual: true, run: (c) => p2Round(c, id) })),
   { id: 'P4-T2', tier: 2, needs: ['claude'], run: p4t2 },
