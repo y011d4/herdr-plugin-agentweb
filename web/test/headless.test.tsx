@@ -704,16 +704,21 @@ describe('replying on a Home, and asking about a to-do item', () => {
     const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
     await fire(() => { msg.dispatchEvent(ev); }); // Android's long press
     assert.deepEqual([ev.defaultPrevented, items()], [false, []], "the OS's: selecting words, its own Copy");
-    const tap = (el: Element, held = 0): Promise<void> => fire(() => {
+    // `select`: a selection made between its touchstart and its click (a long press's); else a tap drops any
+    const tap = (el: Element, { held = 0, select = false } = {}): Promise<void> => fire(() => {
       const down = new Event('touchstart', { bubbles: true });
       el.dispatchEvent(down);
-      getSelection()!.removeAllRanges(); // what a tap does to a selection, maybe before its click
+      if (select) getSelection()!.selectAllChildren(msg.querySelector('.chat-md')!);
+      else getSelection()!.removeAllRanges(); // what a tap does to a selection, maybe before its click
       const click = new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 });
       Object.defineProperty(click, 'timeStamp', { value: down.timeStamp + held });
       el.dispatchEvent(click);
     });
-    await tap(msg, 600);
+    await tap(msg, { held: 600 });
     assert.deepEqual(items(), [], 'a held press is no tap');
+    await tap(msg, { select: true });
+    assert.deepEqual(items(), [], 'a press that selected words');
+    getSelection()!.removeAllRanges();
     const link = $('#chat-log .chat-assistant a');
     link.addEventListener('click', (e) => { e.preventDefault(); }); // no navigation in happy-dom (it would fetch the URL)
     await tap(link);
@@ -723,6 +728,13 @@ describe('replying on a Home, and asking about a to-do item', () => {
     assert.deepEqual(items(), [], 'only ends the selection');
     await tap(msg);
     assert.deepEqual(items(), ['reply', 'copy']);
+    const at = document.querySelector<HTMLElement>('#modal-root [role="menu"]')!.style;
+    assert.deepEqual([at.left, Math.abs(parseFloat(at.top) - 30)], ['20px', 8], 'where it was tapped (its offset from the point)');
+    // a tap with it open only closes it (its click-outside, a touchstart on the document)
+    await tap(msg);
+    await act(() => new Promise<void>((r) => { setTimeout(r, 300); })); // past its closing transition
+    assert.deepEqual(items(), [], 'closed, not opened again');
+    await tap(msg);
     await pick('reply');
     assert.equal(getQuote(key), '> Replying to your message: The PR is ready: https://github.com/o/r/pull/7');
   });

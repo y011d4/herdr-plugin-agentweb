@@ -237,19 +237,22 @@ function Repliable({ className, of, text, time, children }: { className: string;
 
 /** A phone's way to a message's menu: a tap opens it where it landed (as Menu.ContextMenu does for a right click),
  *  and the long press is left to the OS. Not a press held past a tap's 500 ms (should a click follow it), nor a tap
- *  that ends a text selection (read at its touchstart too: by its click the browser may have dropped it), nor one
- *  on a link or a button. */
+ *  that ends a text selection or closes a menu (read at its touchstart: by its click the browser may have dropped
+ *  the selection, and the menu's click-outside, on the document, has closed it), nor one on a link or a button. */
 function MenuOnTap({ children }: { children: ReactElement<HTMLAttributes<HTMLDivElement>> }) {
   const menu = useMenuContext();
   // typed for an element, but Floating UI's: a virtual one too, the point Menu.ContextMenu gives it the same way
   const reference = usePopoverContext().reference as (at: object) => void;
-  const start = useRef<{ at: number; selected: boolean } | null>(null);
+  const start = useRef<{ at: number; ending: boolean } | null>(null);
   return cloneElement(children, {
-    onTouchStart: (e) => { start.current = { at: e.timeStamp, selected: selected() }; },
+    onTouchStart: (e) => {
+      children.props.onTouchStart?.(e);
+      start.current = { at: e.timeStamp, ending: selected() || !!document.querySelector('[role="menu"]') };
+    },
     onClick: (e) => {
       const s = start.current;
       start.current = null;
-      if (s?.selected || (s && e.timeStamp - s.at > 500) || selected() || (e.target as Element).closest('a, button')) return;
+      if (s?.ending || (s && e.timeStamp - s.at > 500) || selected() || (e.target as Element).closest('a, button')) return;
       reference({ getBoundingClientRect: () => DOMRect.fromRect({ x: e.clientX, y: e.clientY }), contextElement: e.currentTarget });
       menu.openDropdown();
     },
