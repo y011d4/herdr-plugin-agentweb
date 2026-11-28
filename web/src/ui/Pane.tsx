@@ -355,8 +355,9 @@ function HomeStatus({ name, state, actions, clear = actions?.clear, paneId }:
 // buttons (below sm only the numbers: the words come back with the room). A tap opens the popover under it, as Needs you's
 // does (Todos.tsx's NeedsButton: as wide as a phone allows, no taller than the room below it; Escape, a tap outside, a tap
 // on it again and leaving the screen close it; the focus goes into it and back): its account's agents, blocked first, then
-// working, done and idle (byUrgency), each opening its drawer: a phone's list of them; on a PC a row's ⋮ also asks the
-// orchestrator about it (on a running Home: the popover closes, the focus stays in the composer) or stops it. It holds
+// working, done and idle (byUrgency): a phone's list of them. A tap on a row opens its menu (Dashboard.tsx's AgentRow): Open
+// (on a PC Open in herdr, then Show here), Ask the orchestrator about it (on a running Home: the popover closes, the focus
+// stays in the composer), Stop. It holds
 // still while a finger is down (useHeldState), and keeps its scrollTop when a push reorders the rows (no scroll
 // anchoring: Chrome's would scroll it after the row it anchored on).
 function AgentsButton({ name, s }: { name: string; s: HomeSummary }) {
@@ -375,7 +376,7 @@ function AgentsButton({ name, s }: { name: string; s: HomeSummary }) {
   const ask = o?.paneId && o.agents ? (c: DashboardCard): void => { askAbout(name, c); setAsked(true); setOpened(false); } : undefined;
   return (
     <Popover opened={opened} onChange={setOpened} position="bottom-start" width="min(400px, calc(100vw - 24px))" radius="md" shadow="md"
-      trapFocus returnFocus={!asked} middlewares={{ shift: { padding: 12 }, size: { padding: 12 } }}>
+      trapFocus returnFocus={!asked} middlewares={{ shift: { padding: 12 }, size: { padding: 12 } }} closeOnEscape={false}>
       <Popover.Target>
         <Button {...SMALL} className="home-counts shrink-0 bg-transparent hover:bg-(--color-surface-2)" classNames={{ label: 'gap-x-3' }} size="compact-sm" fz={13} fw={400}
           data-action="agents" title="Agents" aria-label={`Agents: ${s.working} working, ${s.done} done, ${s.idle} idle`}
@@ -385,7 +386,9 @@ function AgentsButton({ name, s }: { name: string; s: HomeSummary }) {
           <span data-count=""><Dot status="idle" />{s.idle}<span className="max-sm:hidden"> idle</span></span>
         </Button>
       </Popover.Target>
-      <Popover.Dropdown className="overflow-y-auto overscroll-contain [overflow-anchor:none]" p={6} data-agents-list="" {...hold}>
+      {/* Mantine's own Escape (closeOnEscape) would take one meant for a row's menu inside it too, as NeedsButton's */}
+      <Popover.Dropdown className="overflow-y-auto overscroll-contain [overflow-anchor:none]" p={6} data-agents-list="" {...hold}
+        onKeyDownCapture={(e) => { if (e.key === 'Escape' && !(e.target as Element).closest('[role="menu"]')) setOpened(false); }}>
         {cards.length ? cards.map((c) => <AgentRow key={c.pane.paneId} card={c} ask={ask} askOff={!!o?.headless?.pending} />) : <Text c="dimmed" fz={13} px={12} py={8}>No active agents.</Text>}
       </Popover.Dropdown>
     </Popover>
@@ -495,7 +498,8 @@ function HomeMenu({ name, o, actions }: { name: string; o?: OrchestratorView; ac
     <Indicator color="blocked" size={7} offset={3} disabled={!hint} data-hint={hint ? '' : undefined}>
       <Menu id="btn-home-menu" position="bottom-end" width={240} radius="md">
         <Menu.Target>
-          {/* an agent row's ⋮ (Dashboard.tsx's AgentMore), in the bar's 34×22, on the line as a Button sits */}
+          {/* ⋮ as an agent row's (Dashboard.tsx's MoreMark), but a button of its own (a Home's bar has no row), in the bar's
+              34×22, on the line as a Button sits */}
           <ActionIcon variant="subtle" color="gray" size={22} w={34} className="align-middle text-(--color-text-dim) hover:text-(--color-text)"
             aria-label={hint ? `Orchestrator actions (ctx ${pct(ctx)}: Compact suggested)` : 'Orchestrator actions'}>&#8942;</ActionIcon>
         </Menu.Target>

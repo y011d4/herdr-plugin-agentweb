@@ -103,26 +103,31 @@ describe('HomePanel', () => {
     assert.equal(location.hash, '#/home/personal');
   });
 
-  it("opens an agent in herdr on a click; its ⋮ has Open in herdr, Show here (its drawer), Ask and Stop", async () => {
+  it("a click, Enter or Space anywhere on an agent's row opens its menu: Open in herdr first, Show here (its drawer), Ask, Stop; its ⋮ marks it, no button of its own", async () => {
     await show('personal', fresh());
-    await fire(() => c.querySelector<HTMLElement>('.agent-row[data-pane-id="p3"]')!.click());
+    const row = c.querySelector<HTMLElement>('.agent-row[data-pane-id="p3"]')!;
+    assert.equal(row.getAttribute('role'), 'button');
+    assert.ok(row.querySelector('.row-more[aria-hidden="true"]') && !row.querySelector('button'), '⋮ marks it, not a button of its own');
+    const menu = (): HTMLElement | null => c.querySelector<HTMLElement>('[data-agent-more="p3"]');
+    await fire(() => row.click());
+    assert.deepEqual([...menu()!.querySelectorAll('[role="menuitem"]')].map((e) => e.textContent), ['Open in herdr', 'Show here', 'Ask the orchestrator', 'Stop agent…']);
+    assert.deepEqual(posts, [], 'the click opens the menu, nothing else');
+    await fire(() => menu()!.querySelector<HTMLElement>('[data-action="herdr"]')!.click());
     await settle();
     assert.deepEqual(posts, ['/api/panes/p3/focus']);
     assert.deepEqual(getToasts().map((t) => t.title), ['Opened in herdr']);
     assert.equal(location.hash, '#/home/personal', 'no drawer');
-    const more = c.querySelector<HTMLElement>('[data-agent-menu="p3"]')!;
-    assert.equal(more.getAttribute('aria-label'), 'More for w-review');
-    await fire(() => more.click());
-    const menu = c.querySelector<HTMLElement>('[data-agent-more="p3"]')!;
-    assert.deepEqual([...menu.querySelectorAll('[role="menuitem"]')].map((e) => e.textContent), ['Open in herdr', 'Show here', 'Ask the orchestrator', 'Stop agent…']);
-    await fire(() => menu.querySelector<HTMLElement>('[data-action="herdr"]')!.click());
-    await settle();
-    assert.deepEqual(posts, ['/api/panes/p3/focus', '/api/panes/p3/focus']);
-    await fire(() => more.click());
-    await fire(() => c.querySelector<HTMLElement>('[data-agent-more="p3"] [data-action="show"]')!.click());
+    for (const key of ['Enter', ' ']) {
+      await fire(() => row.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
+      assert.ok(menu(), `${JSON.stringify(key)} opens it`);
+      await fire(() => row.click()); // and a click on the row closes it
+      assert.ok(!menu());
+    }
+    await fire(() => row.click());
+    await fire(() => menu()!.querySelector<HTMLElement>('[data-action="show"]')!.click());
     await settle();
     assert.equal(location.hash, '#/pane/p3');
-    assert.equal(posts.length, 2, 'Show here: nothing sent');
+    assert.equal(posts.length, 1, 'Show here: nothing sent');
   });
 
   it("its ⋮'s Ask quotes the agent (name, purpose, pane, status) in the running Home's composer; off while its question is open; none on a stopped Home or one whose account is unknown", async () => {

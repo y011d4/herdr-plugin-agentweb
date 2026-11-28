@@ -3,8 +3,8 @@
  * (ui/Pane.tsx draws it after the screen, in #screen, which style.css makes a row then). What that Home has for the user:
  * Needs you (its count: Todos.tsx's needsYou), its orchestrator's question, its account's blocked agents (as rows) and
  * its to-do list (Ask the orchestrator quotes an item in the composer beside it); then its other agents, working, done
- * and idle (byUrgency). An agent's row opens it in herdr, its ⋮ also here, asks a running Home's orchestrator about it
- * (Ask the orchestrator, into the composer beside it) and stops it (Dashboard.tsx's AgentRow). Narrower, the Home's
+ * and idle (byUrgency). A click on an agent's row opens its menu (Dashboard.tsx's AgentRow): Open in herdr, Show here, Ask
+ * a running Home's orchestrator about it (into the composer beside it), Stop. Narrower, the Home's
  * status bar has the same in its popovers (Needs you, the counts).
  * It holds still while a finger is down (useHeldState), and keeps its scrollTop when a push reorders the rows (no
  * scroll anchoring).

@@ -13,7 +13,7 @@
  * (…?dismiss=1: its orchestrator is told it isn't needed, so no next step follows, and a PR's item isn't taken for a
  * merge). A link shows its host; an agent's name opens it (openAgentNamed).
  */
-import { Anchor, Badge, Button, CloseButton, Group, Loader, Menu, Popover, Stack, Text, TextInput, UnstyledButton } from '@mantine/core';
+import { Anchor, Badge, Button, CloseButton, Group, Menu, Popover, Stack, Text, TextInput, UnstyledButton } from '@mantine/core';
 import { useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { apiDelete, apiPatch } from '../api.ts';
 import { draftKey, setQuote } from '../drafts.ts';
@@ -24,7 +24,7 @@ import { findPane, store } from '../store.ts';
 import { dueLabel, linkHost, localInput, snoozeChoices, splitTodos } from '../todos.ts';
 import { todoQuote } from '../transcript.ts';
 import type { AppState, OrchestratorView, TodoItem } from '../types.ts';
-import { AgentRow, agentCards, cardTitle, orchestratorLabel } from './Dashboard.tsx';
+import { AgentRow, agentCards, cardTitle, orchestratorLabel, MoreMark, ROW_CLASS, ROW_ITEM, ROW_MENU, ROW_TARGET } from './Dashboard.tsx';
 
 /** The time, again at each minute's start: an item due later comes up when its time comes and a usage limit's
  *  countdown ticks (both whole minutes), with no State push. Each wait is measured again, so a phone asleep
@@ -117,7 +117,7 @@ export function NeedsList({ o, s, now, ask, askAgent, rows }: { o: OrchestratorV
 }
 
 /** Agents waiting on the user, under "Waiting on you", as chips (a tap opens it: nav.ts's openAgent), or as the agents
- *  popover's rows (`rows`: AgentRow, with a PC's ⋮ and its Ask, `ask`/`askOff`). Nothing without any. */
+ *  popover's rows (`rows`: AgentRow, its menu with its Ask, `ask`/`askOff`). Nothing without any. */
 export function Blocked({ cards, rows, ask, askOff }: { cards: DashboardCard[]; rows?: boolean; ask?: (c: DashboardCard) => void; askOff?: boolean }) {
   if (!cards.length) return null;
   if (rows) return <Stack gap={0} className="-mx-3"><div className="px-3 pb-1">{head('Waiting on you')}</div>{cards.map((c) => <AgentRow key={c.pane.paneId} card={c} ask={ask} askOff={askOff} />)}</Stack>;
@@ -171,12 +171,12 @@ const SNOOZE_ICON = (
   </svg>
 );
 
-// An item is one target: a tap or a click on it (not on its worker or its link, which are theirs), or Enter/Space on it, opens
-// its menu under it: Mark done, Snooze…, on a running Home Ask the orchestrator (off while its question is open), Dismiss; the arrow keys
-// move in it, Escape closes it (just it: NeedsButton leaves an Escape from inside a menu to the menu). The menu stays in the
-// item's DOM (not a portal; fixed, so no scroll box clips it), so the Needs you popover doesn't take a tap in it for one outside
-// and stays open over a Mark done. ⋮ at its right says it has one. Ask's quote focuses the composer: the menu then doesn't
-// put the focus back on the item (`back`). Snooze…'s panel comes right after the item, so Tab goes on into it; it is in the list,
+// An item is one target, as an agent row is (Dashboard.tsx's ROW_MENU, ROW_TARGET, ROW_CLASS, MoreMark): a tap or a click on
+// it (not on its worker or its link, which are theirs), or Enter/Space on it, opens its menu under it: Mark done, Snooze…, on a
+// running Home Ask the orchestrator (off while its question is open), Dismiss; the arrow keys move in it, Escape closes it (just
+// it: NeedsButton leaves an Escape from inside a menu to the menu). The menu stays in the item's DOM, so the Needs you popover
+// stays open over a Mark done. ⋮ at its right says it has one. Ask's quote focuses the composer: the menu then doesn't put the
+// focus back on the item (`back`). Snooze…'s panel comes right after the item, so Tab goes on into it; it is in the list,
 // not a modal, which would fight the popover's focus trap.
 function Todo({ home, item, now, ask, off }: { home: string; item: TodoItem; now: number; ask?: () => void; off: boolean }) {
   const [busy, setBusy] = useState(false);
@@ -197,16 +197,11 @@ function Todo({ home, item, now, ask, off }: { home: string; item: TodoItem; now
   };
   const own = (e: SyntheticEvent): void => e.stopPropagation(); // a link's tap is the link's, not the menu's
   return (<>
-    <Menu position="bottom-end" withinPortal={false} floatingStrategy="fixed" disabled={busy} returnFocus={back} onOpen={() => setBack(true)}>
+    <Menu {...ROW_MENU} disabled={busy} returnFocus={back} onOpen={() => setBack(true)}>
       <Menu.Target>
         {/* a line under each but the list's last, so items of two or three lines don't run together */}
-        <div role="button" tabIndex={0} data-todo={item.id} aria-busy={busy || undefined}
-          className={`home-todo -mx-2 flex cursor-pointer items-center gap-2 border-b border-(--color-border) px-2 last:border-b-0
-            hover:bg-(--color-border) active:bg-(--color-border) data-expanded:bg-(--color-border) focus-visible:outline-2
-            focus-visible:-outline-offset-2 focus-visible:outline-(--color-accent) aria-busy:opacity-50 min-h-11 py-1.5`}
-          onKeyDown={(e) => {
-            if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.currentTarget.click(); }
-          }}>
+        <div {...ROW_TARGET} data-todo={item.id} aria-busy={busy || undefined}
+          className={`home-todo -mx-2 flex items-center gap-2 border-b border-(--color-border) px-2 last:border-b-0 aria-busy:opacity-50 min-h-11 py-1.5 ${ROW_CLASS}`}>
           <div className="min-w-0 flex-1">
             <Text fz={14} className="break-words">{item.text}</Text>
             {(item.agent || host || due) && (
@@ -217,23 +212,23 @@ function Todo({ home, item, now, ask, off }: { home: string; item: TodoItem; now
               </Group>
             )}
           </div>
-          {busy ? <Loader size={14} /> : <span className="shrink-0 text-(--color-text-dim)" aria-hidden="true">&#8942;</span>}
+          <MoreMark busy={busy} />
         </div>
       </Menu.Target>
       <Menu.Dropdown data-todo-menu={item.id}>
-        <Menu.Item className="min-h-11" fz="md" leftSection={<span className="w-4 text-center" aria-hidden="true">&#10003;</span>} data-action="todo-done"
+        <Menu.Item {...ROW_ITEM} leftSection={<span className="w-4 text-center" aria-hidden="true">&#10003;</span>} data-action="todo-done"
           onClick={() => { void remove(false); }}>Mark done</Menu.Item>
-        <Menu.Item className="min-h-11" fz="md" leftSection={SNOOZE_ICON} data-action="todo-snooze" onClick={() => setSnoozing(true)}>
+        <Menu.Item {...ROW_ITEM} leftSection={SNOOZE_ICON} data-action="todo-snooze" onClick={() => setSnoozing(true)}>
           Snooze…
           <Text fz={12} c="dimmed">Remind me later</Text>
         </Menu.Item>
         {ask && (
-          <Menu.Item className="min-h-11" fz="md" leftSection={ASK_ICON} data-action="todo-ask" disabled={off} onClick={() => { setBack(false); ask(); }}>
+          <Menu.Item {...ROW_ITEM} leftSection={ASK_ICON} data-action="todo-ask" disabled={off} onClick={() => { setBack(false); ask(); }}>
             Ask the orchestrator
             {off && <Text fz={12} c="dimmed">Answer its question first</Text>}
           </Menu.Item>
         )}
-        <Menu.Item className="min-h-11" fz="md" leftSection={<span className="w-4 text-center" aria-hidden="true">&#10005;</span>} data-action="todo-dismiss"
+        <Menu.Item {...ROW_ITEM} leftSection={<span className="w-4 text-center" aria-hidden="true">&#10005;</span>} data-action="todo-dismiss"
           onClick={() => { void remove(true); }}>
           Dismiss
           <Text fz={12} c="dimmed">Not needed: no follow-up</Text>

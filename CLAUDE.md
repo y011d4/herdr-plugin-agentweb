@@ -68,8 +68,8 @@ All in `internal/bridge/` (one package):
   its terminal only when chosen for it, remembered per pane for the app's life (pane-view's `chosenView`);
   `#/settings` likewise opens Settings in `ui/SettingsSheet.tsx`, Mantine's Modal, centered at 1024px and
   up, the whole screen on a phone, a Home under it running on; one overlay at a time, `isOverlay`),
-  `nav.ts` (`openAgent`: a click on an agent, its drawer on a phone, on a PC `focusInHerdr`, herdr's `pane.focus` (the PC's
-  herdr switches to it; `showAgent`, a PC's ⋮ Show here, is the drawer); `go`: overlay → overlay replaces the history entry, so Settings from a drawer
+  `nav.ts` (`openAgent`: a click on an agent's name (a notice's, a chip), its drawer on a phone, on a PC `focusInHerdr`, herdr's
+  `pane.focus` (the PC's herdr switches to it); `showAgent`, a row menu's Show here (a phone's Open), is the drawer; `go`: overlay → overlay replaces the history entry, so Settings from a drawer
   takes its place; `closeOverlay` (`closeAgent`): back to the entry under it when it was opened on it,
   `view.paneOverBase`, else a replace (opened afresh, a notification's with the app closed or a reload, it has no screen
   under it: `showBase` draws an empty one, never a Home, whose view would run beside the drawer's, and it closes to `#/home`,
@@ -205,7 +205,8 @@ All in `internal/bridge/` (one package):
   agents list's old routes (`#/agents`, `#/agents/<name>`) go to the default Home and to that Home.
   Home's counts (its status bar's: an outlined pill with a ▾, `Pane.tsx`'s `AgentsButton`) open a popover as Needs you's: those
   agents, blocked first, then working, done, idle (`byUrgency`), as the Home panel's rows (`AgentRow`, with the time; a tap
-  opens it, `openAgent`; on a PC its ⋮, `AgentMore`: Open in herdr, Show here, on a running Home's rows (its account known) Ask the orchestrator
+  anywhere on one opens its menu, as a to-do item's (the shared `ROW_MENU`/`ROW_TARGET`/`ROW_CLASS`/`ROW_ITEM` and the dim ⋮,
+  `MoreMark`, in `Dashboard.tsx`; Enter/Space too): on a PC Open in herdr first, then Show here, on a phone Open, on a running Home's rows (its account known) Ask the orchestrator
   (`askAbout`: `agentQuote`'s name, purpose, pane id and status into the Home's composer, as a to-do item's Ask), and Stop agent…
   (`Modals.tsx`'s `stopAgentFlow`, the drawer's: a confirm, then `DELETE /api/panes/:id`, herdr's `pane.close`)): only the panes in its state `agents` (its Claude
   account's, via `paneAccount`, cached per agent pane and re-checked every 60s by `paneAccountCache`;
@@ -572,8 +573,8 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   goes; while it is there `#app` is a two-column grid (`#app:has(> #sidebar)`) and `--sidebar-w` is its
   width, for an overlay that should leave it usable (an agent's drawer, from Show here or a notification: the dimmed part
   starts at `--sidebar-w`, so the rail stays usable under it). It holds still while a finger is down
-  (`useHeldState`). A click on an agent at this width (a row, a blocked chip, a worker's name) opens
-  it in herdr (`openAgent` → `focusInHerdr`), and a row's ⋮ (`AgentMore`) has Show here, the drawer, and Stop agent… (a Home's rows: Ask the orchestrator too).
+  (`useHeldState`). A click on an agent's name at this width (a blocked chip, a worker's name) opens
+  it in herdr (`openAgent` → `focusInHerdr`); a click on a row opens its menu, Open in herdr first, then Show here, the drawer, and Stop agent… (a Home's rows: Ask the orchestrator too).
 
 ## Security invariants
 

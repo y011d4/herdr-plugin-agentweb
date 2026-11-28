@@ -1,14 +1,15 @@
 /**
  * ui/Dashboard.tsx — an agent as the app lists it, wherever it does (a Home's agents popover, its panel, the PC rail's
- * Other): AgentRow and its PC ⋮ (AgentMore), the pieces of its lines (cardTitle, cardLocation, CardWhere, the chips),
+ * Other): AgentRow and its menu, the pieces of its lines (cardTitle, cardLocation, CardWhere, the chips), what a row that is
+ * one target for its menu shares with a to-do item's (ROW_MENU, ROW_TARGET, ROW_CLASS, ROW_ITEM, MoreMark),
  * the agents a Home lists (agentCards) and the State such a list draws while a finger is down (useHeldState); and the
  * topbar's ⚙ and icon button. (The agents list it was named for is gone: each Home lists its own.)
  */
-import { ActionIcon, Badge, Menu, NavLink, Text } from '@mantine/core';
-import { useEffect, useRef, useState, type ComponentPropsWithRef, type HTMLAttributes, type SyntheticEvent, type TouchEvent } from 'react';
+import { ActionIcon, Badge, Loader, Menu, NavLink, Text } from '@mantine/core';
+import { useEffect, useRef, useState, type ComponentPropsWithRef, type HTMLAttributes, type KeyboardEvent, type TouchEvent } from 'react';
 import { dashboardCards, shownStatus, type DashboardCard } from '../dashboard-group.ts';
 import { draftKey, setQuote } from '../drafts.ts';
-import { focusInHerdr, go, openAgent, showAgent } from '../nav.ts';
+import { focusInHerdr, go, showAgent } from '../nav.ts';
 import { findPane, store, subscribe } from '../store.ts';
 import { useWide } from '../theme.ts';
 import { agentQuote } from '../transcript.ts';
@@ -96,24 +97,69 @@ export function useHeldState(): [AppState | null, Pick<HTMLAttributes<HTMLElemen
 /** An agent in a Home's agents popover (ui/Pane.tsx's AgentsButton), a PC's Home panel (ui/HomePanel.tsx) and the PC
  *  rail's Other (ui/Sidebar.tsx): the name, then at the line's right end how long ago its status changed and the status;
  *  under it its purpose (two lines at most, all of it on hover), then one dim line: the location and branch (cut short
- *  first), the kind and, in a linked worktree, the `worktree` chip, as a card's. A click opens it (nav.ts's openAgent: on
- *  a PC in herdr, with its ⋮ beside it, AgentMore, for Show here, Ask the orchestrator (`ask`, on a running Home whose
- *  account is known; off while `askOff`) and Stop). */
+ *  first), the kind and, in a linked worktree, the `worktree` chip, as a card's; at its end ⋮ (MoreMark). The row is one
+ *  target, as a to-do item is: a click, a tap or Enter/Space anywhere on it opens its menu: on a PC Open in herdr (herdr's
+ *  pane.focus: the PC's herdr switches to it) first, then Show here, its drawer in this app (the PC's terminal may be out of
+ *  sight, or another machine's), on a phone Open, the drawer; on a running Home's rows Ask the orchestrator (`ask`: its
+ *  quote into the Home's composer; off while its question is open, `askOff`); and Stop agent…, the drawer's (a confirm,
+ *  then the pane closes: Modals.tsx's stopAgentFlow). */
 export function AgentRow({ card, ask, askOff = false }: { card: DashboardCard; ask?: (card: DashboardCard) => void; askOff?: boolean }) {
   const { pane, purpose } = card;
+  const { paneId } = pane;
   const rel = relativeTime(pane.agent!.sinceUnixMs);
   const wide = useWide();
-  const row = (
-    <NavLink component="button" className={`agent-row rounded-lg ${wide ? 'min-w-0 flex-1' : ''}`} data-pane-id={pane.paneId} noWrap
-      label={<span className="flex items-center gap-2"><span className="min-w-0 truncate">{cardTitle(card)}</span><span className="ml-auto" />
-        {rel ? <span className="shrink-0 text-[12px] text-(--color-text-dim)">{rel}</span> : null}<StatusBadge status={shownStatus(pane, store.seenDone) || 'unknown'} small /></span>}
-      // spans (a button holds no <p>), each a line of its own; the purpose wraps, under the row's noWrap
-      description={<>{purpose ? <Text span className="card-purpose my-0.5 whitespace-normal text-(--color-text)" fz={13} lh={1.3} lineClamp={2} title={purpose}>{purpose}</Text> : null}
-        <span className="flex min-w-0 items-center gap-2"><CardWhere card={card} /><Tag>{agentKind(card)}</Tag>
-          {card.isWorktree ? <Tag c="working">worktree</Tag> : null}</span></>}
-      onClick={() => openAgent(pane.paneId)} />
+  return (
+    <Menu {...ROW_MENU}>
+      <Menu.Target>
+        <NavLink component="div" {...ROW_TARGET} className={`agent-row rounded-lg ${ROW_CLASS}`} data-pane-id={paneId} data-agent-menu={paneId} noWrap
+          label={<span className="flex items-center gap-2"><span className="min-w-0 truncate">{cardTitle(card)}</span><span className="ml-auto" />
+            {rel ? <span className="shrink-0 text-[12px] text-(--color-text-dim)">{rel}</span> : null}<StatusBadge status={shownStatus(pane, store.seenDone) || 'unknown'} small /></span>}
+          // spans (a row holds no <p>), each a line of its own; the purpose wraps, under the row's noWrap
+          description={<>{purpose ? <Text span className="card-purpose my-0.5 whitespace-normal text-(--color-text)" fz={13} lh={1.3} lineClamp={2} title={purpose}>{purpose}</Text> : null}
+            <span className="flex min-w-0 items-center gap-2"><CardWhere card={card} /><Tag>{agentKind(card)}</Tag>
+              {card.isWorktree ? <Tag c="working">worktree</Tag> : null}</span></>}
+          rightSection={<MoreMark />} />
+      </Menu.Target>
+      <Menu.Dropdown data-agent-more={paneId}>
+        {wide && <Menu.Item {...ROW_ITEM} data-action="herdr" onClick={() => focusInHerdr(paneId)}>Open in herdr</Menu.Item>}
+        <Menu.Item {...ROW_ITEM} data-action="show" onClick={() => showAgent(paneId)}>{wide ? 'Show here' : 'Open'}</Menu.Item>
+        {ask && (
+          <Menu.Item {...ROW_ITEM} data-action="ask" disabled={askOff} onClick={() => ask(card)}>
+            Ask the orchestrator
+            {askOff && <Text fz={12} c="dimmed">Answer its question first</Text>}
+          </Menu.Item>
+        )}
+        <Menu.Divider />
+        <Menu.Item {...ROW_ITEM} data-action="stop" color="var(--color-blocked)" onClick={() => { void stopAgentFlow(paneId); }}>Stop agent…</Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
   );
-  return wide ? <div className="agent-row-wrap flex items-start">{row}<AgentMore paneId={pane.paneId} name={cardTitle(card)} ask={ask && (() => ask(card))} askOff={askOff} /></div> : row;
+}
+
+/** A row that is one target for its menu: an agent row, a to-do item (Todos.tsx). Its Menu (`ROW_MENU`) opens under it, at
+ *  its end, and stays in the row's DOM (not a portal; fixed, so no scroll box clips it), so a popover the row sits in doesn't
+ *  take a tap in the menu for one outside, and stays open over what the menu does. */
+export const ROW_MENU = { position: 'bottom-end', withinPortal: false, floatingStrategy: 'fixed', radius: 'md' } as const;
+/** The row itself (`ROW_TARGET`, `ROW_CLASS`): a button to assistive tech, focusable, Enter or Space opening the menu as a
+ *  click does (a key in a link or a button inside it is that one's), the pointer over it, the row highlighted while hovered,
+ *  pressed or its menu open. */
+export const ROW_TARGET = {
+  role: 'button',
+  tabIndex: 0,
+  onKeyDown: (e: KeyboardEvent<HTMLElement>): void => {
+    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.currentTarget.click(); }
+  },
+} as const;
+export const ROW_CLASS = 'group cursor-pointer hover:bg-(--color-border) active:bg-(--color-border) data-expanded:bg-(--color-border) ' +
+  'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-(--color-accent)';
+/** Its menu's items: 44px tall, the touch minimum. */
+export const ROW_ITEM = { className: 'min-h-11', fz: 'md' } as const;
+
+/** ⋮ at a row's end: a tap anywhere on the row opens its menu. Not a button of its own (the row is one): dim, the text's
+ *  color while the row is hovered or its menu open; a spinner while the row is `busy`. */
+export function MoreMark({ busy = false }: { busy?: boolean }) {
+  return busy ? <Loader size={14} />
+    : <span className="row-more shrink-0 text-(--color-text-dim) group-hover:text-(--color-text) group-data-expanded:text-(--color-text)" aria-hidden="true">&#8942;</span>;
 }
 
 /** Home `home`'s composer now quotes agent `card` (its name, purpose, pane id and status), to ask its orchestrator about
@@ -121,36 +167,6 @@ export function AgentRow({ card, ask, askOff = false }: { card: DashboardCard; a
 export function askAbout(home: string, card: DashboardCard): void {
   const { pane, purpose } = card;
   setQuote(draftKey('', home), agentQuote({ name: cardTitle(card), purpose, paneId: pane.paneId, status: shownStatus(pane, store.seenDone) || 'unknown' }));
-}
-
-/** On a PC, an agent's ⋮ beside it: Open in herdr (what a click on it does there) and Show here, its drawer in this app
- *  (the PC's terminal may be out of sight, or another machine's); on a running Home's rows Ask the orchestrator (`ask`:
- *  its quote into the Home's composer; off while its question is open, `askOff`); and Stop agent…, the drawer's (a confirm,
- *  then the pane closes: Modals.tsx's stopAgentFlow). The menu stays in the row's DOM (fixed: no scroll box clips it), so a
- *  popover it sits in doesn't take a click in it for one outside (Todos.tsx's item menu does the same); a click or a key in
- *  it is its own, not a card's under it. */
-function AgentMore({ paneId, name, ask, askOff }: { paneId: string; name: string; ask?: () => void; askOff?: boolean }) {
-  const own = (e: SyntheticEvent): void => e.stopPropagation();
-  return (
-    <Menu position="bottom-end" width={190} radius="md" withinPortal={false} floatingStrategy="fixed">
-      <Menu.Target>
-        <ActionIcon variant="subtle" color="gray" size="lg" mt={4} className="agent-more shrink-0 text-(--color-text-dim) hover:text-(--color-text)"
-          aria-label={`More for ${name}`} data-agent-menu={paneId} onClick={own} onKeyDown={own}>&#8942;</ActionIcon>
-      </Menu.Target>
-      <Menu.Dropdown data-agent-more={paneId} onClick={own} onKeyDown={own}>
-        <Menu.Item data-action="herdr" onClick={() => focusInHerdr(paneId)}>Open in herdr</Menu.Item>
-        <Menu.Item data-action="show" onClick={() => showAgent(paneId)}>Show here</Menu.Item>
-        {ask && (
-          <Menu.Item data-action="ask" disabled={askOff} onClick={ask}>
-            Ask the orchestrator
-            {askOff && <Text fz={12} c="dimmed">Answer its question first</Text>}
-          </Menu.Item>
-        )}
-        <Menu.Divider />
-        <Menu.Item data-action="stop" color="var(--color-blocked)" onClick={() => { void stopAgentFlow(paneId); }}>Stop agent…</Menu.Item>
-      </Menu.Dropdown>
-    </Menu>
-  );
 }
 
 // a card's small label: the agent kind, or (blue) worktree

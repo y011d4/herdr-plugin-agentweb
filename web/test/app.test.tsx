@@ -164,7 +164,8 @@ describe('App', () => {
     assert.deepEqual(ids, ['p1', 'p3', 'p6', 'p7'], 'its account (unknown: every agent), never an orchestrator');
     const home = $('#screen #screen-home-stopped');
     const before = history.length;
-    await click($('[data-agents-list] .agent-row[data-pane-id="p1"]'));
+    await click($('[data-agents-list] .agent-row[data-pane-id="p1"]')); // its menu
+    await click($('[data-agent-more="p1"] [data-action="show"]')); // Open
     assert.equal(location.hash, '#/pane/p1');
     assert.ok(!$('[data-agents-list]') && $('#modal-root .agent-drawer #screen-pane'), 'the popover closed, the pane in the drawer');
     history.back();
@@ -309,7 +310,8 @@ describe('App', () => {
     });
     await go(BASE);
     await click($('#home-status .home-counts'));
-    await click($('[data-agents-list] .agent-row[data-pane-id="p1"]')); // the Home's agents popover
+    await click($('[data-agents-list] .agent-row[data-pane-id="p1"]')); // the Home's agents popover: the row's menu
+    await click($('[data-agent-more="p1"] [data-action="show"]')); // its Open
     await settle();
     const before = history.length;
     await act(async () => openAgent('p2')); // the sidebar's (and Clear's)
@@ -644,12 +646,15 @@ describe('App', () => {
     await go(BASE);
   });
 
-  it("on a PC a click on an agent opens it in herdr (a Home panel's row, a [yoicks] notice's name); its ⋮'s Show here, its drawer", async () => {
+  it("on a PC an agent row's menu has Open in herdr first, then Show here, its drawer; a [yoicks] notice's name opens it in herdr", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await setWide(true);
     await setPanel(true);
     await go(BASE);
     await click($('#home-panel .agent-row[data-pane-id="p3"]'));
+    assert.equal(location.hash, BASE, 'a click on the row opens its menu, nothing else');
+    assert.equal($('#home-panel [data-agent-more="p3"] [role="menuitem"]')!.dataset.action, 'herdr', 'Open in herdr first');
+    await click($('#home-panel [data-agent-more="p3"] [data-action="herdr"]'));
     await answer('POST /api/panes/p3/focus', { ok: true });
     assert.deepEqual(toastTitles(), ['Opened in herdr']);
     assert.equal(location.hash, BASE, 'no drawer');
@@ -661,8 +666,7 @@ describe('App', () => {
     await settle();
     assert.equal(location.hash, '#/home/personal');
     await go(BASE);
-    await click($('#home-panel [data-agent-menu="p3"]'));
-    assert.equal(location.hash, BASE, "the ⋮ is its own: not the row's click");
+    await click($('#home-panel .agent-row[data-pane-id="p3"]'));
     await click($('#home-panel [data-agent-more="p3"] [data-action="show"]'));
     await settle();
     assert.equal(location.hash, '#/pane/p3');
@@ -672,7 +676,9 @@ describe('App', () => {
     await setWide(false);
     await go(BASE);
     await click($('#home-status .home-counts'));
-    assert.ok($('[data-agents-list] .agent-row') && !$('[data-agents-list] [data-agent-menu]'), 'a phone: no ⋮ (a tap opens the drawer)');
+    await click($('[data-agents-list] .agent-row[data-pane-id="p3"]'));
+    assert.deepEqual([...document.querySelectorAll<HTMLElement>('[data-agent-more="p3"] [role="menuitem"]')].map((e) => e.dataset.action), ['show', 'stop'],
+      'a phone: Open first, no Open in herdr (it would switch the PC out of sight)');
     await click($('#home-status .home-counts'));
     clearToasts();
   });

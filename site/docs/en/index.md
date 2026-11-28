@@ -33,11 +33,12 @@ phone or a PC's browser:
   main checkout, chipped as a worktree
 - Rename, clear, and stop agents from the phone: each pane's **⋮** menu renames, clears
   (fresh session), or stops it (an orchestrator's Home has **Clear** and **Stop**, and a headless
-  one's **Compact**, in the **⋮** on its status bar, on a PC in its top bar). On a PC's browser a click on an agent opens it
-  in herdr: herdr on the PC switches to that agent's workspace, tab and pane (its **⋮** there has **Show here**, to open it in
-  the browser instead, and **Stop agent…**; beside a running Home, **Ask the orchestrator** quotes the agent (its name,
-  purpose, pane and status) in the Home's composer, to ask about it, "is it still needed?" say; an open pane's **⋮** has
-  **Open in herdr**). Stopping an agent closes its pane, which ends what runs in it. Agents are started by the orchestrators, not by hand.
+  one's **Compact**, in the **⋮** on its status bar, on a PC in its top bar). A tap or a click anywhere on an agent's row
+  opens its menu, as on a to-do item: **Open** (the agent in the app), on a PC's browser **Open in herdr** first (herdr on the
+  PC switches to that agent's workspace, tab and pane) and **Show here** (the browser instead), and **Stop agent…**; on a
+  running Home's rows, **Ask the orchestrator** quotes the agent (its name, purpose, pane and status) in the Home's composer,
+  to ask about it, "is it still needed?" say. On a PC a click on an agent's name elsewhere (a notice, a chip) opens it in
+  herdr, and an open pane's **⋮** has **Open in herdr**. Stopping an agent closes its pane, which ends what runs in it. Agents are started by the orchestrators, not by hand.
   **⚙** at the top right (on a PC at the top of the left rail) opens the settings
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
   scrollback by swiping down, multiline input, and quick keys

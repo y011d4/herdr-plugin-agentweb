@@ -168,11 +168,12 @@ export const scenes: Scene[] = [
     { name: 'sidebar-home', el: q('.sidebar-home[data-home="personal"]'), sizes: ['pc'] },
     { name: 'sidebar-other', el: q('#sidebar .sidebar-other'), sizes: ['pc'] }, // the rail's agents no Home's account lists
   ] },
-  // a PC's agent row menu (Open in herdr, Show here) in the Home's panel: the ready check clicks flaky-test's ⋮ (once: then it's
-  // aria-expanded); a phone has none (a tap on a row opens its drawer)
-  { name: 'home-agent-menu', hash: '#/home/personal', ready: `innerWidth < 1024 || ${items('')} && (!!document.querySelector('[data-agent-more="p2"]')
-    || void document.querySelector('#home-panel [data-agent-menu="p2"][aria-expanded=false]')?.click())`, screen: false, parts: [
-    { name: 'agent-menu', el: `${q('[data-agent-more="p2"]')}?.closest('.agent-row-wrap')?.parentElement`, sizes: ['pc'] },
+  // an agent row's menu, open: a click on flaky-test's row (once: then it's aria-expanded), on a PC in the Home's panel (Open in
+  // herdr, Show here, Ask, Stop), on a phone in its agents popover (the ready check taps the counts first: Open, Ask, Stop)
+  { name: 'home-agent-menu', hash: '#/home/personal', ready: `${items('')} && (!!document.querySelector('[data-agent-more="p2"]')
+    || void (innerWidth < 1024 && document.querySelector('[data-action=agents][aria-expanded=false]')?.click(),
+      document.querySelector('[data-agent-menu="p2"][aria-expanded=false]')?.click()))`, parts: [
+    { name: 'agent-menu', el: q('[data-agent-more="p2"]') },
   ] },
   // its Needs you popover: the ready check taps the button (once: then it's aria-expanded) until the list shows; a phone's
   // only (a PC's sidebar has what it lists)
