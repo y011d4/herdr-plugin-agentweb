@@ -71,6 +71,41 @@ describe('vrt viewer', () => {
     assert.equal(text(w, 'count'), '2 / 3');
   });
 
+  // happy-dom lays nothing out and loads no image: the sizes are given, the loads dispatched
+  const size = (o: object, k: string, v: unknown) => Object.defineProperty(o, k, { configurable: true, get: () => v });
+  const loaded = (w: Window, widths: number[]) => {
+    const imgs = [...w.document.querySelectorAll('#view img')] as unknown as HTMLImageElement[];
+    imgs.forEach((i, k) => { size(i, 'naturalWidth', widths[k]); size(i, 'complete', true); });
+    imgs.forEach((i) => i.dispatchEvent(new w.Event('load')));
+    return imgs;
+  };
+
+  it('scales both shots by one factor, from the widest, never up, again on a resize; clips each at the bar', async () => {
+    const w = await open(`?sha=${SHA}&s=a-pc`);
+    const view = w.document.getElementById('view') as unknown as HTMLElement;
+    size(view, 'clientWidth', 500);
+    size(w.document.querySelector('.frame') as object, 'clientWidth', 500);
+    const [before, after] = loaded(w, [1000, 800]);
+    assert.deepEqual([before.style.width, after.style.width], ['500px', '400px']);
+    size(before, 'clientWidth', 500);
+    (w.document.getElementById('range') as unknown as HTMLInputElement).value = '400';
+    w.document.getElementById('range')?.dispatchEvent(new w.Event('input'));
+    assert.deepEqual([before.style.clipPath, after.style.clipPath].map((c) => c.replace(/\b0(?!px)\b/g, '0px')),
+      ['inset(0px 300px 0px 0px)', 'inset(0px 0px 0px 200px)']);
+    size(view, 'clientWidth', 2000);
+    w.dispatchEvent(new w.Event('resize'));
+    assert.deepEqual([before.style.width, after.style.width], ['1000px', '800px']);
+  });
+
+  it("a phone's shots at their CSS size (taken at 2x), side by side scaled to a column", async () => {
+    const w = await open(`?sha=${SHA}&s=a-phone`);
+    size(w.document.getElementById('view') as object, 'clientWidth', 1000);
+    assert.deepEqual(loaded(w, [780, 780]).map((i) => i.style.width), ['390px', '390px']);
+    (w.document.querySelector('[data-mode="side"]') as unknown as HTMLButtonElement).click();
+    size(w.document.querySelector('#view figure') as object, 'clientWidth', 195);
+    assert.deepEqual(loaded(w, [780, 700]).map((i) => i.style.width), ['195px', '175px']);
+  });
+
   it('the modes: diff, side by side, blink; a key picks one; the last one is remembered', async () => {
     const w = await open(`?sha=${SHA}&s=a-phone`);
     (w.document.querySelector('[data-mode="diff"]') as unknown as HTMLButtonElement).click();
