@@ -647,17 +647,32 @@ func TestHeadlessUsageKept(t *testing.T) {
 	}
 	b3.start(t)
 	b3.waitStatus(t, "idle")
-	if status, body := b3.post(t, "clear", ""); status != 200 {
+	// a compaction's context comes with no turn's end: saved at the shutdown, idle as it is
+	if status, body := b3.post(t, "compact", ""); status != 200 {
+		t.Fatalf("compact: %d %s", status, body)
+	}
+	b3.waitFor(t, "the compacted context", func(v OrchestratorView) bool {
+		return v.Headless.Status == "idle" && v.Headless.Usage.ContextPct != nil && *v.Headless.Usage.ContextPct == 0.5
+	})
+	b3.srv.shutdownHeadless()
+
+	b4 := startHeadless(t, state, nil, nil)
+	if v := b4.view(t).Headless; !same(v.Usage) || v.Usage.ContextPct == nil || *v.Usage.ContextPct != 0.5 {
+		t.Fatalf("after a restart past a compaction: %+v", v.Usage)
+	}
+	b4.start(t)
+	b4.waitStatus(t, "idle")
+	if status, body := b4.post(t, "clear", ""); status != 200 {
 		t.Fatalf("clear: %d %s", status, body)
 	}
-	if v := b3.view(t).Headless; !same(v.Usage) || v.Usage.ContextPct != nil {
+	if v := b4.view(t).Headless; !same(v.Usage) || v.Usage.ContextPct != nil {
 		t.Fatalf("after clear: %+v", v.Usage)
 	}
-	if status, body := b3.post(t, "stop", ""); status != 200 {
+	if status, body := b4.post(t, "stop", ""); status != 200 {
 		t.Fatalf("stop: %d %s", status, body)
 	}
-	b3.clock.Advance(2 * time.Hour) // the 5h window (2 h ahead in fakeclaude) has reset; the 7d one hasn't
-	if v := b3.view(t).Headless; v.Usage == nil || v.Usage.FiveHour != nil || v.Usage.SevenDay == nil || *v.Usage.SevenDay != *u.SevenDay {
+	b4.clock.Advance(2 * time.Hour) // the 5h window (2 h ahead in fakeclaude) has reset; the 7d one hasn't
+	if v := b4.view(t).Headless; v.Usage == nil || v.Usage.FiveHour != nil || v.Usage.SevenDay == nil || *v.Usage.SevenDay != *u.SevenDay {
 		t.Fatalf("past the 5h reset: %+v", v.Usage)
 	}
 }
