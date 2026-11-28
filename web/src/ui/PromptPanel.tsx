@@ -120,7 +120,7 @@ export function PromptPanel({ paneId, prompt, view }: { paneId: string; prompt: 
 }
 
 /** The answers a headless orchestrator's open question has so far in its panel, by orchestrator:
- *  a composer message sent meanwhile carries them (ui/Pane.tsx), as Chat about this does. */
+ *  its Chat about this, sent from the composer (ui/Pane.tsx), carries them. */
 export const answersSoFar = new Map<string, Record<string, string>>();
 
 /**
@@ -131,11 +131,13 @@ export const answersSoFar = new Map<string, Record<string, string>>();
  * new question gets a fresh panel; the sent one stays disabled until the State takes it away.
  * Under each question's options, as in Claude Code's TUI: "Type something." opens a field whose text
  * is that question's answer (a multiSelect's: with the checked ones), and "Chat about this" answers
- * none (POST …/answer {chat}: the bridge refuses the question with Claude Code's words for it, the
- * answers so far in them), so the orchestrator asks what to clarify. A message sent from the
- * composer meanwhile does the same, with the message (the bridge's /send, given answersSoFar).
+ * none: it opens the composer, locked while the question is open (`onChat`; `chatting` once pressed),
+ * whose message then goes with the question's id and answersSoFar (the bridge's /send), and the
+ * bridge refuses the question with Claude Code's words for it, the answers so far in them, so the
+ * orchestrator reads the message with them. The panel flashes as it comes (style.css).
  */
-export function HeadlessPrompt({ name, pending }: { name: string; pending: { id: string; questions: AskQuestion[] } }) {
+export function HeadlessPrompt({ name, pending, chatting, onChat }:
+  { name: string; pending: { id: string; questions: AskQuestion[] }; chatting: boolean; onChat: () => void }) {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [picked, setPicked] = useState<string[]>([]); // a multiSelect question's checked labels
@@ -186,10 +188,6 @@ export function HeadlessPrompt({ name, pending }: { name: string; pending: { id:
     setOwn('');
   }
 
-  function chat(): void {
-    if (!busy.current) void submit({ chat: true, answers: soFar });
-  }
-
   const toggle = (label: string): void => setPicked((p) => (p.includes(label) ? p.filter((l) => l !== label) : [...p, label]));
   return (
     <div className={PANEL} id="headless-prompt">
@@ -219,10 +217,9 @@ export function HeadlessPrompt({ name, pending }: { name: string; pending: { id:
       )}
       {/* not an answer: set apart from them, as the TUI rules it off */}
       <div className="mt-3 flex flex-col">
-        <Option id="headless-prompt-chat" extra num={String(n + 2)} label="Chat about this" description="Ask the orchestrator about it instead of answering"
-          marked={false} disabled={sending} onClick={chat} />
+        <Option id="headless-prompt-chat" extra num={String(n + 2)} label="Chat about this" description="Write about it below instead of answering"
+          marked={false} pressed={chatting} disabled={sending} onClick={onChat} />
       </div>
-      <Text className="chat-prompt-hint" fz={12} c="dimmed" mt={8}>A message sent below is about these questions, not an answer: like Chat about this.</Text>
     </div>
   );
 }

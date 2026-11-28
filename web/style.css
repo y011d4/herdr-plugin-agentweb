@@ -332,6 +332,12 @@ body { font-size: 15px; }
 .ask-opt-label { font-weight: 600; }
 .ask-opt-desc { color: var(--color-text-dim); }
 
+/* a headless Home's question as it comes (ui/PromptPanel.tsx): its panel flashes twice, so it isn't missed mid-typing */
+#headless-prompt { animation: ask-arrive 0.6s ease-out 2; }
+@keyframes ask-arrive {
+  from { background-color: color-mix(in srgb, var(--color-blocked) 30%, var(--color-surface)); }
+}
+
 /* the answer panel (ui/PromptPanel.tsx): its terminal screen, collapsible below the option buttons */
 .chat-prompt-screen {
   font-family: var(--font-mono);

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { act } from 'react';
 import { shownStatus } from '../src/dashboard-group.ts';
+import { draftKey, getDraft, setDraft } from '../src/drafts.ts';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { orchestratorOfPane, resolveRoute } from '../src/routes.ts';
 import { findPane, markPaneSeen, setAppState, store } from '../src/store.ts';
@@ -275,7 +276,7 @@ describe("a headless orchestrator's Home", () => {
         { question: 'When?', header: 'When', multiSelect: false, options: [{ label: 'now', description: '' }] }];
     }));
     // as Claude Code's TUI numbers them: the options, then Type something., then Chat about this
-    assert.deepEqual(extras().map((b) => b.textContent), ['3Type something.', '4Chat about thisAsk the orchestrator about it instead of answering']);
+    assert.deepEqual(extras().map((b) => b.textContent), ['3Type something.', '4Chat about thisWrite about it below instead of answering']);
     assert.equal(container.querySelector('#headless-prompt-next'), null, 'a single choice needs no Next until typing');
     await fire(() => $('#headless-prompt-own').click());
     assert.equal($<HTMLButtonElement>('#headless-prompt-next').disabled, true, 'nothing typed yet');
@@ -294,39 +295,137 @@ describe("a headless orchestrator's Home", () => {
     assert.deepEqual(posts('answer'), [{ id: '1a2b3c4d', answers: { 'Which fruit?': 'a ripe one', 'Size?': 'L, XL', 'When?': 'now' } }]);
   });
 
-  it('chats about the questions instead of answering, with the answers so far', async () => {
-    await home(withPilot((p) => {
-      const q = p.headless!.pending!.questions[0];
-      p.headless!.pending!.questions = [q, { question: 'Size?', header: 'Size', multiSelect: false, options: [{ label: 'S', description: '' }] }];
-    }));
-    await fire(() => opts()[0].click());
-    await fire(() => $('#headless-prompt-own').click());
-    await type($<HTMLTextAreaElement>('#headless-prompt-text'), 'not an answer yet');
-    await fire(() => $('#headless-prompt-chat').click());
-    await fire(() => $('#headless-prompt-chat').click());
-    assert.deepEqual(posts('answer'), [{ id: '1a2b3c4d', chat: true, answers: { 'Which fruit?': 'apple' } }]);
-    assert.match($('#headless-prompt .chat-prompt-hint').textContent!, /not an answer/);
-  });
+  describe('its composer, while its question is open', () => {
+    const input = () => $<HTMLTextAreaElement>('#pane-input');
+    const key = draftKey('hl:pilot', 'pilot');
+    const enter = (): Promise<void> => fire(() => {
+      vi.stubGlobal('matchMedia', () => ({ matches: true })); // a PC: Enter sends
+      input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
 
-  it("sends a composer message with the panel's answers so far (the bridge's Chat about this), and none once it's gone", async () => {
-    await home(withPilot((p) => {
-      const q = p.headless!.pending!.questions[0];
-      p.headless!.pending!.questions = [q, { question: 'Size?', header: 'Size', multiSelect: false, options: [{ label: 'S', description: '' }] }];
-    }));
-    await fire(() => opts()[1].click());
-    await fire(() => { $<HTMLTextAreaElement>('#pane-input').value = 'why S?'; });
-    await fire(() => $('#btn-send-enter').click());
-    assert.deepEqual(posts('send'), [{ text: 'why S?', answers: { 'Which fruit?': 'cherry' } }]);
-    // a multiSelect's checks count as they stand (the TUI records them at each check)
-    await fire(() => setAppState(withPilot((p) => { p.headless!.pending!.id = 'm1'; p.headless!.pending!.questions[0].multiSelect = true; })));
-    await fire(() => opts()[0].click());
-    await fire(() => $('#headless-prompt-chat').click());
-    assert.deepEqual(posts('answer'), [{ id: 'm1', chat: true, answers: { 'Which fruit?': 'apple' } }]);
-    await answer('POST /api/orchestrators/pilot/send', { ok: true });
-    await fire(() => setAppState(withPilot(idle)));
-    await fire(() => { $<HTMLTextAreaElement>('#pane-input').value = 'thanks'; });
-    await fire(() => $('#btn-send-enter').click());
-    assert.deepEqual(posts('send')[1], { text: 'thanks' });
+    it('the race: Enter pressed the moment a question comes sends nothing; the draft is kept, and goes once the question is gone', async () => {
+      await home(withPilot(idle));
+      await type(input(), 'and run the tests');
+      await fire(() => setAppState(withPilot())); // the question comes…
+      await enter(); // …as Enter is pressed
+      await fire(() => $('#btn-send-enter').click());
+      assert.deepEqual(posts('send'), []);
+      assert.deepEqual([input().disabled, input().value, $<HTMLButtonElement>('#btn-send-enter').disabled], [true, 'and run the tests', true]);
+      assert.equal($('#composer-locked').textContent!.trim(), 'Answer the question above, or press Chat about this to write about it.');
+      await fire(() => setAppState(withPilot(idle))); // answered
+      assert.ok(container.querySelector('#composer-locked') === null, 'unlocked');
+      await enter();
+      assert.deepEqual(posts('send'), [{ text: 'and run the tests' }]);
+    });
+
+    it("one sent before the State shows the question is refused by the bridge (409): kept, and it says why", async () => {
+      await home(withPilot(idle));
+      await type(input(), 'hello');
+      await fire(() => $('#btn-send-enter').click());
+      await answer('POST /api/orchestrators/pilot/send', { error: { code: 'question_pending', message: 'a question waits' } }, 409);
+      assert.equal(input().value, 'hello');
+      assert.deepEqual(getToasts().map((t) => t.title), ['Not sent: a question came first']);
+      await fire(() => setAppState(withPilot()));
+      assert.deepEqual([input().disabled, input().value, getDraft(key)], [true, 'hello', 'hello']);
+    });
+
+    it("Chat about this opens it, empty, for a message about the question: its id and the panel's answers so far; then the draft is back", async () => {
+      setDraft(key, 'my draft');
+      await home(withPilot((p) => {
+        const q = p.headless!.pending!.questions[0];
+        p.headless!.pending!.questions = [q, { question: 'Size?', header: 'Size', multiSelect: false, options: [{ label: 'S', description: '' }] }];
+      }));
+      assert.deepEqual([input().disabled, input().value], [true, 'my draft']);
+      await fire(() => opts()[1].click()); // cherry: answered so far
+      await fire(() => $('#headless-prompt-chat').click());
+      assert.deepEqual([input().disabled, input().value, input().placeholder], [false, '', 'Write about the question…'], 'an empty field, the draft kept');
+      assert.ok(document.activeElement === input(), 'focused');
+      assert.equal($('#headless-prompt-chat').getAttribute('aria-pressed'), 'true');
+      assert.deepEqual(posts('answer'), [], 'nothing declined until it is sent');
+      await type(input(), 'why S?');
+      assert.equal(getDraft(key), 'my draft');
+      await fire(() => $('#btn-send-enter').click());
+      assert.deepEqual(posts('send'), [{ text: 'why S?', question: '1a2b3c4d', answers: { 'Which fruit?': 'cherry' } }]);
+      await answer('POST /api/orchestrators/pilot/send', { ok: true });
+      assert.equal(input().value, '');
+      await fire(() => setAppState(withPilot(idle))); // the bridge declined it
+      assert.deepEqual([input().disabled, input().value, getDraft(key)], [false, 'my draft', 'my draft'], 'the draft is back');
+    });
+
+    it("sets the draft's images aside while writing about the question; an image-only one on its way leaves the draft as it was", async () => {
+      const pick = (name: string): Promise<void> => {
+        const picker = $<HTMLInputElement>('#input-image-picker');
+        Object.defineProperty(picker, 'files', { configurable: true, value: [new File(['x'], name, { type: 'image/png' })] });
+        return fire(() => picker.dispatchEvent(new Event('change', { bubbles: true })));
+      };
+      const thumbs = (): number => container.querySelectorAll('#input-images [aria-label="View image"]').length;
+      setDraft(key, 'my draft');
+      await home(withPilot(idle));
+      await pick('a.png');
+      assert.equal(thumbs(), 1);
+      await fire(() => setAppState(withPilot()));
+      await fire(() => $('#headless-prompt-chat').click());
+      assert.equal(thumbs(), 0, 'aside');
+      await pick('b.png');
+      await fire(() => $('#btn-send-enter').click());
+      assert.deepEqual(posts('send'), [{ text: '', images: [{ mediaType: 'image/jpeg', data: 'b.png' }], question: '1a2b3c4d' }]);
+      await fire(() => setAppState(withPilot(idle))); // declined before the send answers
+      await answer('POST /api/orchestrators/pilot/send', { ok: true });
+      assert.equal(input().value, 'my draft');
+      assert.equal(thumbs(), 1, "the draft's image back, the sent one gone");
+    });
+
+    it('keeps unsent text about the question with the draft when the Home is left, or its send fails once it is', async () => {
+      setDraft(key, 'my draft');
+      await home(withPilot());
+      await fire(() => $('#headless-prompt-chat').click());
+      await type(input(), 'half written');
+      await unmount();
+      assert.equal(getDraft(key), 'my draft\n\nhalf written');
+      setDraft(key, 'my draft');
+      await home(withPilot());
+      await fire(() => $('#headless-prompt-chat').click());
+      await type(input(), 'on its way');
+      await fire(() => $('#btn-send-enter').click());
+      await unmount();
+      unmount = async () => {};
+      await answer('POST /api/orchestrators/pilot/send', { error: { code: 'x', message: 'down' } }, 500);
+      assert.equal(getDraft(key), 'my draft\n\non its way');
+    });
+
+    it('gives an image picked for the draft, still read as Chat about this opens, to the draft', async () => {
+      await home(withPilot(idle));
+      let release = () => {};
+      scaled = new Promise((r) => { release = r; });
+      const picker = $<HTMLInputElement>('#input-image-picker');
+      Object.defineProperty(picker, 'files', { configurable: true, value: [new File(['x'], 'a.png', { type: 'image/png' })] });
+      await fire(() => picker.dispatchEvent(new Event('change', { bubbles: true })));
+      await fire(() => setAppState(withPilot()));
+      await fire(() => $('#headless-prompt-chat').click());
+      await act(async () => { release(); await flush(); });
+      scaled = Promise.resolve();
+      assert.ok(container.querySelector('#input-images') === null, 'not in the message about the question');
+      await fire(() => setAppState(withPilot(idle)));
+      assert.equal(container.querySelectorAll('#input-images [aria-label="View image"]').length, 1, "the draft's");
+    });
+
+    it('the question gone while its Chat about this is on its way: the draft once sent; unsent, the draft and what was written', async () => {
+      setDraft(key, 'my draft');
+      await home(withPilot());
+      await fire(() => $('#headless-prompt-chat').click());
+      await type(input(), 'about it');
+      await fire(() => $('#btn-send-enter').click());
+      await fire(() => setAppState(withPilot(idle))); // declined before the send answers
+      assert.equal(input().value, 'about it', 'still on its way');
+      await answer('POST /api/orchestrators/pilot/send', { ok: true });
+      assert.equal(input().value, 'my draft');
+      // answered elsewhere while writing about it: nothing typed is lost
+      await fire(() => setAppState(withPilot((p) => { p.headless!.pending!.id = 'q2'; })));
+      await fire(() => $('#headless-prompt-chat').click());
+      await type(input(), 'half written');
+      await fire(() => setAppState(withPilot(idle)));
+      assert.deepEqual([input().value, getDraft(key)], ['my draft\n\nhalf written', 'my draft\n\nhalf written']);
+    });
   });
 
   it('has ■ on its "doing now" line while it works', async () => {

@@ -174,6 +174,7 @@ export const scenes: Scene[] = [
   { name: 'home-headless', hash: '#/home/work', ready: `${items('')} && !!document.querySelector('.ask-opt')`, screen: false, parts: [
     { name: 'home-status-headless', el: q('#home-status') },
     { name: 'headless-prompt', el: q('#headless-prompt') },
+    { name: 'composer-locked', el: q('.input-bar') }, // its question open: no message but its Chat about this
   ] },
   { name: 'home-stopped', hash: '#/home/side', ready: "!!document.querySelector('#screen-home-stopped')", screen: false, parts: [
     { name: 'home-status-stopped', el: q('#home-status') },

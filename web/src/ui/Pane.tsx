@@ -9,7 +9,8 @@
  * and while it works ■ Interrupt sends Esc.
  * A headless orchestrator's Home (hl:<name>: no herdr pane) sends through /api/orchestrators/:name/*,
  * has ■ on its "doing now" line, its usage, model and warnings on the status bar and its question (the
- * State's headless.pending) in HeadlessPrompt; no terminal and no keys.
+ * State's headless.pending) in HeadlessPrompt; no terminal and no keys. While the question is open the
+ * composer sends nothing but its Chat about this (Composer's `question`).
  *
  * State pushes re-render it constantly. The composer's textarea is uncontrolled (React never sets its
  * value), so a push never resets what is being typed, an IME composition included.
@@ -167,6 +168,8 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
   const readOnly = !home && mode === 'chat';
   const hl = headlessName(paneId);
   const pending = hl ? state?.orchestrators?.find((o) => o.name === hl)?.headless?.pending : null;
+  const [chatting, setChatting] = useState(''); // the question whose Chat about this was pressed: the composer writes about it
+  const chatOn = !!pending && chatting === pending.id;
   return (
     <div id="screen-pane" className={home ? 'screen-home' : undefined} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       {home && <HomeStatus name={name} state={state} actions={actions} />}
@@ -185,7 +188,7 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
         </div>
       )}
       {prompt && paneView && <PromptPanel paneId={paneId} prompt={prompt} view={paneView} />}
-      {hl && pending && <HeadlessPrompt key={pending.id} name={hl} pending={pending} />}
+      {hl && pending && <HeadlessPrompt key={pending.id} name={hl} pending={pending} chatting={chatOn} onChat={() => setChatting(pending.id)} />}
       {home && (
         <Group id="home-activity" gap={8} wrap="nowrap" py={6} className="shrink-0 px-4 border-t border-(--color-border) bg-(--color-bg) lg:px-(--wide-gutter)"
           style={working ? undefined : { display: 'none' }}>
@@ -201,7 +204,7 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
       )}
       {/* hidden, not unmounted: what is typed stays, as across a terminal ⇄ chat switch */}
       <div className={`input-bar ${BAR} pb-(--safe-bottom)`} style={readOnly ? { display: 'none' } : undefined}>
-        <Composer paneId={paneId} home={home} name={name} />
+        <Composer paneId={paneId} home={home} name={name} question={pending?.id ?? ''} chatting={chatOn} />
         {/* Home hides the terminal keys while chatting; they come back with the terminal. A row that
             scrolls sideways, its scrollbar hidden. */}
         <div id="quickkey-row" className="flex gap-1.5 overflow-x-auto px-3 pb-2 [scrollbar-width:none] lg:px-(--wide-gutter)"
@@ -376,7 +379,11 @@ const autoGrow = (t: HTMLTextAreaElement): void => {
 // commands; on a PC Enter sends and Shift+Enter inserts a newline (composer-keys.ts). What is typed is
 // kept as the Home's (`name`) or the pane's draft (drafts.ts) until it is sent. A headless
 // orchestrator's also takes images (+, or pasted), shown above it until sent (not kept as a draft).
-function Composer({ paneId, home, name }: { paneId: string; home: boolean; name: string }) {
+// While its question is open (`question`: its id) it is locked, its draft kept, Enter and Send doing
+// nothing, until the panel's Chat about this (`chatting`) gives it an empty field: what is sent then
+// names the question, which the bridge declines with it. Once the question is gone, the draft is back.
+function Composer({ paneId, home, name, question = '', chatting = false }:
+  { paneId: string; home: boolean; name: string; question?: string; chatting?: boolean }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const resetPicker = useRef<() => void>(null);
   const key = draftKey(paneId, home ? name : undefined);
@@ -386,10 +393,38 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
   const shown = useRef(images);
   shown.current = images;
   const sendingImages = useRef(false);
+  const locked = !!question && !chatting;
+  const chatNow = useRef(chatting);
+  chatNow.current = chatting;
+  const chatSending = useRef(false); // a Chat about this in flight: once it ends, the draft is back (if the question went meanwhile)
+  const draftImages = useRef<ImageAttachment[]>([]); // the draft's images, set aside while writing about the question
+  // the draft again (it stayed in drafts.ts) and its images, with what was written about the question and not sent
+  const backToDraft = (t: HTMLTextAreaElement, rest: string): void => {
+    t.value = [getDraft(key), rest].filter(Boolean).join('\n\n');
+    if (rest) setDraft(key, t.value);
+    autoGrow(t);
+    const aside = draftImages.current;
+    draftImages.current = [];
+    if (aside.length) setImages((cur) => fitImages(aside, cur));
+  };
+  const wasChatting = useRef(false);
+  useLayoutEffect(() => {
+    const t = input.current!;
+    if (chatting === wasChatting.current) return;
+    wasChatting.current = chatting;
+    if (chatting) {
+      t.value = '';
+      autoGrow(t);
+      draftImages.current = shown.current;
+      setImages([]);
+      t.focus();
+    } else if (!chatSending.current) backToDraft(t, t.value);
+  }, [chatting]);
   const [preparing, setPreparing] = useState(0); // images being scaled: no send until they are there
   const attach = async (files: File[]): Promise<void> => {
     const picked = files.filter((f) => f.type.startsWith('image/'));
     if (!picked.length) return;
+    const forDraft = !chatNow.current;
     let added: ImageAttachment[];
     setPreparing((n) => n + 1);
     try {
@@ -400,9 +435,12 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
     } finally {
       setPreparing((n) => n - 1);
     }
-    const next = fitImages(shown.current, added);
-    if (next.length < shown.current.length + added.length) showToast('Not every image was added', `At most ${MAX_IMAGES}, 1 MB in all, per message`);
-    setImages(next);
+    const toDraft = forDraft && chatNow.current; // picked for the draft, read once Chat about this opened: the draft's
+    const into = toDraft ? draftImages.current : shown.current;
+    const next = fitImages(into, added);
+    if (next.length < into.length + added.length) showToast('Not every image was added', `At most ${MAX_IMAGES}, 1 MB in all, per message`);
+    if (toDraft) draftImages.current = next;
+    else setImages(next);
   };
   useLayoutEffect(() => {
     const t = input.current!;
@@ -414,16 +452,22 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
       t.value = draft;
       autoGrow(t);
     }
-    return () => { if (shownInput === t) shownInput = null; };
+    return () => {
+      if (shownInput === t) shownInput = null;
+      // leaving with text about the question unsent: kept with the draft (images aren't kept, as ever)
+      if (chatNow.current && t.value && !chatSending.current) setDraft(key, [getDraft(key), t.value].filter(Boolean).join('\n\n'));
+    };
   }, [paneId, key]);
 
   const send = async (): Promise<void> => {
     const t = input.current!;
     const text = t.value;
     const sent = shown.current;
-    if ((!text && !sent.length) || sendingImages.current || preparing) return;
+    if ((!text && !sent.length) || sendingImages.current || preparing || locked) return;
     sendingImages.current = sent.length > 0; // an upload takes a while: a second tap mustn't send them twice
-    if (text) sendingDrafts.set(key, text);
+    const about = chatting ? question : ''; // Chat about this: not the draft
+    if (about) chatSending.current = true;
+    else if (text) sendingDrafts.set(key, text);
     try {
       // clear:true wipes the pane's composer first so this message submits on its own — never
       // merged with a half-typed draft the user left in the pane that yoicks can't see. Scope it
@@ -431,15 +475,26 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
       // raw control byte a full-screen / non-readline TUI could act on. Other panes just get
       // text+enter. enter:true then submits in the same request.
       const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
-      await (hl ? orchestratorPost(hl, 'send', { text, ...(sent.length ? { images: sent } : {}), ...(answersSoFar.has(hl) ? { answers: answersSoFar.get(hl) } : {}) }) : apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) }));
+      const aboutIt = hl && about ? { question: about, ...(answersSoFar.has(hl) ? { answers: answersSoFar.get(hl) } : {}) } : {};
+      await (hl ? orchestratorPost(hl, 'send', { text, ...(sent.length ? { images: sent } : {}), ...aboutIt }) : apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) }));
       if (t.value === text) { // clear on success, but keep text typed mid-send
         t.value = '';
         autoGrow(t);
       }
-      if (text && getDraft(key) === text) setDraft(key, '');
+      if (about && !chatNow.current) backToDraft(t, t.value); // the question went while it was on its way
+      if (text && !about && getDraft(key) === text) setDraft(key, '');
       if (sent.length) setImages((cur) => cur.filter((i) => !sent.includes(i))); // and images added mid-send
       paneView?.echo();
     } catch (err) {
+      if (about) { // still in the field; the draft with it, if the question (or the Home) went meanwhile
+        if (!chatNow.current || !t.isConnected) backToDraft(t, t.value);
+        showToast('Send failed', (err as Error).message);
+        return;
+      }
+      if ((err as { code?: string }).code === 'question_pending') { // came first: the State shows it in a moment
+        showToast('Not sent: a question came first', 'Answer it, or press Chat about this to write about it. Your message is kept.');
+        return;
+      }
       // the draft again, unless a newer one is stored (a later send's success left none); a composer
       // empty under its key (reopened, a Home's after a Clear's new pane too) shows it
       if (text && !getDraft(key)) {
@@ -454,6 +509,7 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
       showToast('Send failed', (err as Error).message);
     } finally {
       sendingImages.current = false;
+      chatSending.current = false;
       if (sendingDrafts.get(key) === text) sendingDrafts.delete(key);
     }
   };
@@ -491,19 +547,24 @@ function Composer({ paneId, home, name }: { paneId: string; home: boolean; name:
           })}
         </div>
       )}
+      {locked && (
+        <Text id="composer-locked" fz={12} c="blocked" pt={8} className="px-3 lg:px-(--wide-gutter)">
+          Answer the question above, or press Chat about this to write about it.
+        </Text>
+      )}
       <Group gap={6} wrap="nowrap" pt={8} pb={6} className="px-3 lg:px-(--wide-gutter)">
         {hl && (
           // the picker's input is hidden; picking the same file again works (reset after each pick)
           <FileButton resetRef={resetPicker} accept="image/*" multiple inputProps={{ id: 'input-image-picker' }}
             onChange={(files) => { void attach(files); resetPicker.current?.(); }}>
-            {(props) => <ActionIcon {...props} id="btn-attach" variant="default" size="xl" radius={8} fz={20} aria-label="Attach images">+</ActionIcon>}
+            {(props) => <ActionIcon {...props} id="btn-attach" variant="default" size="xl" radius={8} fz={20} disabled={locked} aria-label="Attach images">+</ActionIcon>}
           </FileButton>
         )}
         {/* Mantine's look, the composer's own text: 14px (iOS zooms in on focus, as before), at most 120px tall (autoGrow) */}
-        <Textarea id="pane-input" ref={input} rows={1} placeholder={placeholder} autoCorrect="off" autoCapitalize="off" spellCheck={false}
+        <Textarea id="pane-input" ref={input} rows={1} placeholder={chatting ? 'Write about the question…' : placeholder} disabled={locked} autoCorrect="off" autoCapitalize="off" spellCheck={false}
           className="flex-1" styles={{ input: { fontSize: 14, lineHeight: 1.4, maxHeight: 120, background: 'var(--color-bg)', paddingTop: 10, paddingBottom: 10 } }}
-          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); setDraft(key, e.currentTarget.value); }} />
-        <Button id="btn-send-enter" miw={64} px={12} fz={13} disabled={preparing > 0} onClick={() => { void send(); }}>Send</Button>
+          onKeyDown={onKeyDown} onPaste={onPaste} onInput={(e) => { autoGrow(e.currentTarget); if (!chatting) setDraft(key, e.currentTarget.value); }} />
+        <Button id="btn-send-enter" miw={64} px={12} fz={13} disabled={preparing > 0 || locked} onClick={() => { void send(); }}>Send</Button>
       </Group>
     </>
   );

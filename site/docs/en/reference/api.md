@@ -52,8 +52,10 @@
 - `POST /api/orchestrators/:name/send` `{"text": "…"}`, `…/interrupt`, `…/clear` and `…/stop` — for a
   headless orchestrator: send a message (also while it works) and interrupt its turn, both 409 when it
   isn't running; clear starts it in a fresh session (returning `{"paneId", "name"}` like start), running
-  or not; stop ends it, and succeeds when it is already stopped. A message sent while a question is
-  pending is about it, not an answer: it is written, then the question is refused as `answer`'s `chat` refuses it, with the send's `"answers"` (the panel's so far), if any. A send may
+  or not; stop ends it, and succeeds when it is already stopped. While a question is
+  pending (or on its way, not pending yet), a send must name it (`"question": "<its id>"`: the web UI's Chat about this), else it is refused
+  unwritten (409 `question_pending`; the web UI keeps it as the draft). A send naming it is about it, not an answer: it is written, then the
+  question is refused as `answer`'s `chat` refuses it, with the send's `"answers"` (the panel's so far), if any. A send may
   carry `"images": [{"mediaType": "image/jpeg", "data": "<base64>"}]` (JPEG, PNG or GIF that decode
   whole, at most 4, 2000 px a side and 1 MiB in all; `text` may then be empty), written as image
   blocks before the text; 400 otherwise. The web UI's + and paste
