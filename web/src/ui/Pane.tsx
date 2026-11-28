@@ -391,7 +391,7 @@ function AgentsButton({ name, s }: { name: string; s: HomeSummary }) {
 
 // Home's status bar, on the surface below the topbar (padding as classes: Mantine's px, inline, would beat lg:)
 const STATUS_BAR = 'shrink-0 border-b border-(--color-border) bg-(--color-surface) lg:px-(--wide-gutter)';
-// Home's small outlined buttons (■, a warning's; its ⋮ too, without the outline, as the other ⋮s): dim text unless given a color
+// Home's small outlined buttons (■, a warning's): dim text unless given a color
 const SMALL = { variant: 'default', size: 'compact-xs', radius: 'xl', fz: 12, fw: 600, c: 'dimmed', className: 'bg-transparent hover:bg-(--color-surface-2)' } as const;
 // a count's dot, before its number
 const Dot = ({ status }: { status: string }) => <span className="mr-[5px] inline-block align-[1px]"><StatusDot status={status} /></span>;
@@ -491,7 +491,9 @@ function HomeMenu({ name, o, actions }: { name: string; o?: OrchestratorView; ac
     <Indicator color="blocked" size={7} offset={3} disabled={!hint} data-hint={hint ? '' : undefined}>
       <Menu id="btn-home-menu" position="bottom-end" width={240} radius="md">
         <Menu.Target>
-          <Button {...SMALL} variant="subtle" px={6} fz={20} aria-label={hint ? `Orchestrator actions (ctx ${pct(ctx)}: Compact suggested)` : 'Orchestrator actions'}>&#8942;</Button>
+          {/* an agent row's ⋮ (Dashboard.tsx's AgentMore), in the bar's 34×22, on the line as a Button sits */}
+          <ActionIcon variant="subtle" color="gray" size={22} w={34} className="align-middle text-(--color-text-dim) hover:text-(--color-text)"
+            aria-label={hint ? `Orchestrator actions (ctx ${pct(ctx)}: Compact suggested)` : 'Orchestrator actions'}>&#8942;</ActionIcon>
         </Menu.Target>
         <Menu.Dropdown>
           {h && (
