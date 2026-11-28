@@ -216,8 +216,12 @@ chat. An item is one short line in the user's language, optionally with the work
   talk it over first, a worker's plan waiting for their pick, something you asked in plain text.
   Mark it done once they decide.
 - Mark an item done (`done` with its id) once you learn it is done, for example when a worker
-  reports its PR merged. The user can tick items off too; `todo` then reports those ids as
-  already gone.
+  reports its PR merged.
+- The user can tick items off too: `[yoicks] to-do done by the user: <text> (<worker>, <url>)`
+  wakes you, one line per item (the item is gone already; `todo` reports its id as already
+  gone). When a next step follows from it (have the worker verify it, deploy, open the next PR,
+  add the next item, ask a decision), do it, or propose it in one line if it needs the user's
+  go-ahead. Otherwise acknowledge it in a few words, or say nothing.
 - A PR's item is for merging it now. When the PR stops being ready to merge for a while (the
   user asked for changes, it needs a rebase or a fix, CI fails, it waits on another PR), mark its
   item done right away, so the list shows only what the user can do now; add it again, with its

@@ -213,24 +213,28 @@ func (s *todoStore) Apply(name string, add []todoAdd, done []string, now int64) 
 	return items, gone, nil
 }
 
-// Done removes name's item id (the user ticked it off); found false: there is none. An error
-// (it couldn't be saved, or its file read) leaves the item there.
-func (s *todoStore) Done(name, id string) (found bool, err error) {
+// Done removes name's item id (the user ticked it off, or its PR is over) and returns it; nil:
+// there is none. An error (it couldn't be saved, or its file read) leaves the item there.
+func (s *todoStore) Done(name, id string) (*TodoItem, error) {
 	s.mu.Lock()
 	if err := s.broken[name]; err != nil {
 		s.mu.Unlock()
-		return false, err
+		return nil, err
 	}
 	list := s.lists[name]
 	i := slices.IndexFunc(list, func(e todoEntry) bool { return e.ID == id })
-	if i >= 0 {
-		err = s.save(name, slices.Delete(slices.Clone(list), i, i+1))
+	if i < 0 {
+		s.mu.Unlock()
+		return nil, nil
 	}
+	item := list[i].TodoItem
+	err := s.save(name, slices.Delete(slices.Clone(list), i, i+1))
 	s.mu.Unlock()
-	if i >= 0 && err == nil {
-		s.onChange()
+	if err != nil {
+		return nil, err
 	}
-	return i >= 0, err
+	s.onChange()
+	return &item, nil
 }
 
 // TakeDue marks each item due by now and not reminded yet as reminded, and returns them by name

@@ -840,6 +840,32 @@ func (r *headlessRunner) notice(line string) {
 	r.persist()
 }
 
+// tickedOff wakes it with an item the user ticked off its to-do list, so it can take up what
+// follows; several ticked off within wakeCoalesce come in one message. A Home the user stopped,
+// or its crashes did (error), isn't told, not even at its next start: the user did it themselves,
+// and the list it reads shows it gone. One between a crash and its restart (wanted, stopped for
+// 2–30 s) is told once it is back, as a worker's wake-ups are: nobody stopped it.
+func (r *headlessRunner) tickedOff(it TodoItem) {
+	line := "to-do done by the user: " + it.Text
+	var extra []string
+	if it.Agent != nil {
+		extra = append(extra, *it.Agent)
+	}
+	if it.URL != nil {
+		extra = append(extra, *it.URL)
+	}
+	if len(extra) > 0 {
+		line += " (" + strings.Join(extra, ", ") + ")"
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.wanted && r.model.Status != "error" {
+		r.wakes = append(r.wakes, "[yoicks] "+line)
+		r.scheduleWakes()
+		r.persist()
+	}
+}
+
 // retryWatch: a broken wait is re-armed (herdr restarting, say) unless the watch ended or
 // its agent is gone.
 func (r *headlessRunner) retryWatch(ctx context.Context, w *hlWatch, err error) bool {

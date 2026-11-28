@@ -211,7 +211,8 @@ describe('the chat log (ui/ChatLog.tsx): assistant + user turns use the markdown
     assert.deepEqual(parts('[yoicks] w-a: done → idle, ready, task not sent'), [['#text', '[yoicks] '], ['button[w-a]', 'w-a'], ['#text', ': done → idle, ready, task not sent']]);
     assert.deepEqual(parts('[yoicks] started w_b2 (pane w8:p1) in /x <y>; sent'), [['#text', '[yoicks] started '], ['button[w_b2]', 'w_b2'], ['#text', ' (pane w8:p1) in /x <y>; sent']]);
     // not a worker: the bridge's own word, a name herdr wouldn't take, nothing after it
-    for (const l of ['[yoicks] restarted while you were working; check overview.', '[yoicks] W-A: x → y', '[yoicks] w-a', '[yoicks] <b>: x']) {
+    for (const l of ['[yoicks] restarted while you were working; check overview.', '[yoicks] to-do done by the user: merge #157 (w-a, https://github.com/o/r/pull/157)',
+      '[yoicks] W-A: x → y', '[yoicks] w-a', '[yoicks] <b>: x']) {
       assert.deepEqual(parts(l), [['#text', l]], l); // text, escaped: no element in it
     }
     assert.ok(item({ kind: 'user', text: '[yoicks] w-a: working → done', sidechain: false, ts: null }).querySelector('.chat-item.chat-notice button.chat-notice-agent[data-agent="w-a"]'));
