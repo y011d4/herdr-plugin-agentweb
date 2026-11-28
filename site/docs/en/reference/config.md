@@ -83,6 +83,9 @@ with defaults, is:
   the worker). Needs `gh` on the bridge's PATH and logged in (`gh auth status`); when it fails, each
   Home with a PR on its list is alerted once per error. Off by default: then nothing goes to GitHub.
 
+For which behaviors are built in and which come from this file, an orchestrator's files or tools
+outside yoicks, see [What yoicks does vs. what you configure](./built-in-vs-configured).
+
 **Applying changes:** the config is read once at startup, so restart the bridge
 after editing — `herdr plugin action invoke y011d4.yoicks.stop`, then `…start`.
 

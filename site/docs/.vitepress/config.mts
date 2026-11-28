@@ -51,6 +51,7 @@ const GROUPS: Array<{ en: string; ja: string; items: Array<[string, string, stri
   ] },
   { en: 'Reference', ja: 'リファレンス', items: [
     ['reference/config', 'Configuration', '設定 (config)'],
+    ['reference/built-in-vs-configured', 'What yoicks does vs. what you configure', 'yoicks が決めること、あなたが決めること'],
     ['reference/cli', 'The yoicks commands', 'yoicks のコマンド'],
     ['reference/api', 'API (for scripting)', 'API (スクリプト用)'],
     ['reference/security', 'Security model', 'セキュリティモデル'],
