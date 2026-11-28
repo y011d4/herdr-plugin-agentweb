@@ -87,7 +87,7 @@ export default defineConfig({
   cleanUrls: true,
   lang: 'en',
   title: 'yoicks',
-  description: 'Monitor and control every coding agent running in herdr from your phone.',
+  description: 'Hand the work to one orchestrator: it runs many coding agents in herdr at once.',
   head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/docs/favicon.svg' }]],
   markdown: {
     config(md) {
@@ -139,7 +139,7 @@ export default defineConfig({
     },
     ja: {
       label: '日本語', lang: 'ja', link: '/ja/',
-      description: 'herdr で動くすべてのコーディングエージェントを、スマホから見て操作できます。',
+      description: 'orchestrator に仕事を渡すと、herdr のコーディングエージェントを同時にいくつも動かします。',
       themeConfig: {
         nav: nav('ja'), sidebar: sidebar('ja'),
         editLink: editLink('GitHub でこのページを編集する'),
