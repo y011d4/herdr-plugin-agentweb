@@ -13,8 +13,9 @@
  *   node tools/webcheck.ts shots --after DIR [--before DIR] --out DIR [--only home,agents]   # the PR screenshots
  *
  * shots needs no herdr and no bridge: it serves tools/shots-fixture.ts's made-up data and a web build (DIR = a
- * web/dist), shoots each scene on a phone and a PC, before and after, and writes <scene>-<phone|pc>.<side>.png and
- * manifest.json (which changed: the PNGs' bytes differ) into --out. Each shot gets a browser context of its own
+ * web/dist), shoots each scene on a phone and a PC, before and after, and writes <scene>-<phone|pc>.<side>.png,
+ * for each changed one <name>.diff.png (where its pixels differ), and manifest.json (which changed: the PNGs' bytes
+ * differ; how many pixels) into --out. Each shot gets a browser context of its own
  * (the app keeps seen-done, the last Home, drafts in localStorage), a frozen clock (the fixture's T0 + 30s), UTC,
  * en-US, no animations (CSS transitions off: Mantine's JS-timed ones then show their end state two frames in), and
  * its images decoded, so the same build shoots the same bytes. CI (.github/workflows/screenshots.yml) posts the
@@ -2382,6 +2383,29 @@ function block(): number {
 
 const SHOTS_PORT = 8397;
 
+/** In a page: how many pixels of two PNGs (base64) differ, and the diff as a PNG: the after dimmed, magenta within 2 px
+ *  of each pixel that differs (seen even when the comment shows it at a third of its size). Chrome decodes them. */
+const DIFF_JS = `async (b, a) => {
+  const load = async (s) => { const i = new Image(); i.src = 'data:image/png;base64,' + s; await i.decode(); return i; };
+  const [x, y] = await Promise.all([load(b), load(a)]);
+  const w = Math.max(x.width, y.width), h = Math.max(x.height, y.height);
+  const canvas = (i, alpha) => { const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d', { willReadFrequently: true }); g.fillStyle = '#000'; g.fillRect(0, 0, w, h); g.globalAlpha = alpha;
+    g.drawImage(i, 0, 0); return { c, g, d: g.getImageData(0, 0, w, h) }; };
+  const p = canvas(x, 1).d.data, q = canvas(y, 1).d.data, out = canvas(y, 0.3), o = out.d.data;
+  const m = new Uint8Array(w * h);
+  let n = 0;
+  for (let i = 0, k = 0; i < m.length; i++, k += 4) if (p[k] !== q[k] || p[k + 1] !== q[k + 1] || p[k + 2] !== q[k + 2]) { m[i] = 1; n++; }
+  for (let i = 0; i < m.length; i++) if (m[i]) {
+    const x0 = i % w, y0 = (i - x0) / w;
+    for (let y1 = Math.max(0, y0 - 2); y1 <= Math.min(h - 1, y0 + 2); y1++) for (let x1 = Math.max(0, x0 - 2); x1 <= Math.min(w - 1, x0 + 2); x1++) {
+      const k = (y1 * w + x1) * 4; o[k] = 255; o[k + 1] = 0; o[k + 2] = 255;
+    }
+  }
+  out.g.putImageData(out.d, 0, 0);
+  return { pixels: n, png: out.c.toDataURL('image/png').slice('data:image/png;base64,'.length) };
+}`;
+
 const SIZES = [
   { id: 'phone', metrics: { width: 390, height: 844, deviceScaleFactor: 2, mobile: true } },
   { id: 'pc', metrics: { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false } },
@@ -2500,7 +2524,35 @@ async function shots(o: Record<string, any>): Promise<number> {
         await c.send('Target.disposeBrowserContext', { browserContextId }).catch(() => {});
       }
     };
-    const manifest: Array<{ name: string; changed: boolean | null; notReady: string[] }> = [];
+    /** An expression's value in a blank page of its own. */
+    const inPage = async (expression: string) => {
+      const { browserContextId } = await c.send('Target.createBrowserContext');
+      try {
+        const { targetId } = await c.send('Target.createTarget', { url: 'about:blank', browserContextId });
+        const { sessionId } = await c.send('Target.attachToTarget', { targetId, flatten: true });
+        const r = await c.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, sessionId);
+        if (!r.result?.value) throw new Error(`in page: ${r.exceptionDetails?.exception?.description ?? 'no result'}`);
+        return r.result.value;
+      } finally {
+        await c.send('Target.disposeBrowserContext', { browserContextId }).catch(() => {});
+      }
+    };
+    const diff = async (before: Buffer, after: Buffer): Promise<{ pixels: number; png: Buffer }> => {
+      const v = await inPage(`(${DIFF_JS})(${js(before.toString('base64'))}, ${js(after.toString('base64'))})`);
+      return { pixels: v.pixels, png: Buffer.from(v.png, 'base64') };
+    };
+    // the diff's own check, each run: two 8x8 PNGs one level apart at (1,1) give 1 pixel, magenta to (3,3), not (4,4)
+    const probe = await inPage(`(async () => {
+      const png = (c1) => { const c = document.createElement('canvas'); c.width = c.height = 8; const g = c.getContext('2d');
+        g.fillStyle = '#123456'; g.fillRect(0, 0, 8, 8); g.fillStyle = c1; g.fillRect(1, 1, 1, 1); return c.toDataURL('image/png').slice(22); };
+      const r = await (${DIFF_JS})(png('#123456'), png('#123457'));
+      const i = new Image(); i.src = 'data:image/png;base64,' + r.png; await i.decode();
+      const c = document.createElement('canvas'); c.width = c.height = 8; const g = c.getContext('2d'); g.drawImage(i, 0, 0);
+      const at = (x, y) => [...g.getImageData(x, y, 1, 1).data.slice(0, 3)].join(',');
+      return { pixels: r.pixels, near: at(3, 3), far: at(4, 4) };
+    })()`);
+    if (probe.pixels !== 1 || probe.near !== '255,0,255' || probe.far === '255,0,255') throw new Error(`the diff is broken: ${js(probe)}`);
+    const manifest: Array<{ name: string; changed: boolean | null; notReady: string[]; pixels: number | null }> = [];
     for (const scene of picked) for (const size of SIZES) {
       const name = `${scene.name}-${size.id}`;
       const got: Record<string, Buffer> = {};
@@ -2513,8 +2565,14 @@ async function shots(o: Record<string, any>): Promise<number> {
         if (!r.ready) notReady.push(side);
       }
       const changed = got.before ? !got.before.equals(got.after) : null;
-      manifest.push({ name, changed, notReady });
-      console.log(`${changed === null ? 'shot   ' : changed ? 'CHANGED' : 'same   '} ${name}${notReady.length ? ` (not ready: ${notReady.join(', ')})` : ''}`);
+      let pixels: number | null = null;
+      if (changed) {
+        const d = await diff(got.before, got.after);
+        fs.writeFileSync(path.join(out, `${name}.diff.png`), d.png);
+        pixels = d.pixels;
+      }
+      manifest.push({ name, changed, notReady, pixels });
+      console.log(`${changed === null ? 'shot   ' : changed ? 'CHANGED' : 'same   '} ${name}${changed ? ` (${pixels} px)` : ''}${notReady.length ? ` (not ready: ${notReady.join(', ')})` : ''}`);
     }
     fs.writeFileSync(path.join(out, 'manifest.json'), js({ shots: manifest }, null, 1));
     console.log(`${manifest.filter((s) => s.changed).length} of ${manifest.length} changed; ${out}`);
