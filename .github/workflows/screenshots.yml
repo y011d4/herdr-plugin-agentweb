@@ -2,7 +2,9 @@ name: Screenshots
 
 # What a web change looks like, on its PR: the PR's web build and main's (as the PR merges into it) are shot
 # over tools/shots-fixture.ts's made-up data (`node tools/webcheck.ts shots`, headless Chrome, no herdr, no
-# bridge), on a phone and a PC, and the screens whose pixels changed go into one comment, before | after and
+# bridge), on a phone and a PC: a full screen per kind of screen and the components cut out of them (agent card,
+# Home status bar, chat items, answer panel, settings sections…: tools/shots-fixture.ts's `parts`), so a diff names
+# the component that changed. The shots whose pixels changed go into one comment, components first, before | after and
 # where they differ (tools/webcheck.ts's diff: the after dimmed, the changed pixels magenta), updated on each push. The fixture is all the shots ever see: they are public.
 #
 # The `screens` job is a gate (a required check): it fails while a screen differs from main's and the user hasn't
@@ -169,21 +171,21 @@ jobs:
           n=${#changed[@]} s=s
           if (( n == 1 )); then s=; fi
           if (( ${#notready[@]} )); then
-            reason="not ready on the PR's side within 10 s: ${notready[*]} (a broken screen, or the scene's ready in tools/shots-fixture.ts)"
+            reason="not ready on the PR's side within 10 s: ${notready[*]} (a broken screen or component, or its ready/el in tools/shots-fixture.ts)"
           elif (( n == 0 )); then
-            verdict=pass reason="no screen changed"
+            verdict=pass reason="no shot changed"
           elif [[ $ACTION == labeled && $LABEL == ui-change ]]; then
             if [[ $digest == "$shown" ]]; then
-              verdict=pass approved=$digest reason="the user approved the $n changed screen$s"
+              verdict=pass approved=$digest reason="the user approved the $n changed shot$s"
             else
-              unlabel=1 approved=- reason="the screens changed since the comment showed them: look again, then add ui-change again"
+              unlabel=1 approved=- reason="the shots changed since the comment showed them: look again, then add ui-change again"
             fi
           elif [[ $HAS_LABEL == true && $digest == "$approved" ]]; then
-            verdict=pass reason="the user approved the $n changed screen$s"
+            verdict=pass reason="the $n changed shot$s are the ones the user approved"
           elif [[ $HAS_LABEL == true ]]; then
-            unlabel=1 approved=- reason="the screens changed since the user approved them: look again, then add ui-change again"
+            unlabel=1 approved=- reason="the shots changed since the user approved them: look again, then add ui-change again"
           else
-            reason="$n screen$s changed: once the user has looked, the ui-change label approves"
+            reason="$n shot$s changed: once the user has looked, the ui-change label approves"
           fi
           {
             echo "verdict=$verdict"
@@ -247,11 +249,12 @@ jobs:
           mkdir -p "$pub"
           cd shots
           jq -e '(.shots | type) == "array" and (.shots | length) <= 100' manifest.json > /dev/null
-          changed=() same=() notready=()
+          parts=() screens=() same=() notready=()
           declare -A px
           # notReady last: read collapses a tab run, so an empty field anywhere else would shift the rest
-          while IFS=$'\t' read -r n ch p nr; do
-            if [[ ! $n =~ ^[a-z0-9-]{1,64}$ || ! $ch =~ ^(true|false|null)$ || ! $nr =~ ^(|before|after|before,after)$ || ! $p =~ ^([0-9]{1,8}|null)$ ]]; then
+          while IFS=$'\t' read -r n k ch p nr; do
+            if [[ ! $n =~ ^[a-z0-9-]{1,64}$ || ! $k =~ ^(screen|part)$ || ! $ch =~ ^(true|false|null)$ || ! $nr =~ ^(|before|after|before,after)$ \
+              || ! $p =~ ^([0-9]{1,8}|null)$ ]]; then
               echo "bad manifest entry"; exit 1
             fi
             if [[ -n $nr ]]; then notready+=("$n ($nr)"); fi
@@ -264,8 +267,9 @@ jobs:
               if (( $(stat -c %s "$f") > 2000000 )); then echo "too big: $f"; exit 1; fi
               cp "$f" "$pub/"
             done
-            changed+=("$n")
-          done < <(jq -r '.shots[] | [.name, (.changed | tostring), (.pixels | tostring), (.notReady | join(","))] | @tsv' manifest.json)
+            if [[ $k == part ]]; then parts+=("$n"); else screens+=("$n"); fi
+          done < <(jq -r '.shots[] | [.name, .kind, (.changed | tostring), (.pixels | tostring), (.notReady | join(","))] | @tsv' manifest.json)
+          changed=("${parts[@]}" "${screens[@]}")
 
           if (( ${#changed[@]} )); then
             cd "$pub"
@@ -284,14 +288,33 @@ jobs:
             if [[ $VERDICT == pass ]]; then echo "**screens passed**: $REASON."; else echo "**screens failing**: $REASON."; fi
             echo
             if (( ${#changed[@]} )); then
-              echo "**UI screenshots**: ${#changed[@]} of $total shots changed (${HEAD_SHA:0:7}). Made-up data: \`tools/shots-fixture.ts\`."
-              for n in "${changed[@]}"; do
-                w=260; if [[ $n == *-pc ]]; then w=440; fi
+              echo "**UI screenshots**: ${#changed[@]} of $total shots changed: ${#parts[@]} components, ${#screens[@]} screens (${HEAD_SHA:0:7}). Made-up data: \`tools/shots-fixture.ts\`."
+              # a PNG's width (its IHDR), in CSS px: the phone's are shot at 2x
+              pngw() { echo $(( 16#$(od -An -tx1 -j16 -N4 "$1" | tr -d ' \n') )); }
+              show() { # $1 the shot, $2 open or not
+                n=$1
+                if [[ " ${screens[*]} " == *" $n "* ]]; then
+                  w=260; if [[ $n == *-pc ]]; then w=440; fi
+                else # a component at its own size (both sides' wider), at most half the comment
+                  w=$(pngw "$pub/$n.after.png"); b=$(pngw "$pub/$n.before.png"); if (( b > w )); then w=$b; fi
+                  if [[ $n == *-phone ]]; then w=$(( w / 2 )); fi
+                  if (( w > 440 )); then w=440; fi
+                fi
                 cell() { if [[ -f $pub/$n.$1.png ]]; then echo "<img src=\"https://raw.githubusercontent.com/$REPO/$sha/$n.$1.png\" width=\"$w\">"; else echo "(none)"; fi; }
                 # the diff under the pair, not beside it: three PC shots don't fit the comment's width
-                printf '\n<details open><summary><code>%s</code>: %s px differ</summary>\n\n| before | after |\n| --- | --- |\n| %s | %s |\n\nWhere they differ (magenta):<br>%s\n\n</details>\n' \
-                  "$n" "${px[$n]}" "$(cell before)" "$(cell after)" "$(cell diff)"
-              done
+                printf '\n<details%s><summary><code>%s</code>: %s px differ</summary>\n\n| before | after |\n| --- | --- |\n| %s | %s |\n\nWhere they differ (magenta):<br>%s\n\n</details>\n' \
+                  "$2" "$n" "${px[$n]}" "$(cell before)" "$(cell after)" "$(cell diff)"
+              }
+              if (( ${#parts[@]} )); then
+                printf '\n#### Components\n'
+                for n in "${parts[@]}"; do show "$n" ' open'; done
+              fi
+              # the screens show how the components sit together; mostly a repeat once a component changed: closed then
+              if (( ${#screens[@]} )); then
+                printf '\n#### Screens\n'
+                o=' open'; if (( ${#parts[@]} )); then o=''; fi
+                for n in "${screens[@]}"; do show "$n" "$o"; done
+              fi
             elif (( total )); then
               echo "**UI screenshots**: no screen changed ($total shots, ${HEAD_SHA:0:7})."
             else
