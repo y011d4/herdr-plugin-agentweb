@@ -78,7 +78,7 @@ export function AgentDrawer({ sheet, actions }: { sheet: Sheet | null; actions: 
           <CloseButton id="btn-drawer-close" aria-label="Close" size="xl" iconSize={18} className="shrink-0 text-(--color-text-dim) hover:text-(--color-text)" onClick={closeAgent} />
           <div className="topbar-title"><PaneTitle paneId={sheet.paneId} home={false} /></div>
           <ViewToggle paneId={sheet.paneId} home={false} />
-          <AgentMenu actions={actions(sheet.paneId)} />
+          <AgentMenu actions={actions(sheet.paneId)} wide={wide} />
         </div>
         <Pane paneId={sheet.paneId} home={false} />
         </Fragment>

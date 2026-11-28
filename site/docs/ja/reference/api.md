@@ -34,7 +34,8 @@
   — `"clear": true` を加えると、テキストが入る前にペインの入力欄を消します (Ctrl+U を繰り返します)。
   こうすると、ここで書いたメッセージは、ペインに直接打ち込まれていた下書きの後ろにつながらず、
   それだけで送信されます
-- `POST /api/panes/:paneId/focus`
+- `POST /api/panes/:paneId/focus` — herdr の `pane.focus`: PC の herdr がそのペインのワークスペース、タブ、ペインに
+  切り替わります (Web の **Open in herdr**。PC のブラウザでのみペインの ⋮ にあります)
 - `POST /api/panes/:paneId/scroll` `{"direction": "up", "steps": 3}` — フルスクリーンアプリ向けの SGR ホイールイベント
 - `POST /api/agents` `{"profile": "claude", "cwd": "/path", "name": "review", "task": "…", "workspace": "w7"}`
   — 名前付きの[起動プロファイル](./config)から新しいエージェントを起動します (argv を固定した許可リストです。

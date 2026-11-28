@@ -87,7 +87,8 @@ All in `internal/bridge/` (one package):
   Mantine's Notification; only the toasts take taps, the box too while the stack overflows) and `Modals.tsx`
   (Confirm, Rename and the image preview, all on Mantine's Modal) is portalled into `#modal-root`;
   a pane's ⋮ is a Mantine Menu (`Pane.tsx`'s `AgentMenu`, in its drawer's header, its dropdown in `#modal-root`
-  too, over the drawer). An opened
+  too, over the drawer; at the PC width, `wide`, its first item is Open in herdr: `POST /api/panes/:id/focus`, herdr's
+  `pane.focus`, which switches the PC's herdr to that pane; never on a phone, where it would switch it out of sight). An opened
   pane's body is `pane-view.ts` (`createPaneView` → setMode/onState/echo/destroy, one per opened
   pane or Home: the chat log, the transcript probe, its own WS messages and agent_status, the 3s
   refresh, the pane's visibilitychange, the prompt poll and closing the drawer after an answer, and the chat's pin to its
