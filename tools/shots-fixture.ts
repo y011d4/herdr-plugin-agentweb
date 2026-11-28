@@ -175,9 +175,11 @@ export const scenes: Scene[] = [
     || void document.querySelector('[data-action=needs][aria-expanded=false]')?.click())`, screen: false, parts: [
     { name: 'needs-popover', el: q('[data-needs-list]') },
   ] },
-  // a reply in its chat, and a Reply on a message: the ready check taps one's ↩ (then takes the focus off: no caret)
-  { name: 'home-reply', hash: '#/home/personal', ready: `${items('')} && (!!document.querySelector('#composer-quote')
-    || void (document.querySelector('#chat-log .chat-assistant .chat-reply')?.click(), document.activeElement?.blur()))`, screen: false, parts: [
+  // a reply in its chat, and a Reply on a message: the ready check taps one's ↩ (then takes the focus off: no caret),
+  // then focuses the reply's own ↩, as a keyboard does (on a PC it shows, in its bubble's corner; on a phone it is sr-only)
+  { name: 'home-reply', hash: '#/home/personal', ready: `${items('')} && (document.querySelector('#composer-quote')
+    ? (document.querySelector('#chat-log .chat-quote-ref')?.closest('.chat-item')?.querySelector('.chat-reply')?.focus(), !!document.activeElement?.matches('.chat-reply'))
+    : void (document.querySelector('#chat-log .chat-assistant .chat-reply')?.click(), document.activeElement?.blur()))`, screen: false, parts: [
     { name: 'chat-reply', el: `${q('#chat-log .chat-quote-ref')}?.closest('.chat-item')` },
     { name: 'composer-quote', el: q('.input-bar') },
   ] },

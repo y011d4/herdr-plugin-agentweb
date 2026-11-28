@@ -112,7 +112,7 @@ export const ChatItem = memo(function ChatItem({ item, home = false, today }: { 
         const q = parseQuote(t); // a reply: what it quotes on top, then its words
         const words = q ? q.body : t;
         return (
-          <Repliable className={`chat-item chat-user max-w-[88%] self-end ${sub} ${own ? `${TIME_UNDER} after:text-right` : ''}`} of="me" text={words} side="left" time={own}>
+          <Repliable className={`chat-item chat-user max-w-[88%] self-end ${sub} ${own ? `${TIME_UNDER} after:text-right` : ''}`} of="me" text={words} time={own}>
             {tag}
             <Paper className="chat-bubble rounded-[14px_14px_4px_14px]" bg="accent" c="white" px={12} py={8}>
               {q && <QuoteRef q={q} />}
@@ -125,7 +125,7 @@ export const ChatItem = memo(function ChatItem({ item, home = false, today }: { 
       if (!before.length && !after.length) return <>{bubble(text)}{images}</>;
       // the bridge's notices: dim lines, not the user's
       const notices = (ls: string[]): ReactNode => ls.map((l, i) => (
-        <Repliable key={i} className={`chat-item chat-notice self-center ${sub}`} of="notice" text={l} side="right">
+        <Repliable key={i} className={`chat-item chat-notice self-center ${sub}`} of="notice" text={l}>
           <Text component="div" className={`whitespace-pre-wrap wrap-anywhere ${time ? `${TIME} after:ml-1.5` : ''}`} fz={12} c="dimmed" ta="center"
             data-time={time}><Notice line={l} /></Text>
         </Repliable>
@@ -135,7 +135,7 @@ export const ChatItem = memo(function ChatItem({ item, home = false, today }: { 
     case 'assistant':
       // a Home's replies are left bubbles, opposite the user's
       return home ? (
-        <Repliable className={`chat-item chat-assistant max-w-[92%] self-start ${sub} ${time ? TIME_UNDER : ''}`} of="you" text={item.text} side="right" time={time}>
+        <Repliable className={`chat-item chat-assistant max-w-[92%] self-start ${sub} ${time ? TIME_UNDER : ''}`} of="you" text={item.text} time={time}>
           {tag}
           <Paper className="rounded-[14px_14px_14px_4px]" withBorder bg="dark.7" px={12} py={8}><Markdown text={item.text} /></Paper>
         </Repliable>
@@ -193,11 +193,12 @@ const REPLY_ICON = (
 
 /** A message a Home can reply to (`of`: whose, `text`: its words): Reply puts its quote line into the
  *  composer, Copy copies its words. Both from a long press on a phone or a right click on a PC (Mantine's
- *  Menu.ContextMenu), Reply also from the ↩ beside it, shown on a PC's hover or keyboard focus (on a phone
- *  it is there for a screen reader only). On a link or a button, or with its text selected, the browser's
- *  own menu instead. A mouse still selects its text; a long press selects none (Copy is for that). Its
- *  data-quote is that quote line: a reply's QuoteRef finds it by it. */
-function Repliable({ className, of, text, side, time, children }: { className: string; of: Exclude<QuoteOf, 'todo'>; text: string; side: 'left' | 'right'; time?: string; children: ReactNode }) {
+ *  Menu.ContextMenu), Reply also from the ↩ over its top-right corner, shown on a PC's hover or keyboard
+ *  focus (inside the message, so the mouse reaches it without leaving it; on its own background, over the
+ *  text while shown), on a phone there for a screen reader only. On a link or a button, or with its text
+ *  selected, the browser's own menu instead. A mouse still selects its text; a long press selects none (Copy
+ *  is for that). Its data-quote is that quote line: a reply's QuoteRef finds it by it. */
+function Repliable({ className, of, text, time, children }: { className: string; of: Exclude<QuoteOf, 'todo'>; text: string; time?: string; children: ReactNode }) {
   const reply = useContext(ReplyTo);
   const [native, setNative] = useState(false);
   if (!reply || !text.trim()) return <div className={className} data-time={time}>{children}</div>;
@@ -217,8 +218,9 @@ function Repliable({ className, of, text, side, time, children }: { className: s
         <div className={`group/msg relative rounded-[14px] pointer-fine:select-text! data-flash:outline-2 data-flash:outline-offset-2 data-flash:outline-(--color-accent) ${className}`}
           data-quote={quote} data-time={time} onTouchStart={press} onMouseDown={press}>
           {children}
-          <ActionIcon className={`chat-reply absolute top-1 ${side === 'left' ? '-left-9' : '-right-9'} opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 pointer-coarse:sr-only`}
-            variant="subtle" color="gray" size={28} aria-label="Reply" onClick={() => reply(quote)}>{REPLY_ICON}</ActionIcon>
+          {/* a notice has no bubble: at its line's end, centered on it */}
+          <ActionIcon className={`chat-reply absolute right-1 ${of === 'notice' ? 'top-1/2 -translate-y-1/2' : 'top-1'} opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 focus-visible:outline-current pointer-coarse:sr-only`}
+            variant="default" size={28} aria-label="Reply" onClick={() => reply(quote)}>{REPLY_ICON}</ActionIcon>
         </div>
       </Menu.ContextMenu>
       <Menu.Dropdown>
