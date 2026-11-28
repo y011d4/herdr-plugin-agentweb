@@ -249,7 +249,9 @@ jobs:
           # one comment per PR, updated in place only when what it says changes (an edit by this token starts no run);
           # none is made just to say that nothing changed and all is well
           if [[ -n $id ]]; then
-            # edited since it was read above (a tick, say): that edit's run decides, after this one
+            # edited since it was read above (a tick, say): that edit's run decides, after this one. Not atomic: GitHub
+            # has no conditional comment update, so an edit landing between this read and the PATCH is drawn over; the
+            # box then shows the state it was drawn with.
             if [[ $(gh api "repos/$REPO/issues/comments/$id" --jq .body) != "$old" ]]; then echo "the comment was edited meanwhile"; exit 0; fi
             if [[ $old != "$(cat "$body")" ]]; then gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$body" > /dev/null; fi
           elif (( n )) || [[ $state != success ]]; then
