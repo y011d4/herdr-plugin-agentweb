@@ -28,11 +28,13 @@ func TestGoLifecycleCommands(t *testing.T) {
 		t.Skip("starts and stops real bridges")
 	}
 	t.Parallel()
-	// a copy of its own: serving tells this test's bridges by their binary's path, and
-	// TestGoMatchesWireRecordings runs a bridge of the shared one meanwhile
+	// a path of its own: serving tells this test's bridges by their binary's path, and
+	// TestGoMatchesWireRecordings runs a bridge of the shared one meanwhile. A hard link,
+	// never a copy: a child that test forks while a copy is being written holds the write
+	// fd until its own exec, and an exec of the copy meanwhile fails (ETXTBSY)
 	bin := filepath.Join(t.TempDir(), "yoicks")
-	if b, err := os.ReadFile(buildYoicks(t)); err != nil || os.WriteFile(bin, b, 0o755) != nil {
-		t.Fatal("copying the binary:", err)
+	if err := os.Link(buildYoicks(t), bin); err != nil {
+		t.Fatal("linking the binary:", err)
 	}
 	dir := t.TempDir()
 	sockDir, err := os.MkdirTemp("", "fh") // unix socket paths must stay short
@@ -252,9 +254,9 @@ func TestGoLifecycleCommands(t *testing.T) {
 		return // a renamed binary is recognized through /proc only
 	}
 	// the same binary under another name is still known by its executable
-	renamed := filepath.Join(dir, "awc")
-	if b, err := os.ReadFile(bin); err != nil || os.WriteFile(renamed, b, 0o755) != nil {
-		t.Fatal("copying the binary:", err)
+	renamed := filepath.Join(dir, "awc") // linked, as bin is
+	if err := os.Link(bin, renamed); err != nil {
+		t.Fatal("linking the binary:", err)
 	}
 	bin = renamed
 	code, out = ctl("start")
