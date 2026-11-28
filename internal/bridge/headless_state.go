@@ -57,11 +57,13 @@ type hlModel struct {
 	models        []HeadlessModel   // the models Claude Code offers (its answer to initRequest)
 	// the model in effect, Claude Code's id: get_settings' answer at the start, set_model's, each
 	// turn's init. A resumed session keeps the model it last ran on, whatever the default says.
-	active     string
-	compact    *HeadlessCompact // its last compaction, until the next turn ends
-	preTokens  float64          // the context that compaction began with (compact_boundary's)
-	nContext   int              // contextRequests asked so far
-	contextAsk string           // the one whose answer is still wanted ("": none; a later turn's end drops it)
+	active    string
+	compact   *HeadlessCompact // its last compaction, until the next turn ends
+	preTokens float64          // the context that compaction began with (compact_boundary's)
+	// the context a compaction left (contextRequest): the latest request, until its answer (an older one's
+	// is ignored), and how many contexts the results had reported when it was asked (measured then)
+	nContext, measured, askedAt int
+	contextAsk                  string
 }
 
 // initRequest is the request_id of the initialize control request each child gets at its start:
@@ -160,7 +162,6 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 		// failed with compact_error); on success compact_boundary, whose context Claude Code is asked for
 		case sub == "status" && ev["status"] == "compacting":
 			m.compact = &HeadlessCompact{State: "running", From: m.contextPct()}
-			m.contextAsk = "" // the one before's answer would be taken for this one's
 		case sub == "status" && res != "":
 			if m.compact == nil {
 				m.compact = &HeadlessCompact{From: m.contextPct()}
@@ -176,7 +177,7 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 			m.preTokens = num(meta["pre_tokens"])
 			m.ctxTokens = 0 // the context before it: the result after it must not report that one
 			m.nContext++
-			m.contextAsk = fmt.Sprintf("%s-%d", contextRequest, m.nContext)
+			m.contextAsk, m.askedAt = fmt.Sprintf("%s-%d", contextRequest, m.nContext), m.measured
 			st.Reply = map[string]any{"type": "control_request", "request_id": m.contextAsk, "request": map[string]any{"subtype": "get_context_usage"}}
 		}
 	case "assistant":
@@ -234,9 +235,6 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 		if cmd == "" {
 			m.compact = nil // a turn ended: the compaction before it, or in it, has been shown
 		}
-		if cmd == "" && m.ctxTokens > 0 {
-			m.contextAsk = "" // the context is this turn's: a late answer would set an older one
-		}
 		usage, _ := ev["modelUsage"].(map[string]any)
 		mu, _ := usage[m.model].(map[string]any)
 		if len(usage) == 1 {
@@ -246,6 +244,7 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 		}
 		if window := num(mu["contextWindow"]); window > 0 && m.ctxTokens > 0 {
 			m.usage().ContextPct = pctOf(m.ctxTokens, window)
+			m.measured++
 		}
 	case "rate_limit_event":
 		windows, _ := ev["rate_limit_info"].(map[string]any)["unifiedWindows"].(map[string]any)
@@ -288,12 +287,15 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 				m.active = model
 			}
 		}
-		// the context a compaction left: the answer to the request still wanted only. Not ctxTokens, which a
-		// turn begun meanwhile has set: its result reports its own.
+		// the context a compaction left: the context shown unless a result has reported a newer one since it was
+		// asked (not ctxTokens, which a turn begun meanwhile has set), and that of the compaction on show, unless
+		// it is a later one still running or failed
 		if total, window := num(inner["totalTokens"]), num(inner["maxTokens"]); st.Acked != "" && st.Acked == m.contextAsk && st.AckError == "" && total > 0 && window > 0 {
 			m.contextAsk = ""
-			m.usage().ContextPct = pctOf(total, window)
-			if c := m.compact; c != nil {
+			if m.measured == m.askedAt {
+				m.usage().ContextPct = pctOf(total, window)
+			}
+			if c := m.compact; c != nil && c.State == "done" {
 				c.To = pctOf(total, window)
 				if m.preTokens > 0 {
 					c.From = pctOf(m.preTokens, window)
