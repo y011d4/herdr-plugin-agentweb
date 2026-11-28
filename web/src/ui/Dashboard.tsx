@@ -11,7 +11,7 @@
 import { ActionIcon, Badge, Button, Card, Center, Group, Loader, NavLink, Text } from '@mantine/core';
 import { useEffect, useRef, useState, useSyncExternalStore, type ComponentPropsWithRef, type HTMLAttributes, type TouchEvent } from 'react';
 import { dashboardCards, shownStatus, type DashboardCard } from '../dashboard-group.ts';
-import { openAgent } from '../nav.ts';
+import { go, openAgent } from '../nav.ts';
 import { agentsScope, defaultHome, homeHash } from '../routes.ts';
 import { findPane, lastHome, store, subscribe } from '../store.ts';
 import { useWide } from '../theme.ts';
@@ -198,9 +198,10 @@ export const dashboardTopbar = (hash: string): Topbar => ({
   right: <SettingsButton />,
 });
 
-/** ⚙, Settings: at a topbar's right on a phone; on a PC at the sidebar's top (`sidebar`), none in the topbar. */
+/** ⚙, Settings: at a topbar's right on a phone; on a PC at the sidebar's top (`sidebar`), none in the topbar. The sidebar's
+ *  is in reach under an agent's drawer: Settings then takes the drawer's place (nav.ts's go), as any overlay over one. */
 export function SettingsButton({ sidebar = false }: { sidebar?: boolean }) {
-  return useWide() === sidebar ? <TopbarIcon id="btn-settings" label="Settings" onClick={() => { location.hash = '#/settings'; }}>&#9881;</TopbarIcon> : null;
+  return useWide() === sidebar ? <TopbarIcon id="btn-settings" label="Settings" onClick={() => go('#/settings')}>&#9881;</TopbarIcon> : null;
 }
 
 /** A topbar's (or a drawer's) icon button: 44px, dim, the text's color under the

@@ -620,6 +620,28 @@ describe('App', () => {
     await go('#/agents');
   });
 
+  it("a PC's ⚙ (the sidebar's, in reach under a drawer) takes the drawer's place, as an overlay over an overlay does", async () => {
+    const replace = vi.spyOn(location, 'replace').mockImplementation((url: string | URL) => { // as a browser's
+      const oldURL = location.href;
+      history.replaceState(history.state, '', String(url));
+      dispatchEvent(new HashChangeEvent('hashchange', { oldURL, newURL: location.href }));
+    });
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await setWide(true);
+    await go('#/agents');
+    await go('#/pane/p3');
+    const len = history.length;
+    await click($('#sidebar #btn-settings'));
+    await settle();
+    assert.equal(location.hash, '#/settings');
+    assert.equal(history.length, len, "in the drawer's entry");
+    await click($('#btn-settings-close'));
+    await settle();
+    assert.equal(location.hash, '#/agents', 'back to the list, past the drawer');
+    await setWide(false);
+    replace.mockRestore();
+  });
+
   it("a Home's Stop (its ⋮) closes its orchestrator's pane after the confirm, and the Home stays, stopped", async () => {
     await act(async () => push!({ type: 'state', state: fresh() }));
     await go('#/home/personal');
