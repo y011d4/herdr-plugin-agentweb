@@ -1,14 +1,14 @@
 /**
  * ui/Todos.tsx — what waits on the user at a Home, and its to-do list. Each Home's "needs you" count:
- * the badge on its switcher button and its PC sidebar heading, and on its status bar (Pane.tsx's
+ * the badge on its switcher button and its PC rail row (ui/Sidebar.tsx), and on its status bar (Pane.tsx's
  * HomeStatus, on a running Home and a stopped one alike) "Needs you · n", which opens a popover: its
- * account's blocked agents (a tap: the drawer), its orchestrator's own question (answered below the
- * chat) and the to-do list, what its orchestrator wrote down (todos.ts); on a PC the sidebar shows the same
- * (NeedsList) under the Home's heading, its blocked agents outside any Home under Other (Blocked). An item due later waits
+ * account's blocked agents (a tap opens it: nav.ts's openAgent), its orchestrator's own question (answered below the
+ * chat) and the to-do list, what its orchestrator wrote down (todos.ts); on a PC from 1280px the Home's panel shows the
+ * same (NeedsList, ui/HomePanel.tsx) and the rail its blocked agents outside any Home, under Other (Blocked). An item due later waits
  * under Later until its time. A tap on an item opens its menu: Mark done ticks it off (DELETE …/todos/:id, the State
  * push then drops it), and on a running Home Ask the orchestrator puts its quote into the composer (transcript.ts's
  * todoQuote: its text, id, worker and link), to ask its orchestrator about it. A link shows its host; an agent's name
- * opens its drawer. The sidebar's are `dense`: smaller, each item's text two lines at most (all of it on hover).
+ * opens it (openAgentNamed).
  */
 import { Anchor, Badge, Button, Group, Loader, Menu, Popover, Stack, Text, UnstyledButton } from '@mantine/core';
 import { useEffect, useState, type ReactNode, type SyntheticEvent } from 'react';
@@ -21,7 +21,7 @@ import { findPane, store } from '../store.ts';
 import { dueLabel, linkHost, splitTodos } from '../todos.ts';
 import { todoQuote } from '../transcript.ts';
 import type { AppState, OrchestratorView, TodoItem } from '../types.ts';
-import { agentCards, cardTitle, orchestratorLabel } from './Dashboard.tsx';
+import { AgentRow, agentCards, cardTitle, orchestratorLabel } from './Dashboard.tsx';
 
 /** The time, again at each minute's start: an item due later comes up when its time comes and a usage limit's
  *  countdown ticks (both whole minutes), with no State push. Each wait is measured again, so a phone asleep
@@ -48,7 +48,7 @@ export function needsYou(o: OrchestratorView, state: AppState, now: number): num
   return homeSummary(agentCards(state, o), store.seenDone).blocked.length + (asksUser(o) ? 1 : 0) + splitTodos(o.todos ?? [], now).now.length;
 }
 
-/** The count on a Home's switcher button and sidebar heading; nothing at 0. */
+/** The count on a Home's switcher button and PC rail row; nothing at 0. */
 export function NeedsBadge({ n }: { n: number }) {
   return n > 0 ? <Badge className="home-needs shrink-0" color="blocked" c="white" size="sm" radius="xl" px={6}>{n}</Badge> : null;
 }
@@ -101,20 +101,22 @@ export function NeedsButton({ o, s, n, now }: { o: OrchestratorView; s: HomeSumm
 const head = (text: string): ReactNode => <Text fz={11} fw={700} c="dimmed" tt="uppercase" lts="0.06em">{text}</Text>;
 
 /** What waits on the user at Home `o` (`s`: its agents' summary): its orchestrator's question, its blocked agents
- *  and its to-do list. The popover's, and on a PC the sidebar's (`dense`), under the Home's heading. */
-export function NeedsList({ o, s, now, ask, dense }: { o: OrchestratorView; s: HomeSummary; now: number; ask?: (it: TodoItem) => void; dense?: boolean }) {
+ *  and its to-do list. The popover's, and a PC's Home panel's (ui/HomePanel.tsx: its blocked agents as `rows`). */
+export function NeedsList({ o, s, now, ask, rows }: { o: OrchestratorView; s: HomeSummary; now: number; ask?: (it: TodoItem) => void; rows?: boolean }) {
   return (
-    <Stack gap={dense ? 8 : 12}>
+    <Stack gap={12}>
       {asksUser(o) && <Text data-asks="" fz={13} c="blocked" fw={600}>{`${orchestratorLabel(o)} is waiting for your answer, below the chat.`}</Text>}
-      <Blocked cards={s.blocked} />
-      {(o.todos?.length ?? 0) > 0 && <Stack gap={4}>{head('To-do')}<Todos o={o} now={now} ask={ask} dense={dense} /></Stack>}
+      <Blocked cards={s.blocked} rows={rows} />
+      {(o.todos?.length ?? 0) > 0 && <Stack gap={4}>{head('To-do')}<Todos o={o} now={now} ask={ask} /></Stack>}
     </Stack>
   );
 }
 
-/** Agents waiting on the user, under "Waiting on you", as chips (a tap: its drawer). Nothing without any. */
-export function Blocked({ cards }: { cards: DashboardCard[] }) {
+/** Agents waiting on the user, under "Waiting on you", as chips (a tap opens it: nav.ts's openAgent), or as the agents
+ *  popover's rows (`rows`: AgentRow, with a PC's ⋮). Nothing without any. */
+export function Blocked({ cards, rows }: { cards: DashboardCard[]; rows?: boolean }) {
   if (!cards.length) return null;
+  if (rows) return <Stack gap={0} className="-mx-3"><div className="px-3 pb-1">{head('Waiting on you')}</div>{cards.map((c) => <AgentRow key={c.pane.paneId} card={c} />)}</Stack>;
   return (
     <Stack gap={6}>
       {head('Waiting on you')}
@@ -132,21 +134,21 @@ export function Blocked({ cards }: { cards: DashboardCard[] }) {
 
 /** Home `o`'s items: the ones to do now, then Later (n), closed until tapped. Nothing without items. `ask`:
  *  each menu has Ask the orchestrator, off while its question is open (the composer is the question's then). */
-export function Todos({ o, now, ask, dense }: { o: OrchestratorView; now: number; ask?: (it: TodoItem) => void; dense?: boolean }) {
+export function Todos({ o, now, ask }: { o: OrchestratorView; now: number; ask?: (it: TodoItem) => void }) {
   const off = !!o.headless?.pending;
   const [open, setOpen] = useState(false);
   const { now: due, later } = splitTodos(o.todos ?? [], now);
   if (!due.length && !later.length) return null;
   return (
     <Stack className="home-todos" gap={0}>
-      {due.map((it) => <Todo key={it.id} home={o.name} item={it} now={now} ask={ask && (() => ask(it))} off={off} dense={dense} />)}
+      {due.map((it) => <Todo key={it.id} home={o.name} item={it} now={now} ask={ask && (() => ask(it))} off={off} />)}
       {later.length > 0 && (
         <UnstyledButton className="self-start py-1 text-[12px] font-semibold text-(--color-text-dim) hover:text-(--color-text)" data-action="todo-later"
           aria-expanded={open} onClick={() => setOpen(!open)}>
           {`Later (${later.length}) ${open ? '▾' : '›'}`}
         </UnstyledButton>
       )}
-      {open && later.map((it) => <Todo key={it.id} home={o.name} item={it} now={now} ask={ask && (() => ask(it))} off={off} dense={dense} />)}
+      {open && later.map((it) => <Todo key={it.id} home={o.name} item={it} now={now} ask={ask && (() => ask(it))} off={off} />)}
     </Stack>
   );
 }
@@ -164,8 +166,7 @@ const ASK_ICON = (
 // item's DOM (not a portal; fixed, so no scroll box clips it), so the Needs you popover doesn't take a tap in it for one outside
 // and stays open over a Mark done. ⋮ at its right says it has one. Ask's quote focuses the composer: the menu then doesn't
 // put the focus back on the item (`back`).
-// `dense` (the sidebar's): smaller, the text two lines at most (all of it on hover)
-function Todo({ home, item, now, ask, off, dense }: { home: string; item: TodoItem; now: number; ask?: () => void; off: boolean; dense?: boolean }) {
+function Todo({ home, item, now, ask, off }: { home: string; item: TodoItem; now: number; ask?: () => void; off: boolean }) {
   const [busy, setBusy] = useState(false);
   const [back, setBack] = useState(true);
   const host = item.url ? linkHost(item.url) : null;
@@ -188,12 +189,12 @@ function Todo({ home, item, now, ask, off, dense }: { home: string; item: TodoIt
         <div role="button" tabIndex={0} data-todo={item.id} aria-busy={busy || undefined}
           className={`home-todo -mx-2 flex cursor-pointer items-center gap-2 border-b border-(--color-border) px-2 last:border-b-0
             hover:bg-(--color-border) active:bg-(--color-border) data-expanded:bg-(--color-border) focus-visible:outline-2
-            focus-visible:-outline-offset-2 focus-visible:outline-(--color-accent) aria-busy:opacity-50 ${dense ? 'py-1' : 'min-h-11 py-1.5'}`}
+            focus-visible:-outline-offset-2 focus-visible:outline-(--color-accent) aria-busy:opacity-50 min-h-11 py-1.5`}
           onKeyDown={(e) => {
             if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.currentTarget.click(); }
           }}>
           <div className="min-w-0 flex-1">
-            <Text fz={dense ? 13 : 14} lh={dense ? 1.45 : undefined} className="break-words" lineClamp={dense ? 2 : undefined} title={dense ? item.text : undefined}>{item.text}</Text>
+            <Text fz={14} className="break-words">{item.text}</Text>
             {(item.agent || host || due) && (
               <Group gap={10} className="text-[12px]">
                 {item.agent && <Anchor component="button" fz={12} data-agent={item.agent} onClick={(e) => { own(e); openAgentNamed(item.agent!); }}>{item.agent}</Anchor>}

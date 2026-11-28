@@ -416,13 +416,12 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
      composer's, and doesn't shift once the chat overflows */
   .chat-log { scrollbar-gutter: stable both-edges; }
 
-  /* The sidebar (ui/Sidebar.tsx), drawn at this width on every screen but the token one: while it
-     is there the shell is two columns, the sidebar beside the topbar, the banner and #screen (their
-     rows set, so a hidden banner can't pull #screen into its row). --sidebar-w is its width, for
-     whatever covers the rest of the screen (an agent's drawer) and should leave it usable: 320px, and
-     from xl (theme.ts's 80em = 1280px) 360px, the width that still leaves the chat its whole 880px column. */
-  :root:has(#sidebar) { --sidebar-w: 320px; }
-  @media (min-width: 80em) { :root:has(#sidebar) { --sidebar-w: 360px; } }
+  /* The sidebar, the rail of Homes (ui/Sidebar.tsx), drawn at this width on every screen but the token one: while
+     it is there the shell is two columns, the rail beside the topbar, the banner and #screen (their rows set, so a
+     hidden banner can't pull #screen into its row). --sidebar-w is its width, for whatever covers the rest of the
+     screen (an agent's drawer) and should leave it usable: 248px, so at 1280px the chat's column and a Home's
+     320px panel still fit beside it. */
+  :root:has(#sidebar) { --sidebar-w: 248px; }
   #app:has(> #sidebar) {
     display: grid;
     grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
@@ -431,6 +430,8 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
   #app:has(> #sidebar) > #topbar { grid-area: 1 / 2; }
   #app:has(> #sidebar) > #reconnect-banner { grid-area: 2 / 2; }
   #app:has(> #sidebar) > #screen { grid-area: 3 / 2; min-height: 0; }
+  /* a Home with its panel (ui/HomePanel.tsx, from PANEL_QUERY's 1280px) at its right */
+  #screen:has(> #home-panel) { flex-direction: row; }
   /* a column: its All agents row goes to the bottom when the rest is short (ui/Sidebar.tsx) */
   #sidebar {
     grid-area: 1 / 1 / -1 / 2;
@@ -443,9 +444,8 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
     background: var(--color-surface);
     border-right: 1px solid var(--color-border);
   }
-  /* what the sidebar does instead: the full list's ← Home (a Home's own list keeps its ← <Home>,
-     aria-label "Back to …": the way back where the list is). The Home switcher stays, as on a phone:
-     the way between Homes (the sidebar's Home headings list what waits there) */
+  /* what the rail does instead (its Home rows): the full list's ← Home (a Home's own list keeps its ← <Home>,
+     aria-label "Back to …": the way back where the list is) */
   #app:has(> #sidebar) #topbar-left .topbar-back[aria-label='Home'] {
     display: none;
   }

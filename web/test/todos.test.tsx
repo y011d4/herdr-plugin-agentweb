@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { setAppState } from '../src/store.ts';
+import { WIDE_QUERY } from '../src/theme.ts';
 import { dueLabel, linkHost, splitTodos } from '../src/todos.ts';
 import type { AppState, OrchestratorView, TodoItem } from '../src/types.ts';
 import { needsYou, Todos } from '../src/ui/Todos.tsx';
 import { state as recorded } from './contract.gen.ts';
-import { fire, render } from './render.ts';
+import { fakeMedia, fire, render } from './render.ts';
 
 const at = (d: string): number => new Date(d).getTime(); // local time, as the labels are
 const NOW = at('2026-11-27T12:00:00');
@@ -90,7 +91,8 @@ describe('Todos', () => {
     assert.equal(container.querySelector('.home-todo a'), null);
   });
 
-  it("opens the worker's drawer by its herdr name, not the item's menu", async () => {
+  it("opens the worker's drawer by its herdr name (a phone's: a PC's opens it in herdr), not the item's menu", async () => {
+    fakeMedia(WIDE_QUERY, false);
     await show(home([item('a1b2c3', 'merge it', { agent: 'w-review' })])); // p3's name in the recording
     location.hash = '#/home/personal';
     await fire(() => container.querySelector<HTMLElement>('[data-agent="w-review"]')!.click());
@@ -155,20 +157,6 @@ describe('Todos', () => {
     await fire(() => reqs[1].answer(500, { error: { code: 'error', message: 'could not save the to-do list: disk full' } }));
     assert.deepEqual(getToasts().map((t) => `${t.title}: ${t.body}`), ['Could not tick it off: could not save the to-do list: disk full']);
     assert.equal(row('d4e5f6').hasAttribute('aria-busy'), false, 'tappable again');
-  });
-
-  it("dense (the sidebar's): two lines of text at most, all of it on hover; the popover's: all of it", async () => {
-    const long = 'merge PR #119 once CI is green at /home/u/src/repo-wt-a-very-long-branch-name-that-wraps';
-    const o = home([item('a1b2c3', long, { agent: 'w-todo' })]);
-    ({ container, unmount } = await render(<Todos o={o} now={NOW} ask={() => {}} dense />));
-    const text = container.querySelector<HTMLElement>('[data-todo="a1b2c3"] .mantine-Text-root')!;
-    assert.equal(text.dataset.lineClamp, 'true');
-    assert.match(text.getAttribute('style')!, /--text-line-clamp: ?2/);
-    assert.equal(text.title, long);
-    await unmount();
-    ({ container, unmount } = await render(<Todos o={o} now={NOW} ask={() => {}} />));
-    const full = container.querySelector<HTMLElement>('[data-todo="a1b2c3"] .mantine-Text-root')!;
-    assert.ok(!full.hasAttribute('data-line-clamp') && !full.title);
   });
 
   it('counts what waits at a Home: its blocked agents, its orchestrator waiting itself, its items due now', () => {

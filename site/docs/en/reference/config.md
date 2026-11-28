@@ -61,13 +61,14 @@ with defaults, is:
   it works. Orchestrators aren't listed among the agents. A tap on the counts lists those agents, blocked first,
   then working, done and idle (a tap on one opens it); its **Open the list** opens the agents list with
   only that account's agents (`#/agents/<name>`, Back returns to the Home); the full list's
-  **← Home** opens the Home used last. On a PC the status bar has neither: the sidebar beside it lists what needs
-  you under each Home's heading, and the agents under **All agents**, where a Home's heading opens its list. With
-  two or more configured, a phone's top bar is a switcher between the Homes (`label`s, with their status and what waits
-  on you there; it scrolls sideways when they don't fit), over the Home's status bar; on a PC the sidebar's Home
-  headings switch between them, and the top bar is the Home's own: its name and status, then what a phone has at its
-  status bar's right (a headless one's usage and model, `>_` and **⋮**). The app reopens the Home used last
-  (`#/home/<name>`); with none, it opens on the list.
+  **← Home** opens the Home used last. With two or more configured, a phone's top bar is a switcher between the
+  Homes (`label`s, with their status and what waits on you there; it scrolls sideways when they don't fit), over the
+  Home's status bar. On a PC a rail at the left lists the Homes instead, each with what waits on you there (a count)
+  and its agents' counts (working, done, idle); a click opens the Home, and **All agents** at its bottom the full
+  list. A Home's top bar is its own: its name and status, then what a phone has at its status bar's right (a headless
+  one's usage and model, `>_` and **⋮**). From 1280px wide a panel at the Home's right lists what needs you there (its
+  question, its blocked agents, its to-do list) and its other agents, with **Open the list**; narrower, its status bar
+  keeps Needs you and the counts. The app reopens the Home used last (`#/home/<name>`); with none, it opens on the list.
 - `notify_url` — optional [ntfy](https://ntfy.sh) topic URL for background push
   notifications, e.g. `https://ntfy.example.internal/herdr` for a **self-hosted**
   ntfy instance. When unset (default) the bridge performs no outbound requests at

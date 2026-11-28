@@ -15,7 +15,7 @@ import { openAgent, openAgentNamed } from '../src/nav.ts';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { emit, setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
-import { WIDE_QUERY } from '../src/theme.ts';
+import { PANEL_QUERY, WIDE_QUERY } from '../src/theme.ts';
 import { App, start } from '../src/ui/App.tsx';
 import { previewImage } from '../src/ui/Modals.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
@@ -37,8 +37,9 @@ const reqs: Req[] = [];
 vi.stubGlobal('fetch', (url: string, init: RequestInit = {}) => new Promise((res) => {
   reqs.push({ method: init.method ?? 'GET', url, answered: false, answer: (status, body) => res({ ok: status < 400, status, json: async () => body }) });
 }));
-// A phone's width until a test says otherwise: no PC sidebar.
+// A phone's width until a test says otherwise: no PC sidebar; and no Home panel (from 1280px) until one says so.
 const setWide = fakeMedia(WIDE_QUERY, false);
+const setPanel = fakeMedia(PANEL_QUERY, false);
 /** Answers every open request `${method} ${url}` containing `match` (StrictMode starts a pane's view twice). */
 async function answer(match: string, body: unknown, status = 200): Promise<void> {
   const open = reqs.filter((q) => !q.answered && `${q.method} ${q.url}`.includes(match));
@@ -563,7 +564,7 @@ describe('App', () => {
     await go('#/agents');
   });
 
-  it("a Home's Needs you and agent counts are a phone's only: on a PC the sidebar has them, and the topbar is the Home's header", async () => {
+  it("a Home's Needs you and agent counts are on its bar until its panel has them (1280px); on a PC the topbar is the Home's header", async () => {
     const s = fresh();
     s.orchestrators[0].todos = [{ id: 't1', text: 'Review the PR', agent: null, url: null, due: null, createdAt: 0 }];
     await act(async () => push!({ type: 'state', state: s }));
@@ -573,15 +574,18 @@ describe('App', () => {
       .map((sel) => ($(sel) ? 1 : 0)).join('');
     assert.equal(bar(), '0111101100', 'a phone: no sidebar; Needs you, the counts, the switcher in the topbar (its button names the Home), ⋮ on its bar; ⚙ and the dot in the topbar');
     await setWide(true);
-    assert.equal(bar(), '1000010011', "a PC: the sidebar, ⚙ and the dot at its top; the topbar the Home's header, its ⋮ there");
-    assert.ok($('#sidebar .sidebar-home[data-home="personal"] .home-todo'), "the sidebar has the Home's to-do item");
+    assert.equal(bar(), '1110010011', "a PC (under 1280px): the sidebar, ⚙ and the dot at its top; the topbar the Home's header, its ⋮ there; Needs you and the counts on its bar");
     assert.match($('#topbar-title')!.textContent!, /^Personal· /, 'its name and status');
+    assert.ok(!$('#home-panel'), 'no panel');
+    await setPanel(true);
+    assert.equal(bar(), '1000010011', 'from 1280px: neither on a bar');
     assert.ok(!$('#home-status'), 'no bar under it (a TUI Home: no warnings)');
-    await click($('#sidebar .sidebar-all'));
-    await click($('#sidebar .sidebar-group[data-home="personal"] .sidebar-home-list'));
-    assert.equal(location.hash, '#/agents/personal', "the Home's list: its heading under All agents (a phone's is in the counts' popover)");
-    assert.equal($('#sidebar .sidebar-home-list[aria-current="page"]')?.getAttribute('href'), '#/agents/personal', 'marked');
+    assert.ok($('#screen > #home-panel')?.previousElementSibling === $('#screen-pane'), 'its panel after the Home, in #screen');
+    assert.ok($('#home-panel .home-todo[data-todo="t1"]'), "the panel has the Home's to-do item");
+    await click($('#home-panel a.home-panel-list'));
+    assert.equal(location.hash, '#/agents/personal', "the Home's list: its panel's Open the list (a phone's is in the counts' popover)");
     await go('#/home/personal');
+    await setPanel(false);
     await setWide(false);
     assert.equal(bar(), '0111101100', 'a phone again');
     // a stopped TUI Home, the only one: on a PC nothing for its bar to show, so none
@@ -591,8 +595,10 @@ describe('App', () => {
     await go('#/home/work');
     assert.ok($('#screen-home-stopped #home-status .home-counts'), 'a phone: its counts');
     await setWide(true);
-    assert.ok($('#screen-home-stopped') && !$('#home-status'), 'a PC: no bar');
     assert.deepEqual([$('#topbar-title')!.textContent, $('#topbar-right')!.innerHTML], ['work· stopped', ''], 'its name and status; no tools to a stopped TUI Home');
+    await setPanel(true);
+    assert.ok($('#screen-home-stopped') && !$('#home-status') && $('#screen > #home-panel'), 'from 1280px: no bar, its panel');
+    await setPanel(false);
     await setWide(false);
     await go('#/agents');
   });
@@ -618,6 +624,35 @@ describe('App', () => {
     assert.deepEqual(toastTitles(), ['Could not open in herdr']);
     await setWide(false);
     await go('#/agents');
+  });
+
+  it("on a PC a click on an agent opens it in herdr (a list card, a [yoicks] notice's name); its ⋮'s Show here, its drawer", async () => {
+    await act(async () => push!({ type: 'state', state: fresh() }));
+    await setWide(true);
+    await go('#/agents');
+    await click($('#screen .agent-card[data-pane-id="p3"]'));
+    await answer('POST /api/panes/p3/focus', { ok: true });
+    assert.deepEqual(toastTitles(), ['Opened in herdr']);
+    assert.equal(location.hash, '#/agents', 'no drawer');
+    clearToasts();
+    await act(async () => openAgentNamed('w-review')); // p3
+    await answer('POST /api/panes/p3/focus', { error: { code: 'not_found', message: 'pane not found' } }, 404);
+    assert.deepEqual(toastTitles(), ['Could not open in herdr']);
+    await act(async () => openAgent('p4')); // an orchestrator's pane: its Home, at every width
+    await settle();
+    assert.equal(location.hash, '#/home/personal');
+    await go('#/agents');
+    await click($('#screen [data-agent-menu="p3"]'));
+    assert.equal(location.hash, '#/agents', "the ⋮ is its own: not the card's click");
+    await click($('#screen [data-agent-more="p3"] [data-action="show"]'));
+    await settle();
+    assert.equal(location.hash, '#/pane/p3');
+    assert.ok($('.agent-drawer #screen-pane'));
+    assert.ok(!reqs.some((q) => !q.answered && q.url.endsWith('/focus')), 'Show here sends nothing');
+    await setWide(false);
+    await go('#/agents');
+    assert.ok(!$('#screen [data-agent-menu]'), 'a phone: no ⋮ (a tap opens the drawer)');
+    clearToasts();
   });
 
   it("a PC's ⚙ (the sidebar's, in reach under a drawer) takes the drawer's place, as an overlay over an overlay does", async () => {

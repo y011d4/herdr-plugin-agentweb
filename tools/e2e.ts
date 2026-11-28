@@ -1651,66 +1651,79 @@ async function p6(c: Ctx) {
   }
 }
 
-/** W1: the PC sidebar. On a PC (1280px): #sidebar left of the topbar and #screen, --sidebar-w its
- *  width; All agents, folded, at its bottom; its agents, unfolded (All agents), a group per orchestrator, in /api/state's order, with its
- *  account's agents, then Other with the agents no account has (when there are any); clicking wc-less
- *  there opens #/pane/<it> and marks it. W1.switch: a Home's topbar is its header, no switcher there (a phone's has one),
- *  and a click on another Home's heading in the sidebar opens that Home.
- *  W1.home: that Home's Needs you and agent counts are a phone's only: they go as the sidebar comes (which has them),
- *  at its breakpoint too (1023px: no sidebar, the counts; 1024px: the sidebar, neither), and come back with a phone's width.
- *  Down to a phone's width the sidebar goes, and #screen stays the same element. */
+/** W1: the PC's rail of Homes. On a PC (1280px): #sidebar left of the topbar and #screen, --sidebar-w its width (248px);
+ *  All agents at its bottom, pinned there however long the rows above get; a row per orchestrator, in /api/state's order,
+ *  its counts (working, done, idle) adding up to its account's agents less the blocked ones (those are in its needs
+ *  count). A click on wc-less's card opens it in herdr (one POST …/focus, no drawer), as a Home panel's row does, and its
+ *  ⋮'s Show here opens #/pane/<it>. W1.switch: a Home's topbar is its header, no switcher
+ *  there (a phone's has one), and a click on another Home's row in the rail opens that Home. W1.home: that Home's Needs
+ *  you and agent counts are on its status bar until its panel has them (1023px: no rail, the counts; 1024px: the rail and
+ *  the counts, no panel; 1280px: the rail and the panel, neither), and come back with a phone's width. Down to a phone's
+ *  width the rail goes, and #screen stays the same element. */
 async function w1(c: Ctx) {
   const { pg } = c;
   const less = c.rec.names.less;
-  const row = `document.querySelector('#sidebar [data-sidebar-pane=${js(less)}]')`;
+  const click = async (sel: string) => {
+    const p = await pg.at(sel);
+    for (const type of ['mousePressed', 'mouseReleased']) await pg.S('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', clickCount: 1 });
+  };
   try {
     await mobile(pg, false);
     await loadApp(c, '#/agents'); // a new document: a PC's pointer
-    // the folded row's bottom edge on the sidebar's (pinned there), with the sidebar made too short for what it lists
-    // (150px: its topbar and the row leave 46px) and scrolled to its top
-    const pin = await pg.until(`(() => { const s = document.getElementById('sidebar'), r = document.querySelector('#sidebar .sidebar-all[aria-expanded=false]')?.parentElement;
+    // All agents' bottom edge on the rail's (pinned there), with the rail made too short for what it lists (150px: its
+    // top and All agents leave 46px) and scrolled to its top
+    const pin = await pg.until(`(() => { const s = document.getElementById('sidebar'), r = document.querySelector('#sidebar .sidebar-all')?.parentElement;
       if (!s || !r) return false;
       s.style.height = '150px';
       s.scrollTop = 0;
       return s.scrollHeight > s.clientHeight && Math.round(s.getBoundingClientRect().bottom - r.getBoundingClientRect().bottom) === 0; })()`, 5000);
     await pg.ev(`document.getElementById('sidebar')?.style.removeProperty('height'), 1`);
-    let groups = '';
+    let rows = '';
     const g = await waitFn(async () => {
       const st = await api(c, 'GET', '/api/state');
       const orch: any[] = st.orchestrators;
-      const agents = allPanes(st).filter((p) => p.agent && !orch.some((o) => o.paneId === p.paneId)).map((p) => p.paneId as string);
-      const want: Array<[string, string[]]> = orch.map((o) => [o.name, agents.filter((id) => o.agents?.includes(id)).sort()]);
-      const other = agents.filter((id) => !orch.some((o) => o.agents?.includes(id))).sort();
-      if (other.length) want.push(['', other]);
-      // folded at first: unfold them (React draws them on the next try)
-      const dom = await pg.ev(`document.querySelector('#sidebar .sidebar-all[aria-expanded=false]')?.click(), [...document.querySelectorAll('#sidebar section.sidebar-group')].map((s) =>
-        [s.dataset.home, [...s.querySelectorAll('[data-sidebar-pane]')].map((e) => e.dataset.sidebarPane).sort()])`);
-      groups = `${want.length}/${dom.length}`;
+      const agents = allPanes(st).filter((p) => p.agent && !orch.some((o) => o.paneId === p.paneId));
+      const want = orch.map((o) => [o.name, agents.filter((p) => (o.agents == null || o.agents.includes(p.paneId)) && p.agent.status !== 'blocked').length]);
+      const dom = await pg.ev(`[...document.querySelectorAll('#sidebar a.sidebar-home')].map((a) => [a.dataset.home,
+        [...a.querySelectorAll('.status-counts [data-count]')].reduce((n, e) => n + parseInt(e.textContent, 10), 0)])`);
+      rows = `${js(want)}/${js(dom)}`;
       return js(dom) === js(want);
     }, 5000, 300);
     const geo = await pg.ev(`(() => { const x = (id) => Math.round(document.getElementById(id).getBoundingClientRect().x);
       return { w: Math.round(document.getElementById('sidebar').getBoundingClientRect().width), topbar: x('topbar'), screen: x('screen'),
         v: getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w').trim() }; })()`);
     const screen = await pg.ev(`window.__wcScreen = document.getElementById('screen'), 1`);
-    const p = await pg.at(row);
-    for (const type of ['mousePressed', 'mouseReleased']) await pg.S('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', clickCount: 1 });
-    const open = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)} && ${row}?.getAttribute('aria-current') === 'page'`, 2000);
-    const [first, second] = (await api(c, 'GET', '/api/state')).orchestrators.map((o: any) => o.name as string);
+    // a click on wc-less's card opens it in herdr, its ⋮'s Show here in the drawer (a Home panel's rows do the same)
+    const card = `document.querySelector('#screen .agent-card[data-pane-id=${js(less)}]')`;
+    let herdr: Awaited<ReturnType<typeof waitFn>> | null = null;
+    let show: Awaited<ReturnType<typeof waitFn>> | null = null;
+    if (!(await pg.until(`!!${card}`, 5000)).timeout) {
+      const t = Date.now();
+      await click(card);
+      herdr = await waitFn(async () => pg.posts(t, `/api/panes/${enc(less)}/focus`).length === 1
+        && await pg.ev(`location.hash === '#/agents' && !document.querySelector('.agent-drawer-content')`), 2000);
+      await click(`document.querySelector('#screen [data-agent-menu=${js(less)}]')`);
+      await pg.until(`!!document.querySelector('[data-agent-more=${js(less)}] [data-action=show]')`, 2000);
+      await click(`document.querySelector('[data-agent-more=${js(less)}] [data-action=show]')`);
+      show = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)} && !!document.querySelector('.agent-drawer-content')`, 2000);
+    }
+    const orch: any[] = (await api(c, 'GET', '/api/state')).orchestrators;
+    const [first, second] = orch.map((o: any) => o.name as string);
     await pg.goto(`#/home/${enc(first)}`);
     const btn = `document.querySelector('#sidebar a[data-home=${js(second)}]')`;
     const shown = await pg.until(`!document.querySelector('#topbar .home-switch') && !!document.querySelector('#topbar-title .home-state')
       && (${btn}?.getBoundingClientRect().height ?? 0) > 0`, 5000);
     let switched = shown;
     if (!shown.timeout) {
-      const b = await pg.at(btn);
-      for (const type of ['mousePressed', 'mouseReleased']) await pg.S('Input.dispatchMouseEvent', { type, x: b.x, y: b.y, button: 'left', clickCount: 1 });
+      await click(btn);
       switched = await pg.until(`location.hash === ${js(`#/home/${enc(second)}`)}`, 2000);
     }
     result(c, !shown.timeout && !switched.timeout, 'W1.switch', `shown=${ms(shown)},switched=${ms(switched)}`,
-      `1280px: #/home/<the first orchestrator>: no .home-switch in #topbar, its title the Home's (.home-state), and the second's heading in #sidebar, within 5s; a click on it opens #/home/<it> within 2s`);
-    // the sidebar there from 1024px on, and the Home's counts (and Needs you) exactly while it isn't
-    const split = `(() => { const side = !!document.getElementById('sidebar'); return side === (innerWidth >= 1024)
-      && side !== !!document.querySelector('#home-status .home-counts') && !(side && document.querySelector('#home-status [data-action="needs"]')); })()`;
+      `1280px: #/home/<the first orchestrator>: no .home-switch in #topbar, its title the Home's (.home-state), and the second's row in #sidebar, within 5s; a click on it opens #/home/<it> within 2s`);
+    // the rail there from 1024px on, the panel from 1280px on, and the Home's counts (and Needs you) exactly while there is no panel
+    const split = `(() => { const side = !!document.getElementById('sidebar'), panel = !!document.getElementById('home-panel');
+      return side === (innerWidth >= 1024) && panel === (innerWidth >= 1280)
+        && panel !== !!document.querySelector('#home-status .home-counts') && !(panel && document.querySelector('#home-status [data-action="needs"]')); })()`;
     const at: string[] = [];
     let split1 = !switched.timeout;
     for (const width of [1023, 1024, 1280]) {
@@ -1723,11 +1736,13 @@ async function w1(c: Ctx) {
     const gone = await pg.until(`!document.getElementById('sidebar') && document.getElementById('screen') === window.__wcScreen`, 2000);
     const phone = await pg.until(split, 2000);
     result(c, split1 && !phone.timeout, 'W1.home', `${at.join(',')},390:${ms(phone)}`,
-      "#/home/<the second>: at 1023px no #sidebar and its .home-counts; at 1024px and 1280px #sidebar and no .home-counts or Needs you; at 390px the counts again; each within 2s");
-    result(c, !pin.timeout && !g.timeout && geo.w === 360 && geo.topbar === 360 && geo.screen === 360 && geo.v === '360px' && screen === 1 && !open.timeout && !gone.timeout, 'W1',
-      `pinned=${ms(pin)},groups=${groups}:${g.timeout ? 'mismatch' : 'ok'},width=${geo.w},topbarX=${geo.topbar},screenX=${geo.screen},--sidebar-w=${geo.v},open=${ms(open)},phone=${ms(gone)}`,
-      "1280px: #sidebar 360px left of #topbar and #screen (--sidebar-w 360px); All agents, folded, at its bottom within 5s (the sidebar 150px tall, overflowing, scrolled to its top); its unfolded groups = /api/state's orchestrators (each its account's agents) + Other; " +
-        "clicking wc-less there opens #/pane/<it> marked within 2s; at 390px no #sidebar and the same #screen within 2s");
+      "#/home/<the second>: at 1023px no #sidebar, its .home-counts; at 1024px #sidebar and the counts, no #home-panel; at 1280px #sidebar and #home-panel, no .home-counts or Needs you; at 390px the counts again; each within 2s");
+    result(c, !pin.timeout && !g.timeout && geo.w === 248 && geo.topbar === 248 && geo.screen === 248 && geo.v === '248px' && screen === 1
+      && !!herdr && !herdr.timeout && !!show && !show.timeout && !gone.timeout, 'W1',
+      `pinned=${ms(pin)},rows=${rows}:${g.timeout ? 'mismatch' : 'ok'},width=${geo.w},topbarX=${geo.topbar},screenX=${geo.screen},--sidebar-w=${geo.v},` +
+        `herdr=${herdr ? ms(herdr) : 'no card'},show=${show ? ms(show) : 'no card'},phone=${ms(gone)}`,
+      "1280px: #sidebar 248px left of #topbar and #screen (--sidebar-w 248px); All agents at its bottom within 5s (the rail 150px tall, overflowing, scrolled to its top); a row per /api/state orchestrator, in order, " +
+        "its counts = its account's agents less the blocked; a click on wc-less's card POSTs …/focus once, no drawer, and its ⋮ Show here opens #/pane/<it>, within 2s each; at 390px no #sidebar and the same #screen within 2s");
   } finally {
     await mobile(pg, true);
     await loadApp(c, '#/agents'); // a phone's document again

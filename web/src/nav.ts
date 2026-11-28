@@ -1,14 +1,16 @@
 /**
  * nav.ts — the moves more than one screen makes: opening an overlay and closing it. An agent (#/pane/<id>)
- * opens in a drawer (ui/AgentDrawer.tsx), Settings (#/settings) in a sheet (ui/SettingsSheet.tsx), in
+ * opens in a drawer (ui/AgentDrawer.tsx; a click on one on a PC opens it in herdr instead: openAgent), Settings (#/settings) in a sheet (ui/SettingsSheet.tsx), in
  * front of the screen they were opened from (store.view.paneBackRoute), one at a time. Going from one
  * overlay to another replaces the history entry, so the phone's Back still closes it; a close goes back
  * to the entry under it when the overlay was opened on top of it here, else replaces itself with that
  * screen.
  */
+import { apiPost } from './api.ts';
 import { showToast } from './notify.ts';
 import { isOverlay, paneRoute } from './routes.ts';
 import { store } from './store.ts';
+import { WIDE_QUERY } from './theme.ts';
 
 /** To `hash`: from an overlay to an overlay in place, else as a new history entry. */
 export function go(hash: string): void {
@@ -16,8 +18,24 @@ export function go(hash: string): void {
   else location.hash = hash;
 }
 
-/** Opens a pane: its drawer, or for an orchestrator's pane its Home. */
-export const openAgent = (paneId: string): void => go(paneRoute(store.appState, paneId));
+/** Opens an agent the way a click on it does: on a PC (WIDE_QUERY) in herdr (focusInHerdr: the PC's herdr switches to its
+ *  pane), on a phone in its drawer (showAgent); an orchestrator's pane is its Home at every width. */
+export function openAgent(paneId: string): void {
+  const hash = paneRoute(store.appState, paneId);
+  if (hash.startsWith('#/pane/') && matchMedia(WIDE_QUERY).matches) focusInHerdr(paneId);
+  else go(hash);
+}
+
+/** Opens an agent in this app, its drawer (an orchestrator's pane: its Home), at every width: a PC's Show here. */
+export const showAgent = (paneId: string): void => go(paneRoute(store.appState, paneId));
+
+/** herdr's pane.focus: the PC's herdr switches to the pane's workspace, tab and pane; a toast says how it went (the
+ *  browser can't bring the terminal to the front). */
+export function focusInHerdr(paneId: string): void {
+  apiPost(`/api/panes/${encodeURIComponent(paneId)}/focus`).then(
+    () => showToast('Opened in herdr', 'Its pane has the focus in herdr'),
+    (err: Error) => showToast('Could not open in herdr', err.message));
+}
 
 /** Opens the agent herdr names `name` (a [yoicks] notice's worker), or says none is: while an agent's
  *  name isn't known (agent.list fills names in a moment after an agent shows), it may be that one. */

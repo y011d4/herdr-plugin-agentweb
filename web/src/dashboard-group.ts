@@ -124,11 +124,11 @@ export function shownStatus(pane: PaneNode, seen: SeenDone): AgentStatus {
   return status === 'done' && completionSeq != null && seen[pane.paneId] === completionSeq ? 'idle' : status;
 }
 
-/** An orchestrator's agents in the PC sidebar: `home` null is Other. */
+/** An orchestrator's agents: `home` null is Other. */
 export interface HomeGroup { home: OrchestratorView | null; cards: DashboardCard[] }
 
 /**
- * The PC sidebar's groups (ui/Sidebar.tsx): each orchestrator, in config order, with its account's
+ * The agents by orchestrator (the PC rail, ui/Sidebar.tsx, lists Other's blocked ones): each orchestrator, in config order, with its account's
  * agents in `cards`' order, then Other: the agents no orchestrator's account lists (left out when
  * empty). An agent is under every orchestrator of its account, as each Home counts it. One whose
  * account isn't known (`agents` null) gets none: its Home counts every agent, and listing them all
@@ -141,7 +141,7 @@ export function homeGroups(cards: DashboardCard[], orchestrators: OrchestratorVi
   return other.length ? [...groups, { home: null, cards: other }] : groups;
 }
 
-/** An orchestrator's dot (a Home's switcher, the sidebar): stopped without a pane, unknown while its
+/** An orchestrator's dot (a Home's switcher, the PC rail): stopped without a pane, unknown while its
  *  pane (`pane`: findPane's) has no agent yet, else its agent's shown status. */
 export function orchestratorStatus(o: OrchestratorView, pane: PaneNode | undefined, seen: SeenDone): AgentStatus | 'stopped' {
   return !o.paneId ? 'stopped' : pane?.agent ? shownStatus(pane, seen) : 'unknown';

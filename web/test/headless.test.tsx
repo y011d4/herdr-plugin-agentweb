@@ -11,7 +11,7 @@ import { draftKey, getDraft, getQuote, setDraft, setQuote } from '../src/drafts.
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { orchestratorOfPane, resolveRoute } from '../src/routes.ts';
 import { findPane, markPaneSeen, setAppState, store } from '../src/store.ts';
-import { WIDE_QUERY } from '../src/theme.ts';
+import { PANEL_QUERY, WIDE_QUERY } from '../src/theme.ts';
 import type { AppState, OrchestratorView, WsMessage, WsStateMessage } from '../src/types.ts';
 import { Modals } from '../src/ui/Modals.tsx';
 import { quoteLine } from '../src/transcript.ts';
@@ -139,6 +139,7 @@ describe("a headless orchestrator's Home", () => {
 
   it("on a PC its header is the topbar: its name and state, then its usage, model, toggle and ⋮; under it only its warnings", async () => {
     const setWide = fakeMedia(WIDE_QUERY, true);
+    const setPanel = fakeMedia(PANEL_QUERY, true); // the Home's panel beside it: its bar keeps only the warnings
     const actions = { clear: () => {}, stop: () => {} };
     await home(withPilot(), actions);
     assert.ok(container.querySelector('#tb .home-switch') === null, 'no switcher: the sidebar lists the Homes');
@@ -149,6 +150,8 @@ describe("a headless orchestrator's Home", () => {
     await unmount();
     await home(withPilot(idle), actions);
     assert.ok(container.querySelector('#home-status') === null, 'no warnings: no bar');
+    await setPanel(false); // under 1280px: Needs you and the counts on its bar, its tools still in the topbar
+    assert.ok($('#home-status .home-counts') && container.querySelector('#home-status #btn-home-menu') === null && $('#tb #btn-home-menu'));
     await setWide(false);
     assert.ok($('#home-status .home-row #btn-home-menu') && $('#home-status #home-usage') && $('#tb #btn-settings') && container.querySelector('#tb #btn-home-menu') === null,
       'a phone: the tools on its bar, ⚙ in the topbar');

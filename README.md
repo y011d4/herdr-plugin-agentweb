@@ -22,9 +22,10 @@ mobile-first PWA:
   main checkout, chipped as a worktree
 - Rename, clear, and stop agents from the phone: each pane's **⋮** menu renames, clears
   (fresh session), or stops it (an orchestrator's Home has **Clear** and **Stop**, and a headless
-  one's **Compact**, in the **⋮** on its status bar, on a PC in its top bar). On a PC's browser the **⋮** also has **Open in herdr**:
-  herdr on the PC switches to that agent's workspace, tab and pane. Agents are started by the orchestrators, not by hand. **⚙** at the top right
-  (on a PC at the top of the sidebar) opens the settings
+  one's **Compact**, in the **⋮** on its status bar, on a PC in its top bar). On a PC's browser a click on an agent opens it
+  in herdr: herdr on the PC switches to that agent's workspace, tab and pane (its **⋮** there has **Show here**, to open it in
+  the browser instead, and an open pane's **⋮** has **Open in herdr**). Agents are started by the orchestrators, not by hand.
+  **⚙** at the top right (on a PC at the top of the left rail) opens the settings
 - Pane view: colored terminal output fitted to the phone width, pinch zoom,
   scrollback by swiping down, multiline input, and quick keys
   (Enter, ⌫, Esc, Ctrl+C, arrows, y/n, …). On a PC's browser, Enter sends and
@@ -333,13 +334,14 @@ with defaults, is:
   it works. Orchestrators aren't listed among the agents. A tap on the counts lists those agents, blocked first,
   then working, done and idle (a tap on one opens it); its **Open the list** opens the agents list with
   only that account's agents (`#/agents/<name>`, Back returns to the Home); the full list's
-  **← Home** opens the Home used last. On a PC the status bar has neither: the sidebar beside it lists what needs
-  you under each Home's heading, and the agents under **All agents**, where a Home's heading opens its list. With
-  two or more configured, a phone's top bar is a switcher between the Homes (`label`s, with their status and what waits
-  on you there; it scrolls sideways when they don't fit), over the Home's status bar; on a PC the sidebar's Home
-  headings switch between them, and the top bar is the Home's own: its name and status, then what a phone has at its
-  status bar's right (a headless one's usage and model, `>_` and **⋮**). The app reopens the Home used last
-  (`#/home/<name>`); with none, it opens on the list.
+  **← Home** opens the Home used last. With two or more configured, a phone's top bar is a switcher between the
+  Homes (`label`s, with their status and what waits on you there; it scrolls sideways when they don't fit), over the
+  Home's status bar. On a PC a rail at the left lists the Homes instead, each with what waits on you there (a count)
+  and its agents' counts (working, done, idle); a click opens the Home, and **All agents** at its bottom the full
+  list. A Home's top bar is its own: its name and status, then what a phone has at its status bar's right (a headless
+  one's usage and model, `>_` and **⋮**). From 1280px wide a panel at the Home's right lists what needs you there (its
+  question, its blocked agents, its to-do list) and its other agents, with **Open the list**; narrower, its status bar
+  keeps Needs you and the counts. The app reopens the Home used last (`#/home/<name>`); with none, it opens on the list.
 - `notify_url` — optional [ntfy](https://ntfy.sh) topic URL for background push
   notifications, e.g. `https://ntfy.example.internal/herdr` for a **self-hosted**
   ntfy instance. When unset (default) the bridge performs no outbound requests at
@@ -437,8 +439,8 @@ limit). The chat marks where a compaction cut the conversation (`[yoicks] compac
 also keeps a to-do list for you (its `todo` tool), under "Needs you" on its Home: what only you can do, such
 as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; a tap on one opens its menu: **Mark done** ticks it off and tells the Home, which takes up what follows
 (a stopped Home isn't told), and **Ask the orchestrator** quotes it (with its id) in the composer, to ask the orchestrator about it. A phone's switcher button
-for each Home (and its heading in the PC sidebar) counts what waits on you there. On a PC the sidebar lists it under that heading, in place of the Home's Needs you
-(its blocked agents, its question, its to-do list: each item two lines at most, all of it on hover); the agents themselves are folded into one row, **All agents**, kept at the bottom of the sidebar, which a click unfolds. It has no herdr pane: on the PC,
+for each Home (and its row in the PC's left rail) counts what waits on you there. On a PC from 1280px wide the Home's panel, beside its chat, lists it in place of the
+Home's Needs you (its blocked agents, its question, its to-do list), then its other agents. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
 back to the TUI: remove `"mode": "headless"`, restart the bridge, and tap **Start** on its Home (a
 fresh session); the Home's warnings and Settings show the same steps.

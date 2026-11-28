@@ -7,7 +7,7 @@ import { clearToasts, getToasts } from '../src/notify.ts';
 import { setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
 import { orchestratorOfPane } from '../src/routes.ts';
-import { WIDE_QUERY } from '../src/theme.ts';
+import { PANEL_QUERY, WIDE_QUERY } from '../src/theme.ts';
 import { AgentDrawer, type Sheet } from '../src/ui/AgentDrawer.tsx';
 import { homeTopbar, Pane, paneViewOnState } from '../src/ui/Pane.tsx';
 import { read, state as recorded, transcript } from './contract.gen.ts';
@@ -612,6 +612,7 @@ describe('Home', () => {
     const s = fresh();
     s.workspaces[0].tabs[0].panes[1].agent!.status = 'working';
     const setWide = fakeMedia(WIDE_QUERY, true);
+    const setPanel = fakeMedia(PANEL_QUERY, true); // from 1280px: its panel has what a bar would
     await home(s);
     assert.equal($('#home-activity').style.display, '');
     assert.equal($('#home-activity').textContent, 'thinking…');
@@ -622,6 +623,7 @@ describe('Home', () => {
     await fire(() => setAppState(fresh()));
     assert.equal($('#home-activity').style.display, 'none');
     assert.equal($('.home-state').textContent, '· ready');
+    await setPanel(false);
     await setWide(false);
     assert.equal(container.querySelector('.home-state'), null, 'a phone: its switcher button names it, its dot the state');
     const one = fresh();
