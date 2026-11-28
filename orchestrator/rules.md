@@ -227,6 +227,8 @@ chat. An item is one short line in the user's language, optionally with the work
   item done right away, so the list shows only what the user can do now; add it again, with its
   link, once the PR is ready to merge.
 - Call `todo` with nothing to read the list, e.g. when asked what is left to do.
+- A message that starts with `> To-do: <text> (id <id>, …)` is the user asking about that item (the id
+  is the one `todo` knows it by).
 <!-- pr-watch -->
 - A PR to merge always goes on with the PR's link as `url` and the worker that opened it as
   `agent`: yoicks watches it, and once it is merged or closed removes the item and wakes you

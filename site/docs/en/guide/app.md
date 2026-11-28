@@ -18,6 +18,10 @@
 - In a chat (a Claude pane's or a Home's), scrolling up from the newest message shows a
   **↓** at its bottom right, with a dot once new messages arrive; tapping it scrolls back to the
   newest message, and the chat follows new ones again.
+- On a Home, a long press on a message (on a PC a right click, or the ↩ beside it) offers **Reply**: the
+  composer shows a line of that message (✕ cancels it), and what you send starts with it as a quote, so
+  the orchestrator knows what you answer. A reply shows that line on top of its bubble; tapping it
+  scrolls to the message. The same menu has **Copy**.
 
 Tip: Claude Code's `"tui": "fullscreen"` setting is what prevents scrollback
 from accumulating. Remove it (default renderer) and restarted sessions build

@@ -7,15 +7,17 @@
  * to its end and leaves what is on show as it is (an open tool result stays open). The prose is
  * renderMarkdown's HTML, escaped (transcript.ts), in Mantine's Typography; everything else is React's
  * text. The class names the tests and webcheck read (chat-item, chat-user, chat-assistant,
- * chat-result…) stay on their elements.
+ * chat-result…) stay on their elements. On a Home (createChatLog's `reply`) a message can be replied to
+ * (Repliable): its quote goes into the composer, and a reply shows what it quotes on top (QuoteRef).
  */
-import { Anchor, Box, Code, Group, Image, MantineProvider, Paper, Text, Typography, UnstyledButton } from '@mantine/core';
-import { memo, type ReactNode, type Ref } from 'react';
+import { ActionIcon, Anchor, Box, Code, Group, Image, MantineProvider, Menu, Paper, Text, Typography, UnstyledButton } from '@mantine/core';
+import { createContext, memo, useContext, useState, type ReactNode, type Ref, type SyntheticEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { openAgentNamed } from '../nav.ts';
+import { showToast } from '../notify.ts';
 import { theme } from '../theme.ts';
-import { inlineMarkdown, renderMarkdown, splitNotices, WORKER_NOTICE, type AskQuestion, type TimelineItem, type TodoEntry } from '../transcript.ts';
+import { inlineMarkdown, parseQuote, quoteLine, renderMarkdown, splitNotices, WORKER_NOTICE, type AskQuestion, type Quote, type QuoteOf, type TimelineItem, type TodoEntry } from '../transcript.ts';
 import { previewImage } from './Modals.tsx';
 
 export interface ChatLog {
@@ -26,15 +28,16 @@ export interface ChatLog {
   destroy(): void;
 }
 
-/** `home`: an orchestrator's Home, where its replies are bubbles too (the left ones). */
-export function createChatLog(el: HTMLElement, { home = false } = {}): ChatLog {
+/** `home`: an orchestrator's Home, where its replies are bubbles too (the left ones); `reply`: its messages'
+ *  Reply, which gets the message's quote line (transcript.ts's quoteLine). */
+export function createChatLog(el: HTMLElement, { home = false, reply }: { home?: boolean; reply?: (quote: string) => void } = {}): ChatLog {
   const root = createRoot(el);
   let items: TimelineItem[] = [];
   let drawn = 0; // each reset: a fresh tree
   // the app's provider already wrote Mantine's variables and global classes: this one only gives the theme
   const draw = (): void => flushSync(() => root.render(
     <MantineProvider theme={theme} forceColorScheme="dark" withCssVariables={false} withGlobalClasses={false}>
-      <Items key={drawn} items={items} home={home} />
+      <ReplyTo value={reply ?? null}><Items key={drawn} items={items} home={home} /></ReplyTo>
     </MantineProvider>,
   ));
   return {
@@ -84,29 +87,36 @@ export const ChatItem = memo(function ChatItem({ item, home = false }: { item: T
       ) : null;
       if (images && !item.text.trim()) return images;
       const { text } = item;
-      const bubble = (t: string): ReactNode => (
-        <div className={`chat-item chat-user max-w-[88%] self-end ${sub}`}>
-          {tag}
-          <Paper className="chat-bubble rounded-[14px_14px_4px_14px]" bg="accent" c="white" px={12} py={8}><Markdown text={t} /></Paper>
-        </div>
-      );
+      const bubble = (t: string): ReactNode => {
+        const q = parseQuote(t); // a reply: what it quotes on top, then its words
+        const words = q ? q.body : t;
+        return (
+          <Repliable className={`chat-item chat-user max-w-[88%] self-end ${sub}`} of="me" text={words} side="left">
+            {tag}
+            <Paper className="chat-bubble rounded-[14px_14px_4px_14px]" bg="accent" c="white" px={12} py={8}>
+              {q && <QuoteRef q={q} />}
+              {words ? <Markdown text={words} /> : null}
+            </Paper>
+          </Repliable>
+        );
+      };
       const { before, body, after } = splitNotices(text);
       if (!before.length && !after.length) return <>{bubble(text)}{images}</>;
       // the bridge's notices: dim lines, not the user's
       const notices = (ls: string[]): ReactNode => ls.map((l, i) => (
-        <Text key={i} component="div" className={`chat-item chat-notice self-center whitespace-pre-wrap wrap-anywhere ${sub}`} fz={12} c="dimmed" ta="center">
-          <Notice line={l} />
-        </Text>
+        <Repliable key={i} className={`chat-item chat-notice self-center ${sub}`} of="notice" text={l} side="right">
+          <Text component="div" className="whitespace-pre-wrap wrap-anywhere" fz={12} c="dimmed" ta="center"><Notice line={l} /></Text>
+        </Repliable>
       ));
       return <>{notices(before)}{body ? bubble(body) : null}{notices(after)}{images}</>;
     }
     case 'assistant':
       // a Home's replies are left bubbles, opposite the user's
       return home ? (
-        <div className={`chat-item chat-assistant max-w-[92%] self-start ${sub}`}>
+        <Repliable className={`chat-item chat-assistant max-w-[92%] self-start ${sub}`} of="you" text={item.text} side="right">
           {tag}
           <Paper className="rounded-[14px_14px_14px_4px]" withBorder bg="dark.7" px={12} py={8}><Markdown text={item.text} /></Paper>
-        </div>
+        </Repliable>
       ) : <div className={`chat-item chat-assistant self-stretch ${sub}`}>{tag}<Markdown text={item.text} /></div>;
     case 'thinking':
       return (
@@ -149,6 +159,90 @@ export const ChatItem = memo(function ChatItem({ item, home = false }: { item: T
       );
   }
 });
+
+// a Home's Reply (createChatLog's `reply`); none elsewhere: a pane's chat is read-only
+const ReplyTo = createContext<((quote: string) => void) | null>(null);
+
+const REPLY_ICON = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+  </svg>
+);
+
+/** A message a Home can reply to (`of`: whose, `text`: its words): Reply puts its quote line into the
+ *  composer, Copy copies its words. Both from a long press on a phone or a right click on a PC (Mantine's
+ *  Menu.ContextMenu), Reply also from the ↩ beside it, shown on a PC's hover or keyboard focus (on a phone
+ *  it is there for a screen reader only). On a link or a button, or with its text selected, the browser's
+ *  own menu instead. A mouse still selects its text; a long press selects none (Copy is for that). Its
+ *  data-quote is that quote line: a reply's QuoteRef finds it by it. */
+function Repliable({ className, of, text, side, children }: { className: string; of: Exclude<QuoteOf, 'todo'>; text: string; side: 'left' | 'right'; children: ReactNode }) {
+  const reply = useContext(ReplyTo);
+  const [native, setNative] = useState(false);
+  if (!reply || !text.trim()) return <div className={className}>{children}</div>;
+  const quote = quoteLine(of, text);
+  // before the menu's own handlers see the press
+  const press = (e: SyntheticEvent<HTMLDivElement>): void => {
+    const sel = getSelection();
+    setNative(!!(e.target as Element).closest('a, button') || (!!sel && !sel.isCollapsed && e.currentTarget.contains(sel.anchorNode)));
+  };
+  const copy = (): void => {
+    (navigator.clipboard?.writeText(text) ?? Promise.reject(new Error())).then(
+      () => showToast('Copied', ''), () => showToast('Not copied', 'This browser did not allow it.'));
+  };
+  return (
+    <Menu position="bottom-start" returnFocus={false}>
+      <Menu.ContextMenu disabled={native}>
+        <div className={`group/msg relative rounded-[14px] pointer-fine:select-text! data-flash:outline-2 data-flash:outline-offset-2 data-flash:outline-(--color-accent) ${className}`}
+          data-quote={quote} onTouchStart={press} onMouseDown={press}>
+          {children}
+          <ActionIcon className={`chat-reply absolute top-1 ${side === 'left' ? '-left-9' : '-right-9'} opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 pointer-coarse:sr-only`}
+            variant="subtle" color="gray" size={28} aria-label="Reply" onClick={() => reply(quote)}>{REPLY_ICON}</ActionIcon>
+        </div>
+      </Menu.ContextMenu>
+      <Menu.Dropdown>
+        <Menu.Item className="min-h-11" fz="md" data-action="reply" onClick={() => reply(quote)}>Reply</Menu.Item>
+        <Menu.Item className="min-h-11" fz="md" data-action="copy" onClick={copy}>Copy</Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
+  );
+}
+
+// whose message a quote is (a to-do item's: none, it isn't in the chat)
+const QUOTE_LABEL: Record<QuoteOf, string> = { you: 'Orchestrator', me: 'You', notice: 'yoicks', todo: 'To-do' };
+
+/** What a quote shows of what it quotes: `head` (whose, by default), then its excerpt (two lines at most). */
+export const QuoteText = ({ q, head = QUOTE_LABEL[q.of] }: { q: Quote; head?: string }) => (
+  <>
+    <Text span display="block" fz={11} fw={700} opacity={0.8}>{head}</Text>
+    <Text span fz={12} lh={1.35} lineClamp={2} className="wrap-anywhere">{q.excerpt}</Text>
+  </>
+);
+
+/** On top of a reply's bubble: what it quotes. A tap scrolls the chat to that message (the nearest before it
+ *  with that quote line) and marks it a moment; a to-do item's isn't in the chat, so it is no button. */
+function QuoteRef({ q }: { q: Quote }) {
+  const cls = 'chat-quote-ref mb-1.5 block w-full rounded-md border-l-3 border-white/60 bg-black/20 px-2 py-1 text-left';
+  if (q.of === 'todo') return <div className={cls} data-quote-of="todo"><QuoteText q={q} /></div>;
+  return (
+    <UnstyledButton className={cls} data-quote-of={q.of} aria-label={`Show the message replied to (${QUOTE_LABEL[q.of]}): ${q.excerpt}`}
+      onClick={(e) => showOriginal(e.currentTarget, q.line)}><QuoteText q={q} /></UnstyledButton>
+  );
+}
+
+// ponytail: found by its quote line, the nearest before the reply: of two messages alike in their first 100 characters
+// (a worker's repeated status notice), the later one. The orchestrator reads only that line too; a reference of the
+// item's own (its transcript line's uuid in the quote) would tell them apart.
+function showOriginal(from: HTMLElement, line: string): void {
+  const el = [...(from.closest('.chat-log')?.querySelectorAll<HTMLElement>('[data-quote]') ?? [])]
+    .filter((m) => m.dataset.quote === line && !m.contains(from) && !!(m.compareDocumentPosition(from) & Node.DOCUMENT_POSITION_FOLLOWING)).at(-1);
+  if (!el) {
+    showToast('Not in this chat', "The message replied to isn't in the part of the chat shown here.");
+    return;
+  }
+  el.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  el.dataset.flash = '';
+  setTimeout(() => { delete el.dataset.flash; }, 1600);
+}
 
 /** A native <details> whose summary has a ▸ (▾ while open) before it, and no marker of the browser's:
  *  the chat's thinking and tool results, the answer panel's terminal. Its state is the element's own (an

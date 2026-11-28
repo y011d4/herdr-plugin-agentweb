@@ -6,13 +6,14 @@ import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { act } from 'react';
 import { shownStatus } from '../src/dashboard-group.ts';
-import { draftKey, getDraft, setDraft } from '../src/drafts.ts';
+import { draftKey, getDraft, getQuote, setDraft, setQuote } from '../src/drafts.ts';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { orchestratorOfPane, resolveRoute } from '../src/routes.ts';
 import { findPane, markPaneSeen, setAppState, store } from '../src/store.ts';
 import type { AppState, OrchestratorView, WsMessage, WsStateMessage } from '../src/types.ts';
 import { Modals } from '../src/ui/Modals.tsx';
-import { compactLine, homeTopbar, Pane, usageParts } from '../src/ui/Pane.tsx';
+import { quoteLine } from '../src/transcript.ts';
+import { compactLine, homeTopbar, Pane, StoppedHome, usageParts } from '../src/ui/Pane.tsx';
 import { claudeCheckText } from '../src/ui/Settings.tsx';
 import { watchMessages } from '../src/watch.ts';
 import { messages, state as recorded, transcript } from './contract.gen.ts';
@@ -619,6 +620,135 @@ describe("a headless orchestrator's Home", () => {
     assert.equal(container.querySelector('.tui-steps'), null);
     await fire(() => rows[2].querySelector<HTMLElement>('[data-action=tui]')!.click());
     assert.match($('.tui-steps').textContent!, /remove "mode": "headless" from the orchestrator "pilot".*y011d4\.yoicks\.stop.*Start/);
+  });
+});
+
+describe('replying on a Home, and asking about a to-do item', () => {
+  const input = () => $<HTMLTextAreaElement>('#pane-input');
+  const key = draftKey('hl:pilot', 'pilot');
+  const said = { kind: 'assistant' as const, text: 'The **PR** is ready:\nhttps://github.com/o/r/pull/7', sidechain: false, ts: null };
+  const mine = { kind: 'user' as const, text: 'deploy it', sidechain: false, ts: null };
+  const chat = (items: unknown[]): Promise<void> => answer('/transcript', { ...transcript[0], items });
+  // a right click (a long press goes the same way: Mantine's Menu.ContextMenu); its menu in #modal-root (the chat's own root)
+  const menu = (el: Element): Promise<void> => fire(() => { el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 })); });
+  const pick = (action: string): Promise<void> => fire(() => document.querySelector<HTMLElement>(`#modal-root [data-action="${action}"]`)!.click());
+  const todo = { id: 't1', text: 'merge PR #7', agent: 'w-review', url: 'https://github.com/o/r/pull/7', due: null, createdAt: 0 };
+  beforeEach(() => { document.body.insertAdjacentHTML('beforeend', '<div id="modal-root"></div>'); });
+  afterEach(() => { document.querySelector('#modal-root')?.remove(); });
+
+  it("Reply on a message quotes it above the composer, focused, and sends the quote first; the ↩ beside one too; ✕ drops it", async () => {
+    await home(withPilot(idle));
+    await chat([said, mine]);
+    await menu($('#chat-log .chat-assistant'));
+    await pick('reply');
+    assert.equal($('#composer-quote').dataset.quoteOf, 'you');
+    assert.equal($('#composer-quote').textContent, 'Replying to the orchestratorThe PR is ready: https://github.com/o/r/pull/7');
+    assert.ok(document.activeElement === input(), 'focused, to type at once');
+    await type(input(), 'merge it');
+    await fire(() => $('#btn-send-enter').click());
+    assert.deepEqual(posts('send'), [{ text: '> Replying to your message: The PR is ready: https://github.com/o/r/pull/7\n\nmerge it' }]);
+    await answer('POST /api/orchestrators/pilot/send', { ok: true });
+    assert.ok(container.querySelector('#composer-quote') === null && getQuote(key) === '', 'sent: gone');
+    await fire(() => $('#chat-log .chat-user [aria-label="Reply"]').click()); // the user's own, from its ↩
+    assert.equal($('#composer-quote').dataset.quoteOf, 'me');
+    assert.equal(getQuote(key), '> Replying to my message: deploy it');
+    await fire(() => $('#composer-quote [aria-label="Cancel the reply"]').click());
+    assert.ok(container.querySelector('#composer-quote') === null && getQuote(key) === '', 'dropped');
+  });
+
+  it('drops a sent quote also where storage keeps nothing (full, or a private window)', async () => {
+    await home(withPilot(idle));
+    await chat([said]);
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('QuotaExceededError'); });
+    await fire(() => $('#chat-log .chat-assistant [aria-label="Reply"]').click());
+    assert.equal($('#composer-quote').dataset.quoteOf, 'you');
+    await type(input(), 'merge it');
+    await fire(() => $('#btn-send-enter').click());
+    await answer('POST /api/orchestrators/pilot/send', { ok: true });
+    assert.ok(container.querySelector('#composer-quote') === null, 'not sent again with the next message');
+    vi.restoreAllMocks();
+  });
+
+  it('Copy copies its words; on a link (or with its text selected) the menu is the browser\'s', async () => {
+    const copied: string[] = [];
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: async (t: string) => { copied.push(t); } } });
+    await home(withPilot(idle));
+    await chat([said]);
+    await menu($('#chat-log .chat-assistant'));
+    await pick('copy');
+    await flush();
+    assert.deepEqual(copied, [said.text]);
+    assert.deepEqual(getToasts().map((t) => t.title), ['Copied']);
+    const link = $('#chat-log .chat-assistant a');
+    await fire(() => { link.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 2 })); });
+    const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    await fire(() => { link.dispatchEvent(ev); });
+    assert.equal(ev.defaultPrevented, false, "the browser's menu: open, copy the link");
+    assert.equal($('#chat-log .chat-assistant').hasAttribute('data-expanded'), false, 'no menu of ours');
+  });
+
+  it('draws a reply with what it quotes on top; a tap scrolls to that message and marks it, or says it is not shown', async () => {
+    const scrolled: Element[] = [];
+    vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) { scrolled.push(this); });
+    await home(withPilot(idle));
+    await chat([said, mine, { kind: 'user', text: `${quoteLine('you', said.text)}\n\nmerge it`, sidechain: false, ts: null },
+      { kind: 'user', text: '> Replying to your message: long gone\n\nand?', sidechain: false, ts: null }]);
+    const [, reply, lost] = [...container.querySelectorAll<HTMLElement>('#chat-log .chat-user')];
+    assert.equal(reply.querySelector('.chat-quote-ref')!.textContent, 'OrchestratorThe PR is ready: https://github.com/o/r/pull/7');
+    assert.equal(reply.querySelector('.chat-md')!.textContent, 'merge it');
+    assert.equal(reply.dataset.quote, '> Replying to my message: merge it', 'a reply to it quotes its words, not its quote');
+    await fire(() => reply.querySelector<HTMLElement>('.chat-quote-ref')!.click());
+    const original = $('#chat-log .chat-assistant');
+    assert.ok(scrolled.length === 1 && scrolled[0] === original, 'scrolled to the original');
+    assert.equal(original.dataset.flash, '');
+    await fire(() => lost.querySelector<HTMLElement>('.chat-quote-ref')!.click());
+    assert.equal(scrolled.length, 1);
+    assert.deepEqual(getToasts().map((t) => t.title), ['Not in this chat']);
+    vi.restoreAllMocks();
+  });
+
+  it('keeps the quote with the draft (stored: a reload too); while its question is open: shown with the locked draft, left out of Chat about this, no new one', async () => {
+    setDraft(key, 'my draft');
+    setQuote(key, quoteLine('you', 'earlier words'));
+    await home(withPilot()); // blocked on its question
+    await chat([said]);
+    assert.deepEqual([$('#composer-quote').dataset.quoteOf, input().disabled, input().value], ['you', true, 'my draft']);
+    await fire(() => $('#headless-prompt-chat').click());
+    assert.ok(container.querySelector('#composer-quote') === null, 'not about the question');
+    await menu($('#chat-log .chat-assistant'));
+    await pick('reply');
+    assert.deepEqual(getToasts().map((t) => t.title), ['Answer the question first']);
+    assert.equal(getQuote(key), '> Replying to your message: earlier words', 'untouched');
+    await type(input(), 'why?');
+    await fire(() => $('#btn-send-enter').click());
+    assert.deepEqual(posts('send'), [{ text: 'why?', question: '1a2b3c4d' }]);
+    await answer('POST /api/orchestrators/pilot/send', { ok: true });
+    await fire(() => setAppState(withPilot(idle)));
+    assert.deepEqual([$('#composer-quote').dataset.quoteOf, input().value], ['you', 'my draft'], 'back with the draft');
+  });
+
+  it('Ask on a to-do item closes the popover and quotes the item (text, id, worker, link) in the composer, focused', async () => {
+    await home(withPilot((p) => { idle(p); p.todos = [todo]; }));
+    await fire(() => $('[data-action="needs"]').click());
+    await fire(() => $('[data-action="todo-ask"]').click());
+    assert.ok(container.querySelector('[data-needs-list]') === null, 'closed');
+    assert.deepEqual([$('#composer-quote').dataset.quoteOf, $('#composer-quote').textContent], ['todo', 'Asking about a to-domerge PR #7']);
+    await act(() => new Promise<void>((r) => { setTimeout(r, 30); })); // past the popover's focus return
+    assert.ok(document.activeElement === input(), 'in the composer, not back on Needs you');
+    await type(input(), 'is CI green?');
+    await fire(() => $('#btn-send-enter').click());
+    assert.deepEqual(posts('send'), [{ text: '> To-do: merge PR #7 (id t1, worker w-review, https://github.com/o/r/pull/7)\n\nis CI green?' }]);
+  });
+
+  it('has Ask off while its question is open, and none on a stopped Home (no composer)', async () => {
+    await home(withPilot((p) => { p.todos = [todo]; }));
+    await fire(() => $('[data-action="needs"]').click());
+    assert.equal($<HTMLButtonElement>('[data-action="todo-ask"]').disabled, true);
+    await unmount();
+    setAppState(withPilot((p) => { idle(p); p.paneId = null; p.headless!.status = 'stopped'; p.todos = [todo]; }));
+    ({ container, unmount } = await render(<StoppedHome name="pilot" />));
+    await fire(() => $('[data-action="needs"]').click());
+    assert.ok(container.querySelector('[data-todo="t1"]') && container.querySelector('[data-action="todo-ask"]') === null);
   });
 });
 

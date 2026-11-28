@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { act, useState } from 'react';
-import { draftKey, setDraft } from '../src/drafts.ts';
+import { draftKey, setDraft, setQuote } from '../src/drafts.ts';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { setAppState, store } from '../src/store.ts';
 import type { AppState, WsMessage } from '../src/types.ts';
@@ -211,12 +211,15 @@ describe('composer', () => {
     assert.equal(ta().value, 'home draft', 'a failed send shows it in the Home again');
   });
 
-  it("drops the drafts of panes and orchestrators the State no longer has, but not while herdr is out of reach", async () => {
+  it("drops the drafts (and their quotes) of panes and orchestrators the State no longer has, but not while herdr is out of reach", async () => {
     for (const k of [draftKey('p2'), draftKey('p99'), draftKey('p4', 'personal'), draftKey('', 'gone')]) setDraft(k, k);
+    for (const k of [draftKey('p4', 'personal'), draftKey('', 'gone')]) setQuote(k, k);
     setAppState({ ...fresh(), connected: false, workspaces: [], orchestrators: [] });
     assert.deepEqual(Object.keys(JSON.parse(localStorage.getItem('herdr_drafts')!)), ['pane:p2', 'pane:p99', 'home:personal', 'home:gone']);
+    assert.deepEqual(Object.keys(JSON.parse(localStorage.getItem('herdr_draft_quotes')!)), ['home:personal', 'home:gone']);
     setAppState(fresh());
     assert.deepEqual(JSON.parse(localStorage.getItem('herdr_drafts')!), { 'pane:p2': 'pane:p2', 'home:personal': 'home:personal' });
+    assert.deepEqual(JSON.parse(localStorage.getItem('herdr_draft_quotes')!), { 'home:personal': 'home:personal' });
     await show('p2');
     await key({});
     const gone = fresh(); // p2 closed while its send is in flight

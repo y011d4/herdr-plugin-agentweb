@@ -10,7 +10,8 @@
  * A headless orchestrator's Home (hl:<name>: no herdr pane) sends through /api/orchestrators/:name/*,
  * has ■ on its "doing now" line, its usage, model and warnings on the status bar and its question (the
  * State's headless.pending) in HeadlessPrompt; no terminal and no keys. While the question is open the
- * composer sends nothing but its Chat about this (Composer's `question`).
+ * composer sends nothing but its Chat about this (Composer's `question`). A Home's composer also takes a quote
+ * (a Reply on a message in its chat, an Ask on a to-do item), shown above it and sent before its text.
  *
  * State pushes re-render it constantly. The composer's textarea is uncontrolled (React never sets its
  * value), so a push never resets what is being typed, an IME composition included.
@@ -19,14 +20,16 @@ import { ActionIcon, Button, CloseButton, FileButton, Group, Image, Indicator, M
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
-import { draftKey, getDraft, pruneDrafts, setDraft } from '../drafts.ts';
+import { draftKey, getDraft, getQuote, onQuote, pruneDrafts, setDraft, setQuote } from '../drafts.ts';
 import { homeSummary, orchestratorStatus } from '../dashboard-group.ts';
 import { fitImages, MAX_IMAGES, toAttachment, type ImageAttachment } from '../image.ts';
 import { showToast } from '../notify.ts';
 import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts';
+import { parseQuote, type QuoteOf } from '../transcript.ts';
 import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
 import { emit, findPane, store, subscribe } from '../store.ts';
 import type { AppState, HeadlessCompact, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
+import { QuoteText } from './ChatLog.tsx';
 import { TopbarIcon, agentCards, orchestratorLabel, relativeTime } from './Dashboard.tsx';
 import { StatusDot } from './Status.tsx';
 import { NeedsBadge, NeedsButton, needsYou, useMinute } from './Todos.tsx';
@@ -148,6 +151,15 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
       activity: setActivity,
       prompt: setPrompt,
       jump: (away, unread) => setJump(away ? { unread } : null),
+      // a Home's: into its draft, but not while its question is open (the composer is the question's then)
+      reply: (quote) => {
+        const hl = headlessName(paneId);
+        if (hl && store.appState?.orchestrators?.find((o) => o.name === hl)?.headless?.pending) {
+          showToast('Answer the question first', 'Replies wait while its question is open.');
+          return;
+        }
+        setQuote(draftKey(paneId, name), quote);
+      },
     });
     paneView = own.current = view;
     paneViewPane = paneId;
@@ -413,6 +425,11 @@ const BAR = 'shrink-0 border-t border-(--color-border) bg-(--color-surface)';
 // a quick key: dim, the accent while pressed
 const QKEY = 'qkey shrink-0 text-(--color-text-dim) active:border-(--color-accent) active:bg-(--color-accent) active:text-white';
 
+// what the composer says it sends a quote of
+const QUOTING: Record<QuoteOf, string> = {
+  you: 'Replying to the orchestrator', me: 'Replying to your message', notice: 'Replying to a yoicks notice', todo: 'Asking about a to-do',
+};
+
 const autoGrow = (t: HTMLTextAreaElement): void => {
   t.style.height = 'auto';
   t.style.height = `${Math.min(t.scrollHeight, 120)}px`;
@@ -426,12 +443,27 @@ const autoGrow = (t: HTMLTextAreaElement): void => {
 // While its question is open (`question`: its id) it is locked, its draft kept, Enter and Send doing
 // nothing, until the panel's Chat about this (`chatting`) gives it an empty field: what is sent then
 // names the question, which the bridge declines with it. Once the question is gone, the draft is back.
+// A draft's quote (drafts.ts: a Home's Reply, Ask on a to-do item) shows above it, ✕ drops it, and the
+// message sends it first; while the composer writes about the question it is left out, and back after.
 function Composer({ paneId, home, name, question = '', chatting = false }:
   { paneId: string; home: boolean; name: string; question?: string; chatting?: boolean }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const resetPicker = useRef<() => void>(null);
   const key = draftKey(paneId, home ? name : undefined);
   const [placeholder] = useState(() => (home ? `Message ${orchestratorLabel(orchestratorOfPane(store.appState, paneId))}…` : 'Send text…'));
+  const [quote, setShownQuote] = useState(() => getQuote(key));
+  useEffect(() => {
+    setShownQuote(getQuote(key));
+    // a Reply or an Ask: to type at once (in the tap, so a phone's keyboard opens)
+    return onQuote((k, line) => {
+      if (k !== key) return;
+      setShownQuote(line);
+      if (line) input.current?.focus();
+    });
+  }, [key]);
+  const q = quote && !chatting ? parseQuote(quote) : null;
+  const shownQuote = useRef(quote);
+  shownQuote.current = quote;
   const hl = headlessName(paneId); // no pane to type into: its message goes to the bridge's child
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const shown = useRef(images);
@@ -510,6 +542,8 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
     if ((!text && !sent.length) || sendingImages.current || preparing || locked) return;
     sendingImages.current = sent.length > 0; // an upload takes a while: a second tap mustn't send them twice
     const about = chatting ? question : ''; // Chat about this: not the draft
+    const line = q?.line ?? ''; // its quote, first
+    const full = [line, text].filter(Boolean).join('\n\n');
     if (about) chatSending.current = true;
     else if (text) sendingDrafts.set(key, text);
     try {
@@ -520,13 +554,15 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
       // text+enter. enter:true then submits in the same request.
       const isClaude = findPane(paneId)?.pane?.agent?.name === 'claude';
       const aboutIt = hl && about ? { question: about, ...(answersSoFar.has(hl) ? { answers: answersSoFar.get(hl) } : {}) } : {};
-      await (hl ? orchestratorPost(hl, 'send', { text, ...(sent.length ? { images: sent } : {}), ...aboutIt }) : apiPost(inputUrl(paneId), { text, enter: true, ...(isClaude ? { clear: true } : {}) }));
+      await (hl ? orchestratorPost(hl, 'send', { text: full, ...(sent.length ? { images: sent } : {}), ...aboutIt }) : apiPost(inputUrl(paneId), { text: full, enter: true, ...(isClaude ? { clear: true } : {}) }));
       if (t.value === text) { // clear on success, but keep text typed mid-send
         t.value = '';
         autoGrow(t);
       }
       if (about && !chatNow.current) backToDraft(t, t.value); // the question went while it was on its way
       if (text && !about && getDraft(key) === text) setDraft(key, '');
+      // sent: dropped, unless another was picked meanwhile (on show, the one shown: storage may have kept none)
+      if (line && (t.isConnected ? shownQuote.current : getQuote(key)) === line) setQuote(key, '');
       if (sent.length) setImages((cur) => cur.filter((i) => !sent.includes(i))); // and images added mid-send
       paneView?.echo();
     } catch (err) {
@@ -590,6 +626,12 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
             );
           })}
         </div>
+      )}
+      {q && (
+        <Group id="composer-quote" data-quote-of={q.of} gap={8} wrap="nowrap" pt={8} className="px-3 lg:px-(--wide-gutter)">
+          <div className="min-w-0 flex-1 border-l-3 border-(--color-accent) pl-2 text-(--color-text-dim)"><QuoteText q={q} head={QUOTING[q.of]} /></div>
+          <CloseButton size={28} aria-label={q.of === 'todo' ? 'Cancel the question about the to-do' : 'Cancel the reply'} onClick={() => setQuote(key, '')} />
+        </Group>
       )}
       {locked && (
         <Text id="composer-locked" fz={12} c="blocked" pt={8} className="px-3 lg:px-(--wide-gutter)">

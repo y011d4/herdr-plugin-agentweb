@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
-import { askAnswer, renderMarkdown, conversationItems, latestActivity, WORKER_NOTICE, type TimelineItem } from '../src/transcript.ts';
+import { askAnswer, renderMarkdown, conversationItems, latestActivity, parseQuote, quoteLine, todoQuote, WORKER_NOTICE, type TimelineItem } from '../src/transcript.ts';
 import { createElement } from 'react';
 import { Notice } from '../src/ui/ChatLog.tsx';
 import { chatDom, drawn } from './render.ts';
@@ -338,5 +338,48 @@ describe('the chat log — images', () => {
     const img = item({ kind: 'user', text: '', images: ['x" onerror="y'], sidechain: false, ts: null }).querySelector('img')!;
     assert.equal(img.getAttribute('src'), 'x" onerror="y');
     assert.ok(!img.hasAttribute('onerror'));
+  });
+});
+
+describe('quotes (a Reply on a message, Ask on a to-do item)', () => {
+  it('quotes a message on one line, cut short, and reads it back with the words after it', () => {
+    assert.equal(quoteLine('you', 'The **PR** is ready:\n\n  https://github.com/o/r/pull/7  '), '> Replying to your message: The PR is ready: https://github.com/o/r/pull/7');
+    const long = quoteLine('me', 'あ'.repeat(150));
+    assert.equal(long, `> Replying to my message: ${'あ'.repeat(100)}…`);
+    assert.deepEqual(parseQuote(`${long}\n\nそれで?\n\nもう一行`), { of: 'me', line: long, excerpt: `${'あ'.repeat(100)}…`, body: 'それで?\n\nもう一行' });
+    assert.equal(quoteLine('you', '# Plan\n> note\n- **one** `a.ts`\n2. [the docs](https://example.com/d) ~~old~~\n\nsnake_case *em*'),
+      '> Replying to your message: Plan note one a.ts the docs old snake_case em', 'Markdown marks dropped, as it reads');
+    assert.equal(quoteLine('me', 'is x ** 2 > 3 & <b>?\n```ts\nconst y = 1;\n```'), '> Replying to my message: is x ** 2 > 3 & <b>? const y = 1;', 'a lone mark, and code, stay');
+    assert.equal(quoteLine('you', 'try `run(**x**)` or ```hello``` now'), '> Replying to your message: try run(**x**) or hello now', "code's own marks stay");
+    assert.equal(quoteLine('you', '```\n```'), '> Replying to your message: ``` ```', 'nothing shown: its text');
+    assert.equal(quoteLine('notice', '[yoicks] sent to w-a: rm *foo* **bar**'), '> Replying to this notice: [yoicks] sent to w-a: rm *foo* **bar**', 'a notice: as it is shown');
+    assert.deepEqual(parseQuote(quoteLine('notice', '[yoicks] w-a: working → done')),
+      { of: 'notice', line: '> Replying to this notice: [yoicks] w-a: working → done', excerpt: '[yoicks] w-a: working → done', body: '' });
+  });
+
+  it("quotes a to-do item with its id, worker and link; shows only its text", () => {
+    const line = todoQuote({ id: 't1', text: 'merge\nPR (#7)', agent: 'w-a', url: 'https://github.com/o/r/pull/7' });
+    assert.equal(line, '> To-do: merge PR (#7) (id t1, worker w-a, https://github.com/o/r/pull/7)');
+    assert.equal(todoQuote({ id: 't2', text: 'log in', agent: null, url: null }), '> To-do: log in (id t2)');
+    assert.deepEqual(parseQuote(`${line}\n\nis CI green?`), { of: 'todo', line, excerpt: 'merge PR (#7)', body: 'is CI green?' });
+  });
+
+  it('reads no quote from anything else: a plain quote, one not on its own line, one not at the start', () => {
+    for (const t of ['> just a quote\n\nhi', '> Replying to your message: x\nhi', 'hi\n\n> Replying to your message: x', '> Replying to your message: ', '> To-do:x']) {
+      assert.equal(parseQuote(t), null, t);
+    }
+  });
+
+  it('draws a reply with what it quotes on top of its bubble (a to-do item: no button), then its words', () => {
+    const d = chatDom([
+      { kind: 'user', text: `${quoteLine('you', 'The PR is ready')}\n\nmerge it`, sidechain: false, ts: null },
+      { kind: 'user', text: `${todoQuote({ id: 't1', text: 'log in', agent: null, url: null })}\n\nhow?`, sidechain: false, ts: null },
+    ], true);
+    const [a, b] = [...d.querySelectorAll('.chat-user')];
+    assert.equal(a.querySelector('button.chat-quote-ref')!.textContent, 'OrchestratorThe PR is ready');
+    assert.equal(a.querySelector('.chat-md')!.textContent, 'merge it');
+    assert.equal(b.querySelector('.chat-quote-ref')!.tagName, 'DIV');
+    assert.equal(b.querySelector('.chat-quote-ref')!.textContent, 'To-dolog in');
+    assert.ok(d.querySelector('[data-quote]') === null, 'no Reply outside a Home (none given)');
   });
 });
