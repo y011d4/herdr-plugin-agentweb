@@ -269,6 +269,36 @@ describe("a headless orchestrator's Home", () => {
     assert.deepEqual(posts('answer'), [{ id: '1a2b3c4d', answers: { 'Which fruit?': 'apple, cherry', 'Size?': 'L' } }]);
   });
 
+  it("takes Enter in a question's own answer as its Next (Send on the last) on a PC; Shift+Enter, an IME's, a held one and a phone's don't", async () => {
+    await home(withPilot((p) => {
+      const q = p.headless!.pending!.questions[0];
+      p.headless!.pending!.questions = [q, { question: 'Size?', header: 'Size', multiSelect: false, options: [{ label: 'S', description: '' }] }];
+    }));
+    const field = () => $<HTMLTextAreaElement>('#headless-prompt-text');
+    const enter = async (init: KeyboardEventInit = {}): Promise<boolean> => { // whether it kept the newline from going in
+      const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init });
+      await fire(() => field().dispatchEvent(ev));
+      return ev.defaultPrevented;
+    };
+    const question = () => $('#headless-prompt .chat-prompt-q').textContent;
+    await fire(() => $('#headless-prompt-own').click());
+    await type(field(), 'a ripe one');
+    assert.equal(await enter(), false, "a phone's return key: a newline");
+    vi.stubGlobal('matchMedia', () => ({ matches: true })); // a PC
+    assert.deepEqual([await enter({ shiftKey: true }), await enter({ isComposing: true })], [false, false], 'Shift+Enter, an IME confirming: as typed');
+    assert.equal(await enter({ repeat: true }), true, 'held: no newline either');
+    assert.equal(question(), 'Which fruit?', 'none of them moved on');
+    assert.equal(await enter(), true);
+    assert.equal(question(), 'Size?', 'Next: the second question');
+    assert.deepEqual(posts('answer'), [], 'nothing sent before the last is answered');
+    await fire(() => $('#headless-prompt-own').click());
+    await enter(); // nothing typed: nothing
+    assert.equal(question(), 'Size?');
+    await type(field(), 'XL');
+    await enter();
+    assert.deepEqual(posts('answer'), [{ id: '1a2b3c4d', answers: { 'Which fruit?': 'a ripe one', 'Size?': 'XL' } }], 'Send: all of them');
+  });
+
   it("types a question's own answer under its options: that question's alone, a multiSelect's with its checks", async () => {
     await home(withPilot((p) => {
       const q = p.headless!.pending!.questions[0];
