@@ -290,8 +290,10 @@ export function createPaneView(container: HTMLElement, paneId: string, opts: Pan
       items = conversationItems(items, calls);
     }
     chat.reset(items);
-    if (preserveScroll && !pinned) chatEl.scrollTop = prevTop;
-    else toEnd();
+    if (preserveScroll && !pinned) {
+      chatEl.scrollTop = prevTop;
+      unread = true; // the session moved on meanwhile (onTranscriptItems: no redraw for what is on show)
+    } else toEnd();
     reportJump();
   }
 

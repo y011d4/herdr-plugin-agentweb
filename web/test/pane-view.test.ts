@@ -334,6 +334,20 @@ describe('pane view: the chat’s ↓', () => {
     assert.deepEqual(calls.jump.at(-1), 'end');
   });
 
+  it('a re-watch that moved on (a reconnect, a resume) keeps the reader where they were, and the dot says so', async () => {
+    const log = await opened();
+    scroll(300);
+    assert.deepEqual(calls.jump, ['away']);
+    const tail = { type: 'transcript_items', paneId: 'p1', available: true, sessionId: transcript[0].sessionId!, reset: true } as const;
+    push({ ...tail, items: [...transcript[0].items!, { kind: 'assistant', text: 'meanwhile', sidechain: false }], cursor: 900 });
+    assert.equal(log.scrollTop, 300);
+    assert.deepEqual(calls.jump, ['away', 'away+new']);
+    scroll(log.scrollHeight);
+    push({ ...tail, items: transcript[0].items!, cursor: 1000 });
+    assert.equal(log.scrollTop, log.scrollHeight, 'at its end: there still');
+    assert.deepEqual(calls.jump, ['away', 'away+new', 'end']);
+  });
+
   it('a tap scrolls smoothly to the newest item and follows again (an append mid-way too); scrolling up mid-way shows it again', async () => {
     const log = await opened();
     const to: ScrollToOptions[] = [];
