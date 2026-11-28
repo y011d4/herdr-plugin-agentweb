@@ -24,6 +24,10 @@
       }
     }
     document.documentElement.lang = document.documentElement.dataset.lang = l
+    // an image has one alt: the English one in the HTML, its data-alt-ja for Japanese
+    if (l === 'ja') document.addEventListener('DOMContentLoaded', function () {
+      document.querySelectorAll('img[data-alt-ja]').forEach(function (i) { i.alt = i.getAttribute('data-alt-ja') })
+    })
   })()
 </script>
 <style>
@@ -71,6 +75,16 @@
     background: var(--fox); margin-right: .5rem; vertical-align: middle; }
   .card p { margin: 0; color: var(--dim); }
   .card a { display: inline-block; margin-top: .75rem; }
+  /* the screenshots (screens/, made by site/screens.sh from the made-up fixture): the PC's wide, the phones' in a grid */
+  .screens figure { margin: 0; }
+  .screens figure a { display: block; } /* a tap opens the full-size image */
+  .screens img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: .75rem;
+    background: #111318; }
+  .screens figcaption { color: var(--dim); font-size: .875rem; text-align: center; margin-top: .5rem; }
+  .screens figcaption span { display: block; }
+  .screens .pc { max-width: 60rem; margin: 0 auto; }
+  .phones { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 1.25rem 1rem;
+    align-items: start; max-width: 52rem; margin: 2rem auto 0; padding-bottom: 3rem; }
   footer { border-top: 1px solid var(--line); padding-block: 1.5rem 2.5rem; color: var(--dim); font-size: .875rem; }
   footer p { margin: 0; }
 </style>
@@ -109,6 +123,44 @@
       <a class="button primary" lang="en" href="docs/en/">Get started</a>
       <a class="button primary" lang="ja" href="docs/ja/">はじめる</a>
       <a class="button" href="https://github.com/y011d4/herdr-yoicks">GitHub</a>
+    </div>
+  </section>
+
+  <section class="wrap screens" aria-labelledby="screens">
+    <h2 id="screens"><span lang="en">What it looks like</span><span lang="ja">こんな画面です</span></h2>
+    <figure class="pc">
+      <a href="screens/home-pc.webp">
+        <img src="screens/home-pc.webp" width="1280" height="800" loading="lazy" decoding="async"
+          alt="yoicks on a PC: the Homes on the left, a Home's chat with its orchestrator in the middle, and on the right what waits on you, the to-do list and the agents"
+          data-alt-ja="PC の yoicks: 左に Home の一覧、中央に orchestrator とのチャット、右にあなたを待っているもの、やることリスト、エージェント">
+      </a>
+      <figcaption><span lang="en">On a PC: the Homes, one Home's chat, and beside it what waits on you, its to-do list and its agents</span><span lang="ja">PC: Home の一覧、Home のチャット、その横にあなたを待っているもの、やることリスト、エージェント</span></figcaption>
+    </figure>
+    <div class="phones">
+      <figure>
+        <a href="screens/home-phone.webp">
+          <img src="screens/home-phone.webp" width="540" height="1169" loading="lazy" decoding="async"
+            alt="A Home on a phone: Needs you and the agents' counts at the top, the chat with its orchestrator below"
+            data-alt-ja="スマホの Home: 上に Needs you とエージェントの数、その下に orchestrator とのチャット">
+        </a>
+        <figcaption><span lang="en">A Home on a phone</span><span lang="ja">スマホの Home</span></figcaption>
+      </figure>
+      <figure>
+        <a href="screens/needs-popover-phone.webp">
+          <img src="screens/needs-popover-phone.webp" width="540" height="412" loading="lazy" decoding="async"
+            alt="Needs you, open: a worker waiting on you, and the to-do list with an item due today"
+            data-alt-ja="Needs you を開いたところ: あなたを待っているワーカーと、今日が期日の項目があるやることリスト">
+        </a>
+        <figcaption><span lang="en">Needs you: what waits on you, and the to-do list</span><span lang="ja">Needs you: あなたを待っているものとやることリスト</span></figcaption>
+      </figure>
+      <figure>
+        <a href="screens/agents-phone.webp">
+          <img src="screens/agents-phone.webp" width="540" height="1169" loading="lazy" decoding="async"
+            alt="The agents of a Home's account, each with its status, what it is for and where it runs"
+            data-alt-ja="Home のアカウントのエージェント: それぞれの状態、目的、動いている場所">
+        </a>
+        <figcaption><span lang="en">Its account's agents</span><span lang="ja">そのアカウントのエージェント</span></figcaption>
+      </figure>
     </div>
   </section>
 

@@ -288,8 +288,9 @@ All in `internal/bridge/` (one package):
   (PRs only build it, in ci.yml's `docs` job). `npm run build` there makes all of it in `site/dist`: the landing at
   `/` (`static/index.html`, hand-written, both languages in one page: `?lang=en|ja`, else the last choice, else the
   browser's), the docs (`docs/`, VitePress, base `/docs/`: `en/` and `ja/` with the same pages, which the config
-  checks; the language menu, hreflang and `sitemap.xml` pair them), `static/` copied as is (`/vrt/`: the PR
-  screenshots' viewer, below; later `/demo/`), then `check-links.mjs` (every link and anchor inside the site). Its own npm project
+  checks; the language menu, hreflang and `sitemap.xml` pair them), `static/` copied as is (`screens/`: the landing's screenshots, which `sh site/screens.sh` makes from
+  `tools/shots-fixture.ts`'s made-up data with the PR screenshots' own tool and ImageMagick, committed; `/vrt/`: the PR
+  screenshots' viewer, below; later `/demo/`), then `check-links.mjs` (every link, image and anchor inside the site). Its own npm project
   (`site/package.json`, VitePress 2 alpha pinned exactly): the app's dependencies, its build and the binary never
   see it (`go:embed` takes `web/dist*` only)
 
