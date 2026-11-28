@@ -53,6 +53,10 @@ export function CardWhere({ card }: { card: DashboardCard }) {
   );
 }
 
+/** A card's (or a row's) chip of the agent's kind: the stable one, raw pane.agent's `name` (e.g. "claude"/"codex"), over
+ *  displayName, which can be a richer label. */
+const agentKind = ({ pane }: DashboardCard): string => pane.agent?.name || pane.agent?.displayName || 'agent';
+
 /** The agents a list or a Home shows, most recent status change first: never the orchestrators,
  *  and for an orchestrator (`scope`) only its account's agents — all of them when that isn't known. */
 export function agentCards(state: AppState | null, scope?: OrchestratorView): DashboardCard[] {
@@ -128,10 +132,7 @@ const LIST = 'agent-list mt-4 flex flex-col gap-2.5 px-4 min-[600px]:px-6 lg:gri
 function AgentCard({ card }: { card: DashboardCard }) {
   const { pane, purpose, isWorktree } = card;
   const { paneId, agent, title } = pane;
-  const { displayName, name, sinceUnixMs } = agent!;
-  // The chip shows the stable agent kind, so prefer `name` (raw pane.agent,
-  // e.g. "claude"/"codex") over displayName, which can be a richer label.
-  const agentKind = name || displayName || 'agent';
+  const { sinceUnixMs } = agent!;
   const status = shownStatus(pane, store.seenDone) || 'unknown';
   const relTime = relativeTime(sinceUnixMs);
   const wide = useWide();
@@ -147,7 +148,7 @@ function AgentCard({ card }: { card: DashboardCard }) {
       {purpose ? <Text className="card-purpose" fz={14} lh={1.35} mb={6} lineClamp={2} title={purpose}>{purpose}</Text> : null}
       <Group gap={12} fz={13} c="dimmed" wrap="nowrap">
         <CardWhere card={card} />
-        <Tag>{agentKind}</Tag>
+        <Tag>{agentKind(card)}</Tag>
         {isWorktree ? <Tag c="working">worktree</Tag> : null}
         {title ? <Text fz={12} inherit truncate>{title}</Text> : null}
         {relTime ? <span className="shrink-0 whitespace-nowrap">{relTime}</span> : null}
@@ -156,11 +157,12 @@ function AgentCard({ card }: { card: DashboardCard }) {
   );
 }
 
-/** An agent in a Home's agents popover (ui/Pane.tsx's AgentsButton) and a PC's Home panel (ui/HomePanel.tsx): the name,
- *  then at the line's right end how long ago its status changed and the status; under it its purpose (two lines at most,
- *  all of it on hover) and the location and branch. A click opens it (nav.ts's openAgent: on a PC in herdr, with its ⋮
- *  beside it, AgentMore, for Show here, Ask the orchestrator (`ask`, on a running Home whose account is known; off while
- *  `askOff`) and Stop). */
+/** An agent in a Home's agents popover (ui/Pane.tsx's AgentsButton), a PC's Home panel (ui/HomePanel.tsx) and the PC
+ *  rail's Other (ui/Sidebar.tsx): the name, then at the line's right end how long ago its status changed and the status;
+ *  under it its purpose (two lines at most, all of it on hover), then one dim line: the location and branch (cut short
+ *  first), the kind and, in a linked worktree, the `worktree` chip, as a card's. A click opens it (nav.ts's openAgent: on
+ *  a PC in herdr, with its ⋮ beside it, AgentMore, for Show here, Ask the orchestrator (`ask`, on a running Home whose
+ *  account is known; off while `askOff`) and Stop). */
 export function AgentRow({ card, ask, askOff = false }: { card: DashboardCard; ask?: (card: DashboardCard) => void; askOff?: boolean }) {
   const { pane, purpose } = card;
   const rel = relativeTime(pane.agent!.sinceUnixMs);
@@ -171,7 +173,8 @@ export function AgentRow({ card, ask, askOff = false }: { card: DashboardCard; a
         {rel ? <span className="shrink-0 text-[12px] text-(--color-text-dim)">{rel}</span> : null}<StatusBadge status={shownStatus(pane, store.seenDone) || 'unknown'} small /></span>}
       // spans (a button holds no <p>), each a line of its own; the purpose wraps, under the row's noWrap
       description={<>{purpose ? <Text span className="card-purpose my-0.5 whitespace-normal text-(--color-text)" fz={13} lh={1.3} lineClamp={2} title={purpose}>{purpose}</Text> : null}
-        <CardWhere card={card} /></>}
+        <span className="flex min-w-0 items-center gap-2"><CardWhere card={card} /><Tag>{agentKind(card)}</Tag>
+          {card.isWorktree ? <Tag c="working">worktree</Tag> : null}</span></>}
       onClick={() => openAgent(pane.paneId)} />
   );
   return wide ? <div className="agent-row-wrap flex items-start">{row}<AgentMore paneId={pane.paneId} name={cardTitle(card)} ask={ask && (() => ask(card))} askOff={askOff} /></div> : row;

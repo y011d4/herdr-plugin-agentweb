@@ -177,4 +177,15 @@ describe('HomePanel', () => {
       await modals.unmount();
     }
   });
+
+  it("a row's dim line ends with its agent's kind and, in a linked worktree, the worktree chip, as a card's", async () => {
+    const s = fresh();
+    await show('work', s); // its account unknown: every agent
+    const want = s.workspaces.flatMap((w) => w.tabs.flatMap((t) => t.panes.filter((x) => x.agent && x.paneId !== 'p4')
+      .map((x) => [x.paneId, x.agent!.name, w.worktree?.isLinkedWorktree ? 'worktree' : ''].join(' ').trim()))).sort();
+    const got = [...c.querySelectorAll<HTMLElement>('.agent-row')].map((r) =>
+      [r.dataset.paneId, ...[...r.querySelectorAll('.mantine-Badge-root')].map((b) => b.textContent).filter((t) => !/^(working|done|idle|blocked|unknown)$/i.test(t!))].join(' ')).sort();
+    assert.deepEqual(got, want);
+    assert.ok(want.some((w) => w.endsWith(' worktree')) && want.some((w) => !w.endsWith(' worktree')), 'the recorded State has both');
+  });
 });

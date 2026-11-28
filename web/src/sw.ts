@@ -83,7 +83,7 @@ sw.addEventListener('notificationclick', (event: NotificationEvent) => {
   // client needs the bare hash (#/pane/…) — passing "/#/pane/…" would yield
   // "#/#/pane/…". A newly opened window needs the full path instead. A tag that
   // is a hash (a failed Claude Code check's: #/settings) is where it opens.
-  const targetHash = !paneId ? '#/agents' : paneId.startsWith('#/') ? paneId : `#/pane/${encodeURIComponent(paneId)}`;
+  const targetHash = !paneId ? '#/home' : paneId.startsWith('#/') ? paneId : `#/pane/${encodeURIComponent(paneId)}`;
   const targetUrl = `/${targetHash}`;
 
   event.waitUntil(

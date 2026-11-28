@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // ui/Sidebar.tsx, the PC's rail of Homes: at its top the app's name, the dot it is given and ⚙; a row per Home in config
 // order (its dot, its name, what waits there as a count, under them its agents' counts), the one on show marked; Other's
-// blocked agents; All agents at the bottom, a link to the list; holding still while a finger is down. The recorded
+// agents, as rows; All agents at the bottom, a link to the list; holding still while a finger is down. The recorded
 // State: personal (p4, running; its account p1 p3 p4) and work (stopped, its account unknown: every agent); agents p1
 // (working) p7 (unknown) p6 (blocked, its account no Home's) p3 (done).
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
@@ -68,7 +68,8 @@ describe('Sidebar', () => {
     const work = c.querySelector<HTMLAnchorElement>('a[data-home="work"]')!;
     assert.equal(work.querySelector('.mantine-NavLink-label')!.textContent, 'work', 'no label: its name');
     assert.match(work.style.color, /dimmed/, 'not running');
-    assert.ok(!c.querySelector('.home-todo, .agent-row'), 'neither what waits there nor the agents: those are its Home\'s');
+    assert.ok(!c.querySelector('.home-todo') && [...c.querySelectorAll('.agent-row')].every((e) => e.closest('section.sidebar-other')),
+      "neither what waits there nor its agents: those are its Home's");
   });
 
   it('has zeros under a Home without agents, as tall as the others, and no count on it while nothing waits there', async () => {
@@ -93,16 +94,21 @@ describe('Sidebar', () => {
     assert.deepEqual(marked(c), ['work']);
   });
 
-  it("lists under Other the blocked agents no Home's account lists, as chips; none without them", async () => {
+  it("lists under Other the agents no Home's account lists, of every status, blocked first, as rows; none without them", async () => {
+    const ids = (c: HTMLElement): string[] => [...c.querySelectorAll<HTMLElement>('section.sidebar-other .agent-row')].map((e) => e.dataset.paneId!);
     const c = await show('#/home/personal', fresh());
     const other = c.querySelector<HTMLElement>('section.sidebar-other')!;
     assert.equal(other.querySelector('.sidebar-heading')!.textContent, 'Other');
-    assert.deepEqual([...other.querySelectorAll<HTMLElement>('.home-chip')].map((e) => e.dataset.paneId), ['p6']);
+    assert.deepEqual(ids(c), ['p6', 'p7'], 'p6 blocked, then p7 (unknown)');
+    assert.ok(other.querySelector('[data-agent-menu="p6"]'), "a PC's row: its ⋮ beside it");
     await unmount!();
     const s = fresh();
-    s.workspaces[1].tabs[0].panes[1].agent!.status = 'idle'; // p6
-    const c2 = await show('#/home/personal', s);
-    assert.ok(!c2.querySelector('section.sidebar-other'));
+    s.workspaces[1].tabs[0].panes[1].agent!.status = 'idle'; // p6: not blocked, still Other, after p7 (the newer change)
+    assert.deepEqual(ids(await show('#/home/personal', s)), ['p7', 'p6']);
+    await unmount!();
+    const t = fresh();
+    t.orchestrators[0].agents!.push('p6', 'p7'); // personal's account: every agent is a Home's
+    assert.ok(!(await show('#/home/personal', t)).querySelector('section.sidebar-other'));
   });
 
   it('holds still while a finger is down; the latest State shows after the last one lifts, in the same #sidebar', async () => {

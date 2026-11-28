@@ -32,7 +32,7 @@ export interface View {
 export const store: { appState: AppState | null; wsConnected: boolean; view: View; seenDone: SeenDone } = {
   appState: null,
   wsConnected: false,
-  view: { screen: 'loading', activePaneId: null, homeMode: false, paneViewMode: 'terminal', paneBackRoute: '#/agents', paneOverBase: false, settingsOpen: false },
+  view: { screen: 'loading', activePaneId: null, homeMode: false, paneViewMode: 'terminal', paneBackRoute: '#/home', paneOverBase: false, settingsOpen: false },
   seenDone: (() => {
     try { return JSON.parse(localStorage.getItem(STORAGE_SEEN) ?? '{}') ?? {}; } catch { return {}; }
   })(),

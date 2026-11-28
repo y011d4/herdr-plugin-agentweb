@@ -72,7 +72,9 @@ All in `internal/bridge/` (one package):
   `nav.ts` (`openAgent`: a click on an agent, its drawer on a phone, on a PC `focusInHerdr`, herdr's `pane.focus` (the PC's
   herdr switches to it; `showAgent`, a PC's ⋮ Show here, is the drawer); `go`: overlay → overlay replaces the history entry, so Settings from a drawer
   takes its place; `closeOverlay` (`closeAgent`): back to the entry under it when it was opened on it,
-  `view.paneOverBase`, else a replace; ✕, the dimmed screen, Escape with no other layer over it and the
+  `view.paneOverBase`, else a replace (opened afresh, a notification's with the app closed or a reload, it has no screen
+  under it: `showBase` draws an empty one, never a Home, whose view would run beside the drawer's, and it closes to `#/home`,
+  the default Home); ✕, the dimmed screen, Escape with no other layer over it and the
   phone's Back close it), the topbar (each screen fills its three slots), the connection dot and the
   reconnect banner, the SW's `navigate` message, visibilitychange's global part (the watch, the
   open pane's OS notifications, seen done), `visualViewport` → `--app-height` and the startup (token,
@@ -461,7 +463,7 @@ Verified live against herdr 0.7.3 / protocol 16:
   shared `--git-common-dir`, matching herdr's own repoKey. In the UI each card (and agent
   row) shows the agent's herdr name (`herdrName`, else its tab name), under it its purpose
   (state `purposes`, when given: two lines at most, all of it on hover), then one dim line,
-  its location and git branch; the drawer title is the name and location, the purpose a small
+  its location and git branch, its kind and (a linked worktree's) the `worktree` chip; the drawer title is the name and location, the purpose a small
   line under them. The dashboard is one flat list of every agent, most
   recent status change first, so each card names its own location (`cardLocation`); a linked
   worktree's card adds a `worktree` chip. The order is herdr's `stateChangeSeq` (a change
@@ -561,7 +563,8 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   At that width (`WIDE_QUERY`, `theme.ts`; theme.test checks it against style.css and `lg`) the shell
   also draws the rail of Homes (`#sidebar`, `ui/Sidebar.tsx`, 248px) on every screen but the token one: a row per
   orchestrator's Home (its dot, its name, its needs count, under them its agents' counts, `StatusCounts`; a click opens
-  the Home), then Other's blocked agents (`homeGroups`), and at its bottom, pinned, All agents (`#/agents`). Its top, the topbar's height, has
+  the Home), then Other: the agents no Home's account lists, of every status, blocked first, as `AgentRow`s (`homeGroups`;
+  no Home has them, and a phone has only their notifications), and at its bottom, pinned, All agents (`#/agents`). Its top, the topbar's height, has
   the app's name, the connection dot (`#conn-dot`: App.tsx draws it there, else in the topbar) and ⚙ (`SettingsButton`:
   the topbar's on a phone, the sidebar's on a PC, one `#btn-settings`), so the topbar beside it is the screen's own. It comes first in `#app`, in a
   slot of its own, so `#topbar`/`#reconnect-banner`/`#screen` stay the same elements as it comes and
