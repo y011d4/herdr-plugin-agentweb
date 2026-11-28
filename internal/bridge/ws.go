@@ -46,7 +46,7 @@ func (s *server) serveUpgrade(w http.ResponseWriter, r *http.Request, pathname s
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		// The Origin isn't checked, as the ws library didn't: /ws needs the token, which
 		// another site's page doesn't have, and a check would break a reverse proxy
-		// that rewrites Host (README's public_url). Despite the name this has nothing
+		// that rewrites Host (config's public_url). Despite the name this has nothing
 		// to do with TLS.
 		InsecureSkipVerify: true,
 		// permessage-deflate: pane_output resends the whole screen (~9 KB) on every

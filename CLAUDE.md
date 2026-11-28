@@ -288,8 +288,9 @@ All in `internal/bridge/` (one package):
   (PRs only build it, in ci.yml's `docs` job). `npm run build` there makes all of it in `site/dist`: the landing at
   `/` (`static/index.html`, hand-written, both languages in one page: `?lang=en|ja`, else the last choice, else the
   browser's), the docs (`docs/`, VitePress, base `/docs/`: `en/` and `ja/` with the same pages, which the config
-  checks; the language menu, hreflang and `sitemap.xml` pair them), `static/` copied as is (`/vrt/`: the PR
-  screenshots' viewer, below; later `/demo/`), then `check-links.mjs` (every link and anchor inside the site). Its own npm project
+  checks; the language menu, hreflang and `sitemap.xml` pair them), `static/` copied as is (`screens/`: the landing's screenshots, which `sh site/screens.sh` makes from
+  `tools/shots-fixture.ts`'s made-up data with the PR screenshots' own tool and ImageMagick, committed; `/vrt/`: the PR
+  screenshots' viewer, below; later `/demo/`), then `check-links.mjs` (every link, image and anchor inside the site). Its own npm project
   (`site/package.json`, VitePress 2 alpha pinned exactly): the app's dependencies, its build and the binary never
   see it (`go:embed` takes `web/dist*` only)
 
@@ -767,8 +768,8 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   `personal`, `work`, `side`, `o/r`. A local git hook may refuse a commit or a push: report it to the user, never
   bypass it (`--no-verify`).
 - Docs: the user-facing docs are `site/docs/en/` and `site/docs/ja/`, the same pages in both languages (a page in
-  one only fails the build); a behavior change updates the page in both, in the same PR. The READMEs still carry the
-  same text until they are cut down to a pointer to the site: change them too until then.
+  one only fails the build); a behavior change updates the page in both, in the same PR. The READMEs are short (the pitch,
+  install, the docs' page list): a new docs page goes into both of their tables.
 - TS sources use explicit `.ts` relative-import extensions (`node` runs `tools/vectors/*.ts`
   on them directly; Vite bundles them). No raw control bytes in
   source — write ESC as the literal six characters `\u001b` in string escapes.
