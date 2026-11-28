@@ -18,9 +18,9 @@ import { Center, Loader } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { Fragment, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { apiDelete, apiGet, apiPost, getToken, headlessName, loadToken, onUnauthorized, orchestratorPost, setToken } from '../api.ts';
+import { apiGet, apiPost, getToken, headlessName, loadToken, onUnauthorized, orchestratorPost, setToken } from '../api.ts';
 import { dismissNotificationsForPane, notifyAgentStatus, notifyOrchestratorAlert, showToast } from '../notify.ts';
-import { closeAgent, closingDrawer, focusInHerdr, go, showAgent } from '../nav.ts';
+import { closeAgent, drawerShows, focusInHerdr, go, showAgent } from '../nav.ts';
 import { openingMode } from '../pane-view.ts';
 import { homeOf, isAgentsRoute, nextOverlayBase, nextOverlayOverBase, resolveRoute } from '../routes.ts';
 import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, store, subscribe, type View } from '../store.ts';
@@ -29,7 +29,7 @@ import { WIDE_QUERY } from '../theme.ts';
 import { onWsMessage, wsConnect, wsSendWatch } from '../ws.ts';
 import { AgentDrawer, type Sheet } from './AgentDrawer.tsx';
 import { Dashboard, dashboardTopbar } from './Dashboard.tsx';
-import { Modals, confirmModal, openRename } from './Modals.tsx';
+import { Modals, confirmModal, openRename, stopAgentFlow } from './Modals.tsx';
 import { closePaneView, homeTopbar, Pane, paneViewOnState, resumePaneView, StoppedHome, stoppedHomeTopbar, suspendPaneView, type AgentActions } from './Pane.tsx';
 import { Settings } from './Settings.tsx';
 import { SettingsSheet } from './SettingsSheet.tsx';
@@ -462,10 +462,6 @@ function agentActions(paneId: string): AgentActions {
 // The pane a Clear is replacing: its going is expected (its drawer stays for the new pane).
 let clearingPane: string | null = null;
 
-/** Whether `paneId` is the drawer's pane now, not closing. The hash, not view.activePaneId: it changes at
- *  once; a close going Back changes it only once that lands (closingDrawer). */
-const drawerShows = (paneId: string): boolean => location.hash === `#/pane/${encodeURIComponent(paneId)}` && !closingDrawer();
-
 async function clearAgentFlow(paneId: string): Promise<void> {
   const hl = headlessName(paneId);
   const ok = await confirmModal('Clear agent?', hl ? 'Starts a fresh session and ends the current one. In-session context is lost.'
@@ -490,19 +486,6 @@ async function clearAgentFlow(paneId: string): Promise<void> {
     else if (drawerShows(paneId) && !findPane(paneId)) leaveClosedPane(); // gone, the Clear failed or not
   } finally {
     if (clearingPane === paneId) clearingPane = null;
-  }
-}
-
-async function stopAgentFlow(paneId: string): Promise<void> {
-  const hl = headlessName(paneId);
-  const ok = await confirmModal('Stop agent?', hl ? 'Stops the orchestrator. Start resumes its session.' : 'Closes the pane and terminates the agent running in it.', 'Stop', true);
-  if (!ok) return;
-  try {
-    await (hl ? orchestratorPost(hl, 'stop') : apiDelete(`/api/panes/${encodeURIComponent(paneId)}`));
-    showToast('Stopped', hl ? 'The orchestrator stopped' : 'Agent pane closed');
-    if (!view.homeMode && drawerShows(paneId)) closeAgent(); // a Home stays: the State shows it stopped; another pane opened meanwhile too
-  } catch (err) {
-    showToast('Stop failed', (err as Error).message);
   }
 }
 

@@ -11,12 +11,15 @@
 import { ActionIcon, Badge, Button, Card, Center, Group, Loader, Menu, NavLink, Text } from '@mantine/core';
 import { useEffect, useRef, useState, useSyncExternalStore, type ComponentPropsWithRef, type HTMLAttributes, type SyntheticEvent, type TouchEvent } from 'react';
 import { dashboardCards, shownStatus, type DashboardCard } from '../dashboard-group.ts';
+import { draftKey, setQuote } from '../drafts.ts';
 import { focusInHerdr, go, openAgent, showAgent } from '../nav.ts';
 import { agentsScope, defaultHome, homeHash } from '../routes.ts';
 import { findPane, lastHome, store, subscribe } from '../store.ts';
 import { useWide } from '../theme.ts';
+import { agentQuote } from '../transcript.ts';
 import type { AppState, OrchestratorView } from '../types.ts';
 import type { Topbar } from './App.tsx';
+import { stopAgentFlow } from './Modals.tsx';
 import { StatusBadge } from './Status.tsx';
 
 /** A card's tab: its name (the agent kind if a tab somehow has no label), with a per-tab index for
@@ -156,8 +159,9 @@ function AgentCard({ card }: { card: DashboardCard }) {
 /** An agent in a Home's agents popover (ui/Pane.tsx's AgentsButton) and a PC's Home panel (ui/HomePanel.tsx): the name,
  *  then at the line's right end how long ago its status changed and the status; under it its purpose (two lines at most,
  *  all of it on hover) and the location and branch. A click opens it (nav.ts's openAgent: on a PC in herdr, with its ⋮
- *  beside it, AgentMore, for Show here). */
-export function AgentRow({ card }: { card: DashboardCard }) {
+ *  beside it, AgentMore, for Show here, Ask the orchestrator (`ask`, on a running Home whose account is known; off while
+ *  `askOff`) and Stop). */
+export function AgentRow({ card, ask, askOff = false }: { card: DashboardCard; ask?: (card: DashboardCard) => void; askOff?: boolean }) {
   const { pane, purpose } = card;
   const rel = relativeTime(pane.agent!.sinceUnixMs);
   const wide = useWide();
@@ -170,14 +174,23 @@ export function AgentRow({ card }: { card: DashboardCard }) {
         <CardWhere card={card} /></>}
       onClick={() => openAgent(pane.paneId)} />
   );
-  return wide ? <div className="agent-row-wrap flex items-start">{row}<AgentMore paneId={pane.paneId} name={cardTitle(card)} /></div> : row;
+  return wide ? <div className="agent-row-wrap flex items-start">{row}<AgentMore paneId={pane.paneId} name={cardTitle(card)} ask={ask && (() => ask(card))} askOff={askOff} /></div> : row;
+}
+
+/** Home `home`'s composer now quotes agent `card` (its name, purpose, pane id and status), to ask its orchestrator about
+ *  it: an agent row's Ask the orchestrator, as a to-do item's (Todos.tsx). */
+export function askAbout(home: string, card: DashboardCard): void {
+  const { pane, purpose } = card;
+  setQuote(draftKey('', home), agentQuote({ name: cardTitle(card), purpose, paneId: pane.paneId, status: shownStatus(pane, store.seenDone) || 'unknown' }));
 }
 
 /** On a PC, an agent's ⋮ beside it: Open in herdr (what a click on it does there) and Show here, its drawer in this app
- *  (the PC's terminal may be out of sight, or another machine's). The menu stays in the row's DOM (fixed: no scroll box
- *  clips it), so a popover it sits in doesn't take a click in it for one outside (Todos.tsx's item menu does the same); a
- *  click or a key in it is its own, not a card's under it. */
-function AgentMore({ paneId, name }: { paneId: string; name: string }) {
+ *  (the PC's terminal may be out of sight, or another machine's); on a running Home's rows Ask the orchestrator (`ask`:
+ *  its quote into the Home's composer; off while its question is open, `askOff`); and Stop agent…, the drawer's (a confirm,
+ *  then the pane closes: Modals.tsx's stopAgentFlow). The menu stays in the row's DOM (fixed: no scroll box clips it), so a
+ *  popover it sits in doesn't take a click in it for one outside (Todos.tsx's item menu does the same); a click or a key in
+ *  it is its own, not a card's under it. */
+function AgentMore({ paneId, name, ask, askOff }: { paneId: string; name: string; ask?: () => void; askOff?: boolean }) {
   const own = (e: SyntheticEvent): void => e.stopPropagation();
   return (
     <Menu position="bottom-end" width={190} radius="md" withinPortal={false} floatingStrategy="fixed">
@@ -188,6 +201,14 @@ function AgentMore({ paneId, name }: { paneId: string; name: string }) {
       <Menu.Dropdown data-agent-more={paneId} onClick={own} onKeyDown={own}>
         <Menu.Item data-action="herdr" onClick={() => focusInHerdr(paneId)}>Open in herdr</Menu.Item>
         <Menu.Item data-action="show" onClick={() => showAgent(paneId)}>Show here</Menu.Item>
+        {ask && (
+          <Menu.Item data-action="ask" disabled={askOff} onClick={ask}>
+            Ask the orchestrator
+            {askOff && <Text fz={12} c="dimmed">Answer its question first</Text>}
+          </Menu.Item>
+        )}
+        <Menu.Divider />
+        <Menu.Item data-action="stop" color="var(--color-blocked)" onClick={() => { void stopAgentFlow(paneId); }}>Stop agent…</Menu.Item>
       </Menu.Dropdown>
     </Menu>
   );

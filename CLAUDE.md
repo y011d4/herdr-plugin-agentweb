@@ -201,7 +201,9 @@ All in `internal/bridge/` (one package):
   in `ui/Dashboard.tsx` feeds both the list and `homeSummary`); the full list's ← Home opens `defaultHome()`.
   Home's counts (its status bar's: an outlined pill with a ▾, `Pane.tsx`'s `AgentsButton`) open a popover as Needs you's: those
   agents, blocked first, then working, done, idle (`byUrgency`), as the Home panel's rows (`AgentRow`, with the time; a tap
-  opens it, `openAgent`; on a PC its ⋮, `AgentMore`: Open in herdr, Show here), and at its bottom Open the list, `#/agents/<name>`: only the panes in its state `agents` (its Claude
+  opens it, `openAgent`; on a PC its ⋮, `AgentMore`: Open in herdr, Show here, on a running Home's rows (its account known) Ask the orchestrator
+  (`askAbout`: `agentQuote`'s name, purpose, pane id and status into the Home's composer, as a to-do item's Ask), and Stop agent…
+  (`Modals.tsx`'s `stopAgentFlow`, the drawer's: a confirm, then `DELETE /api/panes/:id`, herdr's `pane.close`)), and at its bottom Open the list, `#/agents/<name>`: only the panes in its state `agents` (its Claude
   account's, via `paneAccount`, cached per agent pane and re-checked every 60s by `paneAccountCache`;
   `null` = unknown → every agent),
   with `← <its Home>` (`Back to …`; at every width) to that Home; a pane opened from there opens over that list. Any route to
@@ -566,7 +568,7 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   width, for an overlay that should leave it usable (an agent's drawer, from Show here or a notification: the dimmed part
   starts at `--sidebar-w`, so the rail stays usable under it). Like the list it holds still while a finger is down
   (`useHeldState`). A click on an agent at this width (a list card, a panel's row, a blocked chip, a worker's name) opens
-  it in herdr (`openAgent` → `focusInHerdr`), and its ⋮ (`AgentMore`, on a card and a row) has Show here, the drawer.
+  it in herdr (`openAgent` → `focusInHerdr`), and its ⋮ (`AgentMore`, on a card and a row) has Show here, the drawer, and Stop agent… (a Home's rows: Ask the orchestrator too).
 
 ## Security invariants
 

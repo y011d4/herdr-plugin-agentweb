@@ -97,3 +97,6 @@ without asking.
 - With several workers active, name the worker each message is about.
 - Asked "what's going on?", check `yoicks overview` and answer briefly, things that
   need the user first.
+- A message that starts with `> Agent: <name> — <purpose> (pane <pane id>, <status>)` is the
+  user asking about that agent (is it still needed, what is it doing): look it up with
+  `yoicks agent get <pane id>` (its name works too, when it has one) and answer.

@@ -1,14 +1,15 @@
 /**
- * ui/Modals.tsx — the modal dialogs, one at a time, on Mantine's Modal in #modal-root: Confirm, Rename,
+ * ui/Modals.tsx — the modal dialogs, one at a time, on Mantine's Modal in #modal-root: Confirm (and Stop agent…'s, stopAgentFlow), Rename,
  * a headless Home's Compact and its way back to the TUI, and the image preview (full screen). A modal closes on a backdrop tap, Escape or its
  * buttons; its close() is idempotent and fires the opener's onClose exactly once (so a
  * confirm resolves on dismiss). Opening one closes the one before.
  */
 import { Button, CloseButton, Code, Group, List, Modal, Text, TextInput } from '@mantine/core';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { apiPost, orchestratorPost } from '../api.ts';
-import { back } from '../nav.ts';
+import { apiDelete, apiPost, headlessName, orchestratorPost } from '../api.ts';
+import { back, closeAgent, drawerShows } from '../nav.ts';
 import { showToast } from '../notify.ts';
+import { store } from '../store.ts';
 import type { RenameResponse } from '../types.ts';
 
 // preview: the image preview's full-screen look. opener: where the focus goes back on close.
@@ -145,6 +146,22 @@ export function confirmModal(title: string, message: string, confirmLabel: strin
 }
 
 // ── Rename (from a pane's ⋮, ui/Pane.tsx's AgentMenu) ────────────────────────
+
+/** Stop agent…, after a confirm: a pane's ⋮ (in its drawer, on a Home) and a PC's agent ⋮ (Dashboard.tsx's AgentMore). A
+ *  pane is closed (herdr's pane.close: SIGHUP, then SIGTERM, then SIGKILL to what runs in it); a headless orchestrator
+ *  (hl:<name>) is stopped by the bridge (Start resumes its session). */
+export async function stopAgentFlow(paneId: string): Promise<void> {
+  const hl = headlessName(paneId);
+  const ok = await confirmModal('Stop agent?', hl ? 'Stops the orchestrator. Start resumes its session.' : 'Closes the pane and terminates the agent running in it.', 'Stop', true);
+  if (!ok) return;
+  try {
+    await (hl ? orchestratorPost(hl, 'stop') : apiDelete(`/api/panes/${encodeURIComponent(paneId)}`));
+    showToast('Stopped', hl ? 'The orchestrator stopped' : 'Agent pane closed');
+    if (!store.view.homeMode && drawerShows(paneId)) closeAgent(); // a Home stays: the State shows it stopped; another pane opened meanwhile too
+  } catch (err) {
+    showToast('Stop failed', (err as Error).message);
+  }
+}
 
 /** Rename… (the header follows the State). */
 export function openRename(paneId: string, current: string): void {
