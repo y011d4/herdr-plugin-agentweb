@@ -247,6 +247,8 @@ function MenuOnTap({ children }: { children: ReactElement<HTMLAttributes<HTMLDiv
   return cloneElement(children, {
     onTouchStart: (e) => {
       children.props.onTouchStart?.(e);
+      // ponytail: a menu in the DOM, its 150 ms closing transition included, so a tap that soon after one closed is
+      // dropped too (one more tap); its open state, kept across the chat's menus, would leak one unmounted open
       start.current = { at: e.timeStamp, ending: selected() || !!document.querySelector('[role="menu"]') };
     },
     onClick: (e) => {
