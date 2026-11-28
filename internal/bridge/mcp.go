@@ -360,11 +360,10 @@ func (r *headlessRunner) approve(ctx context.Context, req *mcp.CallToolRequest, 
 	if r.approveHook != nil {
 		r.approveHook()
 	}
-	p := r.ask(in.Input, epochOf(ctx))
+	p := r.ask(in.Input, in.ToolUseID, epochOf(ctx))
 	if p == nil {
 		return textResult(`{"behavior":"deny","message":"this orchestrator's session has ended"}`, false), nil, nil
 	}
-	r.asked(in.ToolUseID)
 	defer r.dropQuestion(p)
 	for n := 1.0; ; n++ {
 		select {
@@ -384,9 +383,11 @@ func (r *headlessRunner) approve(ctx context.Context, req *mcp.CallToolRequest, 
 	}
 }
 
-// ask makes input (AskUserQuestion's) the pending question: it is blocked until answered.
-// nil, the pending one untouched: the asking child (epoch) has been replaced since.
-func (r *headlessRunner) ask(input map[string]any, epoch int) *hlPending {
+// ask makes input (AskUserQuestion's, tool use toolUseID) the pending question: it is blocked
+// until answered. The same step notes that it reached the permission route (see watchAsk), so
+// no one sees it pending and still on its way. nil, the pending one untouched: the asking
+// child (epoch) has been replaced since.
+func (r *headlessRunner) ask(input map[string]any, toolUseID string, epoch int) *hlPending {
 	b, _ := json.Marshal(input)
 	o, _ := jsonParse(string(b))
 	p := &hlPending{id: newUUID()[:8], questions: extractAsk(o), input: input, reply: make(chan map[string]any, 1)}
@@ -399,6 +400,7 @@ func (r *headlessRunner) ask(input map[string]any, epoch int) *hlPending {
 		old.reply <- map[string]any{"behavior": "deny", "message": "another question came"}
 	}
 	r.pending = p
+	r.asks[toolUseID] = true
 	from := r.model.Status
 	r.model.Status = "blocked"
 	r.mu.Unlock()
@@ -481,13 +483,6 @@ func clarify(questions []AskQuestion, answers map[string]any) string {
 		}
 	}
 	return b.String()
-}
-
-// asked notes that a question reached the permission route (see watchAsk).
-func (r *headlessRunner) asked(toolUseID string) {
-	r.mu.Lock()
-	r.asks[toolUseID] = true
-	r.mu.Unlock()
 }
 
 // watchAsk: an AskUserQuestion in the stream must reach approve within askReachWait, else
