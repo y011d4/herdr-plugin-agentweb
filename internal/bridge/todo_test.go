@@ -327,7 +327,9 @@ func TestHeadlessTodoTickWake(t *testing.T) {
 		return got
 	}
 
-	del(5, "?dismiss=yes", 400)
+	for _, q := range []string{"?dismiss=yes", "?dismiss=", "?dismiss", "?dismiss=1&dismiss=1", "?dismiss=1;x=1", "?dismiss=%zz"} {
+		del(5, q, 400)
+	}
 	tick(0)
 	del(5, "?dismiss=1", 200)
 	tick(1)

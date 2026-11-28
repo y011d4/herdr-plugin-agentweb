@@ -456,8 +456,9 @@ func (s *server) route(w http.ResponseWriter, r *http.Request, pathname string) 
 			jsonError(w, http.StatusNotFound, "not_found", "no such orchestrator")
 			return
 		}
-		dismiss := r.URL.Query().Get("dismiss")
-		if dismiss != "" && dismiss != "1" { // never read as done: that wakes its next step
+		q, err := url.ParseQuery(r.URL.RawQuery) // Query() would drop a malformed pair, a dismiss in it too
+		vals, dismiss := q["dismiss"]
+		if err != nil || dismiss && !slices.Equal(vals, []string{"1"}) { // never read as done: that wakes its next step
 			jsonError(w, http.StatusBadRequest, "bad_request", "dismiss: 1 or absent")
 			return
 		}
@@ -471,7 +472,7 @@ func (s *server) route(w http.ResponseWriter, r *http.Request, pathname string) 
 			return
 		}
 		if h := s.headless[name]; h != nil {
-			h.tickedOff(*item, dismiss == "1")
+			h.tickedOff(*item, dismiss)
 		}
 		jsonOK(w, okWith(struct{}{}))
 		return
