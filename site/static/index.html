@@ -7,7 +7,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>yoicks</title>
-<meta name="description" content="Monitor and control every coding agent running in herdr from your phone. herdr で動くすべてのコーディングエージェントを、スマホから見て操作できます。">
+<meta name="description" content="Hand the work to one orchestrator on its Home: it runs many coding agents in herdr at once, each in its own worktree, and comes back when one is done or needs you. Home の orchestrator に仕事を渡すと、herdr のコーディングエージェントを同時にいくつも動かし、終わったときやあなたが要るときに戻ってきます。">
 <link rel="canonical" href="https://yoicks.y011d4.com/">
 <link rel="icon" type="image/svg+xml" href="docs/favicon.svg">
 <script>
@@ -57,6 +57,7 @@
   .hero picture img { width: min(18rem, 70vw); height: auto; }
   h1 { font-size: clamp(1.75rem, 5vw, 2.75rem); line-height: 1.25; margin: 1.5rem 0 .75rem; }
   h1 span, .lead span { display: block; }
+  h1, h2, h3 { word-break: auto-phrase; } /* Japanese breaks between phrases (Chrome), not mid-word */
   .lead { color: var(--dim); font-size: 1.125rem; max-width: 40rem; margin: 0 auto; }
   .cta { display: flex; flex-wrap: wrap; justify-content: center; gap: .75rem; margin-top: 2rem; }
   .button { display: inline-block; padding: .75rem 1.5rem; border-radius: .5rem; font-weight: 600; text-decoration: none;
@@ -95,13 +96,14 @@
       <img src="docs/lockup-light.svg" alt="yoicks" width="214" height="64">
     </picture>
     <h1>
-      <span lang="en">Every herdr agent, on your phone</span>
-      <span lang="ja">herdr のエージェントを、スマホから</span>
+      <span lang="en">One Home, many agents at work</span>
+      <span lang="ja">1 つの Home から、たくさんのエージェントを同時に</span>
     </h1>
     <p class="lead">
-      <span lang="en">Monitor and control the coding agents running in herdr from your phone, or from a PC's browser.
-        A small local bridge and a PWA; nothing leaves your machine.</span>
-      <span lang="ja">herdr で動くコーディングエージェントを、スマホや PC のブラウザから見て操作できます。小さなローカルのブリッジと PWA で動き、データはマシンの外に出ません。</span>
+      <span lang="en">Hand the work to an orchestrator, one Claude Code agent you talk to on its Home. It starts a worker
+        for each task, each in its own git worktree, follows them all at once, and comes back to you only when
+        something is done or needs you. A herdr plugin; from your phone or a PC's browser.</span>
+      <span lang="ja">仕事は orchestrator に渡します。Home で話しかける 1 つの Claude Code エージェントです。orchestrator はタスクごとにワーカーを起動し、それぞれ専用の git worktree で同時に進め、終わったときやあなたが要るときだけ戻ってきます。herdr のプラグインで、スマホや PC のブラウザから使えます。</span>
     </p>
     <div class="cta">
       <a class="button primary" lang="en" href="docs/en/">Get started</a>
@@ -114,52 +116,52 @@
     <h2 id="features"><span lang="en">What it does</span><span lang="ja">できること</span></h2>
     <div class="features">
       <div class="card">
-        <h3 lang="en">Every agent on one screen</h3>
-        <h3 lang="ja">全エージェントを 1 画面で</h3>
-        <p lang="en">Live status (idle, working, blocked, done) across all workspaces, blocked agents first, with each one's git branch and worktree.</p>
-        <p lang="ja">すべてのワークスペースのエージェントの状態 (idle、working、blocked、done) をライブで表示します。blocked のものが先頭に並び、git のブランチと worktree も出ます。</p>
-        <a lang="en" href="docs/en/">What is yoicks</a>
-        <a lang="ja" href="docs/ja/">yoicks とは</a>
-      </div>
-      <div class="card">
-        <h3 lang="en">A pane in your hand</h3>
-        <h3 lang="ja">ペインを手元に</h3>
-        <p lang="en">The terminal fitted to the phone's width, pinch zoom, scrollback by swiping, quick keys; a Claude Code pane also reads as a chat.</p>
-        <p lang="ja">端末をスマホの幅に合わせて表示し、ピンチでズーム、スワイプで履歴をさかのぼり、クイックキーで入力できます。Claude Code のペインはチャットとしても読めます。</p>
-        <a lang="en" href="docs/en/guide/app">Using the app</a>
-        <a lang="ja" href="docs/ja/guide/app">アプリの使い方</a>
-      </div>
-      <div class="card">
-        <h3 lang="en">Orchestrators</h3>
-        <h3 lang="ja">orchestrator</h3>
-        <p lang="en">Talk to one Claude Code agent on its Home. It starts the workers, follows them and reports back, inside its own Claude account.</p>
-        <p lang="ja">Home で 1 つの Claude Code エージェントと話します。それがワーカーを起動し、進み具合を追い、結果を伝えます。触れるのは自分の Claude アカウントの中だけです。</p>
+        <h3 lang="en">Many workers at once</h3>
+        <h3 lang="ja">ワーカーを同時にいくつも</h3>
+        <p lang="en">The orchestrator starts a worker per task, each in a new herdr tab and, for a repository, in its own git worktree next to it. They run side by side; a finished worker's tab is closed, and a merged worktree removed.</p>
+        <p lang="ja">orchestrator はタスクごとにワーカーを起動します。どれも新しい herdr のタブで、リポジトリの作業ならその隣に作る専用の git worktree で、並んで進みます。終わったワーカーのタブは閉じ、マージされた worktree は片付けます。</p>
         <a lang="en" href="docs/en/guide/orchestrators">Orchestrators</a>
         <a lang="ja" href="docs/ja/guide/orchestrators">orchestrator</a>
       </div>
       <div class="card">
-        <h3 lang="en">Headless mode</h3>
-        <h3 lang="ja">ヘッドレス</h3>
-        <p lang="en">An orchestrator can run as the bridge's own <code>claude -p</code>, with no pane, and keep a to-do list of what only you can do.</p>
-        <p lang="ja">orchestrator を、ペインを持たないブリッジ自身の <code>claude -p</code> として動かせます。あなたにしかできないことは、やることリストに残ります。</p>
+        <h3 lang="en">It follows them, not you</h3>
+        <h3 lang="ja">追いかけるのは orchestrator</h3>
+        <p lang="en">A worker that finishes or stops for an answer wakes the orchestrator. It reads the result and gives the next task, or tells you what the worker is waiting for.</p>
+        <p lang="ja">ワーカーが終わるか、答えを待って止まると、orchestrator が起きます。結果を読んで次のタスクを渡すか、ワーカーが何を待っているかをあなたに伝えます。</p>
+        <a lang="en" href="docs/en/reference/cli">The yoicks commands</a>
+        <a lang="ja" href="docs/ja/reference/cli">yoicks のコマンド</a>
+      </div>
+      <div class="card">
+        <h3 lang="en">Only what needs you</h3>
+        <h3 lang="ja">あなたが要るものだけ</h3>
+        <p lang="en">A Home's Needs you gathers its blocked workers and its own question. A headless Home also keeps a to-do list of what only you can do (a PR to merge, a login, a decision) and reminds you of each when it comes due.</p>
+        <p lang="ja">Home の Needs you に、止まっているワーカーと orchestrator 自身の質問が集まります。ヘッドレスの Home は、PR のマージ、ログイン、判断など、あなたにしかできないことをやることリストに残し、期日が来たら知らせます。</p>
         <a lang="en" href="docs/en/guide/headless">Headless orchestrators</a>
         <a lang="ja" href="docs/ja/guide/headless">ヘッドレスの orchestrator</a>
       </div>
       <div class="card">
-        <h3 lang="en">Notifications</h3>
-        <h3 lang="ja">通知</h3>
-        <p lang="en">OS notifications when an agent is blocked or done, and optional ntfy pushes while the app is closed.</p>
-        <p lang="ja">エージェントが blocked か done になると OS の通知を出します。ntfy を設定すれば、アプリを閉じている間もプッシュが届きます。</p>
+        <h3 lang="en">From merge to deploy</h3>
+        <h3 lang="ja">マージの先まで</h3>
+        <p lang="en">With <code>pr_watch</code> on, a headless Home learns when a PR on its list is merged. It then deploys, if its own rules allow it, and removes the worker's worktree.</p>
+        <p lang="ja"><code>pr_watch</code> を有効にすると、ヘッドレスの Home はリストにある PR のマージに気づきます。自分の rules が許していればデプロイまで進め、ワーカーの worktree を片付けます。</p>
         <a lang="en" href="docs/en/reference/config">Configuration</a>
         <a lang="ja" href="docs/ja/reference/config">設定 (config)</a>
       </div>
       <div class="card">
-        <h3 lang="en">Local only</h3>
-        <h3 lang="ja">ローカルだけで動く</h3>
-        <p lang="en">No account, no cloud. The bridge listens on loopback; you pick the way in: a reverse proxy, a tunnel or a VPN.</p>
-        <p lang="ja">アカウントもクラウドも要りません。ブリッジはループバックで待ち受け、スマホからの経路 (リバースプロキシ、トンネル、VPN) は自分で選びます。</p>
-        <a lang="en" href="docs/en/guide/phone">Exposing the bridge to your phone</a>
-        <a lang="ja" href="docs/ja/guide/phone">スマホへの公開</a>
+        <h3 lang="en">One Home per account</h3>
+        <h3 lang="ja">Home はアカウントごと</h3>
+        <p lang="en">An orchestrator sees and drives only the agents of its own Claude account, so a work Home and a personal one stay apart. The app switches between Homes.</p>
+        <p lang="ja">orchestrator が見て動かせるのは、自分の Claude アカウントのエージェントだけです。仕事用と個人用の Home を分けておけて、アプリで切り替えられます。</p>
+        <a lang="en" href="docs/en/guide/orchestrators#what-it-can-reach">What it can reach</a>
+        <a lang="ja" href="docs/ja/guide/orchestrators#what-it-can-reach">何に触れられるか</a>
+      </div>
+      <div class="card">
+        <h3 lang="en">In your hand, on your machine</h3>
+        <h3 lang="ja">手元から、自分のマシンで</h3>
+        <p lang="en">The bridge serves a PWA for your phone or a PC: every agent with its live status, a pane's terminal or chat, a notification when one is blocked or done. No cloud; you pick the way in.</p>
+        <p lang="ja">ブリッジがスマホや PC 向けの PWA を配信します。全エージェントの状態、ペインの端末やチャット、blocked や done になったときの通知。クラウドは使わず、スマホからの経路は自分で選びます。</p>
+        <a lang="en" href="docs/en/guide/app">Using the app</a>
+        <a lang="ja" href="docs/ja/guide/app">アプリの使い方</a>
       </div>
     </div>
   </section>
