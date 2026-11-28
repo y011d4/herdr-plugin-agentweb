@@ -624,14 +624,17 @@ func TestHeadlessUsageKept(t *testing.T) {
 	b.waitStatus(t, "idle")
 	b.send(t, "replyhold") // its rate_limit_event, then held before its result
 	u := b.waitFor(t, "the limits", func(v OrchestratorView) bool { return v.Headless.Usage != nil && v.Headless.Usage.FiveHour != nil }).Headless.Usage
-	b.srv.shutdownHeadless()
+	b.srv.shutdownHeadless() // its interrupt: one more reading comes as it stops (5h 0.3)
 
 	same := func(got *HeadlessUsage) bool {
 		return got != nil && got.FiveHour != nil && got.SevenDay != nil && *got.FiveHour == *u.FiveHour && *got.SevenDay == *u.SevenDay && got.At == u.At
 	}
 	b2 := startHeadless(t, state, nil, nil)
-	if v := b2.view(t).Headless; v.Status != "stopped" || !same(v.Usage) || v.Usage.ContextPct != nil {
+	if v := b2.view(t).Headless; v.Status != "stopped" || v.Usage == nil || v.Usage.FiveHour == nil || v.Usage.FiveHour.Utilization != 0.3 ||
+		v.Usage.At < u.At || v.Usage.ContextPct != nil {
 		t.Fatalf("after a restart mid-turn, before a start: %+v %+v", v, v.Usage)
+	} else {
+		u = v.Usage
 	}
 	b2.srv.startHeadless() // it resumes, is told, and answers: a newer reading, and a result with its context
 	if v := b2.waitStatus(t, "done").Headless; v.Usage == nil || v.Usage.At <= u.At || v.Usage.ContextPct == nil || *v.Usage.ContextPct != 1 {

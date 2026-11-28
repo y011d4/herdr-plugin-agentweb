@@ -1503,9 +1503,8 @@ func (r *headlessRunner) Shutdown() {
 	c := r.child
 	if c != nil && (r.model.Status == "working" || r.model.Status == "blocked") {
 		r.interrupted = true
+		r.persist()
 	}
-	// saved idle too: what changed with no turn's end (a compaction's context, an interrupted turn's limits)
-	r.persist()
 	for _, w := range r.watches { // their connections close; they stay saved, re-armed at the next start
 		w.cancel()
 	}
@@ -1513,6 +1512,11 @@ func (r *headlessRunner) Shutdown() {
 	if c != nil {
 		r.stopChild(c)
 	}
+	// saved again once its last lines are read, idle too: what changed with no turn's end (a
+	// compaction's context, an interrupted turn's limits)
+	r.mu.Lock()
+	r.persist()
+	r.mu.Unlock()
 }
 
 // denyPending ends the pending question unanswered; r.mu held.
