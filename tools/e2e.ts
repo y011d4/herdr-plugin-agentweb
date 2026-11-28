@@ -1662,9 +1662,14 @@ async function w1(c: Ctx) {
   try {
     await mobile(pg, false);
     await loadApp(c, '#/agents'); // a new document: a PC's pointer
-    // the folded row's bottom edge above the sidebar's (0: pinned there)
-    const pin = await pg.until(`(() => { const r = document.querySelector('#sidebar .sidebar-all[aria-expanded=false]')?.parentElement;
-      return !!r && Math.round(document.getElementById('sidebar').getBoundingClientRect().bottom - r.getBoundingClientRect().bottom) === 0; })()`, 5000);
+    // the folded row's bottom edge on the sidebar's (pinned there), with the sidebar made too short for what it lists
+    // (150px: its topbar and the row leave 46px) and scrolled to its top
+    const pin = await pg.until(`(() => { const s = document.getElementById('sidebar'), r = document.querySelector('#sidebar .sidebar-all[aria-expanded=false]')?.parentElement;
+      if (!s || !r) return false;
+      s.style.height = '150px';
+      s.scrollTop = 0;
+      return s.scrollHeight > s.clientHeight && Math.round(s.getBoundingClientRect().bottom - r.getBoundingClientRect().bottom) === 0; })()`, 5000);
+    await pg.ev(`document.getElementById('sidebar')?.style.removeProperty('height'), 1`);
     let groups = '';
     const g = await waitFn(async () => {
       const st = await api(c, 'GET', '/api/state');
@@ -1690,7 +1695,7 @@ async function w1(c: Ctx) {
     const gone = await pg.until(`!document.getElementById('sidebar') && document.getElementById('screen') === window.__wcScreen`, 2000);
     result(c, !pin.timeout && !g.timeout && geo.w === 360 && geo.topbar === 360 && geo.screen === 360 && geo.v === '360px' && screen === 1 && !open.timeout && !gone.timeout, 'W1',
       `pinned=${ms(pin)},groups=${groups}:${g.timeout ? 'mismatch' : 'ok'},width=${geo.w},topbarX=${geo.topbar},screenX=${geo.screen},--sidebar-w=${geo.v},open=${ms(open)},phone=${ms(gone)}`,
-      "1280px: #sidebar 360px left of #topbar and #screen (--sidebar-w 360px); All agents, folded, at its bottom within 5s; its unfolded groups = /api/state's orchestrators (each its account's agents) + Other; " +
+      "1280px: #sidebar 360px left of #topbar and #screen (--sidebar-w 360px); All agents, folded, at its bottom within 5s (the sidebar 150px tall, overflowing, scrolled to its top); its unfolded groups = /api/state's orchestrators (each its account's agents) + Other; " +
         "clicking wc-less there opens #/pane/<it> marked within 2s; at 390px no #sidebar and the same #screen within 2s");
   } finally {
     await mobile(pg, true);
