@@ -644,9 +644,11 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   (`Input.dispatchTouchEvent`, mobile metrics, fresh profile). "The screen
   changed" is not proof by itself on a busy pane — assert on content moving
   to *older* lines and on the composer staying clean.
-- **e2e** (`tools/e2e.ts`: the web UI's end-to-end checks, headless Chrome over CDP, no dependencies): CI's `e2e` job
-  runs Tier 1 on every PR and every push to main, over a private herdr (the release binary of
-  `HERDR_VERSION`, pinned by SHA-256 in ci.yml), and main's run is the gate before a deploy (above).
+- **e2e** (`tools/e2e.ts`: the web UI's end-to-end checks, headless Chrome over CDP, no dependencies): CI runs Tier 1
+  on every PR and every push to main, over a private herdr (the release binary of `HERDR_VERSION`,
+  pinned by SHA-256 in ci.yml), in two parts on two runners (`e2e (part 1|2)`: the items before
+  ci.yml's `E2E_SPLIT` and those from it on, `--until`/`--from`) under one check, `e2e`, green when
+  both passed; main's run is the gate before a deploy (above).
   By hand it is optional, for debugging a UI flow or writing a check: the same, in a root of your own
   (its own lock: no other worker's run to wait for) and nowhere production shows:
   ```bash
@@ -665,7 +667,7 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   (every worker's) gets none. Without `herdr start` (Tier 2, which needs the desktop's HOME and direnv),
   the preview is a throwaway bridge over the real herdr.
   Each check prints `PASS|FAIL <id> <measured> <condition>`; the exit code is the failure count.
-  `--only P10,P12` picks checks; `--profile DIR` reuses a Chrome profile, for the old-SW round trip
+  `--only P10,P12` picks checks, `--from ID`/`--until ID` the ones from an item on/before it; `--profile DIR` reuses a Chrome profile, for the old-SW round trip
   (`P2.old` → `P2.upgrade` → `P2.downgrade`, the old build served with `preview start --web-dir`).
   The file's header lists the rest (`setup --gonogo`, `block`, `teardown`).
   - Tier 1 is deterministic, shell panes only: `wc-shell` (`seq`) and `wc-less` (`less --mouse`,

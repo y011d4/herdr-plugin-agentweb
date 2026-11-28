@@ -5,7 +5,8 @@
  *
  *   node tools/e2e.ts preview start --bin bin/yoicks [--port 8395] [--web-dir DIR] [--fake-claude BIN]
  *   node tools/e2e.ts preview stop [--port 8395]
- *   node tools/e2e.ts check --base http://127.0.0.1:8395 [--tier 1|2|1,2] [--only P10,P12] [--profile DIR]
+ *   node tools/e2e.ts check --base http://127.0.0.1:8395 [--tier 1|2|1,2] [--only P10,P12] [--from ID | --until ID] [--profile DIR]
+ *     (--from: that item and those after it; --until: the items before it. CI runs Tier 1 as both halves of one cut)
  *   node tools/e2e.ts setup --gonogo --base URL   # go/no-go: wc-less + a blocked wc-claude, held until SIGINT/SIGTERM
  *   node tools/e2e.ts block                       # go/no-go B5: report that wc-less as blocked
  *   node tools/e2e.ts teardown                    # clean every unfinished run
@@ -1152,9 +1153,8 @@ async function p12(c: Ctx) {
     const watch = pg.wsSent.filter((f) => f.t >= t1 && /"type":"watch_/.test(f.payload)).length;
     result(c, !gone.timeout && watch >= 1, 'P12.reconnect', `bannerGone=${gone.timeout ? 'timeout' : `${tUp - t1}ms`},watchSent=${watch}`,
       'after start the banner hides within 16s and >= 1 watch_* is sent');
-    await sleep(31_000);
-    const pings = pg.wsSent.filter((f) => f.t >= t1 && /"type":"ping"/.test(f.payload)).length;
-    result(c, pings >= 1, 'P12.ping', `pings31s=${pings}`, '>= 1 ping within 31s of reconnecting');
+    const ping = await waitFn(() => pg.wsSent.some((f) => f.t >= t1 && /"type":"ping"/.test(f.payload)), 31_000);
+    result(c, !ping.timeout, 'P12.ping', `ping=${ping.timeout ? 'none' : `${Date.now() - tUp}ms`}`, '>= 1 ping within 31s of reconnecting');
   } finally {
     await previewCtl(p, 'start'); // never leave the preview down (no-op when running)
   }
@@ -2356,8 +2356,11 @@ async function locked(base: string, body: (c: Ctx) => Promise<void>, needs: Set<
 async function check(o: Record<string, any>): Promise<number> {
   const tiers = new Set(String((o.tier ?? ['1']).join(',')).split(',').map(Number));
   const only = o.only ? new Set(String(o.only).split(',')) : null;
-  const items = ITEMS.filter((i) => (only ? only.has(i.id) : tiers.has(i.tier) && !i.manual));
+  let items = ITEMS.filter((i) => (only ? only.has(i.id) : tiers.has(i.tier) && !i.manual));
   if (only) for (const id of only) if (!ITEMS.some((i) => i.id === id)) throw new Error(`unknown item ${id}`);
+  const at = (id: string) => { const i = items.findIndex((x) => x.id === id); if (i < 0) throw new Error(`no item ${id} in this run`); return i; };
+  if (o.from) items = items.slice(at(o.from));
+  if (o.until) items = items.slice(0, at(o.until));
   const needs = new Set(items.flatMap((i) => i.needs ?? []));
   const c = await locked(o.base, async (c) => {
     c.pg = await openPage(c, o.profile);
@@ -2655,7 +2658,7 @@ async function shots(o: Record<string, any>): Promise<number> {
 
 async function main(): Promise<number> {
   const { values: o, positionals: [cmd, sub] } = parseArgs({ allowPositionals: true, options: {
-    base: { type: 'string' }, tier: { type: 'string', multiple: true }, only: { type: 'string' }, profile: { type: 'string' },
+    base: { type: 'string' }, tier: { type: 'string', multiple: true }, only: { type: 'string' }, from: { type: 'string' }, until: { type: 'string' }, profile: { type: 'string' },
     gonogo: { type: 'boolean' }, bin: { type: 'string' }, port: { type: 'string' }, 'web-dir': { type: 'string' }, 'fake-claude': { type: 'string' },
     before: { type: 'string' }, after: { type: 'string' }, out: { type: 'string' } } });
   if (cmd === 'shots') return shots(o);

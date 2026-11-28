@@ -160,10 +160,23 @@ jobs:
   # against the SHA-256 below (herdr publishes none): a release replaced under the same tag fails here, not runs.
   # Raising the version is a PR that changes both lines, and so runs this against the new herdr first.
   # It runs on pushes to main too, with no `if:`: main's run is the deploy gate (CLAUDE.md's deploy steps).
-  e2e:
+  # Tier 1 runs in two parts on two runners, each with its own herdr, bridge and Chrome: the items before
+  # E2E_SPLIT and those from it on (`--until`/`--from`, one cut, so a new item lands in one of them). The cut
+  # is where the two take about as long (~1 min each); the e2e job below is the one check for both.
+  e2e-part:
+    name: e2e (part ${{ matrix.part }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: 1
+            range: --until
+          - part: 2
+            range: --from
     env:
+      E2E_SPLIT: P12
       HERDR_VERSION: v0.9.5
       HERDR_SHA256: 14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d
     steps:
@@ -208,22 +221,36 @@ jobs:
           go build -o bin/yoicks ./cmd/yoicks
           go build -o "$RUNNER_TEMP/fake/claude" ./tools/fakeclaude
 
-      - name: Tier 1
+      - name: Tier 1, part ${{ matrix.part }}
         env:
           E2E_ROOT: ${{ runner.temp }}/e2e
+          RANGE: ${{ matrix.range }}
         run: |
           node tools/e2e.ts herdr start
           node tools/e2e.ts preview start --bin bin/yoicks --fake-claude "$RUNNER_TEMP/fake/claude"
-          node tools/e2e.ts check --base http://127.0.0.1:8395 --tier 1
+          node tools/e2e.ts check --base http://127.0.0.1:8395 --tier 1 "$RANGE" "$E2E_SPLIT"
 
       - name: Upload the logs
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: e2e-logs
+          name: e2e-logs-${{ matrix.part }}
           path: |
             ${{ runner.temp }}/e2e/preview-*/state/bridge.log
             ${{ runner.temp }}/e2e/herdr/server.log
             ${{ runner.temp }}/e2e/herdr/.config/herdr/herdr-server.log
           retention-days: 7
           if-no-files-found: ignore
+
+  # The one e2e check (a required check has one name): green only when both parts passed. `always()`: a
+  # skipped job counts as passed for a required check, so this one runs, and fails, after a failed or cancelled part.
+  e2e:
+    needs: e2e-part
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Both parts passed
+        env:
+          RESULT: ${{ needs.e2e-part.result }}
+        run: test "$RESULT" = success
