@@ -251,7 +251,7 @@ function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: st
   const usage = self?.headless?.usage ? <Usage usage={self.headless.usage} now={now} /> : null;
   return (
     <Stack id="home-status" gap={8} py={8} className={`px-3.5 ${STATUS_BAR}`}>
-      {/* a PC's sidebar does this (style.css hides it there): the row scrolls sideways, its scrollbar hidden */}
+      {/* on a PC too (its sidebar's Home headings list what waits there): the row scrolls sideways, its scrollbar hidden */}
       {all.length >= 2 && (
         <Group className="home-switch overflow-x-auto [scrollbar-width:none]" gap={6} wrap="nowrap">
           {all.map((o) => {

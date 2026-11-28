@@ -437,9 +437,10 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
     background: var(--color-surface);
     border-right: 1px solid var(--color-border);
   }
-  /* what the sidebar does instead: the Home switcher, the full list's ← Home (a Home's own list keeps
-     its ← <Home>, aria-label "Back to …": the way back where the list is) */
-  #app:has(> #sidebar) :is(.home-switch, #topbar-left .topbar-back[aria-label='Home']) {
+  /* what the sidebar does instead: the full list's ← Home (a Home's own list keeps its ← <Home>,
+     aria-label "Back to …": the way back where the list is). The Home switcher stays, as on a phone:
+     the way between Homes (the sidebar's Home headings list what waits there) */
+  #app:has(> #sidebar) #topbar-left .topbar-back[aria-label='Home'] {
     display: none;
   }
   /* an agent's drawer from the right, over the main column (right of the sidebar, if any) */

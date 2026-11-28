@@ -1653,7 +1653,8 @@ async function p6(c: Ctx) {
 /** W1: the PC sidebar. On a PC (1280px): #sidebar left of the topbar and #screen, --sidebar-w its
  *  width; All agents, folded, at its bottom; its agents, unfolded (All agents), a group per orchestrator, in /api/state's order, with its
  *  account's agents, then Other with the agents no account has (when there are any); clicking wc-less
- *  there opens #/pane/<it> and marks it.
+ *  there opens #/pane/<it> and marks it. W1.switch: a Home there shows its switcher, as a phone does, and a click on
+ *  another Home's button opens that Home.
  *  Down to a phone's width the sidebar goes, and #screen stays the same element. */
 async function w1(c: Ctx) {
   const { pg } = c;
@@ -1691,6 +1692,18 @@ async function w1(c: Ctx) {
     const p = await pg.at(row);
     for (const type of ['mousePressed', 'mouseReleased']) await pg.S('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', clickCount: 1 });
     const open = await pg.until(`location.hash === ${js(`#/pane/${enc(less)}`)} && ${row}?.getAttribute('aria-current') === 'page'`, 2000);
+    const [first, second] = (await api(c, 'GET', '/api/state')).orchestrators.map((o: any) => o.name as string);
+    await pg.goto(`#/home/${enc(first)}`);
+    const btn = `document.querySelector('.home-switch-btn[data-orch=${js(second)}]')`;
+    const shown = await pg.until(`(${btn}?.getBoundingClientRect().height ?? 0) > 0`, 5000);
+    let switched = shown;
+    if (!shown.timeout) {
+      const b = await pg.at(btn);
+      for (const type of ['mousePressed', 'mouseReleased']) await pg.S('Input.dispatchMouseEvent', { type, x: b.x, y: b.y, button: 'left', clickCount: 1 });
+      switched = await pg.until(`location.hash === ${js(`#/home/${enc(second)}`)}`, 2000);
+    }
+    result(c, !shown.timeout && !switched.timeout, 'W1.switch', `shown=${ms(shown)},switched=${ms(switched)}`,
+      `1280px: #/home/<the first orchestrator> shows the switcher's button for the second within 5s; a click on it opens #/home/<it> within 2s`);
     await mobile(pg, true);
     const gone = await pg.until(`!document.getElementById('sidebar') && document.getElementById('screen') === window.__wcScreen`, 2000);
     result(c, !pin.timeout && !g.timeout && geo.w === 360 && geo.topbar === 360 && geo.screen === 360 && geo.v === '360px' && screen === 1 && !open.timeout && !gone.timeout, 'W1',
