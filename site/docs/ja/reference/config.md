@@ -83,6 +83,9 @@ herdr plugin config-dir y011d4.yoicks
   (`gh auth status`) 必要があります。失敗したときは、リストに PR がある Home ごとに、エラー 1 つにつき
   1 回知らせます。既定では無効で、そのときは GitHub に何も送りません。
 
+どのふるまいが組み込みで、どれがこのファイル、orchestrator のファイル、yoicks の外の道具で決まるかは、
+[yoicks が決めること、あなたが決めること](./built-in-vs-configured) にまとめています。
+
 **変更の反映:** 設定は起動時に一度だけ読み込まれるため、編集後はブリッジを再起動してください
 — `herdr plugin action invoke y011d4.yoicks.stop` の後に `…start`。
 
