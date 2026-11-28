@@ -6,7 +6,8 @@
  * and idle (byUrgency), and Open the list (#/agents/<name>). An agent's row opens it in herdr, its ⋮ also here, asks a
  * running Home's orchestrator about it (Ask the orchestrator, into the composer beside it) and stops it (Dashboard.tsx's
  * AgentRow). Narrower, the Home's status bar has the same in its popovers (Needs you, the counts).
- * Like the agents list it holds still while a finger is down (useHeldState).
+ * Like the agents list it holds still while a finger is down (useHeldState), and keeps its scrollTop when a push reorders
+ * the rows (no scroll anchoring).
  */
 import { NavLink, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
@@ -42,7 +43,7 @@ export function HomePanel({ name }: { name: string }) {
   const askOff = !!o?.headless?.pending; // the composer is the question's then
   return (
     <aside id="home-panel" aria-label={`${orchestratorLabel(o)}: what needs you, and its agents`} {...hold}
-      className="w-[320px] shrink-0 overflow-y-auto overscroll-contain border-l border-(--color-border) bg-(--color-surface) px-2 pb-4">
+      className="w-[320px] shrink-0 overflow-y-auto overscroll-contain [overflow-anchor:none] border-l border-(--color-border) bg-(--color-surface) px-2 pb-4">
       {o && (
         <>
           <section data-panel="needs">
