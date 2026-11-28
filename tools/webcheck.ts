@@ -531,7 +531,12 @@ function startChrome(dir: string, args: string[]): { proc: ReturnType<typeof spa
   // a spawn failure or an early exit rejects into the caller's teardown instead of waiting out the timeout
   const gone = new Promise<never>((_, rej) => {
     proc.on('error', (e) => rej(env(`chrome: ${e.message}`)));
-    proc.on('exit', (code, sig) => rej(env(`chrome exited (${sig ?? code}) before it listened:\n${tail}`)));
+    // stderr read to its end, or 0.5 s on: chrome_crashpad_handler holds it and can outlive Chrome
+    proc.on('exit', (code, sig) => {
+      const fail = () => rej(env(`chrome exited (${sig ?? code}) before it listened:\n${tail}`));
+      proc.stderr!.once('close', fail);
+      setTimeout(fail, 500);
+    });
   });
   gone.catch(() => {});
   const url = (async () => {
