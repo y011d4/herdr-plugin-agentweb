@@ -8,18 +8,20 @@
  * under Later until its time. A tap on an item opens its menu: Mark done ticks it off (DELETE …/todos/:id, the State
  * push then drops it; a running headless Home takes up what follows), on a running Home Ask the orchestrator puts its
  * quote into the composer (transcript.ts's todoQuote: its text, id, worker and link), to ask its orchestrator about it,
- * and Dismiss drops it undone (…?dismiss=1: its orchestrator is told it isn't needed, so no next step follows, and a
- * PR's item isn't taken for a merge). A link shows its host; an agent's name opens it (openAgentNamed).
+ * Snooze… opens its panel under it (a preset or a day and time: PATCH …/todos/:id {due}; it waits under Later, out of
+ * the needs-you count, and comes back with a reminder then; its orchestrator isn't told), and Dismiss drops it undone
+ * (…?dismiss=1: its orchestrator is told it isn't needed, so no next step follows, and a PR's item isn't taken for a
+ * merge). A link shows its host; an agent's name opens it (openAgentNamed).
  */
-import { Anchor, Badge, Button, Group, Loader, Menu, Popover, Stack, Text, UnstyledButton } from '@mantine/core';
-import { useEffect, useState, type ReactNode, type SyntheticEvent } from 'react';
-import { apiDelete } from '../api.ts';
+import { Anchor, Badge, Button, CloseButton, Group, Loader, Menu, Popover, Stack, Text, TextInput, UnstyledButton } from '@mantine/core';
+import { useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
+import { apiDelete, apiPatch } from '../api.ts';
 import { draftKey, setQuote } from '../drafts.ts';
 import { homeSummary, orchestratorStatus, type DashboardCard, type HomeSummary } from '../dashboard-group.ts';
 import { openAgent, openAgentNamed } from '../nav.ts';
 import { showToast } from '../notify.ts';
 import { findPane, store } from '../store.ts';
-import { dueLabel, linkHost, splitTodos } from '../todos.ts';
+import { dueLabel, linkHost, localInput, snoozeChoices, splitTodos } from '../todos.ts';
 import { todoQuote } from '../transcript.ts';
 import type { AppState, OrchestratorView, TodoItem } from '../types.ts';
 import { AgentRow, agentCards, cardTitle, orchestratorLabel } from './Dashboard.tsx';
@@ -162,15 +164,24 @@ const ASK_ICON = (
   </svg>
 );
 
+// the menu's Snooze…: a clock
+const SNOOZE_ICON = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+  </svg>
+);
+
 // An item is one target: a tap or a click on it (not on its worker or its link, which are theirs), or Enter/Space on it, opens
-// its menu under it: Mark done, on a running Home Ask the orchestrator (off while its question is open), Dismiss; the arrow keys
+// its menu under it: Mark done, Snooze…, on a running Home Ask the orchestrator (off while its question is open), Dismiss; the arrow keys
 // move in it, Escape closes it (just it: NeedsButton leaves an Escape from inside a menu to the menu). The menu stays in the
 // item's DOM (not a portal; fixed, so no scroll box clips it), so the Needs you popover doesn't take a tap in it for one outside
 // and stays open over a Mark done. ⋮ at its right says it has one. Ask's quote focuses the composer: the menu then doesn't
-// put the focus back on the item (`back`).
+// put the focus back on the item (`back`). Snooze…'s panel comes right after the item, so Tab goes on into it; it is in the list,
+// not a modal, which would fight the popover's focus trap.
 function Todo({ home, item, now, ask, off }: { home: string; item: TodoItem; now: number; ask?: () => void; off: boolean }) {
   const [busy, setBusy] = useState(false);
   const [back, setBack] = useState(true);
+  const [snoozing, setSnoozing] = useState(false);
   const host = item.url ? linkHost(item.url) : null;
   const due = item.due != null ? dueLabel(item.due, now) : null;
   // done, or dismissed: off the list undone, and its orchestrator told so (no next step follows)
@@ -185,7 +196,7 @@ function Todo({ home, item, now, ask, off }: { home: string; item: TodoItem; now
     }
   };
   const own = (e: SyntheticEvent): void => e.stopPropagation(); // a link's tap is the link's, not the menu's
-  return (
+  return (<>
     <Menu position="bottom-end" withinPortal={false} floatingStrategy="fixed" disabled={busy} returnFocus={back} onOpen={() => setBack(true)}>
       <Menu.Target>
         {/* a line under each but the list's last, so items of two or three lines don't run together */}
@@ -212,6 +223,10 @@ function Todo({ home, item, now, ask, off }: { home: string; item: TodoItem; now
       <Menu.Dropdown data-todo-menu={item.id}>
         <Menu.Item className="min-h-11" fz="md" leftSection={<span className="w-4 text-center" aria-hidden="true">&#10003;</span>} data-action="todo-done"
           onClick={() => { void remove(false); }}>Mark done</Menu.Item>
+        <Menu.Item className="min-h-11" fz="md" leftSection={SNOOZE_ICON} data-action="todo-snooze" onClick={() => setSnoozing(true)}>
+          Snooze…
+          <Text fz={12} c="dimmed">Remind me later</Text>
+        </Menu.Item>
         {ask && (
           <Menu.Item className="min-h-11" fz="md" leftSection={ASK_ICON} data-action="todo-ask" disabled={off} onClick={() => { setBack(false); ask(); }}>
             Ask the orchestrator
@@ -225,5 +240,52 @@ function Todo({ home, item, now, ask, off }: { home: string; item: TodoItem; now
         </Menu.Item>
       </Menu.Dropdown>
     </Menu>
+    {snoozing && <Snooze home={home} item={item} close={() => setSnoozing(false)} />}
+  </>);
+}
+
+// Snooze…'s panel, under its item: the presets (snoozeChoices, each with its time) and a day and time of one's own (tomorrow
+// morning's to start with). A pick puts the item off (PATCH …/todos/:id {due}): the State push moves it under Later.
+function Snooze({ home, item, close }: { home: string; item: TodoItem; close: () => void }) {
+  const [now] = useState(Date.now);
+  const choices = snoozeChoices(now);
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const hm = (t: number): string => dueLabel(t, t).text.split(' ')[1];
+  const snooze = async (due: number): Promise<void> => {
+    if (!(due > Date.now())) { setError('Pick a time ahead.'); return; } // NaN too: an input left empty
+    setBusy(true);
+    setError('');
+    try {
+      await apiPatch(`/api/orchestrators/${encodeURIComponent(home)}/todos/${encodeURIComponent(item.id)}`, { due });
+      showToast('Snoozed', `Until ${dueLabel(due, Date.now()).text}`);
+      close();
+    } catch (err) {
+      if ((err as { status?: number }).status === 404) { close(); return; } // gone already
+      setBusy(false);
+      setError((err as Error).message);
+    }
+  };
+  return (
+    <div data-snooze={item.id} className="-mx-2 border-b border-(--color-border) px-2 pb-2.5">
+      <Group justify="space-between" wrap="nowrap">
+        <Text fz={12} fw={600} c="dimmed">Snooze until</Text>
+        <CloseButton aria-label="Cancel snooze" data-action="snooze-cancel" onClick={close} />
+      </Group>
+      <Stack gap={6}>
+        {choices.map((c) => (
+          <Button key={c.label} variant="default" fullWidth justify="space-between" fw={500} disabled={busy} data-snooze-at={c.at}
+            rightSection={<Text span fz={13} c="dimmed">{hm(c.at)}</Text>} onClick={() => { void snooze(c.at); }}>{c.label}</Button>
+        ))}
+        {/* the date and time need about 14rem: in a PC's narrow Home panel, Snooze goes under them */}
+        <Group gap={6} justify="flex-end">
+          <TextInput type="datetime-local" className="min-w-56 flex-1" ref={input} aria-label="Snooze until, a day and time" data-snooze-input=""
+            defaultValue={localInput(choices[choices.length - 1].at)} min={localInput(now)} disabled={busy} />
+          <Button disabled={busy} data-action="snooze-at" onClick={() => { void snooze(new Date(input.current!.value).getTime()); }}>Snooze</Button>
+        </Group>
+      </Stack>
+      {error && <Text fz={12} c="red" mt={6} data-snooze-error="">{error}</Text>}
+    </div>
   );
 }

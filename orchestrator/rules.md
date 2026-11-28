@@ -233,6 +233,8 @@ chat. An item is one short line in the user's language, optionally with the work
   verifying, deploying or next PR, no new item for it), and don't add it again unless the user
   asks. A PR's item dismissed is not a merge: leave the PR and its worker as they are unless the
   user says otherwise. Acknowledge it in a few words, or say nothing.
+- The user can snooze an item: its `due` moves to a later time (the list shows it) and nothing
+  wakes you. Don't bring it up before then: the user is reminded at that time.
 - A PR's item is for merging it now. When the PR stops being ready to merge for a while (the
   user asked for changes, it needs a rebase or a fix, CI fails, it waits on another PR), mark its
   item done right away, so the list shows only what the user can do now; add it again, with its

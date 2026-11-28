@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { clearToasts, getToasts } from '../src/notify.ts';
 import { setAppState } from '../src/store.ts';
 import { WIDE_QUERY } from '../src/theme.ts';
-import { dueLabel, linkHost, splitTodos } from '../src/todos.ts';
+import { dueLabel, linkHost, localInput, snoozeChoices, splitTodos } from '../src/todos.ts';
 import type { AppState, OrchestratorView, TodoItem } from '../src/types.ts';
 import { needsYou, Todos } from '../src/ui/Todos.tsx';
 import { state as recorded } from './contract.gen.ts';
@@ -30,6 +30,16 @@ describe('todos.ts', () => {
     for (const bad of ['javascript:alert(1)', 'data:text/html,x', 'ftp://h/x', '/relative', 'not a url']) assert.equal(linkHost(bad), null, bad);
   });
 
+  it("snooze's presets: in 1 and 3 hours (to the minute), this evening while an hour or more ahead, tomorrow morning", () => {
+    const show = (now: number): string[] => snoozeChoices(now).map((c) => `${c.label} ${localInput(c.at)}`);
+    assert.deepEqual(show(at('2026-11-27T12:00:20')), ['In 1 hour 2026-11-27T13:01', 'In 3 hours 2026-11-27T15:01',
+      'This evening 2026-11-27T18:00', 'Tomorrow morning 2026-11-28T09:00']);
+    const labels = (now: number): string[] => snoozeChoices(now).map((c) => c.label);
+    assert.deepEqual(labels(at('2026-11-27T17:00:00')), ['In 1 hour', 'In 3 hours', 'This evening', 'Tomorrow morning'], 'an hour ahead: still');
+    assert.deepEqual(labels(at('2026-11-27T17:01:00')), ['In 1 hour', 'In 3 hours', 'Tomorrow morning']);
+    assert.deepEqual(show(at('2026-11-30T23:30:00')), ['In 1 hour 2026-12-01T00:30', 'In 3 hours 2026-12-01T02:30', 'Tomorrow morning 2026-12-01T09:00']);
+  });
+
   it('names the day of a due', () => {
     assert.deepEqual(dueLabel(at('2026-11-27T18:30:00'), NOW), { text: 'today 18:30', past: false });
     assert.deepEqual(dueLabel(at('2026-11-28T09:00:00'), NOW), { text: 'tomorrow 09:00', past: false });
@@ -40,7 +50,7 @@ describe('todos.ts', () => {
 });
 
 describe('Todos', () => {
-  let reqs: { method: string; url: string; answer: (status: number, body: unknown) => void }[];
+  let reqs: { method: string; url: string; body?: string; answer: (status: number, body: unknown) => void }[];
   let unmount: () => Promise<void>;
   let container: HTMLElement;
   const home = (todos: TodoItem[]): OrchestratorView => ({ ...structuredClone(recorded.orchestrators[0]), todos });
@@ -54,12 +64,12 @@ describe('Todos', () => {
     reqs = [];
     unmount = async () => {};
     vi.stubGlobal('fetch', (url: string, init: RequestInit = {}) => new Promise((res) => {
-      reqs.push({ method: init.method ?? 'GET', url, answer: (status, body) => res({ ok: status < 400, status, json: async () => body }) });
+      reqs.push({ method: init.method ?? 'GET', url, body: init.body as string | undefined, answer: (status, body) => res({ ok: status < 400, status, json: async () => body }) });
     }));
     clearToasts();
     setAppState(structuredClone(recorded));
   });
-  afterEach(async () => { await unmount(); vi.unstubAllGlobals(); });
+  afterEach(async () => { await unmount(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
   it('draws nothing without items', async () => {
     await show(home([]));
@@ -105,12 +115,12 @@ describe('Todos', () => {
     await show(o);
     assert.equal(menu(), null);
     await fire(() => row('a1b2c3').click());
-    assert.deepEqual(items(), ['Mark done', 'DismissNot needed: no follow-up']);
+    assert.deepEqual(items(), ['Mark done', 'Snooze…Remind me later', 'DismissNot needed: no follow-up']);
     await unmount();
     let asked = 0;
     ({ container, unmount } = await render(<Todos o={o} now={NOW} ask={() => { asked++; }} />));
     await fire(() => row('a1b2c3').click());
-    assert.deepEqual(items(), ['Mark done', 'Ask the orchestrator', 'DismissNot needed: no follow-up']);
+    assert.deepEqual(items(), ['Mark done', 'Snooze…Remind me later', 'Ask the orchestrator', 'DismissNot needed: no follow-up']);
     await fire(() => menu()!.querySelector<HTMLElement>('[data-action="todo-ask"]')!.click());
     assert.equal(asked, 1);
     assert.equal(menu(), null, 'closed by it');
@@ -119,7 +129,7 @@ describe('Todos', () => {
     ({ container, unmount } = await render(<Todos o={o} now={NOW} ask={() => { asked++; }} />));
     await fire(() => row('a1b2c3').click());
     const ask = menu()!.querySelector<HTMLButtonElement>('[data-action="todo-ask"]')!;
-    assert.deepEqual([ask.disabled, items()[1]], [true, 'Ask the orchestratorAnswer its question first']);
+    assert.deepEqual([ask.disabled, items()[2]], [true, 'Ask the orchestratorAnswer its question first']);
   });
 
   it('the keyboard: Enter or Space on an item opens its menu, the arrows move in it, Escape closes it and puts the focus back', async () => {
@@ -173,6 +183,46 @@ describe('Todos', () => {
     await fire(() => reqs[1].answer(500, { error: { code: 'error', message: 'could not save the to-do list: disk full' } }));
     assert.deepEqual(getToasts().map((t) => `${t.title}: ${t.body}`), ['Could not dismiss it: could not save the to-do list: disk full']);
     assert.equal(row('d4e5f6').hasAttribute('aria-busy'), false, 'tappable again');
+  });
+
+  it('Snooze… opens its panel under the item: a preset or a day and time of its own puts it off (PATCH {due}); one not ahead, or a failure, says so', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at('2026-11-27T12:00:00'));
+    await show(home([item('a1b2c3', 'merge it'), item('d4e5f6', 'log in')]));
+    const panel = (): HTMLElement | null => container.querySelector<HTMLElement>('[data-snooze="a1b2c3"]');
+    const open = async (): Promise<void> => {
+      await fire(() => row('a1b2c3').click());
+      await fire(() => menu()!.querySelector<HTMLElement>('[data-action="todo-snooze"]')!.click());
+    };
+    await open();
+    assert.equal(menu(), null, 'the menu closes');
+    const presets = [...panel()!.querySelectorAll<HTMLButtonElement>('[data-snooze-at]')];
+    assert.deepEqual(presets.map((b) => b.textContent), ['In 1 hour13:00', 'In 3 hours15:00', 'This evening18:00', 'Tomorrow morning09:00']);
+    assert.equal(panel()!.querySelector<HTMLInputElement>('[data-snooze-input]')!.value, '2026-11-28T09:00');
+    await fire(() => presets[1].click());
+    assert.deepEqual(reqs.map((r) => `${r.method} ${r.url} ${r.body}`), [`PATCH /api/orchestrators/personal/todos/a1b2c3 {"due":${at('2026-11-27T15:00:00')}}`]);
+    assert.ok(presets[1].disabled, 'busy');
+    await fire(() => reqs[0].answer(200, { ok: true }));
+    assert.equal(panel(), null, 'closed');
+    assert.deepEqual(getToasts().map((t) => `${t.title}: ${t.body}`), ['Snoozed: Until today 15:00']);
+    // its own day and time; one not ahead is refused here
+    await open();
+    const input = panel()!.querySelector<HTMLInputElement>('[data-snooze-input]')!;
+    const at_ = panel()!.querySelector<HTMLElement>('[data-action="snooze-at"]')!;
+    for (const v of ['2026-11-27T11:00', '']) {
+      input.value = v;
+      await fire(() => at_.click());
+      assert.equal(panel()!.querySelector('[data-snooze-error]')?.textContent, 'Pick a time ahead.', v);
+    }
+    assert.equal(reqs.length, 1);
+    input.value = '2026-11-29T20:30';
+    await fire(() => at_.click());
+    assert.equal(reqs[1].body, `{"due":${at('2026-11-29T20:30:00')}}`);
+    await fire(() => reqs[1].answer(500, { error: { code: 'error', message: 'could not save the to-do list: disk full' } }));
+    assert.equal(panel()!.querySelector('[data-snooze-error]')?.textContent, 'could not save the to-do list: disk full');
+    assert.equal(at_.hasAttribute('disabled'), false, 'tappable again');
+    await fire(() => panel()!.querySelector<HTMLElement>('[data-action="snooze-cancel"]')!.click());
+    assert.equal(panel(), null, 'cancelled');
   });
 
   it('counts what waits at a Home: its blocked agents, its orchestrator waiting itself, its items due now', () => {

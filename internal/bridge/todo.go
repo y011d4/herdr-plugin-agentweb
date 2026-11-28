@@ -2,7 +2,8 @@ package bridge
 
 // The user's to-do list, one per Home: what only the user can do and nothing else shows (merge a
 // PR, a login, a step on the PC, a later cleanup). Its orchestrator writes it (the headless child's
-// `todo` tool, mcp.go); the user ticks items off or dismisses them (DELETE /api/orchestrators/:name/todos/:id). Kept in
+// `todo` tool, mcp.go); the user ticks items off or dismisses them (DELETE /api/orchestrators/:name/todos/:id) and
+// snoozes them (PATCH: a later due). Kept in
 // <state>/todos/<name>.json, apart from the session: Stop, Clear and a bridge restart keep it. A
 // blocked worker and the Home's own question are not items: the web shows those from the State.
 
@@ -28,6 +29,8 @@ const (
 	todoMaxItems = 30
 	todoMaxText  = 200 // characters
 	todoMaxURL   = 500
+	// the furthest the user can put an item off (ms)
+	todoMaxSnooze = 366 * 24 * 60 * 60 * 1000
 )
 
 var (
@@ -213,9 +216,24 @@ func (s *todoStore) Apply(name string, add []todoAdd, done []string, now int64) 
 	return items, gone, nil
 }
 
-// Done removes name's item id (the user ticked it off, or its PR is over) and returns it; nil:
+// Done removes name's item id (the user ticked it off or dismissed it, or its PR is over) and returns it; nil:
 // there is none. An error (it couldn't be saved, or its file read) leaves the item there.
 func (s *todoStore) Done(name, id string) (*TodoItem, error) {
+	return s.change(name, id, func(list []todoEntry, i int) []todoEntry { return slices.Delete(list, i, i+1) })
+}
+
+// Snooze puts name's item id off to due (the user did): due then, and so under Later until then and
+// reminded once again then. It returns the item; nil: there is none.
+func (s *todoStore) Snooze(name, id string, due int64) (*TodoItem, error) {
+	return s.change(name, id, func(list []todoEntry, i int) []todoEntry {
+		list[i].Due, list[i].Notified = &due, false
+		return list
+	})
+}
+
+// change saves f's change to (a copy of) name's list at item id's index i, and returns that item as
+// f left it (as it was, once removed); nil: there is none. An error leaves the list as it was.
+func (s *todoStore) change(name, id string, f func(list []todoEntry, i int) []todoEntry) (*TodoItem, error) {
 	s.mu.Lock()
 	if err := s.broken[name]; err != nil {
 		s.mu.Unlock()
@@ -228,7 +246,11 @@ func (s *todoStore) Done(name, id string) (*TodoItem, error) {
 		return nil, nil
 	}
 	item := list[i].TodoItem
-	err := s.save(name, slices.Delete(slices.Clone(list), i, i+1))
+	next := f(slices.Clone(list), i)
+	if i < len(next) && next[i].ID == id {
+		item = next[i].TodoItem
+	}
+	err := s.save(name, next)
 	s.mu.Unlock()
 	if err != nil {
 		return nil, err

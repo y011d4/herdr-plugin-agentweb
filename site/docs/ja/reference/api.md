@@ -84,6 +84,9 @@
   その行は `[yoicks] to-do dismissed by the user: <text> (<agent>, <url>)` で、orchestrator はそこから次の作業を
   しません (`dismiss` がほかの値なら 400)。その項目が無ければ (すでに済みにした・外した、またはその orchestrator
   が完了にした) 404 になります。
+- `PATCH /api/orchestrators/:name/todos/:id` `{"due": 1795910400000}` — 項目をスヌーズします。`due` をその時刻
+  (ms。先の時刻で 1 年以内。そうでなければ 400) にするので、そのときまで Later に移って Needs you の数から外れ、
+  その時刻にもう一度だけ知らせます。orchestrator には伝えません (読むリストに期日が出ます)。その項目が無ければ 404 になります。
 - `DELETE /api/panes/:paneId` — ペインを閉じてエージェントを止めます
 - `POST /api/panes/:paneId/rename` `{"name": "worker-2"}` — ペインで動いているエージェントの名前を変えます
 - `POST /api/agents/:target/clear` — 代わりの新しいエージェントを (同じプロファイルと cwd で) 起動し、

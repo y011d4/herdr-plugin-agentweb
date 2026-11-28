@@ -71,7 +71,7 @@ var (
 	paneIDRoute = regexp.MustCompile(`^/api/panes/([^/]+)$`) // DELETE = stop the agent
 	agentRoute  = regexp.MustCompile(`^/api/agents/([^/]+)/(\w+)$`)
 	orchRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/(start|send|answer|interrupt|clear|stop|model|compact)$`)
-	todoRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/todos/([^/]+)$`) // DELETE = the user did it (?dismiss=1: dropped it)
+	todoRoute   = regexp.MustCompile(`^/api/orchestrators/([^/]+)/todos/([^/]+)$`) // DELETE = the user did it (?dismiss=1: dropped it); PATCH = put it off
 )
 
 // server is the HTTP + WS server over one herdr client.
@@ -448,12 +448,34 @@ func (s *server) route(w http.ResponseWriter, r *http.Request, pathname string) 
 	}
 
 	// The user ticked an item of a Home's to-do list off, or dismissed it (?dismiss=1): removed
-	// without being done, so its orchestrator takes no step from it.
-	if m := todoRoute.FindStringSubmatch(pathname); m != nil && method == "DELETE" {
+	// without being done, so its orchestrator takes no step from it. PATCH {due}: snoozed, put off
+	// to due (ms): under Later until then, and reminded once again then; its orchestrator isn't told
+	// (nothing for it to do; the list it reads shows the due).
+	if m := todoRoute.FindStringSubmatch(pathname); m != nil && (method == "DELETE" || method == "PATCH") {
 		name, ok := decodePathSegment(m[1])
 		id, idOK := decodePathSegment(m[2])
 		if !ok || !idOK || !slices.ContainsFunc(s.cfg.Orchestrators, func(d OrchestratorDef) bool { return d.Name == name }) {
 			jsonError(w, http.StatusNotFound, "not_found", "no such orchestrator")
+			return
+		}
+		if method == "PATCH" {
+			body := readBody(w, r)
+			if body == nil {
+				return
+			}
+			due, ok := body["due"].(float64)
+			now := nowMs()
+			if !ok || due != math.Trunc(due) || due <= float64(now) || due > float64(now+todoMaxSnooze) {
+				jsonError(w, http.StatusBadRequest, "invalid_params", "due: a time ahead, in ms, at most a year away")
+				return
+			}
+			if item, err := s.todos.Snooze(name, id, int64(due)); err != nil {
+				jsonError(w, http.StatusInternalServerError, "error", err.Error())
+			} else if item == nil {
+				jsonError(w, http.StatusNotFound, "not_found", "no item "+id+" on "+name+"'s list")
+			} else {
+				jsonOK(w, okWith(struct{}{}))
+			}
 			return
 		}
 		q, err := url.ParseQuery(r.URL.RawQuery) // Query() would drop a malformed pair, a dismiss in it too
