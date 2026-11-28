@@ -27,6 +27,16 @@ updates:
     cooldown:
       default-days: 7
 
+  # The Pages site's own npm project (site/: VitePress, pinned to an exact 2.0 alpha). ci.yml's docs job builds
+  # each bump before it merges. Same 7-day cooldown.
+  - package-ecosystem: npm
+    directory: /site
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+
   # Go module updates (coder/websocket). Same 7-day cooldown as above.
   - package-ecosystem: gomod
     directory: /

@@ -1,0 +1,67 @@
+name: Pages
+
+# The public site, https://yoicks.y011d4.com/: the landing (/), the docs (/docs/en/, /docs/ja/), later the VRT viewer
+# (/vrt/) and a demo (/demo/). One build makes all of it (site/: `npm run build` → site/dist), and this is the only
+# workflow that deploys it: a Pages deploy replaces the whole site.
+#
+# Only from main (a push, or by hand): no pull_request trigger, so a PR's code never deploys and never holds the
+# pages/id-token permissions. PRs build the same site read-only in ci.yml's `docs` job.
+#
+# Once, in the repo's settings: Pages → Source: GitHub Actions, Custom domain: yoicks.y011d4.com (a CNAME file is
+# not used with this source), Enforce HTTPS. GitHub then creates the github-pages environment, which admits only
+# the default branch.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+# one deploy at a time, and never cut one in half: the next push deploys after it
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: package.json # its engines.node, as site/package.json's
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      # --ignore-scripts as in ci.yml; the build checks every link and anchor inside the site
+      - name: Build the site
+        working-directory: site
+        run: npm ci --ignore-scripts && npm run build
+
+      - name: Upload it
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
