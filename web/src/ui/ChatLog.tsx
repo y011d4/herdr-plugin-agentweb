@@ -229,6 +229,9 @@ function QuoteRef({ q }: { q: Quote }) {
   );
 }
 
+// ponytail: found by its quote line, the nearest before the reply: of two messages alike in their first 100 characters
+// (a worker's repeated status notice), the later one. The orchestrator reads only that line too; a reference of the
+// item's own (its transcript line's uuid in the quote) would tell them apart.
 function showOriginal(from: HTMLElement, line: string): void {
   const el = [...(from.closest('.chat-log')?.querySelectorAll<HTMLElement>('[data-quote]') ?? [])]
     .filter((m) => m.dataset.quote === line && !m.contains(from) && !!(m.compareDocumentPosition(from) & Node.DOCUMENT_POSITION_FOLLOWING)).at(-1);

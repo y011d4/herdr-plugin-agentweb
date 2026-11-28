@@ -462,6 +462,8 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
     });
   }, [key]);
   const q = quote && !chatting ? parseQuote(quote) : null;
+  const shownQuote = useRef(quote);
+  shownQuote.current = quote;
   const hl = headlessName(paneId); // no pane to type into: its message goes to the bridge's child
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const shown = useRef(images);
@@ -559,7 +561,8 @@ function Composer({ paneId, home, name, question = '', chatting = false }:
       }
       if (about && !chatNow.current) backToDraft(t, t.value); // the question went while it was on its way
       if (text && !about && getDraft(key) === text) setDraft(key, '');
-      if (line && getQuote(key) === line) setQuote(key, ''); // unless another was picked meanwhile
+      // sent: dropped, unless another was picked meanwhile (on show, the one shown: storage may have kept none)
+      if (line && (t.isConnected ? shownQuote.current : getQuote(key)) === line) setQuote(key, '');
       if (sent.length) setImages((cur) => cur.filter((i) => !sent.includes(i))); // and images added mid-send
       paneView?.echo();
     } catch (err) {

@@ -642,11 +642,11 @@ describe('replying on a Home, and asking about a to-do item', () => {
     await menu($('#chat-log .chat-assistant'));
     await pick('reply');
     assert.equal($('#composer-quote').dataset.quoteOf, 'you');
-    assert.equal($('#composer-quote').textContent, 'Replying to the orchestratorThe **PR** is ready: https://github.com/o/r/pull/7');
+    assert.equal($('#composer-quote').textContent, 'Replying to the orchestratorThe PR is ready: https://github.com/o/r/pull/7');
     assert.ok(document.activeElement === input(), 'focused, to type at once');
     await type(input(), 'merge it');
     await fire(() => $('#btn-send-enter').click());
-    assert.deepEqual(posts('send'), [{ text: '> Replying to your message: The **PR** is ready: https://github.com/o/r/pull/7\n\nmerge it' }]);
+    assert.deepEqual(posts('send'), [{ text: '> Replying to your message: The PR is ready: https://github.com/o/r/pull/7\n\nmerge it' }]);
     await answer('POST /api/orchestrators/pilot/send', { ok: true });
     assert.ok(container.querySelector('#composer-quote') === null && getQuote(key) === '', 'sent: gone');
     await fire(() => $('#chat-log .chat-user [aria-label="Reply"]').click()); // the user's own, from its ↩
@@ -654,6 +654,19 @@ describe('replying on a Home, and asking about a to-do item', () => {
     assert.equal(getQuote(key), '> Replying to my message: deploy it');
     await fire(() => $('#composer-quote [aria-label="Cancel the reply"]').click());
     assert.ok(container.querySelector('#composer-quote') === null && getQuote(key) === '', 'dropped');
+  });
+
+  it('drops a sent quote also where storage keeps nothing (full, or a private window)', async () => {
+    await home(withPilot(idle));
+    await chat([said]);
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('QuotaExceededError'); });
+    await fire(() => $('#chat-log .chat-assistant [aria-label="Reply"]').click());
+    assert.equal($('#composer-quote').dataset.quoteOf, 'you');
+    await type(input(), 'merge it');
+    await fire(() => $('#btn-send-enter').click());
+    await answer('POST /api/orchestrators/pilot/send', { ok: true });
+    assert.ok(container.querySelector('#composer-quote') === null, 'not sent again with the next message');
+    vi.restoreAllMocks();
   });
 
   it('Copy copies its words; on a link (or with its text selected) the menu is the browser\'s', async () => {
@@ -681,7 +694,7 @@ describe('replying on a Home, and asking about a to-do item', () => {
     await chat([said, mine, { kind: 'user', text: `${quoteLine('you', said.text)}\n\nmerge it`, sidechain: false, ts: null },
       { kind: 'user', text: '> Replying to your message: long gone\n\nand?', sidechain: false, ts: null }]);
     const [, reply, lost] = [...container.querySelectorAll<HTMLElement>('#chat-log .chat-user')];
-    assert.equal(reply.querySelector('.chat-quote-ref')!.textContent, 'OrchestratorThe **PR** is ready: https://github.com/o/r/pull/7');
+    assert.equal(reply.querySelector('.chat-quote-ref')!.textContent, 'OrchestratorThe PR is ready: https://github.com/o/r/pull/7');
     assert.equal(reply.querySelector('.chat-md')!.textContent, 'merge it');
     assert.equal(reply.dataset.quote, '> Replying to my message: merge it', 'a reply to it quotes its words, not its quote');
     await fire(() => reply.querySelector<HTMLElement>('.chat-quote-ref')!.click());

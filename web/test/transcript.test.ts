@@ -343,10 +343,12 @@ describe('the chat log — images', () => {
 
 describe('quotes (a Reply on a message, Ask on a to-do item)', () => {
   it('quotes a message on one line, cut short, and reads it back with the words after it', () => {
-    assert.equal(quoteLine('you', 'The **PR** is ready:\n\n  https://github.com/o/r/pull/7  '), '> Replying to your message: The **PR** is ready: https://github.com/o/r/pull/7');
+    assert.equal(quoteLine('you', 'The **PR** is ready:\n\n  https://github.com/o/r/pull/7  '), '> Replying to your message: The PR is ready: https://github.com/o/r/pull/7');
     const long = quoteLine('me', 'あ'.repeat(150));
     assert.equal(long, `> Replying to my message: ${'あ'.repeat(100)}…`);
     assert.deepEqual(parseQuote(`${long}\n\nそれで?\n\nもう一行`), { of: 'me', line: long, excerpt: `${'あ'.repeat(100)}…`, body: 'それで?\n\nもう一行' });
+    assert.equal(quoteLine('you', '# Plan\n> note\n- **one** `a.ts`\n2. [the docs](https://example.com/d) ~~old~~\n\nsnake_case *em*'),
+      '> Replying to your message: Plan note one a.ts the docs old snake_case *em*', 'Markdown marks dropped, as it reads');
     assert.deepEqual(parseQuote(quoteLine('notice', '[yoicks] w-a: working → done')),
       { of: 'notice', line: '> Replying to this notice: [yoicks] w-a: working → done', excerpt: '[yoicks] w-a: working → done', body: '' });
   });
