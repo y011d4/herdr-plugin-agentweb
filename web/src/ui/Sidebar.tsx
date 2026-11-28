@@ -5,8 +5,9 @@
  * account's blocked agents, its to-do list), then Other, the blocked agents no Home's account lists.
  * The to-do items there are the dense ones (two lines at most, all of it on hover). Under them the agents, folded
  * into one row (All agents, their count), pinned at the sidebar's bottom (in reach however long the lists above get):
- * a click unfolds them below it, grouped by Home (homeGroups), each opening its pane the list's way (nav.ts's
- * openAgent: its drawer), under Open the list (#/agents), scrolled into view, and folds them again. Settings is the
+ * a click unfolds them below it, grouped by Home (homeGroups: a Home's heading opens its list, #/agents/<name>, which a
+ * phone opens from the Home's counts), each opening its pane the list's way (nav.ts's openAgent: its drawer), under Open
+ * the list (#/agents), scrolled into view, and folds them again. Settings is the
  * topbar's ⚙, at the screen's top right. The Home or the agent on show, from the hash, is marked (aria-current).
  *
  * Like the agents list it gets every State push: it holds still while a finger is down
@@ -18,7 +19,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { homeGroups, homeSummary, orchestratorStatus, shownStatus, type DashboardCard, type HomeGroup } from '../dashboard-group.ts';
 import { draftKey, setQuote } from '../drafts.ts';
 import { openAgent } from '../nav.ts';
-import { homeHash } from '../routes.ts';
+import { homeAgentsHash, homeHash } from '../routes.ts';
 import { findPane, store } from '../store.ts';
 import { todoQuote } from '../transcript.ts';
 import type { AppState, OrchestratorView, TodoItem } from '../types.ts';
@@ -104,12 +105,17 @@ function Home({ o, state, now, on }: { o: OrchestratorView; state: AppState; now
   );
 }
 
-// The unfolded agents of a Home (by its name: its heading is the one above) or Other.
+// The unfolded agents of a Home (by its name, a link to its list: its heading is the one above) or Other.
 function Group({ group: { home, cards }, hash }: { group: HomeGroup; hash: string }) {
   const pane = shownPane(hash);
+  const list = home && homeAgentsHash(homeHash(home.name));
   return (
     <section className="sidebar-group mt-2" data-home={home?.name ?? ''}>
-      {heading(home ? orchestratorLabel(home) : 'Other')}
+      {list ? (
+        <a href={list} className="sidebar-home-list block hover:underline" title="Open the list" aria-current={current(hash === list)}>
+          {heading(`${orchestratorLabel(home)} ›`)}
+        </a>
+      ) : heading('Other')}
       {cards.map((c) => <Agent key={c.pane.paneId} card={c} on={c.pane.paneId === pane} />)}
     </section>
   );

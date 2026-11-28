@@ -61,8 +61,9 @@ with defaults, is:
   it works. Orchestrators aren't listed among the agents. A tap on the counts lists those agents, blocked first,
   then working, done and idle (a tap on one opens it); its **Open the list** opens the agents list with
   only that account's agents (`#/agents/<name>`, Back returns to the Home); the full list's
-  **← Home** opens the Home used last. With several running, Home shows a switcher (`label`s, with their
-  status) and reopens the one used last (`#/home/<name>`); with none, the app opens on the list.
+  **← Home** opens the Home used last. On a PC the status bar has neither: the sidebar beside it lists what needs
+  you under each Home's heading, and the agents under **All agents**, where a Home's heading opens its list. With
+  several running, Home shows a switcher (`label`s, with their status) and reopens the one used last (`#/home/<name>`); with none, the app opens on the list.
 - `notify_url` — optional [ntfy](https://ntfy.sh) topic URL for background push
   notifications, e.g. `https://ntfy.example.internal/herdr` for a **self-hosted**
   ntfy instance. When unset (default) the bridge performs no outbound requests at

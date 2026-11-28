@@ -1655,6 +1655,8 @@ async function p6(c: Ctx) {
  *  account's agents, then Other with the agents no account has (when there are any); clicking wc-less
  *  there opens #/pane/<it> and marks it. W1.switch: a Home there shows its switcher, as a phone does, and a click on
  *  another Home's button opens that Home.
+ *  W1.home: that Home's Needs you and agent counts are a phone's only: they go as the sidebar comes (which has them),
+ *  at its breakpoint too (1023px: no sidebar, the counts; 1024px: the sidebar, neither), and come back with a phone's width.
  *  Down to a phone's width the sidebar goes, and #screen stays the same element. */
 async function w1(c: Ctx) {
   const { pg } = c;
@@ -1704,8 +1706,22 @@ async function w1(c: Ctx) {
     }
     result(c, !shown.timeout && !switched.timeout, 'W1.switch', `shown=${ms(shown)},switched=${ms(switched)}`,
       `1280px: #/home/<the first orchestrator> shows the switcher's button for the second within 5s; a click on it opens #/home/<it> within 2s`);
+    // the sidebar there from 1024px on, and the Home's counts (and Needs you) exactly while it isn't
+    const split = `(() => { const side = !!document.getElementById('sidebar'); return side === (innerWidth >= 1024)
+      && side !== !!document.querySelector('#home-status .home-counts') && !(side && document.querySelector('#home-status [data-action="needs"]')); })()`;
+    const at: string[] = [];
+    let split1 = !switched.timeout;
+    for (const width of [1023, 1024, 1280]) {
+      await pg.S('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: false });
+      const r = await pg.until(split, 2000);
+      at.push(`${width}:${ms(r)}`);
+      split1 &&= !r.timeout;
+    }
     await mobile(pg, true);
     const gone = await pg.until(`!document.getElementById('sidebar') && document.getElementById('screen') === window.__wcScreen`, 2000);
+    const phone = await pg.until(split, 2000);
+    result(c, split1 && !phone.timeout, 'W1.home', `${at.join(',')},390:${ms(phone)}`,
+      "#/home/<the second>: at 1023px no #sidebar and its .home-counts; at 1024px and 1280px #sidebar and no .home-counts or Needs you; at 390px the counts again; each within 2s");
     result(c, !pin.timeout && !g.timeout && geo.w === 360 && geo.topbar === 360 && geo.screen === 360 && geo.v === '360px' && screen === 1 && !open.timeout && !gone.timeout, 'W1',
       `pinned=${ms(pin)},groups=${groups}:${g.timeout ? 'mismatch' : 'ok'},width=${geo.w},topbarX=${geo.topbar},screenX=${geo.screen},--sidebar-w=${geo.v},open=${ms(open)},phone=${ms(gone)}`,
       "1280px: #sidebar 360px left of #topbar and #screen (--sidebar-w 360px); All agents, folded, at its bottom within 5s (the sidebar 150px tall, overflowing, scrolled to its top); its unfolded groups = /api/state's orchestrators (each its account's agents) + Other; " +

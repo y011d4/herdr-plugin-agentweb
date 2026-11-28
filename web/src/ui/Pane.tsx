@@ -17,6 +17,7 @@
  * value), so a push never resets what is being typed, an IME composition included.
  */
 import { ActionIcon, Button, CloseButton, FileButton, Group, Image, Indicator, Menu, NativeSelect, NavLink, Popover, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { apiPost, headlessName, orchestratorPost } from '../api.ts';
 import { DESKTOP_QUERY, enterSends } from '../composer-keys.ts';
@@ -28,6 +29,7 @@ import { createPaneView, type PanelPrompt, type PaneView } from '../pane-view.ts
 import { parseQuote, type QuoteOf } from '../transcript.ts';
 import { homeAgentsHash, homeHash, orchestratorOfPane } from '../routes.ts';
 import { emit, findPane, store, subscribe } from '../store.ts';
+import { WIDE_QUERY } from '../theme.ts';
 import { dueLabel } from '../todos.ts';
 import type { AppState, HeadlessCompact, HeadlessModel, HeadlessUsage, OrchestratorView } from '../types.ts';
 import { QuoteText } from './ChatLog.tsx';
@@ -240,46 +242,58 @@ export function Pane({ paneId, home, actions, name = '' }: { paneId: string; hom
 // stopped one dimmed: its Home has Start), then one row: "Needs you · n" (its account's blocked
 // agents, its own question, its to-do items: Todos.tsx's NeedsButton, a popover), the counts of its
 // agents (AgentsButton, a popover of them), and at the right a headless one's usage and model and the orchestrator's ⋮ (HomeMenu:
-// Compact, Clear, Stop; the row wraps where it must: a phone, a narrow PC); under it a headless one's
-// warnings (`clear`: their Clear, on a stopped Home too).
+// Compact, Clear, Stop; the row wraps where it must); under it a headless one's warnings (`clear`: their Clear, on a stopped
+// Home too). On a PC (WIDE_QUERY: ui/App.tsx's sidebar beside it, with this Home's heading over what waits there and
+// its agents under All agents) neither Needs you nor the counts: the switcher and the rest share one row, and a bar
+// with none of them isn't drawn.
 function HomeStatus({ name, state, actions, clear = actions?.clear }: { name: string; state: AppState | null; actions?: HomeActions; clear?: () => void }) {
   const now = useMinute();
+  const wide = useMediaQuery(WIDE_QUERY, false, { getInitialValueInEffect: false }); // as the sidebar's (App.tsx)
   if (!state) return <Stack id="home-status" className={STATUS_BAR}></Stack>;
   const all = state.orchestrators ?? [];
   const self = all.find((o) => o.name === name);
   const s = homeSummary(agentCards(state, self), store.seenDone);
   const usage = self?.headless?.usage ? <Usage usage={self.headless.usage} now={now} /> : null;
+  // scrolls sideways, its scrollbar hidden
+  const switcher = all.length >= 2 && (
+    <Group className="home-switch min-w-0 overflow-x-auto [scrollbar-width:none]" gap={6} wrap="nowrap">
+      {all.map((o) => {
+        const pane = o.paneId ? findPane(o.paneId)?.pane : undefined;
+        const on = o.name === name;
+        return (
+          <Button key={o.name} className={`home-switch-btn shrink-0 ${on ? 'border-(--color-accent) text-(--color-text)' : 'bg-transparent text-(--color-text-dim)'}`}
+            variant="default" size="compact-sm" radius="xl" fz={13} fw={600} opacity={o.paneId ? undefined : 0.55}
+            aria-current={on ? 'page' : undefined} data-stopped={o.paneId ? undefined : ''} data-orch={o.name} data-pane-id={o.paneId ?? undefined}
+            leftSection={<StatusDot status={orchestratorStatus(o, pane, store.seenDone)} />} rightSection={<NeedsBadge n={needsYou(o, state, now)} />}
+            onClick={() => { location.hash = homeHash(o.name); }}>
+            {orchestratorLabel(o)}
+          </Button>
+        );
+      })}
+    </Group>
+  );
+  const end = (usage || self?.headless || actions) && (
+    <Group gap={10} className={`ml-auto ${wide ? 'shrink-0' : ''}`}>
+      {usage}
+      {self?.headless && <ModelPicker o={self} />}
+      {actions && <HomeMenu name={name} o={self} actions={actions} />}
+    </Group>
+  );
+  if (wide && !switcher && !end) return null; // (a headless one has its model: an end)
   return (
     <Stack id="home-status" gap={8} py={8} className={`px-3.5 ${STATUS_BAR}`}>
-      {/* on a PC too (its sidebar's Home headings list what waits there): the row scrolls sideways, its scrollbar hidden */}
-      {all.length >= 2 && (
-        <Group className="home-switch overflow-x-auto [scrollbar-width:none]" gap={6} wrap="nowrap">
-          {all.map((o) => {
-            const pane = o.paneId ? findPane(o.paneId)?.pane : undefined;
-            const on = o.name === name;
-            return (
-              <Button key={o.name} className={`home-switch-btn shrink-0 ${on ? 'border-(--color-accent) text-(--color-text)' : 'bg-transparent text-(--color-text-dim)'}`}
-                variant="default" size="compact-sm" radius="xl" fz={13} fw={600} opacity={o.paneId ? undefined : 0.55}
-                aria-current={on ? 'page' : undefined} data-stopped={o.paneId ? undefined : ''} data-orch={o.name} data-pane-id={o.paneId ?? undefined}
-                leftSection={<StatusDot status={orchestratorStatus(o, pane, store.seenDone)} />} rightSection={<NeedsBadge n={needsYou(o, state, now)} />}
-                onClick={() => { location.hash = homeHash(o.name); }}>
-                {orchestratorLabel(o)}
-              </Button>
-            );
-          })}
-        </Group>
-      )}
-      <Group className="home-row" gap="6px 14px">
-        {self && <NeedsButton o={self} s={s} n={needsYou(self, state, now)} now={now} />}
-        <AgentsButton name={name} s={s} />
-        {(usage || self?.headless || actions) && (
-          <Group gap={10} className="ml-auto">
-            {usage}
-            {self?.headless && <ModelPicker o={self} />}
-            {actions && <HomeMenu name={name} o={self} actions={actions} />}
+      {wide ? (
+        <Group className="home-row" gap={14} wrap="nowrap">{switcher}{end}</Group>
+      ) : (
+        <>
+          {switcher}
+          <Group className="home-row" gap="6px 14px">
+            {self && <NeedsButton o={self} s={s} n={needsYou(self, state, now)} now={now} />}
+            <AgentsButton name={name} s={s} />
+            {end}
           </Group>
-        )}
-      </Group>
+        </>
+      )}
       {self?.headless && <HeadlessWarnings o={self} clear={clear} />}
     </Stack>
   );

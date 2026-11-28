@@ -183,7 +183,8 @@ All in `internal/bridge/` (one package):
   status bar of one row (wrapping only where it must): "Needs you · n" (that count, orange; `To-do · n`, dim, while only items
   due later wait; none at all otherwise: `NeedsButton`), the counts of its account's agents (`homeSummary`; no orchestrators),
   and at the right a headless one's usage and model, and its ⋮ (`HomeMenu`: a headless one's Compact, Clear, Stop; ■ stays on the
-  "doing now" line). Needs you opens a Mantine Popover (Escape, a tap outside
+  "doing now" line). On a PC (`WIDE_QUERY`, as the sidebar) the bar has neither Needs you nor the counts: the sidebar
+  has both (under All agents a Home's heading opens `#/agents/<name>`), and the switcher and the rest share one row. Needs you opens a Mantine Popover (Escape, a tap outside
   and leaving the screen close it; as wide as a phone allows, no taller than the room below it): the blocked agents' chips, its
   question's line, and its to-do list (`ui/Todos.tsx` over the pure `todos.ts`: ✓ = `DELETE …/todos/:id`, an item due ahead under
   Later until its time, a link shown by its host, a worker's name opening its drawer; a stopped Home has them too), dialogue-only chat
@@ -549,7 +550,7 @@ Per component and engine. innerHTML (and `dangerouslySetInnerHTML`) takes only e
   also draws the sidebar (`ui/Sidebar.tsx`) on every screen but the token one: on top, each orchestrator's
   Home a heading over what waits there (`ui/Todos.tsx`'s `NeedsList`, the Needs you popover's), then Other's
   blocked agents; under them the agents folded into one row (All agents, the count), a click unfolding them under Open the list (`#/agents`),
-  by Home (`homeGroups`), then Other (Settings stays the topbar's ⚙, at
+  by Home (`homeGroups`; a Home's heading opens its list, `#/agents/<name>`), then Other (Settings stays the topbar's ⚙, at
   the screen's top right, as on a phone). It comes first in `#app`, in a
   slot of its own, so `#topbar`/`#reconnect-banner`/`#screen` stay the same elements as it comes and
   goes; while it is there `#app` is a two-column grid (`#app:has(> #sidebar)`) and `--sidebar-w` is its
