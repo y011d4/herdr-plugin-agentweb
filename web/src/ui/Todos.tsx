@@ -6,9 +6,10 @@
  * chat) and the to-do list, what its orchestrator wrote down (todos.ts); on a PC from 1280px the Home's panel shows the
  * same (NeedsList, ui/HomePanel.tsx) and the rail its blocked agents outside any Home, under Other (Blocked). An item due later waits
  * under Later until its time. A tap on an item opens its menu: Mark done ticks it off (DELETE …/todos/:id, the State
- * push then drops it), and on a running Home Ask the orchestrator puts its quote into the composer (transcript.ts's
- * todoQuote: its text, id, worker and link), to ask its orchestrator about it. A link shows its host; an agent's name
- * opens it (openAgentNamed).
+ * push then drops it; a running headless Home takes up what follows), on a running Home Ask the orchestrator puts its
+ * quote into the composer (transcript.ts's todoQuote: its text, id, worker and link), to ask its orchestrator about it,
+ * and Dismiss drops it undone (…?dismiss=1: its orchestrator is told it isn't needed, so no next step follows, and a
+ * PR's item isn't taken for a merge). A link shows its host; an agent's name opens it (openAgentNamed).
  */
 import { Anchor, Badge, Button, Group, Loader, Menu, Popover, Stack, Text, UnstyledButton } from '@mantine/core';
 import { useEffect, useState, type ReactNode, type SyntheticEvent } from 'react';
@@ -162,7 +163,7 @@ const ASK_ICON = (
 );
 
 // An item is one target: a tap or a click on it (not on its worker or its link, which are theirs), or Enter/Space on it, opens
-// its menu under it: Mark done, and on a running Home Ask the orchestrator (off while its question is open); the arrow keys
+// its menu under it: Mark done, on a running Home Ask the orchestrator (off while its question is open), Dismiss; the arrow keys
 // move in it, Escape closes it (just it: NeedsButton leaves an Escape from inside a menu to the menu). The menu stays in the
 // item's DOM (not a portal; fixed, so no scroll box clips it), so the Needs you popover doesn't take a tap in it for one outside
 // and stays open over a Mark done. ⋮ at its right says it has one. Ask's quote focuses the composer: the menu then doesn't
@@ -172,14 +173,15 @@ function Todo({ home, item, now, ask, off }: { home: string; item: TodoItem; now
   const [back, setBack] = useState(true);
   const host = item.url ? linkHost(item.url) : null;
   const due = item.due != null ? dueLabel(item.due, now) : null;
-  const done = async (): Promise<void> => {
+  // done, or dismissed: off the list undone, and its orchestrator told so (no next step follows)
+  const remove = async (dismiss: boolean): Promise<void> => {
     setBusy(true); // until the State push drops it
     try {
-      await apiDelete(`/api/orchestrators/${encodeURIComponent(home)}/todos/${encodeURIComponent(item.id)}`);
+      await apiDelete(`/api/orchestrators/${encodeURIComponent(home)}/todos/${encodeURIComponent(item.id)}${dismiss ? '?dismiss=1' : ''}`);
     } catch (err) {
       if ((err as { status?: number }).status === 404) return; // gone already: its orchestrator ticked it off
       setBusy(false);
-      showToast('Could not tick it off', (err as Error).message);
+      showToast(dismiss ? 'Could not dismiss it' : 'Could not tick it off', (err as Error).message);
     }
   };
   const own = (e: SyntheticEvent): void => e.stopPropagation(); // a link's tap is the link's, not the menu's
@@ -209,13 +211,18 @@ function Todo({ home, item, now, ask, off }: { home: string; item: TodoItem; now
       </Menu.Target>
       <Menu.Dropdown data-todo-menu={item.id}>
         <Menu.Item className="min-h-11" fz="md" leftSection={<span className="w-4 text-center" aria-hidden="true">&#10003;</span>} data-action="todo-done"
-          onClick={() => { void done(); }}>Mark done</Menu.Item>
+          onClick={() => { void remove(false); }}>Mark done</Menu.Item>
         {ask && (
           <Menu.Item className="min-h-11" fz="md" leftSection={ASK_ICON} data-action="todo-ask" disabled={off} onClick={() => { setBack(false); ask(); }}>
             Ask the orchestrator
             {off && <Text fz={12} c="dimmed">Answer its question first</Text>}
           </Menu.Item>
         )}
+        <Menu.Item className="min-h-11" fz="md" leftSection={<span className="w-4 text-center" aria-hidden="true">&#10005;</span>} data-action="todo-dismiss"
+          onClick={() => { void remove(true); }}>
+          Dismiss
+          <Text fz={12} c="dimmed">Not needed: no follow-up</Text>
+        </Menu.Item>
       </Menu.Dropdown>
     </Menu>
   );

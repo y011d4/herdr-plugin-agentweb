@@ -11,7 +11,7 @@ place: the session goes on from the summary, and the "doing now" line says `comp
 From 70% of the context in use, the ctx turns orange and a small orange dot marks the ⋮: a suggestion only (Claude Code compacts by itself near the
 limit). The chat marks where a compaction cut the conversation (`[yoicks] compacted`). It
 also keeps a to-do list for you (its `todo` tool), under "Needs you" on its Home: what only you can do, such
-as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; a tap on one opens its menu: **Mark done** ticks it off, and **Ask the orchestrator** quotes it (with its id) in the composer, to ask the orchestrator about it. A phone's switcher button
+as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; a tap on one opens its menu: **Mark done** ticks it off and tells the Home, which takes up what follows (a stopped Home isn't told), **Ask the orchestrator** quotes it (with its id) in the composer, to ask the orchestrator about it, and **Dismiss** drops it undone: the Home is told it isn't needed, so it takes no next step from it and doesn't add it again unless you ask (a PR's item dismissed is no merge, and that PR isn't watched any more). A phone's switcher button
 for each Home (and its row in the PC's left rail) counts what waits on you there. On a PC from 1280px wide the Home's panel, beside its chat, lists it in place of the
 Home's Needs you (its blocked agents, its question, its to-do list), then its other agents. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go

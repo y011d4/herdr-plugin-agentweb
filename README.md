@@ -440,7 +440,9 @@ From 70% of the context in use, the ctx turns orange and a small orange dot mark
 limit). The chat marks where a compaction cut the conversation (`[yoicks] compacted`). It
 also keeps a to-do list for you (its `todo` tool), under "Needs you" on its Home: what only you can do, such
 as a PR to merge, a login or a decision you still owe it, each reminded once when it comes due; a tap on one opens its menu: **Mark done** ticks it off and tells the Home, which takes up what follows
-(a stopped Home isn't told), and **Ask the orchestrator** quotes it (with its id) in the composer, to ask the orchestrator about it. A phone's switcher button
+(a stopped Home isn't told), **Ask the orchestrator** quotes it (with its id) in the composer, to ask the orchestrator about it, and
+**Dismiss** drops it undone: the Home is told it isn't needed, so it takes no next step from it and doesn't add it again unless you
+ask (a PR's item dismissed is no merge, and that PR isn't watched any more). A phone's switcher button
 for each Home (and its row in the PC's left rail) counts what waits on you there. On a PC from 1280px wide the Home's panel, beside its chat, lists it in place of the
 Home's Needs you (its blocked agents, its question, its to-do list), then its other agents. It has no herdr pane: on the PC,
 open the same Home in a browser. To be told while the app is closed, set `notify_url` (ntfy). To go
@@ -595,8 +597,10 @@ Windows isn't supported (herdr doesn't run there). The binaries are statically l
   isn't the one pending.
 - `DELETE /api/orchestrators/:name/todos/:id` — tick an item of that Home's to-do list off; a running
   headless Home is woken with `[yoicks] to-do done by the user: <text> (<agent>, <url>)` (several within
-  3 s in one message; a stopped one is never told); 404 when there is no such item (already ticked off,
-  or done by its orchestrator).
+  3 s in one message; a stopped one is never told). With `?dismiss=1` it is dismissed instead, off the
+  list undone: the line is `[yoicks] to-do dismissed by the user: <text> (<agent>, <url>)`, from which
+  the orchestrator takes no next step (any other `dismiss` is a 400). 404 when there is no such item
+  (already ticked off or dismissed, or done by its orchestrator).
 - `DELETE /api/panes/:paneId` — stop an agent by closing its pane
 - `POST /api/panes/:paneId/rename` `{"name": "worker-2"}` — rename the agent running in the pane
 - `POST /api/agents/:target/clear` — start a fresh replacement agent (same profile + cwd) and close

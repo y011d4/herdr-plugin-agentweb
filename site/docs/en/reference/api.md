@@ -80,8 +80,12 @@
   joined by `", "`, free text allowed (Claude Code's "Type something."); `chat` is Claude Code's "Chat about
   this": refused with its words, which list the questions and the answers given so far; 409 when that id
   isn't the one pending.
-- `DELETE /api/orchestrators/:name/todos/:id` — tick an item of that Home's to-do list off; 404 when
-  there is no such item (already ticked off, or done by its orchestrator).
+- `DELETE /api/orchestrators/:name/todos/:id` — tick an item of that Home's to-do list off; a running
+  headless Home is woken with `[yoicks] to-do done by the user: <text> (<agent>, <url>)` (several within
+  3 s in one message; a stopped one is never told). With `?dismiss=1` it is dismissed instead, off the
+  list undone: the line is `[yoicks] to-do dismissed by the user: <text> (<agent>, <url>)`, from which
+  the orchestrator takes no next step (any other `dismiss` is a 400). 404 when there is no such item
+  (already ticked off or dismissed, or done by its orchestrator).
 - `DELETE /api/panes/:paneId` — stop an agent by closing its pane
 - `POST /api/panes/:paneId/rename` `{"name": "worker-2"}` — rename the agent running in the pane
 - `POST /api/agents/:target/clear` — start a fresh replacement agent (same profile + cwd) and close

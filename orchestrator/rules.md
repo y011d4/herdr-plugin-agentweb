@@ -228,10 +228,15 @@ chat. An item is one short line in the user's language, optionally with the work
   gone). When a next step follows from it (have the worker verify it, deploy, open the next PR,
   add the next item, ask a decision), do it, or propose it in one line if it needs the user's
   go-ahead. Otherwise acknowledge it in a few words, or say nothing.
+- The user can also dismiss an item: `[yoicks] to-do dismissed by the user: <text> (<worker>,
+  <url>)`. It was not done, and the user doesn't want it. Drop it: take no step from it (no
+  verifying, deploying or next PR, no new item for it), and don't add it again unless the user
+  asks. A PR's item dismissed is not a merge: leave the PR and its worker as they are unless the
+  user says otherwise. Acknowledge it in a few words, or say nothing.
 - A PR's item is for merging it now. When the PR stops being ready to merge for a while (the
   user asked for changes, it needs a rebase or a fix, CI fails, it waits on another PR), mark its
   item done right away, so the list shows only what the user can do now; add it again, with its
-  link, once the PR is ready to merge.
+  link, once the PR is ready to merge (unless the user dismissed it).
 - Call `todo` with nothing to read the list, e.g. when asked what is left to do.
 - A message that starts with `> To-do: <text> (id <id>, …)` is the user asking about that item (the id
   is the one `todo` knows it by).
@@ -239,6 +244,7 @@ chat. An item is one short line in the user's language, optionally with the work
 - A PR to merge always goes on with the PR's link as `url` and the worker that opened it as
   `agent`: yoicks watches it, and once it is merged or closed removes the item and wakes you
   (above). So give a PR's `url` only to the item for merging it, never to a later step such as
-  "deploy after #138".
+  "deploy after #138". Once the user dismissed its item, the PR isn't watched: no `[yoicks] PR
+  merged` follows.
 <!-- /pr-watch -->
 <!-- /headless -->

@@ -328,7 +328,8 @@ func (r *headlessRunner) mcpServer() *mcp.Server {
 		"or call it with nothing to read the list; it returns the list. A worker waiting for an approval and your own pending question show on their own: never add those; " +
 		"a decision the user owes that no pending question shows (one you asked in plain text, say) goes on. " +
 		"A PR's item is for merging it now: mark it done while the PR isn't ready to merge (changes asked, a rebase, a fix, CI failing, another PR first) " +
-		"and add it again, with its url, once it is."},
+		"and add it again, with its url, once it is. An item the user dismissed ([yoicks] to-do dismissed by the user) wasn't done and isn't needed: " +
+		"take no step from it (a PR's item dismissed isn't a merge), and don't add it again unless the user asks."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in todoIn) (*mcp.CallToolResult, any, error) {
 			r.log("tool todo +%d -%d", len(in.Add), len(in.Done))
 			items, gone, err := r.todos.Apply(r.def.Name, in.Add, in.Done, nowMs())
@@ -829,12 +830,16 @@ func (r *headlessRunner) notice(line string) {
 }
 
 // tickedOff wakes it with an item the user ticked off its to-do list, so it can take up what
-// follows; several ticked off within wakeCoalesce come in one message. A Home the user stopped,
+// follows, or dismissed (not done and not needed: rules.md has it take no step from that, nor
+// add it again); several within wakeCoalesce come in one message. A Home the user stopped,
 // or its crashes did (error), isn't told, not even at its next start: the user did it themselves,
 // and the list it reads shows it gone. One between a crash and its restart (wanted, stopped for
 // 2–30 s) is told once it is back, as a worker's wake-ups are: nobody stopped it.
-func (r *headlessRunner) tickedOff(it TodoItem) {
+func (r *headlessRunner) tickedOff(it TodoItem, dismissed bool) {
 	line := "to-do done by the user: " + it.Text
+	if dismissed {
+		line = "to-do dismissed by the user: " + it.Text
+	}
 	var extra []string
 	if it.Agent != nil {
 		extra = append(extra, *it.Agent)
