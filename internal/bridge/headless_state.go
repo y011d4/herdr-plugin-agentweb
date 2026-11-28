@@ -61,9 +61,10 @@ type hlModel struct {
 	compact   *HeadlessCompact // its last compaction, until the next turn ends
 	preTokens float64          // the context that compaction began with (compact_boundary's)
 	// the context a compaction left (contextRequest): the latest request, until its answer (an older one's
-	// is ignored), and how many contexts the results had reported when it was asked (measured then)
+	// is ignored), the compaction that asked it, and how many contexts the results had reported then
 	nContext, measured, askedAt int
 	contextAsk                  string
+	askedFor                    *HeadlessCompact
 }
 
 // initRequest is the request_id of the initialize control request each child gets at its start:
@@ -177,7 +178,7 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 			m.preTokens = num(meta["pre_tokens"])
 			m.ctxTokens = 0 // the context before it: the result after it must not report that one
 			m.nContext++
-			m.contextAsk, m.askedAt = fmt.Sprintf("%s-%d", contextRequest, m.nContext), m.measured
+			m.contextAsk, m.askedAt, m.askedFor = fmt.Sprintf("%s-%d", contextRequest, m.nContext), m.measured, m.compact
 			st.Reply = map[string]any{"type": "control_request", "request_id": m.contextAsk, "request": map[string]any{"subtype": "get_context_usage"}}
 		}
 	case "assistant":
@@ -288,14 +289,14 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 			}
 		}
 		// the context a compaction left: the context shown unless a result has reported a newer one since it was
-		// asked (not ctxTokens, which a turn begun meanwhile has set), and that of the compaction on show, unless
-		// it is a later one still running or failed
+		// asked (not ctxTokens, which a turn begun meanwhile has set), and that of the compaction on show if it
+		// is the one that asked (a later one has a request of its own, or none: it failed)
 		if total, window := num(inner["totalTokens"]), num(inner["maxTokens"]); st.Acked != "" && st.Acked == m.contextAsk && st.AckError == "" && total > 0 && window > 0 {
 			m.contextAsk = ""
 			if m.measured == m.askedAt {
 				m.usage().ContextPct = pctOf(total, window)
 			}
-			if c := m.compact; c != nil && c.State == "done" {
+			if c := m.compact; c != nil && c == m.askedFor {
 				c.To = pctOf(total, window)
 				if m.preTokens > 0 {
 					c.From = pctOf(m.preTokens, window)

@@ -123,6 +123,11 @@ func TestHeadlessCompactStream(t *testing.T) {
 		if c := m4.compact; c.State != "failed" || c.To != nil {
 			t.Errorf("the next compaction failed: %+v", c)
 		}
+		m5 := hlModel{Status: "working"} // the answer between the next one's success and its boundary
+		applyAll(&m5, lineCompacting, lineCompacted, lineInit, lineBoundary, lineCompactEnd, lineCompacting, lineCompacted, lineContext)
+		if c := m5.compact; c.State != "done" || c.To != nil {
+			t.Errorf("the next compaction done: %+v", c)
+		}
 	})
 
 	t.Run("a failed one says why, and changes nothing else", func(t *testing.T) {
