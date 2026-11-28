@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds release <version>'s binaries, for the maintainer (README "Releasing"): from a
+# Builds release <version>'s binaries, for the maintainer (the docs' Development page, Releasing): from a
 # clean temporary worktree of HEAD (no leftover web build), with the Go toolchain
 # pinned, for linux and darwin on amd64 and arm64. Writes dist/release/ (the binaries
 # and checksums.txt, to upload) and release/checksums.txt, and sets version in
