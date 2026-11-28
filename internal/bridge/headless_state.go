@@ -57,9 +57,11 @@ type hlModel struct {
 	models        []HeadlessModel   // the models Claude Code offers (its answer to initRequest)
 	// the model in effect, Claude Code's id: get_settings' answer at the start, set_model's, each
 	// turn's init. A resumed session keeps the model it last ran on, whatever the default says.
-	active    string
-	compact   *HeadlessCompact // its last compaction, until the next turn ends
-	preTokens float64          // the context that compaction began with (compact_boundary's)
+	active     string
+	compact    *HeadlessCompact // its last compaction, until the next turn ends
+	preTokens  float64          // the context that compaction began with (compact_boundary's)
+	nContext   int              // contextRequests asked so far
+	contextAsk string           // the one whose answer is still wanted ("": none; a later turn's end drops it)
 }
 
 // initRequest is the request_id of the initialize control request each child gets at its start:
@@ -71,9 +73,10 @@ const initRequest = "yoicks-init"
 // applied.model is the model in effect, known before any turn.
 const settingsRequest = "yoicks-settings"
 
-// contextRequest is the get_context_usage control request each compaction's boundary brings: its
-// answer is the context left (totalTokens of maxTokens). compact_boundary's post_tokens is only the
-// summary, without the system prompt and the tools (measured on 2.1.322: 3059 of an 11645 total).
+// contextRequest begins the request_id of the get_context_usage control request each compaction's
+// boundary brings: its answer is the context left (totalTokens of maxTokens). compact_boundary's
+// post_tokens is only the summary, without the system prompt and the tools (measured on 2.1.322:
+// 3059 of an 11645 total).
 const contextRequest = "yoicks-context"
 
 // modelRe is a model value fit for --model: one of Claude Code's aliases or ids (opus,
@@ -170,7 +173,10 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 		case sub == "compact_boundary":
 			meta, _ := ev["compact_metadata"].(map[string]any)
 			m.preTokens = num(meta["pre_tokens"])
-			st.Reply = map[string]any{"type": "control_request", "request_id": contextRequest, "request": map[string]any{"subtype": "get_context_usage"}}
+			m.ctxTokens = 0 // the context before it: the result after it must not report that one
+			m.nContext++
+			m.contextAsk = fmt.Sprintf("%s-%d", contextRequest, m.nContext)
+			st.Reply = map[string]any{"type": "control_request", "request_id": m.contextAsk, "request": map[string]any{"subtype": "get_context_usage"}}
 		}
 	case "assistant":
 		msg := ev["message"].(map[string]any)
@@ -225,7 +231,9 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 			m.CompletionSeq++
 		}
 		if cmd == "" {
-			m.compact = nil // a turn ended: the compaction before it, or in it, has been shown
+			// a turn ended: the compaction before it, or in it, has been shown, and its context is
+			// now this turn's (a late answer would set an older one)
+			m.compact, m.contextAsk = nil, ""
 		}
 		usage, _ := ev["modelUsage"].(map[string]any)
 		mu, _ := usage[m.model].(map[string]any)
@@ -278,8 +286,10 @@ func (m *hlModel) apply(line []byte, now int64) (st hlStep) {
 				m.active = model
 			}
 		}
-		if total, window := num(inner["totalTokens"]), num(inner["maxTokens"]); st.Acked == contextRequest && st.AckError == "" && total > 0 && window > 0 {
-			m.ctxTokens = total
+		// the context a compaction left: the answer to the request still wanted only. Not ctxTokens, which a
+		// turn begun meanwhile has set: its result reports its own.
+		if total, window := num(inner["totalTokens"]), num(inner["maxTokens"]); st.Acked != "" && st.Acked == m.contextAsk && st.AckError == "" && total > 0 && window > 0 {
+			m.contextAsk = ""
 			m.usage().ContextPct = pctOf(total, window)
 			if c := m.compact; c != nil {
 				c.To = pctOf(total, window)
