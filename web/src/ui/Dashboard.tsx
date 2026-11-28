@@ -1,24 +1,18 @@
 /**
- * ui/Dashboard.tsx — the agents list: #/agents, and #/agents/<name> (opened from that orchestrator's
- * Home: its account's agents, with ← Home back to it). One flat list, most recent status change
- * first (dashboardCards), never the orchestrators (each is started from its own Home).
- *
- * State pushes arrive constantly while the list is read. #screen-agents, the scroll container, stays
- * the same element while the list is shown and the cards are keyed by pane, so a push only rewrites
- * what changed: scrollTop and iOS momentum hold. While a finger is down the list doesn't change at all
- * (a rewrite mid-drag can cancel the scroll); the latest State shows once it lifts.
+ * ui/Dashboard.tsx — an agent as the app lists it, wherever it does (a Home's agents popover, its panel, the PC rail's
+ * Other): AgentRow and its PC ⋮ (AgentMore), the pieces of its lines (cardTitle, cardLocation, CardWhere, the chips),
+ * the agents a Home lists (agentCards) and the State such a list draws while a finger is down (useHeldState); and the
+ * topbar's ⚙ and icon button. (The agents list it was named for is gone: each Home lists its own.)
  */
-import { ActionIcon, Badge, Button, Card, Center, Group, Loader, Menu, NavLink, Text } from '@mantine/core';
-import { useEffect, useRef, useState, useSyncExternalStore, type ComponentPropsWithRef, type HTMLAttributes, type SyntheticEvent, type TouchEvent } from 'react';
+import { ActionIcon, Badge, Menu, NavLink, Text } from '@mantine/core';
+import { useEffect, useRef, useState, type ComponentPropsWithRef, type HTMLAttributes, type SyntheticEvent, type TouchEvent } from 'react';
 import { dashboardCards, shownStatus, type DashboardCard } from '../dashboard-group.ts';
 import { draftKey, setQuote } from '../drafts.ts';
 import { focusInHerdr, go, openAgent, showAgent } from '../nav.ts';
-import { agentsScope, defaultHome, homeHash } from '../routes.ts';
-import { findPane, lastHome, store, subscribe } from '../store.ts';
+import { findPane, store, subscribe } from '../store.ts';
 import { useWide } from '../theme.ts';
 import { agentQuote } from '../transcript.ts';
 import type { AppState, OrchestratorView } from '../types.ts';
-import type { Topbar } from './App.tsx';
 import { stopAgentFlow } from './Modals.tsx';
 import { StatusBadge } from './Status.tsx';
 
@@ -99,64 +93,6 @@ export function useHeldState(): [AppState | null, Pick<HTMLAttributes<HTMLElemen
   return [state, { onTouchStart: () => { touching.current = true; }, onTouchEnd: lift, onTouchCancel: lift }];
 }
 
-/** The list for `hash` (#/agents or #/agents/<name>). */
-export function Dashboard({ hash }: { hash: string }) {
-  const [state, hold] = useHeldState();
-
-  if (!state) {
-    return <Center id="screen-agents" h="100%"><Loader size={20} /></Center>;
-  }
-  const { workspaces = [] } = state;
-  const cards = agentCards(state, agentsScope(hash, state));
-  const empty = (text: string) => <Text className="empty-state" c="dimmed" ta="center" px={24} py={48}>{text}</Text>;
-  // the scroll container: a 640px column from 600px wide up to lg, where the cards fill the width (a grid)
-  return (
-    <div id="screen-agents" data-ready="1" className={SCROLLER} {...hold}>
-      {workspaces.length === 0 ? empty('No workspaces found.')
-        : cards.length === 0 ? empty('No active agents.')
-        : <div className={LIST}>{cards.map((c) => <AgentCard key={c.pane.paneId} card={c} />)}</div>}
-    </div>
-  );
-}
-
-// no scroll anchoring: a push that reorders the cards would scroll the list after the card the browser
-// anchored on (Chrome's; Safari has none), so scrollTop holds as said above
-const SCROLLER = 'flex-1 overflow-y-auto [overflow-anchor:none] pb-[calc(var(--safe-bottom)+8px)] min-[600px]:max-lg:mx-auto min-[600px]:max-lg:w-full min-[600px]:max-lg:max-w-[640px]';
-// one column of cards, side by side from lg
-const LIST = 'agent-list mt-4 flex flex-col gap-2.5 px-4 min-[600px]:px-6 lg:grid lg:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]';
-
-// One card: the name and the status (on a PC its ⋮ after them, AgentMore); the purpose (two lines at most, all of it on
-// hover); then one dim line, cut short rather than wrapped: the location and the branch (the list is flat, so each card
-// names its own), the kind, the `worktree` chip (from that workspace), the time. A click opens it (openAgent: on a PC in
-// herdr).
-function AgentCard({ card }: { card: DashboardCard }) {
-  const { pane, purpose, isWorktree } = card;
-  const { paneId, agent, title } = pane;
-  const { sinceUnixMs } = agent!;
-  const status = shownStatus(pane, store.seenDone) || 'unknown';
-  const relTime = relativeTime(sinceUnixMs);
-  const wide = useWide();
-  return (
-    <Card className={CARD} data-pane-id={paneId} role="button" tabIndex={0} withBorder radius={10} padding={0} px={16} py={14}
-      onClick={() => openAgent(paneId)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openAgent(paneId); }}>
-      <Group gap={10} wrap="nowrap" mb={6}>
-        <Text className="agent-name min-w-0" fw={600} truncate>{cardTitle(card)}</Text>
-        <span className="ml-auto" />
-        <StatusBadge status={status} />
-        {wide && <span className="-my-1.5 -mr-2"><AgentMore paneId={paneId} name={cardTitle(card)} /></span>}
-      </Group>
-      {purpose ? <Text className="card-purpose" fz={14} lh={1.35} mb={6} lineClamp={2} title={purpose}>{purpose}</Text> : null}
-      <Group gap={12} fz={13} c="dimmed" wrap="nowrap">
-        <CardWhere card={card} />
-        <Tag>{agentKind(card)}</Tag>
-        {isWorktree ? <Tag c="working">worktree</Tag> : null}
-        {title ? <Text fz={12} inherit truncate>{title}</Text> : null}
-        {relTime ? <span className="shrink-0 whitespace-nowrap">{relTime}</span> : null}
-      </Group>
-    </Card>
-  );
-}
-
 /** An agent in a Home's agents popover (ui/Pane.tsx's AgentsButton), a PC's Home panel (ui/HomePanel.tsx) and the PC
  *  rail's Other (ui/Sidebar.tsx): the name, then at the line's right end how long ago its status changed and the status;
  *  under it its purpose (two lines at most, all of it on hover), then one dim line: the location and branch (cut short
@@ -217,36 +153,10 @@ function AgentMore({ paneId, name, ask, askOff }: { paneId: string; name: string
   );
 }
 
-// Mantine's Card on the app's surface (a pressed card, and a hovered one on a PC, the lighter surface-2)
-const CARD = 'agent-card bg-(--color-surface) [-webkit-tap-highlight-color:transparent] active:bg-(--color-surface-2) lg:hover:bg-(--color-surface-2)';
-
 // a card's small label: the agent kind, or (blue) worktree
 const Tag = ({ c = 'dimmed', children }: { c?: string; children: string }) => (
   <Badge size="sm" radius="xl" bg="dark.6" c={c} fw={600} tt="none" className="shrink-0">{children}</Badge>
 );
-
-const useAppState = (): AppState | null => useSyncExternalStore(subscribe, () => store.appState);
-
-// Orchestrators have no cards, so this is the way to a Home (its chat, as a new entry: the list may
-// have been opened from anywhere). A Home's own list (#/agents/<name>): back to that Home, by its
-// name, at every width. The full list: ← Home, to the one used last (on a PC the rail's Home rows
-// do that instead, style.css).
-function HomeButton({ hash }: { hash: string }) {
-  const state = useAppState();
-  const scope = agentsScope(hash, state);
-  const home = scope ?? defaultHome(state, lastHome());
-  if (!home) return null;
-  const open = (): void => { location.hash = homeHash(home.name); };
-  const name = scope && orchestratorLabel(scope);
-  return name ? <BackButton label={`Back to ${name}`} onClick={open}>{`\u2190 ${name}`}</BackButton>
-    : <BackButton label="Home" onClick={open}>{'\u2190 Home'}</BackButton>;
-}
-
-export const dashboardTopbar = (hash: string): Topbar => ({
-  title: 'Agents', // a Home's list: its ← names the Home
-  left: <HomeButton hash={hash} />,
-  right: <SettingsButton />,
-});
 
 /** ⚙, Settings: at a topbar's right on a phone; on a PC at the sidebar's top (`sidebar`), none in the topbar. The sidebar's
  *  is in reach under an agent's drawer: Settings then takes the drawer's place (nav.ts's go), as any overlay over one. */
@@ -258,13 +168,4 @@ export function SettingsButton({ sidebar = false }: { sidebar?: boolean }) {
  *  pointer. A button's props pass on (a menu's target gets its handlers and ref). */
 export function TopbarIcon({ label, children, ...rest }: { label: string; children: string; 'data-action'?: string } & Omit<ComponentPropsWithRef<'button'>, 'children'>) {
   return <ActionIcon variant="subtle" color="gray" size="xl" fz={20} className="text-(--color-text-dim) hover:text-(--color-text)" aria-label={label} {...rest}>{children}</ActionIcon>;
-}
-
-/** A topbar's way back (to a Home): the accent's text, 44px tall, flush with the bar's left edge; a long
- *  name is cut short (…), leaving the title room. */
-export function BackButton({ label, children, onClick }: { label: string; children: string; onClick: () => void }) {
-  return (
-    <Button className="topbar-back -ml-2 min-w-11 text-(--color-accent) hover:text-(--color-text)" variant="subtle" h={44} px={8} maw="40vw" fz={16} fw={400}
-      aria-label={label} onClick={onClick}><span className="truncate">{children}</span></Button>
-  );
 }

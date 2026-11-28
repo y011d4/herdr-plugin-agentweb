@@ -37,7 +37,7 @@ describe('App without a token', () => {
   afterAll(() => { vi.useRealTimers(); });
   it('shows the token screen without the topbar, and no banner over it while the link is down', async () => {
     document.body.innerHTML = '<div id="app"></div><div id="modal-root"></div>';
-    location.hash = '#/agents';
+    location.hash = '#/home/work'; // stopped
     start();
     await act(async () => { createRoot(document.getElementById('app')!).render(<StrictMode>{mantine(<App />)}</StrictMode>); });
     assert.ok($('#screen #screen-login'));
@@ -58,9 +58,9 @@ describe('App without a token', () => {
     await signIn('tok-1');
     assert.equal(localStorage.getItem('herdr_token'), 'tok-1');
     await answer('/api/state', state);
-    assert.ok($('#screen #screen-agents[data-ready]'));
+    assert.ok($('#screen #screen-home-stopped'));
     assert.equal($('#topbar')!.style.display, '');
-    assert.equal(store.view.screen, 'agents');
+    assert.equal(store.view.screen, 'pane');
     assert.equal(banner(), true);
   });
 });

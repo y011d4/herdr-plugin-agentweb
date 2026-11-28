@@ -1,6 +1,6 @@
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
-import { agentsScope, isOverlay, nextOverlayBase, nextOverlayOverBase, paneRoute, resolveRoute } from '../src/routes.ts';
+import { isOverlay, nextOverlayBase, nextOverlayOverBase, paneRoute, resolveRoute } from '../src/routes.ts';
 import type { AppState, OrchestratorView } from '../src/types.ts';
 
 const orch = (name: string, paneId: string | null): OrchestratorView => ({ name, label: '', paneId, agents: null, mode: 'tui', headless: null });
@@ -22,9 +22,9 @@ describe('resolveRoute — the default Home (a fresh open, and #/home)', () => {
       assert.deepEqual(resolveRoute(hash, state(orch('wc o1', 'p1')), null), replace('#/home/wc%20o1'));
     });
 
-    it(`${hash || '(empty)'}: none running, the first configured (stopped); the list only without any`, () => {
+    it(`${hash || '(empty)'}: none running, the first configured (stopped); a spinner without any (the bridge always has one)`, () => {
       assert.deepEqual(resolveRoute(hash, state(orch('x', null), orch('y', null)), null), replace('#/home/x'));
-      assert.deepEqual(resolveRoute(hash, state(), null), replace('#/agents'));
+      assert.deepEqual(resolveRoute(hash, state(), null), { kind: 'loading' });
     });
   }
 
@@ -76,8 +76,13 @@ describe('resolveRoute — the rest', () => {
     for (const hash of ['#/pane/%E0%A4%A', '#/nope', '#/agentsx', '#settings', '#/']) assert.deepEqual(resolveRoute(hash, s, null), replace('#/home'), hash);
   });
 
-  it('the lists and settings', () => {
-    for (const hash of ['#/agents', '#/agents/a', '#/agents/nope']) assert.deepEqual(resolveRoute(hash, s, null), { kind: 'agents' }, hash);
+  it("the agents list's old routes: #/agents/<name> its Home, else the default Home, in their place", () => {
+    assert.deepEqual(resolveRoute('#/agents/a', s, null), replace('#/home/a'));
+    for (const hash of ['#/agents', '#/agents/nope', '#/agents/%E0%A4%A']) assert.deepEqual(resolveRoute(hash, s, null), replace('#/home'), hash);
+    assert.deepEqual(resolveRoute('#/agents/a', null, null), { kind: 'loading' }, 'its Home once the State says which');
+  });
+
+  it('settings', () => {
     assert.deepEqual(resolveRoute('#/settings', s, null), { kind: 'settings' });
     assert.deepEqual(resolveRoute('#/settings', null, null), { kind: 'settings' });
   });
@@ -87,12 +92,6 @@ describe('route helpers', () => {
   const a = orch('a', 'p1');
   const s = state(a, orch('wc o2', 'p2'));
 
-  it("agentsScope: #/agents/<name> is that orchestrator's account; anything else every agent", () => {
-    assert.equal(agentsScope('#/agents/a', s), a);
-    assert.equal(agentsScope('#/agents/wc%20o2', s)?.name, 'wc o2');
-    for (const hash of ['#/agents', '#/agents/nope', '#/agents/%E0%A4%A', '#/home/a']) assert.equal(agentsScope(hash, s), undefined, hash);
-  });
-
   it("paneRoute: an orchestrator's pane is its Home", () => {
     assert.equal(paneRoute(s, 'p2'), '#/home/wc%20o2');
     assert.equal(paneRoute(s, 'w:1/2'), '#/pane/w%3A1%2F2');
@@ -101,25 +100,22 @@ describe('route helpers', () => {
 
   it('isOverlay: a pane (its drawer) and Settings', () => {
     for (const h of ['#/pane/p1', '#/settings']) assert.ok(isOverlay(h), h);
-    for (const h of ['#/agents', '#/home/a', '#/settings/x', '']) assert.ok(!isOverlay(h), h);
+    for (const h of ['#/home/a', '#/settings/x', '']) assert.ok(!isOverlay(h), h);
   });
 
-  it("nextOverlayBase: a Home or a list it came from; from an overlay (it replaced) the same; else #/home, the default Home", () => {
-    assert.equal(nextOverlayBase('#/home/a', '#/agents'), '#/home/a');
-    assert.equal(nextOverlayBase('#/agents/a', '#/home'), '#/agents/a');
-    assert.equal(nextOverlayBase('#/agents', '#/home'), '#/agents');
-    assert.equal(nextOverlayBase('#/pane/p9', '#/agents/a'), '#/agents/a');
+  it("nextOverlayBase: a Home it came from; from an overlay (it replaced) the same; else #/home, the default Home", () => {
+    assert.equal(nextOverlayBase('#/home/a', '#/home'), '#/home/a');
+    assert.equal(nextOverlayBase('#/pane/p9', '#/home/b'), '#/home/b');
     assert.equal(nextOverlayBase('#/settings', '#/home/a'), '#/home/a');
     for (const from of ['#/', '#/nope', '', null]) assert.equal(nextOverlayBase(from, '#/home/a'), '#/home', String(from));
   });
 
   it('nextOverlayOverBase: opened from the screen under it; from an overlay the same; a fresh open or another screen not', () => {
     assert.equal(nextOverlayOverBase('#/home/a', '#/home/a', false), true);
-    assert.equal(nextOverlayOverBase('#/agents', '#/agents', false), true);
     for (const from of ['#/pane/p9', '#/settings']) {
-      assert.equal(nextOverlayOverBase(from, '#/agents', true), true, from);
-      assert.equal(nextOverlayOverBase(from, '#/agents', false), false, from);
+      assert.equal(nextOverlayOverBase(from, '#/home/a', true), true, from);
+      assert.equal(nextOverlayOverBase(from, '#/home/a', false), false, from);
     }
-    for (const from of ['#/', '', null]) assert.equal(nextOverlayOverBase(from, '#/agents', true), false, String(from));
+    for (const from of ['#/', '', null]) assert.equal(nextOverlayOverBase(from, '#/home/a', true), false, String(from));
   });
 });

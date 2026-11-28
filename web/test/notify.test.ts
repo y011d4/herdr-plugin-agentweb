@@ -63,7 +63,7 @@ describe('notify', () => {
     }, { permission: 'granted' }));
     Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { getRegistration: async () => undefined } });
     vi.stubGlobal('focus', () => {});
-    location.hash = '#/agents';
+    location.hash = '#/home/personal';
     notifyOrchestratorAlert({ type: 'orchestrator_alert', name: '', kind: 'canary', message: 'interrupt failed' });
     await settle();
     made[0].onclick();

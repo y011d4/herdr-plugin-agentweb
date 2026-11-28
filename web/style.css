@@ -432,22 +432,17 @@ body:has(.agent-drawer-content) #toast-container { top: calc(var(--safe-top) + 3
   #app:has(> #sidebar) > #screen { grid-area: 3 / 2; min-height: 0; }
   /* a Home with its panel (ui/HomePanel.tsx, from PANEL_QUERY's 1280px) at its right */
   #screen:has(> #home-panel) { flex-direction: row; }
-  /* a column: its All agents row goes to the bottom when the rest is short (ui/Sidebar.tsx) */
+  /* a column (ui/Sidebar.tsx) */
   #sidebar {
     grid-area: 1 / 1 / -1 / 2;
     display: flex;
     flex-direction: column;
     overflow-y: auto;
-    overflow-anchor: none; /* its rows reorder with each status change: no scroll after a moved one (ui/Dashboard.tsx's SCROLLER) */
+    overflow-anchor: none; /* its rows reorder with each status change: no scroll after a moved one */
     overscroll-behavior: contain;
     padding: 0 8px;
     background: var(--color-surface);
     border-right: 1px solid var(--color-border);
-  }
-  /* what the rail does instead (its Home rows): the full list's ← Home (a Home's own list keeps its ← <Home>,
-     aria-label "Back to …": the way back where the list is) */
-  #app:has(> #sidebar) #topbar-left .topbar-back[aria-label='Home'] {
-    display: none;
   }
   /* an agent's drawer from the right, over the main column (right of the sidebar, if any) */
   .agent-drawer { --drawer-size: min(900px, calc((100vw - var(--sidebar-w, 0px)) * 0.65)); }

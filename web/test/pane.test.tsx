@@ -39,7 +39,7 @@ let container: HTMLElement;
 
 const noActions = () => ({ rename: () => {}, clear: () => {}, stop: () => {} });
 /** A pane as mounted, in its drawer over `back`; a Home with its topbar's slots, then the screen. */
-async function show(paneId: string, home = false, back = '#/agents', name = home ? orchestratorOfPane(store.appState, paneId)?.name : undefined): Promise<void> {
+async function show(paneId: string, home = false, back = '#/home/work', name = home ? orchestratorOfPane(store.appState, paneId)?.name : undefined): Promise<void> {
   store.view.activePaneId = paneId;
   store.view.homeMode = home;
   store.view.paneBackRoute = back;
@@ -76,7 +76,7 @@ beforeEach(() => {
   localStorage.clear();
   clearToasts();
   store.seenDone = {};
-  location.hash = '#/agents';
+  location.hash = '#/home/work';
   setAppState(fresh());
 });
 afterEach(async () => {
@@ -143,7 +143,7 @@ describe('composer', () => {
   });
 
   it('keeps an unsent draft per pane and per Home across leaving and reopening (stored: a reload too) until it is sent', async () => {
-    const reopen = async (paneId: string, home = false, name?: string) => { await unmount(); await show(paneId, home, '#/agents', name); };
+    const reopen = async (paneId: string, home = false, name?: string) => { await unmount(); await show(paneId, home, '#/home/work', name); };
     await show('p2');
     await type('p2 draft');
     await reopen('p1');
@@ -329,14 +329,14 @@ describe('pane header', () => {
 
   it('names the agent and where it is, keeps that while the pane is gone, and ✕ closes it', async () => {
     location.hash = '#/pane/p1'; // opened afresh: its close replaces it with the screen under it
-    await show('p1', false, '#/agents/personal');
+    await show('p1', false, '#/home/personal');
     assert.equal($('.agent-drawer-head').textContent!.replace(/[⋮]/g, ''), 'claude· repo / oneChatTerm'); // ✕ is an icon
     const s = fresh();
     s.workspaces[0].tabs[0].panes.splice(0, 1);
     await fire(() => setAppState(s));
     assert.match($('.agent-drawer-head').textContent!, /claude· repo \/ one/);
     await fire(() => $('#btn-drawer-close').click());
-    assert.equal(location.hash, '#/agents/personal');
+    assert.equal(location.hash, '#/home/personal');
   });
 
   it("shows the toggle once there is a transcript: chat by default, then terminal, the pane's own choice while the app runs", async () => {
@@ -467,7 +467,7 @@ describe('Home', () => {
   // happy-dom fires hashchange on a timer
   const hashSettled = (): Promise<void> => act(() => new Promise<void>((r) => { setTimeout(r, 0); }));
 
-  it('shows the counts of its account and opens its agents from them, then its list', async () => {
+  it('shows the counts of its account and opens its agents from them', async () => {
     await home(fresh());
     assert.equal($('#tb').textContent, 'Personalwork1⚙', "a Home's topbar: the switcher (two Homes), then Settings; no toggle, no ⋮");
     assert.ok($('#home-status .home-row #btn-view-toggle') && $('#home-status .home-row #btn-home-menu') === null, 'the toggle on its status bar (no actions: no ⋮)');
@@ -481,10 +481,7 @@ describe('Home', () => {
     await fire(() => $('.home-counts').click());
     assert.equal($('.home-counts').getAttribute('aria-expanded'), 'true');
     assert.deepEqual(rows(), ['p1:working', 'p3:done'], 'its account\'s agents, never its orchestrator (p4)');
-    const list = $('[data-agents-list] .agents-open-list');
-    assert.equal(list.getAttribute('href'), '#/agents/personal');
-    await fire(() => list.click());
-    assert.equal(location.hash, '#/agents/personal');
+    assert.ok(!container.querySelector('[data-agents-list] a'), 'no link to a list: these are its agents');
   });
 
   // the popover's rows: pane id and status shown, in order

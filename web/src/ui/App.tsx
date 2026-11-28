@@ -2,7 +2,6 @@
  * ui/App.tsx — the app shell, drawn into #app: on a wide screen the PC sidebar, the rail of Homes (ui/Sidebar.tsx),
  * the topbar (the screen on show fills its three slots), the connection dot and the reconnect
  * banner, #screen, the toasts, the agent drawer and the modals (portalled into #modal-root). Hash routing:
- *   #/agents        — the list (ui/Dashboard.tsx); #/agents/:name one orchestrator's account's agents
  *   #/home/:name    — an orchestrator's Home; #/home opens the last one used
  *   #/pane/:id      — a pane, in a drawer (ui/AgentDrawer.tsx; its body: ui/Pane.tsx, pane-view.ts)
  *                     over the screen it was opened from (view.paneBackRoute), which stays as it is
@@ -10,7 +9,7 @@
  *                     from, which stays as it is (a Home running on); one overlay at a time
  * What a hash shows is decided in routes.ts (resolveRoute); handleRoute renders it. Each render
  * of a route replaces the screen and its topbar with fresh instances (a new key), so a screen's
- * effects always start over; only the list under a drawer, and back from it, stays as it is.
+ * effects always start over; only a Home under an overlay, and back from it, stays as it is.
  * start() (main.tsx) loads the token, connects, fetches the first
  * State and listens: hashchange, the SW's navigate message, visibilitychange, the viewport.
  */
@@ -22,13 +21,12 @@ import { apiGet, apiPost, getToken, headlessName, loadToken, onUnauthorized, orc
 import { dismissNotificationsForPane, notifyAgentStatus, notifyOrchestratorAlert, showToast } from '../notify.ts';
 import { closeAgent, drawerShows, focusInHerdr, go, showAgent } from '../nav.ts';
 import { openingMode } from '../pane-view.ts';
-import { homeOf, isAgentsRoute, nextOverlayBase, nextOverlayOverBase, resolveRoute } from '../routes.ts';
+import { homeOf, nextOverlayBase, nextOverlayOverBase, resolveRoute } from '../routes.ts';
 import { STORAGE_HOME, findPane, lastHome, markPaneSeen, setAppState, store, subscribe, type View } from '../store.ts';
 import type { AppState, ClearResponse, WsMessage } from '../types.ts';
 import { WIDE_QUERY } from '../theme.ts';
 import { onWsMessage, wsConnect, wsSendWatch } from '../ws.ts';
 import { AgentDrawer, type Sheet } from './AgentDrawer.tsx';
-import { Dashboard, dashboardTopbar } from './Dashboard.tsx';
 import { Modals, confirmModal, openRename, stopAgentFlow } from './Modals.tsx';
 import { closePaneView, homeTopbar, Pane, paneViewOnState, resumePaneView, StoppedHome, stoppedHomeTopbar, suspendPaneView, type AgentActions } from './Pane.tsx';
 import { Settings } from './Settings.tsx';
@@ -210,7 +208,6 @@ function onStateUpdate(): void {
   // Nothing rendered yet (startup), or the token was just (re-)entered and the
   // token screen is still up: render the current route.
   if (!routeRendered || view.screen === 'token') { handleRoute(); return; }
-  // (the list follows the store itself: ui/Dashboard.tsx)
   const hash = location.hash;
   if (hash.startsWith('#/pane/')) {
     // If the pane vanished (e.g. seen via /api/state polling while the WS is
@@ -356,20 +353,15 @@ function handleRoute(e?: Event): void {
     show('loading', <Center flex={1}><Loader size={20} /></Center>, BARE);
   } else if (route.kind === 'home') {
     showHome(route.name, route.paneId, location.hash);
-  } else {
-    // back from an overlay over it, the list stays as it was: where it was scrolled to
-    if (shown.hash !== location.hash) showList(location.hash);
   }
 
   wsSendWatch(); // sync the server-side pane watch with the current route
 }
 
-const showList = (hash: string): void => show('agents', <Dashboard hash={hash} />, dashboardTopbar(hash), hash);
-
-/** The screen under an overlay that has none on show (opened afresh: a notification, a reload): `base`'s list, else an
- *  empty one with the bare topbar. A Home is drawn only as it is on show: under the drawer its view would run beside the
- *  drawer's; closing the overlay goes to `base` (#/home: the default Home), drawn then. */
-const showBase = (base: string): void => (isAgentsRoute(base) ? showList(base) : show('loading', null, BARE, base));
+/** The screen under an overlay that has none on show (opened afresh: a notification, a reload): an empty one with the
+ *  bare topbar. A Home is drawn only as it is on show: under the drawer its view would run beside the drawer's; closing
+ *  the overlay goes to `base` (#/home: the default Home), drawn then. */
+const showBase = (base: string): void => show('loading', null, BARE, base);
 
 /** #/settings: Settings in front of the screen it was opened from, as it is (a Home's view running on),
  *  else in front of showBase's. Opened from a pane's drawer, in the drawer's place (it replaced
@@ -402,8 +394,8 @@ function openSettingsRoute(from: string | null): void {
   view.paneBackRoute = base;
 }
 
-/** #/pane/<id>: the pane in the drawer, over the screen it was opened from (a Home or a list, left as it
- *  is: a Home's view stopped, its chat as it was), else over showBase's. */
+/** #/pane/<id>: the pane in the drawer, over the Home it was opened from (left as it is: its view stopped, its chat
+ *  as it was), else over showBase's. */
 function openPaneRoute(paneId: string, from: string | null): void {
   const base = nextOverlayBase(from, view.paneBackRoute);
   if (shown.hash !== base) showBase(base);

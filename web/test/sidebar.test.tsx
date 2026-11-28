@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // ui/Sidebar.tsx, the PC's rail of Homes: at its top the app's name, the dot it is given and ⚙; a row per Home in config
 // order (its dot, its name, what waits there as a count, under them its agents' counts), the one on show marked; Other's
-// agents, as rows; All agents at the bottom, a link to the list; holding still while a finger is down. The recorded
+// agents, as rows; holding still while a finger is down. The recorded
 // State: personal (p4, running; its account p1 p3 p4) and work (stopped, its account unknown: every agent); agents p1
 // (working) p7 (unknown) p6 (blocked, its account no Home's) p3 (done).
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
@@ -49,7 +49,7 @@ afterEach(async () => {
 
 describe('Sidebar', () => {
   it("has at its top the app's name, the dot it is given and ⚙", async () => {
-    const c = await show('#/agents', fresh());
+    const c = await show('#/settings', fresh());
     const top = c.querySelector('#sidebar')!.firstElementChild!;
     assert.ok(top.textContent!.startsWith('Yoicks') && top.querySelector('#conn-dot') && top.querySelector('#btn-settings'));
     await fire(() => top.querySelector<HTMLElement>('#btn-settings')!.click());
@@ -59,7 +59,7 @@ describe('Sidebar', () => {
   it('has a row per Home in config order: its dot, its name, what waits there, and under them its agents as counts', async () => {
     const s = fresh();
     s.orchestrators[0].todos = [item('t1', 'Merge the PR')];
-    const c = await show('#/agents', s);
+    const c = await show('#/settings', s);
     // personal: p1 working, p3 done, t1 due; work's account is unknown: every agent, p6 blocked (its count), p7 unknown (idle)
     assert.deepEqual(rows(c), [['personal', 'idle', '1', '1 1 0-'], ['work', 'stopped', '1', '1 1 1']]);
     const personal = c.querySelector<HTMLAnchorElement>('a[data-home="personal"]')!;
@@ -75,20 +75,17 @@ describe('Sidebar', () => {
   it('has zeros under a Home without agents, as tall as the others, and no count on it while nothing waits there', async () => {
     const s = fresh();
     s.orchestrators[1].agents = []; // work: none
-    const c = await show('#/agents', s);
+    const c = await show('#/settings', s);
     assert.deepEqual(rows(c), [['personal', 'idle', '', '1 1 0-'], ['work', 'stopped', '', '0- 0- 0-']]);
   });
 
-  it('marks the Home on show; All agents, at the bottom, links the list and is marked on it', async () => {
+  it('marks the Home on show, and nothing on another screen', async () => {
     const c = await show('#/home/personal', fresh());
     assert.deepEqual(marked(c), ['personal']);
-    const all = c.querySelector<HTMLAnchorElement>('a.sidebar-all')!;
-    assert.equal(all.getAttribute('href'), '#/agents');
-    assert.match(all.textContent!, /^All agents\s*4 ›$/);
-    assert.ok(c.querySelector('#sidebar')!.lastElementChild!.contains(all), 'last');
-    location.hash = '#/agents';
+    assert.ok(!c.querySelector('a[href="#/agents"]'), 'no way to an agents list: each Home lists its own');
+    location.hash = '#/settings';
     await settle();
-    assert.deepEqual(marked(c), ['#/agents']);
+    assert.deepEqual(marked(c), []);
     location.hash = '#/home/work';
     await settle();
     assert.deepEqual(marked(c), ['work']);
@@ -112,7 +109,7 @@ describe('Sidebar', () => {
   });
 
   it('holds still while a finger is down; the latest State shows after the last one lifts, in the same #sidebar', async () => {
-    const c = await show('#/agents', fresh());
+    const c = await show('#/settings', fresh());
     const aside = c.querySelector('#sidebar')!;
     const touch = (type: string, fingers = 0) =>
       fire(() => aside.dispatchEvent(new TouchEvent(type, { bubbles: true, touches: Array.from({ length: fingers }, () => ({ clientX: 0 }) as Touch) })));

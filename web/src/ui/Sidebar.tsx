@@ -7,9 +7,9 @@
  * under them its account's other agents as counts (working, done, idle; each, a zero dimmed, so they line up). What waits there and the agents themselves
  * are the Home's: its panel at its right (ui/HomePanel.tsx), or below that width its status bar's popovers. Then Other,
  * the agents no Home's account lists, blocked first (byUrgency), as a Home panel's rows (Dashboard.tsx's AgentRow: a click
- * opens one in herdr, its ⋮ also here): no Home has them. At the bottom, pinned, All agents (their count): the full list.
+ * opens one in herdr, its ⋮ also here): no Home has them.
  *
- * Like the agents list it gets every State push: it holds still while a finger is down (useHeldState), and its rows are
+ * It gets every State push: it holds still while a finger is down (useHeldState), and its rows are
  * keyed by orchestrator, so #sidebar, the scroll container, stays the same element.
  */
 import { NavLink, Text } from '@mantine/core';
@@ -56,11 +56,6 @@ export function Sidebar({ dot }: { dot: ReactNode }) {
           {other.map((c) => <AgentRow key={c.pane.paneId} card={c} />)}
         </section>
       )}
-      {/* as tall as the topbar, at the bottom (#sidebar is a column): pinned there while the rows above run under it */}
-      <div className="sticky bottom-0 z-1 -mx-2 mt-auto flex h-[52px] shrink-0 items-center border-t border-(--color-border) bg-(--color-surface) px-2">
-        <NavLink href="#/agents" className="sidebar-all rounded-lg" label="All agents" rightSection={`${cards.length} ›`}
-          active={hash === '#/agents'} aria-current={current(hash === '#/agents')} />
-      </div>
     </aside>
   );
 }
