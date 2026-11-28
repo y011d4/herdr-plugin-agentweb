@@ -1760,14 +1760,19 @@ async function w1(c: Ctx) {
   }
 }
 
-/** W2: on a PC (1280px) an agent's ⋮ (the card's, as a Home panel's row's: Dashboard.tsx's AgentMore) stops it: Stop agent…
- *  asks first (Cancel sends nothing), Stop sends one DELETE /api/panes/<it> and the pane goes, the list staying (no drawer).
- *  No Ask there: the list has no Home's composer. Its agent, wc-rowstop, is its own (a shell report-agent'ed as claude),
- *  opened here and gone by its end: a card more during the other items would move theirs. */
+/** W2: on a PC (1280px) an agent's ⋮ (its row's in BASE's Home panel: Dashboard.tsx's AgentMore) stops it: Stop agent…
+ *  asks first (Cancel sends nothing), Stop sends one DELETE /api/panes/<it> and the pane goes, the Home staying (no drawer).
+ *  No Ask there: BASE is stopped, no orchestrator to ask. Its agent, wc-rowstop, is its own (cat in a shell report-agent'ed
+ *  as claude: a process in its foreground, so its account is known and the Home lists it), opened here and gone by its
+ *  end: a row more during the other items would move theirs. */
 async function w2(c: Ctx) {
   const { pg } = c;
   const rowStop = await newTab(c, c.rec.workspaces[0], 'wc-rowstop');
   if ((await waitFn(() => screen(rowStop).trim(), 15_000, 300)).timeout) throw new Error(`no shell prompt in ${rowStop}`);
+  mutate(c.rec, rowStop, ['pane', 'run', rowStop, 'cat']);
+  const fg = await waitFn(() => { const pi = herdr(['pane', 'process-info', '--pane', rowStop]).process_info;
+    return !!pi?.foreground_process_group_id && pi.foreground_process_group_id !== pi.shell_pid; }, 10_000, 200);
+  if (fg.timeout) throw new Error('wc-rowstop: cat not in the foreground');
   c.rec.reported.push(rowStop);
   save(c.rec);
   mutate(c.rec, rowStop, ['pane', 'report-agent', '--source', 'e2e', '--agent', 'claude', '--state', 'idle', rowStop]);
@@ -1775,14 +1780,14 @@ async function w2(c: Ctx) {
     const p = await pg.at(sel);
     for (const type of ['mousePressed', 'mouseReleased']) await pg.S('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', clickCount: 1 });
   };
-  const MORE = `document.querySelector('#screen [data-agent-menu=${js(rowStop)}]')`;
+  const MORE = `document.querySelector('#home-panel [data-agent-menu=${js(rowStop)}]')`;
   const STOP = `document.querySelector('[data-agent-more=${js(rowStop)}] [data-action=stop]')`;
   const dels = (t: number) => pg.reqs.filter((q) => q.t >= t && q.method === 'DELETE' && q.url.endsWith(`/api/panes/${enc(rowStop)}`)).length;
   try {
     await mobile(pg, false);
-    await loadApp(c, '#/agents'); // a new document: a PC's pointer
-    const card = await pg.until(`!!${MORE}`, 5000);
-    if (card.timeout) throw new Error('no ⋮ on wc-rowstop\'s card');
+    await loadApp(c, BASE); // a new document: a PC's pointer
+    const row = await pg.until(`!!${MORE}`, 5000);
+    if (row.timeout) throw new Error(`no ⋮ on wc-rowstop's row in ${BASE}'s panel`);
     guard(c.rec, rowStop);
     const t0 = Date.now();
     await click(MORE);
@@ -1802,13 +1807,13 @@ async function w2(c: Ctx) {
     await click(`document.querySelector('#modal-root #cf-ok')`);
     const del = await waitFn(async () => dels(t1) === 1, 3000, 100);
     const gone = await waitFn(async () => !(await paneOf(c, rowStop)), 5000, 200);
-    const stayed = await pg.ev(`location.hash === '#/agents' && !document.querySelector('.agent-drawer-content')`);
+    const stayed = await pg.ev(`location.hash === ${js(BASE)} && !document.querySelector('.agent-drawer-content')`);
     result(c, !menu.timeout && !ask && !confirm.timeout && cancelled === 0 && !del.timeout && !gone.timeout && stayed, 'W2',
       `menu=${ms(menu)},ask=${ask},confirm=${ms(confirm)},cancelDeletes=${cancelled},delete=${ms(del)},paneGone=${ms(gone)},stayed=${stayed}`,
-      "1280px: wc-rowstop's card ⋮ has Stop agent… (no Ask on the list); it asks first: Cancel sends no DELETE, Stop sends one DELETE /api/panes/<it> within 3s, /api/state drops the pane within 5s, #/agents stays with no drawer");
+      `1280px: wc-rowstop's row ⋮ in ${BASE}'s panel has Stop agent… (no Ask: a stopped Home); it asks first: Cancel sends no DELETE, Stop sends one DELETE /api/panes/<it> within 3s, /api/state drops the pane within 5s, ${BASE} stays with no drawer`);
   } finally {
     await mobile(pg, true);
-    await loadApp(c, '#/agents'); // a phone's document again
+    await loadApp(c, BASE); // a phone's document again
   }
 }
 
